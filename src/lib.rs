@@ -1,4 +1,4 @@
-pub mod rosflight;
+pub mod rustflight;
 pub mod board;
 mod sensors;
 // TODO: Change tests below to actual tests.
