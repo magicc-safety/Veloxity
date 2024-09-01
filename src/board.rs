@@ -72,11 +72,11 @@ trait Board {
     // fn gnss_read(&self, gnss: GNSSData, gnss_full: GNSSFull) -> bool; // TODO: Implement structs
 
     // Battery
-    virtual bool battery_present() = 0;
-    virtual bool battery_has_new_data() = 0;
-    virtual bool battery_read(float * voltage, float * current) = 0;
-    virtual void battery_voltage_set_multiplier(double multiplier) = 0;
-    virtual void battery_current_set_multiplier(double multiplier) = 0;
+    fn battery_present(&self) -> bool;
+    fn battery_has_new_data(&self) -> bool;
+    fn battery_read(&self, voltage: f32, current: f32) -> bool;
+    fn battery_voltage_set_multiplier(&self, multiplier: f64) -> bool;
+    fn battery_current_set_multiplier(&self, multiplier: f64) -> bool;
 
     // RC
     virtual void rc_init(rc_type_t rc_type) = 0;
