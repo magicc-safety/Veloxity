@@ -4,3 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+micro_algebra = { git = "ssh://git@github.com/magicc-safety/micro_algebra.git" }
