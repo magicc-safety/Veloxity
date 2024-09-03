@@ -45,3 +45,6 @@ pub struct UnixTimeSeconds(pub i64); // Unix time, in seconds
 
 #[derive(Default)]
 pub struct FracTime(pub u64); // Fractional time
+
+#[derive((Default))]
+pub struct ROSFlightTimestamp(pub u64); // Microseconds; timestamp of last byte in message
