@@ -6,6 +6,8 @@ fn main_test() {
 
     let firmware = ROSFlight::init(0, DummyBoard{});
 
+    // Because this is a test, we don't want this to loop forever.
+    // In the actual firmware, this would be a loop{ ... } instead.
     for _i in 0..10 {
         firmware.run();
     }
