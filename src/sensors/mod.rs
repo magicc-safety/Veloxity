@@ -1,6 +1,7 @@
 
 mod data;
 
+use data::{GNSSData};
 use micro_algebra::{SVector, SMatrix};
 use std::time::Duration;
 
@@ -25,7 +26,7 @@ struct Data {
     imu_time: u64,
     accel: Vector3,
     gyro: Vector3,
-    gnss_data: GnssData,
+    gnss_data: GNSSData,
     gnss_full: bool,
     baro_pressure: f32,
     baro_temperature: f32,

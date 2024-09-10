@@ -20,21 +20,21 @@ struct ECEF {
 }
 
 #[derive(Default)]
-struct GNSSData {
+pub struct GNSSData {
     // fix_type: GNSSFixType, // TODO: Create this
-    time_of_week: u32, // TODO: What unit should this be?
-    time: UnixTimeSeconds,
-    nanos: FracTime,
-    lat: DegENeg7,
-    lon: DegENeg7,
-    height: MM,
-    vel_n: MMPerSec,
-    vel_e: MMPerSec,
-    vel_d: MMPerSec,
-    h_acc: MM,
-    v_acc: MM, // TODO: Is this correct units?
-    ECEF: ECEF,
-    rosflight_timestamp: ROSFlightTimestamp,
+    pub time_of_week: u32, // TODO: What unit should this be?
+    pub time: UnixTimeSeconds,
+    pub nanos: FracTime,
+    pub lat: DegENeg7,
+    pub lon: DegENeg7,
+    pub height: MM,
+    pub vel_n: MMPerSec,
+    pub vel_e: MMPerSec,
+    pub vel_d: MMPerSec,
+    pub h_acc: MM,
+    pub v_acc: MM, // TODO: Is this correct units?
+    pub ECEF: ECEF,
+    pub rosflight_timestamp: ROSFlightTimestamp,
 }
 
 
