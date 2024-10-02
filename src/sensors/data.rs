@@ -1,8 +1,7 @@
 use crate::units::{
-    MM, CM, UnsignedMM, UnsignedCM, CMPerSec, UnsignedCMPerSec, DegENeg7,
-    UnixTimeSeconds, FracTime, MMPerSec, ROSFlightTimestamp, TimeOfWeek,
-    Year, Month, Day, Hour, Minute, Second, Nanosecond, Longitude,
-    Latitude, Meter, MeterPerSec, Radians,
+    CMPerSec, Day, DegENeg7, FracTime, Hour, Latitude, Longitude, MMPerSec, Meter, MeterPerSec, Minute, Month,
+    Nanosecond, ROSFlightTimestamp, Radians, Second, TimeOfWeek, UnixTimeSeconds, UnsignedCM, UnsignedCMPerSec,
+    UnsignedMM, Year, CM, MM,
 };
 
 // Newtype pattern for units to prevent conversion errors.
@@ -37,7 +36,6 @@ pub struct GNSSData {
     pub rosflight_timestamp: ROSFlightTimestamp,
 }
 
-
 /*
 TODO: Fix type values taken from MAVLink; change if necessary
 https://mavlink.io/en/messages/common.html#GPS_FIX_TYPE
@@ -71,27 +69,24 @@ pub struct GNSSFull {
     hour: Hour,
     min: Minute,
     sec: Second,
-    valid: u8, // Units?
+    valid: u8,  // Units?
     t_acc: i32, // Units?
     nano: Nanosecond,
     fix_type: FixType,
     num_sat: u8,
     lon: Longitude,
     lat: Latitude,
-    height: Meter, // Units? MAVLink specifies meters
-    height_msl: Meter, // Units?
-    h_acc: Meter, // Units?
+    height: Meter,      // Units? MAVLink specifies meters
+    height_msl: Meter,  // Units?
+    h_acc: Meter,       // Units?
     v_acc: MeterPerSec, // Units?
     vel_n: MeterPerSec,
     vel_e: MeterPerSec,
     vel_d: MeterPerSec,
-    g_speed: MeterPerSec, // Units? This seems to be ground speed
-    head_mot: i32, // Units? Not sure what this field represents
-    s_acc: Second, // Units? Seems to be seconds accuracy...?
-    head_acc: Radians, // Units?
-    p_dop: u16, // Units? Not sure what this represents
+    g_speed: MeterPerSec,                    // Units? This seems to be ground speed
+    head_mot: i32,                           // Units? Not sure what this field represents
+    s_acc: Second,                           // Units? Seems to be seconds accuracy...?
+    head_acc: Radians,                       // Units?
+    p_dop: u16,                              // Units? Not sure what this represents
     rosflight_timestamp: ROSFlightTimestamp, // microseconds, time stamp of last byte in the message
 }
-
-
-

@@ -1,8 +1,7 @@
-
 mod data;
 
-use data::{GNSSData};
-use micro_algebra::{SVector, SMatrix};
+use data::GNSSData;
+use micro_algebra::{SMatrix, SVector};
 use std::time::Duration;
 
 // Use GotFlags::default() to get default values of `false` for all fields.

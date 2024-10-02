@@ -1,8 +1,9 @@
-pub mod rustflight;
 pub mod board;
+pub mod params;
+pub mod rustflight;
 mod sensors;
-pub(crate) mod units;
 mod state_machine;
+pub(crate) mod units;
 // TODO: Change tests below to actual tests.
 //
 // pub fn add(left: u64, right: u64) -> u64 {

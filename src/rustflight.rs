@@ -1,5 +1,6 @@
-
 use crate::board::Board;
+
+const NUM_PARAMS_LISTENERS: usize = 16;
 
 pub struct ROSFlight<B: Board> {
     loop_time_us: u32,
@@ -9,10 +10,7 @@ pub struct ROSFlight<B: Board> {
 }
 
 impl<B: Board> ROSFlight<B> {
-    pub fn init(
-        _loop_time_us: u32,
-        _board: B,
-    ) -> Self {
+    pub fn init(_loop_time_us: u32, _board: B) -> Self {
         Self {
             loop_time_us: _loop_time_us,
             board: _board,

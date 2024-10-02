@@ -1,16 +1,15 @@
 #![allow(non_camel_case_types)]
 
-
 // Submodules
 #[cfg(test)]
 mod tests;
 
 // Imports
-use core::fmt::{Debug};
-use core::default::{Default};
 use core::clone::Clone;
-use core::marker::{PhantomData, Copy};
 use core::cmp::{Eq, PartialEq};
+use core::default::Default;
+use core::fmt::Debug;
+use core::marker::{Copy, PhantomData};
 
 use bitflags::bitflags;
 
@@ -23,8 +22,8 @@ struct State<State_Value> {
     _state: PhantomData<State_Value>,
 }
 
- // TODO: Implement methods / members for these structs
- #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+// TODO: Implement methods / members for these structs
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Init;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Preflight;
@@ -37,7 +36,6 @@ struct Failsafe;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct ErrorPresent;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StateEnum {
     INIT(State<Init>),
@@ -46,7 +44,7 @@ enum StateEnum {
     ARMED(State<Armed>),
     FAILSAFE(State<Failsafe>),
     ERROR_PRESENT(State<ErrorPresent>),
-} 
+}
 
 impl Default for StateEnum {
     fn default() -> Self {
@@ -79,8 +77,7 @@ Result<Event, ErrorFlag> enum that we match on.
 
  */
 #[derive(Debug)]
-pub(crate) enum Event
-{
+pub(crate) enum Event {
     INITIALIZED,
     REQUEST_ARM,
     REQUEST_ARM_AND_CALIBRATE,
@@ -94,7 +91,6 @@ pub(crate) enum Event
     // NO_ERROR,
 }
 
-
 /*
 State struct implementations
 
@@ -103,11 +99,10 @@ Each struct should have methods that are unique to that state.
 */
 
 impl State<Init> {
-    
     fn new() -> StateEnum {
         /*
         NOTE: This is the only way a state can be created directly.
-    
+
         All other states must be created from previous states. They
         do not have direct constructors.
          */
@@ -169,19 +164,12 @@ impl State<ErrorPresent> {
     }
 }
 
-
 impl<State_Value> State<State_Value> {
-    fn error(self) -> StateEnum{
+    fn error(self) -> StateEnum {
         // TODO: Pass in an error bitflag?
-        StateEnum::ERROR_PRESENT(
-            State { _state: PhantomData}
-        )
+        StateEnum::ERROR_PRESENT(State { _state: PhantomData })
     }
 }
-
-
-
-
 
 #[derive(Debug, Default)]
 pub(crate) struct StateMachine {
@@ -190,7 +178,6 @@ pub(crate) struct StateMachine {
 }
 
 impl StateMachine {
-
     pub fn get_state(&self) -> &StateEnum {
         &self.state
     }
@@ -212,7 +199,7 @@ impl StateMachine {
         // TODO: Have this update function return a Result to indicate success or failure?
 
         /*
-        
+
         TODO: Change the results of the match statement so that we construct the next state from the
         previous one using the typestate pattern.
 
@@ -230,9 +217,7 @@ impl StateMachine {
                 (StateEnum::ARMED(state), Event::RC_LOST) => state.rc_lost(),
                 (StateEnum::FAILSAFE(state), Event::RC_FOUND) => state.rc_found(),
                 (StateEnum::FAILSAFE(state), Event::REQUEST_DISARM) => state.request_disarm(),
-                (state, _) => {
-                    state
-                },
+                (state, _) => state,
             },
             Err(_error) => {
                 self.set_error(_error);
@@ -242,12 +227,9 @@ impl StateMachine {
                     StateEnum::CALIBRATING(state) => state.error(),
                     StateEnum::ARMED(state) => state.error(),
                     StateEnum::FAILSAFE(state) => state.error(),
-                    StateEnum::ERROR_PRESENT(state) => state.error()
+                    StateEnum::ERROR_PRESENT(state) => state.error(),
                 }
             }
         };
     }
 }
-
-
-

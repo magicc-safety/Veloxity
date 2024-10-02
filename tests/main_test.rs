@@ -1,10 +1,9 @@
-use rustflight_alpha::rustflight::ROSFlight;
 use rustflight_alpha::board::DummyBoard;
+use rustflight_alpha::rustflight::ROSFlight;
 
 #[test]
 fn main_test() {
-
-    let firmware = ROSFlight::init(0, DummyBoard{});
+    let firmware = ROSFlight::init(0, DummyBoard {});
 
     // Because this is a test, we don't want this to loop forever.
     // In the actual firmware, this would be a loop{ ... } instead.

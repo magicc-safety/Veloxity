@@ -1,4 +1,3 @@
-
 /*
 
 This module uses the Newtype pattern to prevent issues with incorrect units.
@@ -21,7 +20,6 @@ TODO: Why are all of these units integer types in the original ROSFlight code?
 In MAVLink many of these are listed as floats.
  */
 
-
 // Length / Distance / Location
 #[derive(Default, Debug)]
 pub struct MM(pub i32);
@@ -34,7 +32,6 @@ pub struct CM(pub i32);
 
 #[derive(Default, Debug)]
 pub struct Meter(pub i32);
-
 
 #[derive(Default, Debug)]
 pub struct UnsignedCM(pub u32);
@@ -54,8 +51,6 @@ pub struct HeightMSL(pub i32);
 #[derive(Default, Debug)]
 pub struct H_Acc(pub i32);
 
-
-
 // Angles
 
 #[derive(Default, Debug)]
@@ -66,7 +61,6 @@ pub struct DegENeg7(pub f32); // deg*10^-7
 
 #[derive(Default, Debug)]
 pub struct Radians(pub u32);
-
 
 // Time
 #[derive(Default, Debug)]
@@ -87,10 +81,8 @@ pub struct Year(pub u16);
 #[derive(Default, Debug)]
 pub struct Month(pub u8);
 
-
 #[derive(Default, Debug)]
 pub struct Day(pub u8);
-
 
 #[derive(Default, Debug)]
 pub struct Hour(pub u8);
@@ -107,17 +99,13 @@ pub struct T_Acc(pub u32);
 #[derive(Default, Debug)]
 pub struct Nanosecond(pub i32);
 
-
-
 // Velocities, Accelerations
 
 #[derive(Default, Debug)]
 pub struct MMPerSec(pub i32);
 
-
 #[derive(Default, Debug)]
 pub struct CMPerSec(pub i32);
-
 
 #[derive(Default, Debug)]
 pub struct UnsignedCMPerSec(pub u32);
@@ -125,11 +113,7 @@ pub struct UnsignedCMPerSec(pub u32);
 #[derive(Default, Debug)]
 pub struct MeterPerSec(pub i32);
 
-
-
-
 // Other
 
 #[derive(Default, Debug)]
 pub struct Valid(pub u8);
-
