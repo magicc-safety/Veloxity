@@ -2,9 +2,7 @@ pub mod rustflight;
 pub mod board;
 mod sensors;
 pub(crate) mod units;
-
-
-
+mod state_machine;
 // TODO: Change tests below to actual tests.
 //
 // pub fn add(left: u64, right: u64) -> u64 {
