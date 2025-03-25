@@ -1,7 +1,5 @@
 use crate::board::Board;
 
-const NUM_PARAMS_LISTENERS: usize = 16;
-
 pub struct ROSFlight<B: Board> {
     loop_time_us: u32,
     /* TODO: Is `Box<>` the best way to do this? Ensures that we use the Board trait, but requires
