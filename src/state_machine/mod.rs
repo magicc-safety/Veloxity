@@ -18,26 +18,26 @@ All possible states of the state manager
  */
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct State<State_Value> {
+pub(crate) struct State<State_Value> {
     _state: PhantomData<State_Value>,
 }
 
 // TODO: Implement methods / members for these structs
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct Init;
+pub(crate) struct Init;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct Preflight;
+pub(crate) struct Preflight;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct Calibrating;
+pub(crate) struct Calibrating;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct Armed;
+pub(crate) struct Armed;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct Failsafe;
+pub(crate) struct Failsafe;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct ErrorPresent;
+pub(crate) struct ErrorPresent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StateEnum {
+pub(crate) enum StateEnum {
     INIT(State<Init>),
     PREFLIGHT(State<Preflight>),
     CALIBRATING(State<Calibrating>),

@@ -1,6 +1,6 @@
 use super::board::Board;
 mod param_types;
-use param_types::*;
+pub use param_types::*;
 
 pub struct Params {
     baud_rate: BaudRate,

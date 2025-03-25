@@ -5,4 +5,100 @@ edition = "2021"
 
 [dependencies]
 bitflags = "2.6.0"
-micro_algebra = { git = "ssh://git@github.com/magicc-safety/micro_algebra.git" }
+micro_algebra = { git = "ssh://git@github.com/Derekbenj/micro_algebra.git", branch="turbomath_replace" }
+
+# necessary for packet structures and sensor components
+varmint = { git = "ssh://git@github.com/Derekbenj/nucleo_sandbox.git", branch="main", optional=true} # Phil's stuff <-- put your github fork here...
+
+# everything needed specifically for nucleo
+embassy-embedded-hal = { version = "0.3.0", optional=true}
+embedded-hal-async = { version = "1.0", optional=true}
+embedded-io-async = { version = "0.6.1", optional=true}
+embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"], optional=true}
+embassy-stm32 = { version = "0.2.0", features = ["defmt", "stm32h753zi", "time-driver-tim2", "exti", "unstable-pac", "chrono", "rt", "memory-x"], optional=true}
+embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"], optional=true}
+embassy-sync = { version = "0.6.1",  features = ["defmt"], optional=true}
+cortex-m-rt = { version = "0.7.0", optional=true}
+cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"], optional=true}
+panic-probe = { version = "0.3", features = ["print-defmt"], optional=true}
+static_cell = { version = "2", optional=true}
+defmt-rtt = { version = "0.4", optional=true}
+defmt = {version= "0.3", optional=true}
+heapless = { version = "0.8", default-features = false, optional=true}
+
+[lints.rust]
+non_camel_case_types = "allow"
+non_snake_case = "allow"
+unused = "allow"
+
+[features]
+use_std = []
+default = ["embassy-time", "defmt"] # used only for packets.rs from varmint so we can work with sensors
+dummy_test = ["embassy-time", "defmt"] # needed only for packets.rs from varmint so we can work with sensors
+nucleo = [
+    "embassy-embedded-hal",
+    "embedded-hal-async",
+    "embedded-io-async",
+    "embassy-executor",
+    "embassy-stm32",
+    "embassy-time",
+    "embassy-sync",
+    "cortex-m-rt",
+    "cortex-m",
+    "panic-probe",
+    "static_cell",
+    "defmt-rtt",
+    "defmt",
+    "heapless",
+    "varmint",
+]
+
+# cargo build/run
+[profile.dev]
+codegen-units = 1 # no parallel compilation (better optimization but slower build)
+debug = 2 # includes full debug info
+debug-assertions = true # runtime checks enabled
+incremental = false # no incremental compliation so more stable optimizations
+opt-level = 0 # no optimizations
+overflow-checks = true # integer overflow checks
+
+# cargo build/run --release
+[profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false # disables debug checks
+incremental = false
+lto = 'fat' # link-time optimization (agressive whole-program optimization)
+opt-level = 3 # maximum optimization
+overflow-checks = false # no overflow checks... faster but less safe
+
+# cargo test
+[profile.test]
+codegen-units = 1
+debug = 2 # full debug info for test failure
+debug-assertions = true # debug checks during tests enabled
+incremental = false
+opt-level = 3 # agressive optimization (faster runtime during tests)
+overflow-checks = true
+
+# cargo test --release
+[profile.bench]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false
+
+# nucleo test binary
+[[bin]]
+name = "nucleo_test"
+test = false
+bench = false
+required-features = ["nucleo"]
+
+# dummy test binary
+[[test]]
+name = "dummy_test"
+required-features = ["dummy_test"]

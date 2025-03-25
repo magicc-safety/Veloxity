@@ -1,0 +1,15 @@
+[target.thumbv7em-none-eabihf]
+runner = 'probe-rs run --chip STM32H753ZITx'
+rustflags = [
+    "-C", "linker=rust-lld",
+    "-C", "link-arg=--nmagic",
+    "-C", "link-arg=-Tlink.x",
+    "-C", "link-arg=-Tdefmt.x"
+]
+
+[env]
+DEFMT_LOG = "trace"
+
+[alias]
+bn = "build --features nucleo --target thumbv7em-none-eabihf"
+rn = "run --features nucleo --target thumbv7em-none-eabihf --release --bin nucleo_test"

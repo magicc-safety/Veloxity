@@ -5,6 +5,20 @@ pub enum ParamValue {
     Bool(bool),
 }
 
+impl TryFrom<ParamValue> for u32 {
+    type Error = ();
+
+    fn try_from(value: ParamValue) -> Result<Self, Self::Error> {
+        if let ParamValue::Int(val) = value {
+            if val > 0 {
+                return Ok(val as u32)
+            }
+        }
+
+        Err(())
+    }
+}
+
 pub trait Callback {
     type Args<'a>;
 }
