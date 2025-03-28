@@ -5,6 +5,5 @@ pub mod board;
 pub mod params;
 pub mod comm_manager;
 pub mod rustflight;
-#[cfg(not(feature = "nucleo"))]
 pub mod sensors;
 mod state_machine;

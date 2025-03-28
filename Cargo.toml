@@ -7,9 +7,6 @@ edition = "2021"
 bitflags = "2.6.0"
 micro_algebra = { git = "ssh://git@github.com/Derekbenj/micro_algebra.git", branch="turbomath_replace" }
 
-# necessary for packet structures and sensor components
-varmint = { git = "ssh://git@github.com/Derekbenj/nucleo_sandbox.git", branch="main", optional=true} # Phil's stuff <-- put your github fork here...
-
 # everything needed specifically for nucleo
 embassy-embedded-hal = { version = "0.3.0", optional=true}
 embedded-hal-async = { version = "1.0", optional=true}
@@ -50,7 +47,6 @@ nucleo = [
     "defmt-rtt",
     "defmt",
     "heapless",
-    "varmint",
 ]
 
 # cargo build/run

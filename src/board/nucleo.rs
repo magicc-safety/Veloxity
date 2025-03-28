@@ -1,11 +1,9 @@
-#![cfg(feature = "nucleo")]
-
 use crate::params::Params;
 use crate::board::Board;
 use crate::board::nucleo_config::board_config;
 
-use varmint::sensor;
-use varmint::sensor::{dps310, iis2mdc, dlhrl20g, adis16500, telem};
+use crate::sensors;
+use crate::sensors::{dps310, iis2mdc, dlhrl20g, adis16500, telem};
 
 use cortex_m_rt::entry;
 use defmt::*;
@@ -54,7 +52,7 @@ use embassy_time::Instant;
 use heapless::String;
 use core::fmt::Write;
 
-use varmint::packets;
+use sensors::*;
 
 use embassy_stm32::gpio::OutputType;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
@@ -96,8 +94,8 @@ static P4_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
 pub struct Nucleo {
     probe: [Output<'static>; 4],
-    baro_data: packets::BaroPacket,
-    mag_data: packets::MagPacket,
+    baro_data: sensors::BaroPacket,
+    mag_data: sensors::MagPacket,
 }
 
 
@@ -181,7 +179,7 @@ impl Board for Nucleo {
     }
 
     fn mag_has_new_data(&mut self) -> bool {
-        let result = sensor::iis2mdc::MAG_SIGNAL.try_take();
+        let result = sensors::iis2mdc::MAG_SIGNAL.try_take();
         match result {
             Some(mag) => {
                 self.mag_data = mag;
@@ -205,7 +203,7 @@ impl Board for Nucleo {
     }
 
     fn baro_has_new_data(&mut self) -> bool {
-        let result = sensor::dps310::BARO_SIGNAL.try_take();
+        let result = sensors::dps310::BARO_SIGNAL.try_take();
         match result {
             Some(baro) => {
                 self.baro_data = baro;
@@ -387,19 +385,19 @@ impl Nucleo {
         self.probe[id].toggle(); // so we can see something on the logic analyzer.
     }
     
-    pub fn imu_read(&mut self)-> Option<packets::ImuPacket>
+    pub fn imu_read(&mut self)-> Option<sensors::ImuPacket>
     {
         adis16500::IMU_SIGNAL.try_take()
     }
-    pub fn pitot_read(&mut self)-> Option<packets::PitotPacket>
+    pub fn pitot_read(&mut self)-> Option<sensors::PitotPacket>
     {
         dlhrl20g::PITOT_SIGNAL.try_take()
     }
-    pub fn baro_read(&mut self)-> Option<packets::BaroPacket>
+    pub fn baro_read(&mut self)-> Option<sensors::BaroPacket>
     {
         dps310::BARO_SIGNAL.try_take()
     }
-    pub fn mag_read(&mut self)-> Option<packets::MagPacket>
+    pub fn mag_read(&mut self)-> Option<sensors::MagPacket>
     {
         iis2mdc::MAG_SIGNAL.try_take()
     }
@@ -550,16 +548,16 @@ impl Nucleo {
         Output::new(p.PB12, Level::Low, Speed::Low),
         Output::new(p.PG3, Level::Low, Speed::Low)    ];
         Nucleo {probe
-            , baro_data: packets::BaroPacket {
-                header: packets::RosflightPacketHeader {
+            , baro_data: sensors::BaroPacket {
+                header: sensors::RosflightPacketHeader {
                     timestamp: Instant::from_micros(0)
                     , status: 0
                 }
                 , pressure: 0.0
                 , temperature: 0.0
             }
-            , mag_data: packets::MagPacket {
-                header: packets::RosflightPacketHeader {
+            , mag_data: sensors::MagPacket {
+                header: sensors::RosflightPacketHeader {
                     timestamp: Instant::from_micros(0)
                     , status: 0
                 }

@@ -1,5 +1,3 @@
-#![cfg(feature = "nucleo")]
-
 use embassy_stm32::{rcc, Config};
 use core::option::Option::Some;
 use core::default::Default;

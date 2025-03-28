@@ -1,7 +1,39 @@
+#[cfg(feature = "nucleo")]
+pub(crate) mod adis16500;
+#[cfg(feature = "nucleo")]
+pub(crate) mod dlhrl20g;
+#[cfg(feature = "nucleo")]
+pub(crate) mod dps310;
+#[cfg(feature = "nucleo")]
+pub(crate) mod iis2mdc;
+#[cfg(feature = "nucleo")]
+pub(crate) mod telem;
+
 // Create enum of rosflight return types
 use embassy_time::Instant;
+use embassy_time::Duration;
 use defmt::Format;
 
+pub fn synch_at(slot_rate: Duration) -> Instant 
+{
+    let dt = slot_rate.as_micros();
+    let now = Instant::now().as_micros();
+    Instant::from_micros((now/dt+1u64)*dt)
+}
+
+pub fn synch_at_slot(slot_rate: Duration) -> Instant 
+{
+    let dt = slot_rate.as_micros();
+    let now = Instant::now().as_micros();
+    Instant::from_micros((now/dt+1u64)*dt)
+}
+
+pub fn current_slot(timestamp: Instant, sample_period: Duration, slot_period: Duration) -> u64
+{
+    (timestamp.as_micros()%sample_period.as_micros())/slot_period.as_micros()
+}
+
+// All packets used by sensors:
 const SERIAL_MAX_PAYLOAD_SIZE:usize = 256+4;
 const ADC_MAX_CHANNELS:usize = 21;
 const RC_PACKET_CHANNELS:usize = 24;
