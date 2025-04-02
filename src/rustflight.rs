@@ -45,13 +45,15 @@ impl<B: Board> ROSFlight<B> {
 
             if self.board.mag_has_new_data() {
                 let mut data = [0.0; 3];
-                let mag_data = self.board.mag_read(&mut data);
+                let mut temperature: f32 = 0.0;
+                let mag_data = self.board.mag_read(&mut data, &mut temperature);
 
                 #[cfg(feature = "nucleo")]
-                defmt::trace!("Mag: ({},{},{}) uT\n",
+                defmt::trace!("Mag: ({},{},{}) uT, Temp: {} C\n",
                     data[0],
                     data[1],
-                    data[2]
+                    data[2],
+                    temperature,
                 );
             }
         }

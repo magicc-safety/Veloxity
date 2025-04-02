@@ -13,6 +13,7 @@ pub(crate) mod telem;
 use embassy_time::Instant;
 use embassy_time::Duration;
 use defmt::Format;
+use embassy_stm32;
 
 pub fn synch_at(slot_rate: Duration) -> Instant 
 {
@@ -115,9 +116,6 @@ pub struct SerialRxPacket { pub header: RosflightPacketHeader, pub qos: Qos, pub
 //     Attitude(AttitudePacket),
 // }
 
-
-
-
 // pub enum RosflightPacket
 // {
 //     // These are the ones used by Varmint Board:
@@ -137,6 +135,25 @@ pub struct SerialRxPacket { pub header: RosflightPacketHeader, pub qos: Qos, pub
 //     SerialRxPacket { pub header: RosflightPacketHeader, qos: Qos, len: i16,  payload: [u8;SERIAL_MAX_PAYLOAD_SIZE]},
 // }
 
+#[derive(Debug, Clone)]
+pub enum SensorError {
+    SpiError(embassy_stm32::spi::Error),
+    GenericSensorError(&'static str),
+}
 
-
+pub struct Sensors {
+    rosflight_packet_header: Result<Option<RosflightPacketHeader>, SensorError>,
+    serial_tx_packet: Result<Option<SerialTxPacket>, SensorError>,
+    adc_packet: Result<Option<AdcPacket>, SensorError>,
+    battery_packet: Result<Option<BatteryPacket>, SensorError>,
+    imu_packet: Result<Option<ImuPacket>, SensorError>,
+    baro_packet: Result<Option<BaroPacket>, SensorError>,
+    pitot_packet: Result<Option<PitotPacket>, SensorError>,
+    mag_packet: Result<Option<MagPacket>, SensorError>,
+    rc_packet: Result<Option<RcPacket>, SensorError>,
+    range_packet: Result<Option<RangePacket>, SensorError>,
+    gnss_packet: Result<Option<GNSSPacket>, SensorError>,
+    attitude_packet: Result<Option<AttitudePacket>, SensorError>,
+    serial_rx_packet: Result<Option<SerialRxPacket>, SensorError>
+}
 

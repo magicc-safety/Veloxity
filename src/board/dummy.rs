@@ -73,7 +73,7 @@ impl Board for DummyBoard {
         false
     }
 
-    fn mag_read(&self, mag: &mut [f32; 3]) -> bool {
+    fn mag_read(&self, flux: &mut [f32; 3], temperature: &mut f32) -> bool {
         false
     }
 

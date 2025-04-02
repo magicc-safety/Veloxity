@@ -46,7 +46,7 @@ pub trait Board {
     // Mag
     fn mag_present(&self) -> bool;
     fn mag_has_new_data(&mut self) -> bool;
-    fn mag_read(&self, mag: &mut [f32; 3]) -> bool;
+    fn mag_read(&self, mag: &mut [f32; 3], temperature: &mut f32) -> bool;
 
     // Baro
     fn baro_present(&self) -> bool;

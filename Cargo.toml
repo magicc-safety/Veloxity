@@ -30,8 +30,8 @@ unused = "allow"
 
 [features]
 use_std = []
-default = ["embassy-time", "defmt"] # used only for packets.rs from varmint so we can work with sensors
-dummy_test = ["embassy-time", "defmt"] # needed only for packets.rs from varmint so we can work with sensors
+default = ["embassy-time", "defmt", "embassy-stm32"] # used only for packets.rs from varmint so we can work with sensors
+dummy_test = ["embassy-time", "defmt", "embassy-stm32"] # needed only for packets.rs from varmint so we can work with sensors
 nucleo = [
     "embassy-embedded-hal",
     "embedded-hal-async",

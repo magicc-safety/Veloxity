@@ -171,7 +171,6 @@ impl Board for Nucleo {
     fn imu_not_responding_error(&mut self) {
         // TODO
     }
-    
 
     // Mag
     fn mag_present(&self) -> bool {
@@ -179,7 +178,7 @@ impl Board for Nucleo {
     }
 
     fn mag_has_new_data(&mut self) -> bool {
-        let result = sensors::iis2mdc::MAG_SIGNAL.try_take();
+        let result = iis2mdc::MAG_SIGNAL.try_take();
         match result {
             Some(mag) => {
                 self.mag_data = mag;
@@ -189,11 +188,12 @@ impl Board for Nucleo {
         }
     }
 
-    fn mag_read(&self, mag: &mut [f32; 3]) -> bool {
-        mag[0] = self.mag_data.flux[0]*1e6_f32;
-        mag[1] = self.mag_data.flux[1]*1e-6_f32;
-        mag[2] = self.mag_data.flux[2]*1e-6_f32;
-        
+    fn mag_read(&self, flux: &mut [f32; 3], temperature: &mut f32) -> bool {
+        flux[0] = self.mag_data.flux[0]*1e6_f32;
+        flux[1] = self.mag_data.flux[1]*1e-6_f32;
+        flux[2] = self.mag_data.flux[2]*1e-6_f32;
+
+        *temperature = self.mag_data.temperature;
         true
     }
 
@@ -203,12 +203,13 @@ impl Board for Nucleo {
     }
 
     fn baro_has_new_data(&mut self) -> bool {
-        let result = sensors::dps310::BARO_SIGNAL.try_take();
+        let result = dps310::BARO_SIGNAL.try_take();
         match result {
-            Some(baro) => {
+            Some(Ok(baro)) => {
                 self.baro_data = baro;
                 true
             },
+            Some(Err(_)) => false,
             None => false
         }
     }
@@ -427,16 +428,6 @@ impl Nucleo {
                 }
             }
         }
-    
-    
-        // version using pipe:
-        // let result = telem::TELEM_TX.try_write(&mut buff);
-        // match result {
-        //     Err(error) => info!("{:?}",error),
-        //     Ok(n) => {}
-        // }
-        // version using channel:
-       // for ch in buff { telem::TELEM_TX.try_send(*ch).unwrap(); }
     } 
 
     pub fn new() -> Nucleo {
@@ -504,16 +495,6 @@ impl Nucleo {
         let mut uart2config = usart::Config::default();
         uart2config.baudrate = 921600;
         let mut usart2 = Uart::new(p.USART2, p.PD6, p.PD5, Usart2Irqs, p.DMA1_CH3, p.DMA2_CH3, uart2config).unwrap();
-        // let mut usart3 = Uart::new(
-        //     p.USART3,
-        //     p.PD8,   // TX (valid)
-        //     p.PB11,  // RX (valid)
-        //     Usart3Irqs,
-        //     p.DMA1_CH3,  // TX DMA
-        //     p.DMA1_CH1,  // RX DMA (fixed from DMA2_CH4)
-        //     uart2config
-        // ).unwrap();
-
         let ( mut usart2_tx, mut usart2_rx) = usart2.split();
 
         let telem2_rx = telem::TelemRx{uart_rx: usart2_rx};
