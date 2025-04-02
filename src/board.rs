@@ -4,7 +4,7 @@ pub mod nucleo;
 pub mod nucleo_config;
 
 pub mod dummy;
-use crate::params::Params;
+use crate::{params::Params, sensors};
 
 /*
 TODO: Should encode the priority of the packet, with 0 being highest.
@@ -44,14 +44,16 @@ pub trait Board {
     fn imu_not_responding_error(&mut self);
 
     // Mag
-    fn mag_present(&self) -> bool;
-    fn mag_has_new_data(&mut self) -> bool;
-    fn mag_read(&self, mag: &mut [f32; 3], temperature: &mut f32) -> bool;
+    // fn mag_present(&self) -> bool;
+    // fn mag_has_new_data(&mut self) -> bool; // deprecated... don't use...
+    // fn mag_read(&self, mag: &mut [f32; 3], temperature: &mut f32) -> bool;
+    fn mag_read(&self) -> Option<Result<sensors::MagPacket, sensors::SensorError>>;
 
     // Baro
-    fn baro_present(&self) -> bool;
-    fn baro_has_new_data(&mut self) -> bool;
-    fn baro_read(&self, pressure: &mut f32, temperature: &mut f32) -> bool;
+    // fn baro_present(&self) -> bool;
+    // fn baro_has_new_data(&mut self) -> bool;
+    // fn baro_read(&self, pressure: &mut f32, temperature: &mut f32) -> bool;
+    fn baro_read(&self) -> Option<Result<sensors::BaroPacket, sensors::SensorError>>;
 
     // Pitot
     fn diff_pressure_present(&self) -> bool;

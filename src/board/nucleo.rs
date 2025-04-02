@@ -1,9 +1,7 @@
 use crate::params::Params;
 use crate::board::Board;
 use crate::board::nucleo_config::board_config;
-
 use crate::sensors;
-use crate::sensors::{dps310, iis2mdc, dlhrl20g, adis16500, telem};
 
 use cortex_m_rt::entry;
 use defmt::*;
@@ -27,7 +25,6 @@ use embassy_stm32::peripherals;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::usart::BufferedUart;
 use embassy_time::Duration;
-
 use embassy_stm32::gpio::{Output, Level, Speed};
 
 use {defmt_rtt as _, panic_probe as _};
@@ -52,7 +49,6 @@ use embassy_time::Instant;
 use heapless::String;
 use core::fmt::Write;
 
-use sensors::*;
 
 use embassy_stm32::gpio::OutputType;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
@@ -173,52 +169,67 @@ impl Board for Nucleo {
     }
 
     // Mag
-    fn mag_present(&self) -> bool {
-        false
-    }
+    // fn mag_present(&self) -> bool {
+    //     false
+    // }
 
-    fn mag_has_new_data(&mut self) -> bool {
-        let result = iis2mdc::MAG_SIGNAL.try_take();
-        match result {
-            Some(mag) => {
-                self.mag_data = mag;
-                true
-            },
-            None => false
-        }
-    }
+    // fn mag_has_new_data(&mut self) -> bool {
+    //     let result = iis2mdc::MAG_SIGNAL.try_take();
+    //     match result {
+    //         Some(Ok(mag)) => {
+    //             self.mag_data = mag;
+    //             true
+    //         },
+    //         Some(Err(e)) => {
+    //             trace!("Mag Error {}", e);
+    //             false
+    //         },
+    //         None => false
+    //     }
+    // }
 
-    fn mag_read(&self, flux: &mut [f32; 3], temperature: &mut f32) -> bool {
-        flux[0] = self.mag_data.flux[0]*1e6_f32;
-        flux[1] = self.mag_data.flux[1]*1e-6_f32;
-        flux[2] = self.mag_data.flux[2]*1e-6_f32;
+    // fn mag_read(&self, flux: &mut [f32; 3], temperature: &mut f32) -> bool {
+    //     flux[0] = self.mag_data.flux[0]*1e6_f32;
+    //     flux[1] = self.mag_data.flux[1]*1e-6_f32;
+    //     flux[2] = self.mag_data.flux[2]*1e-6_f32;
 
-        *temperature = self.mag_data.temperature;
-        true
+    //     *temperature = self.mag_data.temperature;
+    //     true
+    // }
+
+    fn mag_read(&self) -> Option<Result<sensors::MagPacket, sensors::SensorError>> {
+        sensors::iis2mdc::MAG_SIGNAL.try_take()
     }
 
     // Baro
-    fn baro_present(&self) -> bool {
-        false
-    }
+    // fn baro_present(&self) -> bool {
+    //     false
+    // }
 
-    fn baro_has_new_data(&mut self) -> bool {
-        let result = dps310::BARO_SIGNAL.try_take();
-        match result {
-            Some(Ok(baro)) => {
-                self.baro_data = baro;
-                true
-            },
-            Some(Err(_)) => false,
-            None => false
-        }
-    }
+    // fn baro_has_new_data(&mut self) -> bool {
+    //     let result = dps310::BARO_SIGNAL.try_take();
+    //     match result {
+    //         Some(Ok(baro)) => {
+    //             self.baro_data = baro;
+    //             true
+    //         },
+    //         Some(Err(e)) => {
+    //             trace!("Baro Error {}", e);
+    //             false
+    //         },
+    //         None => false
+    //     }
+    // }
     
-    fn baro_read(&self, pressure: &mut f32, temperature: &mut f32) -> bool {
-        *pressure = self.baro_data.pressure/1000_f32; 
-        *temperature = self.baro_data.temperature;
+    // fn baro_read(&self, pressure: &mut f32, temperature: &mut f32) -> bool {
+    //     *pressure = self.baro_data.pressure/1000_f32; 
+    //     *temperature = self.baro_data.temperature;
 
-        true
+    //     true
+    // }
+
+    fn baro_read(&self)-> Option<Result<sensors::BaroPacket, sensors::SensorError>> {
+        sensors::dps310::BARO_SIGNAL.try_take()
     }
 
     // Pitot
@@ -388,24 +399,20 @@ impl Nucleo {
     
     pub fn imu_read(&mut self)-> Option<sensors::ImuPacket>
     {
-        adis16500::IMU_SIGNAL.try_take()
+        sensors::adis16500::IMU_SIGNAL.try_take()
     }
     pub fn pitot_read(&mut self)-> Option<sensors::PitotPacket>
     {
-        dlhrl20g::PITOT_SIGNAL.try_take()
+        sensors::dlhrl20g::PITOT_SIGNAL.try_take()
     }
-    pub fn baro_read(&mut self)-> Option<sensors::BaroPacket>
-    {
-        dps310::BARO_SIGNAL.try_take()
-    }
-    pub fn mag_read(&mut self)-> Option<sensors::MagPacket>
-    {
-        iis2mdc::MAG_SIGNAL.try_take()
-    }
+
+    // note: baro_read() is moved into the board implementation...
+    // note: mag_read() is moved into the board implementation...
+    
     pub fn telem_read(&mut self) -> Option<u8> // Read just one byte.
     {
         let mut buff = [0u8;1];
-        let result = telem::TELEM_RX.try_read(&mut buff);
+        let result = sensors::telem::TELEM_RX.try_read(&mut buff);
         match result {
             Err(_) => None,
             Ok(n) => Some(buff[0]) 
@@ -418,7 +425,7 @@ impl Nucleo {
         let len = buff.len();
         let mut n = 0;
         loop {
-            let result = telem::TELEM_TX.try_write(&buff[n..len]);
+            let result = sensors::telem::TELEM_TX.try_write(&buff[n..len]);
             // For some stupid reason, pipes may not write everyting, even if there is room available.
             match result {
                 Err(error) => info!("{:?}",error),
@@ -447,13 +454,13 @@ impl Nucleo {
         let nss1 = Output::new(p.PA4, Level::High, Speed::Low);
         let drdy1 = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down);
         let iis_dev = SpiDevice::new(spi1_bus, nss1); // Todo implement new funciton
-        let iis_sensor = iis2mdc::Iis2mdcSensor{ dev: iis_dev, drdy: drdy1}; // Todo implement new funciton
+        let iis_sensor = sensors::iis2mdc::Iis2mdcSensor{ dev: iis_dev, drdy: drdy1}; // Todo implement new funciton
     
         // DPS210 Baro
         let nss2 = Output::new(p.PC7, Level::High, Speed::Low);
         let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down);
         let dps_dev = SpiDevice::new(spi1_bus, nss2);
-        let dps_sensor = dps310::Dps310Sensor{ dev:dps_dev, drdy: drdy2 , three_wire: true}; // Todo implement new funciton
+        let dps_sensor = sensors::dps310::Dps310Sensor{ dev:dps_dev, drdy: drdy2 , three_wire: true}; // Todo implement new funciton
 
         // SPI2 Bus ///////////////////////////////////////////
         let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
@@ -476,7 +483,7 @@ impl Nucleo {
         let drdy3 = ExtiInput::new(p.PG1, p.EXTI1, Pull::Down);
         let reset = Output::new(p.PE14, Level::High, Speed::Low);
         let adis_dev = SpiDevice::new(spi2_bus, nss3);
-        let adis_sensor = adis16500::Adis16500Sensor{ dev: adis_dev, drdy: drdy3, reset, sample_period: Duration::from_hz(400), timer: timer1 }; // Todo implement new function
+        let adis_sensor = sensors::adis16500::Adis16500Sensor{ dev: adis_dev, drdy: drdy3, reset, sample_period: Duration::from_hz(400), timer: timer1 }; // Todo implement new function
     
         // I2C1 Bus  ///////////////////////////////////////////
         let mut i2c_config = i2c::Config::default();
@@ -489,7 +496,7 @@ impl Nucleo {
         // DLHRL20G Pitot
         let drdy0 = ExtiInput::new(p.PA15, p.EXTI15, Pull::Down);
         let dlhr_dev = I2cDevice::new(i2c1_bus);
-        let dlhr_sensor = dlhrl20g::DlhrL20GSensor{ dev: dlhr_dev, drdy: drdy0 };
+        let dlhr_sensor = sensors::dlhrl20g::DlhrL20GSensor{ dev: dlhr_dev, drdy: drdy0 };
 
         // Telemetry UART
         let mut uart2config = usart::Config::default();
@@ -497,8 +504,8 @@ impl Nucleo {
         let mut usart2 = Uart::new(p.USART2, p.PD6, p.PD5, Usart2Irqs, p.DMA1_CH3, p.DMA2_CH3, uart2config).unwrap();
         let ( mut usart2_tx, mut usart2_rx) = usart2.split();
 
-        let telem2_rx = telem::TelemRx{uart_rx: usart2_rx};
-        let telem2_tx = telem::TelemTx{uart_tx: usart2_tx};
+        let telem2_rx = sensors::telem::TelemRx{uart_rx: usart2_rx};
+        let telem2_tx = sensors::telem::TelemTx{uart_tx: usart2_tx};
 
         // P1 Priority Task for Rx Tememetry
         interrupt::SAI1.set_priority(Priority::P1);
@@ -508,19 +515,19 @@ impl Nucleo {
         // P2 Priority Task for Gyros
         interrupt::SAI2.set_priority(Priority::P2);
         let spawner2 =  P2_EXECUTOR.start(interrupt::SAI2);
-        spawner2.spawn(adis16500::task(adis_sensor)).unwrap();
+        spawner2.spawn(sensors::adis16500::task(adis_sensor)).unwrap();
 
         // P3 Priority Task for Polled Sensors
         interrupt::SAI3.set_priority(Priority::P3);
         let spawner3 =  P3_EXECUTOR.start(interrupt::SAI3);
-        spawner3.spawn(dlhrl20g::task(dlhr_sensor)).unwrap();
-        spawner3.spawn(iis2mdc::task(iis_sensor)).unwrap();
-        spawner3.spawn(dps310::task(dps_sensor)).unwrap();
+        spawner3.spawn(sensors::dlhrl20g::task(dlhr_sensor)).unwrap();
+        spawner3.spawn(sensors::iis2mdc::task(iis_sensor)).unwrap();
+        spawner3.spawn(sensors::dps310::task(dps_sensor)).unwrap();
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);
         let spawner4 = P4_EXECUTOR.start(interrupt::SAI4);
-        spawner4.spawn(telem::task_tx(telem2_tx));
+        spawner4.spawn(sensors::telem::task_tx(telem2_tx));
     
 
         // Setup Probe GPIO's

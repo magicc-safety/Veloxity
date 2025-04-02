@@ -1,6 +1,7 @@
 
 use crate::params::Params;
 use crate::board::Board;
+use crate::sensors;
 
 pub struct DummyBoard;
 
@@ -65,28 +66,36 @@ impl Board for DummyBoard {
         // println!("IMU not responding error.");
     }
 
-    fn mag_present(&self) -> bool {
-        false
-    }
+    // fn mag_present(&self) -> bool {
+    //     false
+    // }
 
-    fn mag_has_new_data(&mut self) -> bool {
-        false
-    }
+    // fn mag_has_new_data(&mut self) -> bool {
+    //     false
+    // }
 
-    fn mag_read(&self, flux: &mut [f32; 3], temperature: &mut f32) -> bool {
-        false
-    }
+    // fn mag_read(&self, flux: &mut [f32; 3], temperature: &mut f32) -> bool {
+    //     false
+    // }
 
-    fn baro_present(&self) -> bool {
-        false
+    fn mag_read(&self) -> Option<Result<sensors::MagPacket, sensors::SensorError>> {
+        None 
     }
+    
+    // fn baro_present(&self) -> bool {
+    //     false
+    // }
 
-    fn baro_has_new_data(&mut self) -> bool {
-        false
-    }
+    // fn baro_has_new_data(&mut self) -> bool {
+    //     false
+    // }
 
-    fn baro_read(&self, pressure: &mut f32, temperature: &mut f32) -> bool {
-        false
+    // fn baro_read(&self, pressure: &mut f32, temperature: &mut f32) -> bool {
+    //     false
+    // }
+    
+    fn baro_read(&self) -> Option<Result<sensors::BaroPacket, sensors::SensorError>> {
+        None
     }
 
     fn diff_pressure_present(&self) -> bool {

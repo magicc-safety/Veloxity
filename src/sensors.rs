@@ -14,6 +14,7 @@ use embassy_time::Instant;
 use embassy_time::Duration;
 use defmt::Format;
 use embassy_stm32;
+use crate::board::Board;
 
 pub fn synch_at(slot_rate: Duration) -> Instant 
 {
@@ -135,25 +136,83 @@ pub struct SerialRxPacket { pub header: RosflightPacketHeader, pub qos: Qos, pub
 //     SerialRxPacket { pub header: RosflightPacketHeader, qos: Qos, len: i16,  payload: [u8;SERIAL_MAX_PAYLOAD_SIZE]},
 // }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, defmt::Format)]
 pub enum SensorError {
-    SpiError(embassy_stm32::spi::Error),
     GenericSensorError(&'static str),
 }
 
 pub struct Sensors {
-    rosflight_packet_header: Result<Option<RosflightPacketHeader>, SensorError>,
-    serial_tx_packet: Result<Option<SerialTxPacket>, SensorError>,
-    adc_packet: Result<Option<AdcPacket>, SensorError>,
-    battery_packet: Result<Option<BatteryPacket>, SensorError>,
-    imu_packet: Result<Option<ImuPacket>, SensorError>,
-    baro_packet: Result<Option<BaroPacket>, SensorError>,
-    pitot_packet: Result<Option<PitotPacket>, SensorError>,
-    mag_packet: Result<Option<MagPacket>, SensorError>,
-    rc_packet: Result<Option<RcPacket>, SensorError>,
-    range_packet: Result<Option<RangePacket>, SensorError>,
-    gnss_packet: Result<Option<GNSSPacket>, SensorError>,
-    attitude_packet: Result<Option<AttitudePacket>, SensorError>,
-    serial_rx_packet: Result<Option<SerialRxPacket>, SensorError>
+    rosflight_packet_header: Option<RosflightPacketHeader>,
+    serial_tx_packet: Option<SerialTxPacket>,
+    adc_packet: Option<AdcPacket>,
+    battery_packet: Option<BatteryPacket>,
+    imu_packet: Option<ImuPacket>,
+    baro_packet: Option<BaroPacket>,
+    pitot_packet: Option<PitotPacket>,
+    mag_packet: Option<MagPacket>,
+    rc_packet: Option<RcPacket>,
+    range_packet: Option<RangePacket>,
+    gnss_packet: Option<GNSSPacket>,
+    attitude_packet: Option<AttitudePacket>,
+    serial_rx_packet: Option<SerialRxPacket>,
 }
 
+impl Sensors {
+    pub fn new() -> Self {
+        Self {
+            rosflight_packet_header: None, // <-- when we're done pulling this value out via ownership, the estimator can replace this with "none" so that everyone else knows it's been processed... I could even have a check when we read in from the board to see: if we're not "None" here, it means the previous value wasn't processed and we can decide what to do.
+            serial_tx_packet: None,
+            adc_packet: None,
+            battery_packet: None,
+            imu_packet: None,
+            baro_packet: None,
+            pitot_packet: None,
+            mag_packet: None,
+            rc_packet: None,
+            range_packet: None,
+            gnss_packet: None,
+            attitude_packet: None,
+            serial_rx_packet: None,
+        }
+    }
+
+    pub fn run<B: Board>(&mut self, board: &B) {
+        match board.baro_read() {
+            Some(Ok(baro_data)) => {
+                self.baro_packet = Some(baro_data);
+
+                #[cfg(feature="nucleo")]
+                defmt::trace!("Baro: {} C, ({}) kPa\n",
+                    self.baro_packet.as_ref().unwrap().pressure,
+                    self.baro_packet.as_ref().unwrap().temperature);
+            },
+            Some(Err(e)) => {
+                defmt::trace!("Baro error: {:?}", e);
+                self.baro_packet = None;
+            },
+            None => {
+                self.baro_packet = None;
+            }
+        }
+
+        match board.mag_read() {
+            Some(Ok(mag_data)) => {
+                self.mag_packet = Some(mag_data);
+
+                #[cfg(feature="nucleo")]
+                defmt::trace!("Mag: ({},{},{}) uT, Temp: {} C\n",
+                    self.mag_packet.as_ref().unwrap().flux[0],
+                    self.mag_packet.as_ref().unwrap().flux[1],
+                    self.mag_packet.as_ref().unwrap().flux[2],
+                    self.mag_packet.as_ref().unwrap().temperature);
+            },
+            Some(Err(e)) => {
+                defmt::trace!("Mag error: {:?}", e);
+                self.mag_packet = None;
+            },
+            None => {
+                self.mag_packet = None;
+            }
+        }
+    }
+}

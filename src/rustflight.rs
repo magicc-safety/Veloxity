@@ -1,4 +1,4 @@
-use crate::{board::Board, comm_manager, params};
+use crate::{board::Board, comm_manager, params, sensors};
 
 // only necessary for stm32 architecure
 #[cfg(feature = "nucleo")]
@@ -26,36 +26,40 @@ impl<B: Board> ROSFlight<B> {
         let mut p = params::Params::new();
         let mut mavlink = crate::comm_manager::mavlink::Mavlink::new();
         let mut comm_manager = crate::comm_manager::CommManager::new(mavlink);
+        let mut sensors = sensors::Sensors::new();
 
         // simulate sensor input and reading!!! <-- ultimately replace this loop with a sensors module!!!
         loop {
-            if self.board.baro_has_new_data() {
-                let mut pressure: f32 = 0.0;
-                let mut temperature: f32 = 0.0;
-                let baro_data = self.board.baro_read(&mut pressure, &mut temperature);
 
-                #[cfg(feature = "nucleo")]
-                defmt::trace!("Baro: {} C, ({}) kPa\n",
-                    pressure,
-                    temperature);
+            sensors.run(&self.board);
 
-                #[cfg(feature = "nucleo")]
-                defmt::trace!("Sin test: {}\n", micro_algebra::mathlib::sin(0.5));
-            }
+            // if self.board.baro_has_new_data() {
+            //     let mut pressure: f32 = 0.0;
+            //     let mut temperature: f32 = 0.0;
+            //     let baro_data = self.board.baro_read(&mut pressure, &mut temperature);
 
-            if self.board.mag_has_new_data() {
-                let mut data = [0.0; 3];
-                let mut temperature: f32 = 0.0;
-                let mag_data = self.board.mag_read(&mut data, &mut temperature);
+            //     #[cfg(feature = "nucleo")]
+            //     defmt::trace!("Baro: {} C, ({}) kPa\n",
+            //         pressure,
+            //         temperature);
 
-                #[cfg(feature = "nucleo")]
-                defmt::trace!("Mag: ({},{},{}) uT, Temp: {} C\n",
-                    data[0],
-                    data[1],
-                    data[2],
-                    temperature,
-                );
-            }
+            //     #[cfg(feature = "nucleo")]
+            //     defmt::trace!("Sin test: {}\n", micro_algebra::mathlib::sin(0.5));
+            // }
+
+            // if self.board.mag_has_new_data() {
+            //     let mut data = [0.0; 3];
+            //     let mut temperature: f32 = 0.0;
+            //     let mag_data = self.board.mag_read(&mut data, &mut temperature);
+
+            //     #[cfg(feature = "nucleo")]
+            //     defmt::trace!("Mag: ({},{},{}) uT, Temp: {} C\n",
+            //         data[0],
+            //         data[1],
+            //         data[2],
+            //         temperature,
+            //     );
+            // }
         }
     }
 }

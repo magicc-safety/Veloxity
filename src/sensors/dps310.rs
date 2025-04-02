@@ -11,17 +11,18 @@ use embassy_time::with_timeout;
 use embedded_hal_async::spi::SpiDevice as _;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 
-use crate::sensors::{RosflightPacketHeader, BaroPacket, SensorError};
-use defmt::info;
+use crate::sensors;
 
-use crate::sensors::synch_at;
+use defmt::info;
+use defmt::trace;
 use core::module_path;
+
 
 // Device dependent
 const SPI_READ: u8 = 0x80;
 const SPI_WRITE: u8 = 0x00;
 
-pub static BARO_SIGNAL : Signal<CriticalSectionRawMutex, Result<BaroPacket, SensorError>> = Signal::<CriticalSectionRawMutex, Result<BaroPacket, SensorError>>::new();
+pub static BARO_SIGNAL : Signal<CriticalSectionRawMutex, Result<sensors::BaroPacket, sensors::SensorError>> = Signal::<CriticalSectionRawMutex, Result<sensors::BaroPacket, sensors::SensorError>>::new();
 
 pub struct Dps310Sensor
 {
@@ -49,31 +50,31 @@ const K8:f64 =  7864320.0; //
 
 impl Dps310Sensor
 {
-    async fn read_register(&mut self, reg_addr: u8) -> Result<u8, SensorError>
+    async fn read_register(&mut self, reg_addr: u8) -> Result<u8, sensors::SensorError>
     {
         let tx = [reg_addr|SPI_READ, 0x00];
         let mut rx = [0u8; 2];
         self.dev.transfer(&mut rx, & tx)
             .await
             .map_err(|e| match e {
-                _ => SensorError::GenericSensorError("SPI failed"),
+                _ => sensors::SensorError::GenericSensorError("SPI failed: read_register"),
             })?;
         Ok(rx[1])
     }
 
-    async fn write_register(&mut self, reg_addr: u8, value: u8) -> Result<(), SensorError>
+    async fn write_register(&mut self, reg_addr: u8, value: u8) -> Result<(), sensors::SensorError>
     {
         let tx = [reg_addr|SPI_WRITE, value];
         // Soft Reset
         self.dev.write(& tx)
             .await
             .map_err(|e| match e {
-                _ => SensorError::GenericSensorError("SPI failed"),
+                _ => sensors::SensorError::GenericSensorError("SPI failed: write_register"),
             })?;
         Ok(())
     }
 
-    async fn initialize_sensor(&mut self) -> Result<[f64;9], SensorError> {
+    async fn initialize_sensor(&mut self) -> Result<[f64;9], sensors::SensorError> {
         // SOFT RESET
         const RESET_REG:u8 = 0x0C;
         self.write_register(  RESET_REG, 0x09).await?;
@@ -100,24 +101,24 @@ impl Dps310Sensor
         const PRODUCT_ID: u8 = 0x10;
         let id = self.read_register( PRODUCT_ID_REG).await?;
         if id != PRODUCT_ID {
-            info!("ID = {:#02x} failure. Should be {:#02x}",id,PRODUCT_ID);
-            return Err(SensorError::GenericSensorError("ID mismatch"));
+            trace!("Failure: ID = {:#02x} failure. Should be {:#02x}",id,PRODUCT_ID);
+            return Err(sensors::SensorError::GenericSensorError("ID mismatch"));
         }
 
         // CHECK IF CALIBRATION COEFFICIENTS ARE READY
         // again, better way to do if else is for future work
         const COEF_READY: u8 = 0x80;
         let coef_rdy = self.read_register(  MEAS_CFG_REG).await?;
-        if (coef_rdy & COEF_READY) != 0x00 {
-            info!("COEF_READY = {:#02x} success",coef_rdy);
-            return Err(SensorError::GenericSensorError("Calibration coefficients not ready"));
+        if (coef_rdy & COEF_READY) == 0x00 {
+            trace!("Failure: COEF_READY = {:#02x}",coef_rdy);
+            return Err(sensors::SensorError::GenericSensorError("Calibration coefficients not ready"));
         }
         
         let mut cal = self.read_calibration_coefficients().await?;
         Ok(cal)
     }
 
-    async fn read_calibration_coefficients(&mut self) -> Result<[f64;9], SensorError> {
+    async fn read_calibration_coefficients(&mut self) -> Result<[f64;9], sensors::SensorError> {
         const COEF_REG: u8 = 0x10;
         let mut tx = [0u8;19];
         tx[0] = COEF_REG | SPI_READ;
@@ -126,7 +127,7 @@ impl Dps310Sensor
         self.dev.transfer(&mut rx, & tx)
             .await
             .map_err(|e| match e {
-                _ => SensorError::GenericSensorError("SPI failed"),
+                _ => sensors::SensorError::GenericSensorError("SPI failed: read_calibration_coefficients"),
             })?;
 
         // move u8 date into u32 data for bit manipulation
@@ -147,7 +148,7 @@ impl Dps310Sensor
         Ok(cal)
     }
 
-    async fn pressure_config(&mut self) -> Result<(), SensorError> {
+    async fn pressure_config(&mut self) -> Result<(), sensors::SensorError> {
         // PRESSURE CONFIG
         const PRS_CFG_REG:u8 = 0x06;
         self.write_register(  PRS_CFG_REG, 0x03  ).await?; // 8x oversampling
@@ -155,7 +156,7 @@ impl Dps310Sensor
         Ok(())
     }
 
-    async fn temperature_config(&mut self) -> Result<(), SensorError> {
+    async fn temperature_config(&mut self) -> Result<(), sensors::SensorError> {
         // CHECK TEMPERATURE SOURCE
         const COEF_SRCE_REG: u8 =0x28;
         let temp_source = self.read_register( COEF_SRCE_REG).await? & 0x80;
@@ -168,7 +169,7 @@ impl Dps310Sensor
         Ok(())
     }
 
-    async fn measurement_configuration(&mut self) -> Result<(), SensorError> {
+    async fn measurement_configuration(&mut self) -> Result<(), sensors::SensorError> {
         // Measurement Configuration
         // 7 - 	0, read only
         // 6 - 	0, read only
@@ -182,12 +183,12 @@ impl Dps310Sensor
         Ok(())
     }
 
-    async fn get_sensor_data(&mut self, cmd: u8) -> Result<i32, SensorError> {
+    async fn get_sensor_data(&mut self, cmd: u8) -> Result<i32, sensors::SensorError> {
         let mut rx = [0u8; 4];
         self.dev.transfer(&mut rx, & [cmd|SPI_READ, 0,0,0])
             .await
             .map_err(|e| match e {
-                _ => SensorError::GenericSensorError("SPI failed"),
+                _ => sensors::SensorError::GenericSensorError("SPI failed: get_sensor_data"),
             })?;
 
         // Clear the ISR
@@ -198,14 +199,13 @@ impl Dps310Sensor
         Ok(raw)
     }
 
-    async fn get_pressure_data(&mut self) -> Result<(i32, u16), SensorError> {
+    async fn get_pressure_data(&mut self) -> Result<(i32, u16), sensors::SensorError> {
         // Start the Pressure read
         self.write_register(  MEAS_CFG_REG, 0x01  ).await?;
 
         // wait for data ready...
         // Use DRDY signal for better robustness? otherwise, timeout at 14ms.
-        let drdy_result = with_timeout(Duration::from_micros(14_000), self.drdy.wait_for_rising_edge()).await;
-        drdy_result.map_err(|e| SensorError::GenericSensorError("SPI failed"))?;
+        let drdy_result = with_timeout(Duration::from_micros(14_000), self.drdy.wait_for_rising_edge()).await.is_ok();
         Timer::after_micros(20).await; // We need at least 14us delay here if running at 2 MHz, maybe because of the messy harness?
 
         // read status (highest 8 bits)
@@ -216,14 +216,13 @@ impl Dps310Sensor
         Ok((raw_p, status))
     }
 
-    async fn get_temperature_data(&mut self) -> Result<(i32, u16), SensorError> {
+    async fn get_temperature_data(&mut self) -> Result<(i32, u16), sensors::SensorError> {
         // Start Temperature read    
         self.write_register(  MEAS_CFG_REG, 0x02  ).await?;
 
         // wait for data ready... 
         // Use DRDY signal if available, otherwise let it timeout
-        let drdy_result = with_timeout(Duration::from_micros(20_000), self.drdy.wait_for_rising_edge()).await;
-        drdy_result.map_err(|e| SensorError::GenericSensorError("SPI failed")).unwrap();
+        let drdy_result = with_timeout(Duration::from_micros(20_000), self.drdy.wait_for_rising_edge()).await.is_ok();
 
         // read status (modify lowest 8 bits)
         let mut status_low = self.read_register( MEAS_CFG_REG ).await? as u16;
@@ -251,31 +250,32 @@ impl Dps310Sensor
         (raw_p_f64, pressure)
     }
 
-    pub async fn run( &mut self)
+    pub async fn run(&mut self)
     {
-
         // initialize the sensor
         let mut cal = match self.initialize_sensor().await {
             Ok(cal) => cal,
             Err(e) => {
+                trace!("Failed to initialize sensor: {:?}", e);
                 BARO_SIGNAL.signal(Err(e));
                 return;
             }
         };
-
         if let Err(e) = self.pressure_config().await {
+            trace!("Failed to configure pressure: {:?}", e);
             BARO_SIGNAL.signal(Err(e));
             return;
         }
         if let Err(e) = self.temperature_config().await {
+            trace!("Failed to configure temperature: {:?}", e);
             BARO_SIGNAL.signal(Err(e));
             return;
         }
         if let Err(e) = self.measurement_configuration().await {
+            trace!("Failed to configure measurement: {:?}", e);
             BARO_SIGNAL.signal(Err(e));
             return;
         }
-
         //////////////////////////////////////////////////////////////////////////////////////
         // Periodic Data Acquisition
         let mut raw_t_previous = 0_i32;
@@ -283,7 +283,7 @@ impl Dps310Sensor
 
         loop
         {
-            let timestamp = synch_at( sample_period );
+            let timestamp = sensors::synch_at( sample_period );
             Timer::at(timestamp).await;
 
             // process pressure data
@@ -314,11 +314,11 @@ impl Dps310Sensor
 
             if status_combined == 0xD0E0
             {
-                let header = RosflightPacketHeader{timestamp, status: status_combined};
-                let baro_packet = BaroPacket{header, pressure: pressure as f32, temperature: temperature as f32};
+                let header = sensors::RosflightPacketHeader{timestamp, status: status_combined};
+                let baro_packet = sensors::BaroPacket{header, pressure: pressure as f32, temperature: temperature as f32};
                 BARO_SIGNAL.signal(Ok(baro_packet)); // make data available for other tasks. 
             } else {
-                BARO_SIGNAL.signal(Err(SensorError::GenericSensorError("Bad status")));
+                BARO_SIGNAL.signal(Err(sensors::SensorError::GenericSensorError("Bad status")));
             }
         }
     }

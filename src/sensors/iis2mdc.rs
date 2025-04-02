@@ -1,27 +1,21 @@
 //#![allow(unused)]
 use embassy_sync::signal::Signal;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-
 use embassy_stm32::mode::Async;
 use embassy_stm32::spi;
 use embassy_stm32::gpio::Output;
-
 use embassy_time::Timer;
 use embassy_time::Duration;
-
 use embassy_stm32::exti::ExtiInput;
-
 use embassy_time::with_timeout;
-use crate::sensors::synch_at;
-
-use defmt::info;
-
-use crate::sensors::{RosflightPacketHeader, MagPacket};
-
-use core::module_path;
-
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embedded_hal_async::spi::SpiDevice as _;
+
+use crate::sensors;
+
+use defmt::info;
+use defmt::trace;
+use core::module_path;
 
 // Device dependent
 const SPI_READ: u8 = 0x80;
@@ -45,7 +39,7 @@ const OUT_TEMP: u8 =  0x6E;
 // Chip ID
 const WHO_AM_I: u8 = 0x40;
 
-pub static MAG_SIGNAL  : Signal<CriticalSectionRawMutex, MagPacket> = Signal::<CriticalSectionRawMutex, MagPacket>::new();
+pub static MAG_SIGNAL  : Signal<CriticalSectionRawMutex, Result<sensors::MagPacket, sensors::SensorError>> = Signal::<CriticalSectionRawMutex, Result<sensors::MagPacket, sensors::SensorError>>::new();
 
 pub struct Iis2mdcSensor
 {
@@ -55,28 +49,39 @@ pub struct Iis2mdcSensor
 
 impl Iis2mdcSensor
 {
-    async fn read_register(&mut self, reg_addr: u8) -> u8
+    async fn read_register(&mut self, reg_addr: u8) -> Result<u8, sensors::SensorError>
     {
         let tx = [reg_addr|SPI_READ, 0x00];
         let mut rx = [0u8; 2];
-        let _ = self.dev.transfer(&mut rx, & tx).await;
-        rx[1]
+        self.dev.transfer(&mut rx, & tx)
+            .await
+            .map_err(|e| match e {
+                _ => sensors::SensorError::GenericSensorError("SPI failed: read_register")
+            })?;
+        Ok(rx[1])
     }
 
-    async fn write_register(&mut self, reg_addr: u8, value: u8)
+    async fn write_register(&mut self, reg_addr: u8, value: u8) -> Result<(), sensors::SensorError>
     {
         let tx = [reg_addr|SPI_WRITE, value];
-        let _ = self.dev.write(& tx).await; // Soft Reset
+        // Soft Reset 
+        self.dev.write(& tx)
+            .await
+            .map_err(|e| match e {
+                _ => sensors::SensorError::GenericSensorError("SPI failed: write_register")
+            })?;
+        Ok(())
     }
 
-    async fn initialize_sensor(&mut self) -> u8 {
+    async fn initialize_sensor(&mut self) -> Result<u8, sensors::SensorError> {
        // Check Chip ID    
-       let who_am_i = self.read_register(  WHO_AM_I_REG).await;
+       let who_am_i = self.read_register(  WHO_AM_I_REG).await?;
        if who_am_i == WHO_AM_I {
            info!("WHO_AM_I = {:#02x} success",who_am_i);
        }
        else {
            info!("WHO_AM_I = {:#02x} failure",who_am_i);
+           return Err(sensors::SensorError::GenericSensorError("IIS2MDC Chip ID mismatch"));
        } 
 
         // Reset the sensor:
@@ -87,9 +92,9 @@ impl Iis2mdcSensor
         // 4:  = 0 High resolution Mode (LP=0)
         // 3:2 = 00 10 Hz Data Rate (ODR)
         // 1:0 = 00 for continuous Mode,  10 or 11 = idle mode
-        self.write_register( CFG_REG_A,0x20).await;
+        self.write_register( CFG_REG_A,0x20).await?;
         Timer::after_micros(10).await; // Wait at least 5 us after reset
-        self.write_register( CFG_REG_A,0x40).await;
+        self.write_register( CFG_REG_A,0x40).await?;
         Timer::after_micros(21).await; // wait at least 20 ms for reboot to complete
     
        // Configure sensor:
@@ -106,7 +111,7 @@ impl Iis2mdcSensor
         // 1000 1100 = 0x8C For 100 Hz.
         // writeRegister(CFG_REG_A,0x80|(odr_mode<<2)); // continuous mode
 
-        self.write_register( CFG_REG_A,0x83).await;
+        self.write_register( CFG_REG_A,0x83).await?;
 
         // Set Single Measurement Mode
         // Register B (0x61)
@@ -117,7 +122,7 @@ impl Iis2mdcSensor
         // [1]  1, OFF_CANC 1= enable offset cancellation in single mode
         // [0]  0 LPF disable offset filter (1- enabled)
 
-        self.write_register( CFG_REG_B,0x12).await;
+        self.write_register( CFG_REG_B,0x12).await?;
 
         // Enable DRDY Pin and set SPI only mode (no I2C)
         // Register C (0x62)
@@ -131,22 +136,26 @@ impl Iis2mdcSensor
         // 1: =0 SELF_TEST
         // 0: =1 DRDY_on_PIN Enable DRDY   
 
-        self.write_register( CFG_REG_C,0x31).await;
+        self.write_register( CFG_REG_C,0x31).await?;
 
         // Disable Event Interrupts (this is not DRDY)
 
-        self.write_register( INT_CTRL_REG,0x00).await;
-        self.write_register( INT_SOURCE_REG,0x00).await;
-        self.write_register( INT_THS_L_REG,0x00).await;
-        self.write_register( INT_THS_H_REG,0x00).await;
+        self.write_register( INT_CTRL_REG,0x00).await?;
+        self.write_register( INT_SOURCE_REG,0x00).await?;
+        self.write_register( INT_THS_L_REG,0x00).await?;
+        self.write_register( INT_THS_H_REG,0x00).await?;
 
         // Read the status register
-        let status = self.read_register(  STATUS_REG).await;
+        let status = self.read_register(  STATUS_REG).await?;
         info!("STATUS_SENSOR = {:#02x}. Shold be 0x00",status);
 
         // Read calibration registers
         let mut offset = [0u8; 7];
-        let _ = self.dev.transfer(&mut offset, & [OFFSET_REG|SPI_READ, 0,0,0,0,0,0]).await; 
+        self.dev.transfer(&mut offset, & [OFFSET_REG|SPI_READ, 0,0,0,0,0,0])
+            .await
+            .map_err(|e| match e {
+                _ => sensors::SensorError::GenericSensorError("SPI failed: initialize_sensor")
+            })?;
     
         let offset = [ 
             (((offset[1] as u16) | (offset[2] as u16)<<8) as i16)*3/2,
@@ -154,26 +163,35 @@ impl Iis2mdcSensor
             (((offset[5] as u16) | (offset[6] as u16)<<8) as i16)*3/2 ];
 
         info!("OFFSET_REGISTERS (not used) = {:?}",offset);
-        status
+        
+        Ok(status)
     }
 
-    async fn get_flux_and_temperature_data(&mut self) -> (u16, [u8; 8], [u8; 3]) {
+    async fn get_flux_and_temperature_data(&mut self) -> Result<(u16, [u8; 8], [u8; 3]), sensors::SensorError> {
 
         // Start Read Cycle
-        self.write_register(  CFG_REG_A, 0x81).await;
+        self.write_register(  CFG_REG_A, 0x81).await?;
 
         // Use DRDY signal for better robustness? otherwise, timeout at 9.6ms.
-        if let Ok(()) = with_timeout(Duration::from_micros(9_600), self.drdy.wait_for_rising_edge()).await{}
+        let drdy_result = with_timeout(Duration::from_micros(9_600), self.drdy.wait_for_rising_edge()).await.is_ok();
 
         let mut flux_data = [0u8; 8];
         // note starting at STATUS_REG to capture both status and flux values
-        let _ = self.dev.transfer(&mut flux_data, & [STATUS_REG|SPI_READ, 0, 0, 0, 0, 0, 0, 0]).await;
+        self.dev.transfer(&mut flux_data, & [STATUS_REG|SPI_READ, 0, 0, 0, 0, 0, 0, 0])
+            .await
+            .map_err(|e| match e {
+                _ => sensors::SensorError::GenericSensorError("SPI failed: get_flux_and_temperature_data")
+            })?;
 
         let mut raw_temperature = [0u8; 3];
-        let _ = self.dev.transfer(&mut raw_temperature, & [OUT_TEMP|SPI_READ, 0, 0]).await;
+        self.dev.transfer(&mut raw_temperature, & [OUT_TEMP|SPI_READ, 0, 0])
+            .await
+            .map_err(|e| match e {
+                _ => sensors::SensorError::GenericSensorError("SPI failed: get_flux_and_temperature_data")
+            })?;
         
         let status = flux_data[1] as u16;
-        (status, flux_data, raw_temperature)
+        Ok((status, flux_data, raw_temperature))
     }
 
     fn process_flux_data(&self, flux_data: [u8; 8], flux_previous: &mut [i16; 3]) -> [f32; 3] {
@@ -198,25 +216,40 @@ impl Iis2mdcSensor
     }
 
     pub async fn run(&mut self) {
-        let status = self.initialize_sensor().await; 
+        let status = match self.initialize_sensor().await {
+            Ok(status) => status,
+            Err(e) => {
+                trace!("Failed to initialize sensor: {:?}", e);
+                MAG_SIGNAL.signal(Err(e));
+                return;
+            }
+        };
 
         let mut flux_previous = [0_i16;3];
         let sample_period = Duration::from_hz(100);
 
         loop {
-            let timestamp = synch_at( sample_period );  
+            let timestamp = sensors::synch_at( sample_period );  
             Timer::at(timestamp).await;
 
             // Read Flux Data
-            let (status, mut flux_data, mut raw_temperature) = self.get_flux_and_temperature_data().await;
+            let (status, mut flux_data, mut raw_temperature) = match self.get_flux_and_temperature_data().await {
+                Ok(data) => data,
+                Err(e) => {
+                    MAG_SIGNAL.signal(Err(e));
+                    continue;
+                } 
+            };
 
             if status == 0x000F {
                 let flux = self.process_flux_data(flux_data, &mut flux_previous);
                 let temperature = self.process_temperature_data(raw_temperature);
 
-                let header = RosflightPacketHeader{timestamp, status};
-                let mag_packet = MagPacket{header, flux, temperature};
-                MAG_SIGNAL.signal(mag_packet); // make data available for other tasks.
+                let header = sensors::RosflightPacketHeader{timestamp, status};
+                let mag_packet = sensors::MagPacket{header, flux, temperature};
+                MAG_SIGNAL.signal(Ok(mag_packet)); // make data available for other tasks
+            } else {
+                MAG_SIGNAL.signal(Err(sensors::SensorError::GenericSensorError("Bad Status")));
             }
         }
     }
