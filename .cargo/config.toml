@@ -11,5 +11,5 @@ rustflags = [
 DEFMT_LOG = "trace"
 
 [alias]
-bn = "build --features nucleo --target thumbv7em-none-eabihf"
-rn = "run --features nucleo --target thumbv7em-none-eabihf --release --bin nucleo_test"
+bn = "build --no-default-features --features nucleo --target thumbv7em-none-eabihf"
+rn = "run --no-default-features --features nucleo --target thumbv7em-none-eabihf --release --bin nucleo_test"
