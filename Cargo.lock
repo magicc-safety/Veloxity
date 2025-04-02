@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayvec"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
 name = "as-slice"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -545,10 +551,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
+name = "libc"
+version = "0.2.171"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
+
+[[package]]
 name = "litrs"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
+
+[[package]]
+name = "log"
+version = "0.4.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
 name = "mathlib"
@@ -563,6 +581,12 @@ dependencies = [
  "mathlib",
  "num",
 ]
+
+[[package]]
+name = "mock_instant"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e1d4c44418358edcac6e1d9ce59cea7fb38052429c7704033f1196f0c179e6a"
 
 [[package]]
 name = "nb"
@@ -727,6 +751,7 @@ dependencies = [
 name = "rustflight_alpha"
 version = "0.1.0"
 dependencies = [
+ "arrayvec",
  "bitflags 2.9.0",
  "cortex-m",
  "cortex-m-rt",
@@ -740,7 +765,10 @@ dependencies = [
  "embedded-hal-async",
  "embedded-io-async",
  "heapless",
+ "libc",
+ "log",
  "micro_algebra",
+ "mock_instant",
  "panic-probe",
  "static_cell",
 ]

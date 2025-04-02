@@ -10,10 +10,150 @@ pub(crate) mod iis2mdc;
 pub(crate) mod telem;
 
 // Create enum of rosflight return types
-use embassy_time::Instant;
-use embassy_time::Duration;
-use defmt::Format;
-use embassy_stm32;
+#[cfg(feature = "nucleo")]
+use {
+    embassy_time::{Instant, Duration},
+    defmt::{trace, Format},
+};
+
+// ------------------------------------------------------------------------ Mock Timing on Host Computer -----------------------------------------------------------------------
+
+#[cfg(feature = "default")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Duration {
+    micros: u64,  // Use u64 for the duration in microseconds
+}
+
+#[cfg(feature = "default")]
+impl Duration {
+    // Constructor that creates a Duration from micros (u64)
+    pub const fn from_micros(micros: u64) -> Self {
+        Duration { micros }
+    }
+
+    // Convert the custom Duration to core::time::Duration
+    pub fn to_core_duration(&self) -> core::time::Duration {
+        core::time::Duration::from_micros(self.micros)
+    }
+
+    // Convert from core::time::Duration to custom Duration
+    pub fn from_core_duration(duration: core::time::Duration) -> Self {
+        Duration {
+            micros: duration.as_secs() * 1_000_000 + duration.subsec_micros() as u64,
+        }
+    }
+
+    // Get the duration in microseconds (u64)
+    pub fn as_micros(&self) -> u64 {
+        self.micros
+    }
+}
+
+#[cfg(feature = "default")]
+use {
+    mock_instant::global::Instant, // <-- relies on "duration"
+    log::info,
+};
+
+#[cfg(feature = "default")]
+pub trait InstantExt {
+    fn as_micros(&self) -> u64;
+    fn from_micros(micros: u64) -> Self;
+}
+
+#[cfg(feature = "default")]
+impl InstantExt for Instant {
+    fn as_micros(&self) -> u64 {
+        let duration = self.elapsed(); // Get elapsed time
+        duration.as_secs() as u64 * 1_000_000 + duration.subsec_micros() as u64
+    }
+
+    fn from_micros(micros: u64) -> Instant {
+        let now = Instant::now();
+        now + Duration::from_micros(micros).to_core_duration()
+    }
+}
+
+// ---------------------------------------------------------------------- End Mock Timing on Host Computer -----------------------------------------------------------------
+
+// ------------------------------------------------------------------------ Logging on Host Computer -----------------------------------------------------------------------
+
+#[cfg(feature = "default")]
+mod host_rtt {
+    use core::fmt::{self, Write};  // Added explicit Write import
+    use libc::{close, c_char, mkfifo, open, O_WRONLY, write};
+
+    const FIFO_PATH: &[u8] = b"/tmp/rustflight_rtt\0";
+    const BUF_SIZE: usize = 128;
+
+    pub struct RttWriter {
+        fd: i32,
+        buffer: [u8; BUF_SIZE],
+        position: usize,
+    }
+
+    impl RttWriter {
+        pub fn new() -> Self {
+            unsafe {
+                mkfifo(FIFO_PATH.as_ptr() as *const c_char, 0o666);
+                let fd = open(FIFO_PATH.as_ptr() as *const c_char, O_WRONLY);
+                Self {
+                    fd,
+                    buffer: [0u8; BUF_SIZE],
+                    position: 0,
+                }
+            }
+        }
+
+        fn write_bytes(&mut self, data: &[u8]) -> fmt::Result {
+            let mut bytes = data;
+            while !bytes.is_empty() {
+                let remaining = self.buffer.len() - self.position;
+                let copy_len = core::cmp::min(bytes.len(), remaining);
+                
+                self.buffer[self.position..self.position+copy_len]
+                    .copy_from_slice(&bytes[..copy_len]);
+                self.position += copy_len;
+                bytes = &bytes[copy_len..];
+
+                if self.position == self.buffer.len() {
+                    self.flush()?;  // Propagate errors
+                }
+            }
+            Ok(())
+        }
+
+        pub fn flush(&mut self) -> fmt::Result {
+            if self.position > 0 {
+                let written = unsafe {
+                    write(
+                        self.fd,
+                        self.buffer.as_ptr() as *const _,
+                        self.position
+                    )
+                };
+                
+                if written < 0 {
+                    return Err(fmt::Error);
+                }
+                
+                self.position = 0;
+            }
+            Ok(())
+        }
+    }
+
+    impl Write for RttWriter {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            self.write_bytes(s.as_bytes())
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------- End Logging on Host Computer ---------------------------------------------------------------------
+
+
 use crate::board::Board;
 
 pub fn synch_at(slot_rate: Duration) -> Instant 
@@ -40,65 +180,82 @@ const SERIAL_MAX_PAYLOAD_SIZE:usize = 256+4;
 const ADC_MAX_CHANNELS:usize = 21;
 const RC_PACKET_CHANNELS:usize = 24;
 
-#[derive(Format)]
+
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub enum Qos
 {
     High, Medium, Low,
 }
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub enum RangeType
 {
     Sonar, Lidar,
 }
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub enum GNSSFixType
 {
     NoFix, DeadReckoningOnly,TwoD, ThreeD, GnssPlusDeadReckoning, TimeFixOnly,
 }
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct RosflightPacketHeader
 {
     pub timestamp :Instant, pub status: u16
 }
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct SerialTxPacket { pub header: RosflightPacketHeader, pub qos: Qos, pub len: i16,  pub payload: [u8;SERIAL_MAX_PAYLOAD_SIZE]}
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct AdcPacket {pub header : RosflightPacketHeader, pub temperature: f32, pub v_bku: f32, pub v_ref : f32, pub volts: [f32;ADC_MAX_CHANNELS]}
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct BatteryPacket { pub header : RosflightPacketHeader, pub voltage :f32, pub current :f32}
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct ImuPacket { pub header : RosflightPacketHeader, pub accel :[f64;3], pub gyro :[f64;3], pub temperature :f32, pub seq: u16 }
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct BaroPacket { pub header : RosflightPacketHeader, pub pressure : f32, pub temperature : f32}
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct PitotPacket { pub header : RosflightPacketHeader, pub pressure : f32, pub temperature : f32}
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct MagPacket {pub header:RosflightPacketHeader, pub flux: [f32;3], pub temperature : f32}
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct RcPacket { pub header: RosflightPacketHeader, pub n_chan: u32, pub chan: [f32;RC_PACKET_CHANNELS], pub frame_lost : bool, pub rc_packet_lost : bool}
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct RangePacket {pub header: RosflightPacketHeader, pub range : f32, pub in_range :f32, pub max_range: f32, pub range_type: RangeType }
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct GNSSPacket {pub header: RosflightPacketHeader, pub pps: u64, pub fix_type: GNSSFixType} // lots more parameters for later
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct AttitudePacket {pub header: RosflightPacketHeader, pub q: [f32;4], pub rate: [f32;3]}
 // not really needed:
 
-#[derive(Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct SerialRxPacket { pub header: RosflightPacketHeader, pub qos: Qos, pub len: i16, pub payload: [u8;SERIAL_MAX_PAYLOAD_SIZE]}
 
 // pub enum RosflightPacket
@@ -136,25 +293,26 @@ pub struct SerialRxPacket { pub header: RosflightPacketHeader, pub qos: Qos, pub
 //     SerialRxPacket { pub header: RosflightPacketHeader, qos: Qos, len: i16,  payload: [u8;SERIAL_MAX_PAYLOAD_SIZE]},
 // }
 
-#[derive(Debug, Clone, defmt::Format)]
+#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+#[derive(Debug, Clone)]
 pub enum SensorError {
     GenericSensorError(&'static str),
 }
 
 pub struct Sensors {
-    rosflight_packet_header: Option<RosflightPacketHeader>,
-    serial_tx_packet: Option<SerialTxPacket>,
-    adc_packet: Option<AdcPacket>,
-    battery_packet: Option<BatteryPacket>,
-    imu_packet: Option<ImuPacket>,
-    baro_packet: Option<BaroPacket>,
-    pitot_packet: Option<PitotPacket>,
-    mag_packet: Option<MagPacket>,
-    rc_packet: Option<RcPacket>,
-    range_packet: Option<RangePacket>,
-    gnss_packet: Option<GNSSPacket>,
-    attitude_packet: Option<AttitudePacket>,
-    serial_rx_packet: Option<SerialRxPacket>,
+    pub rosflight_packet_header: Option<RosflightPacketHeader>,
+    pub serial_tx_packet: Option<SerialTxPacket>,
+    pub adc_packet: Option<AdcPacket>,
+    pub battery_packet: Option<BatteryPacket>,
+    pub imu_packet: Option<ImuPacket>,
+    pub baro_packet: Option<BaroPacket>,
+    pub pitot_packet: Option<PitotPacket>,
+    pub mag_packet: Option<MagPacket>,
+    pub rc_packet: Option<RcPacket>,
+    pub range_packet: Option<RangePacket>,
+    pub gnss_packet: Option<GNSSPacket>,
+    pub attitude_packet: Option<AttitudePacket>,
+    pub serial_rx_packet: Option<SerialRxPacket>,
 }
 
 impl Sensors {
@@ -177,17 +335,34 @@ impl Sensors {
     }
 
     pub fn run<B: Board>(&mut self, board: &B) {
+
+        #[cfg(feature = "default")]
+        use core::fmt::Write;
+        #[cfg(feature = "default")]
+        let mut writer = host_rtt::RttWriter::new();
+
         match board.baro_read() {
             Some(Ok(baro_data)) => {
                 self.baro_packet = Some(baro_data);
 
                 #[cfg(feature="nucleo")]
-                defmt::trace!("Baro: {} C, ({}) kPa\n",
+                trace!("Baro: {} C, ({}) kPa\n",
                     self.baro_packet.as_ref().unwrap().pressure,
                     self.baro_packet.as_ref().unwrap().temperature);
+
+                #[cfg(feature = "default")]
+                write!(&mut writer, "Baro: {} C, ({}) kPa\n",
+                    self.baro_packet.as_ref().unwrap().pressure,
+                    self.baro_packet.as_ref().unwrap().temperature).unwrap();
+
             },
             Some(Err(e)) => {
-                defmt::trace!("Baro error: {:?}", e);
+                #[cfg(feature="nucleo")]
+                trace!("Baro error: {:?}", e);
+
+                #[cfg(feature = "default")]
+                write!(&mut writer, "Mag error: {:?}", e).unwrap();
+
                 self.baro_packet = None;
             },
             None => {
@@ -200,19 +375,38 @@ impl Sensors {
                 self.mag_packet = Some(mag_data);
 
                 #[cfg(feature="nucleo")]
-                defmt::trace!("Mag: ({},{},{}) uT, Temp: {} C\n",
+                trace!("Mag: ({},{},{}) uT, Temp: {} C\n",
                     self.mag_packet.as_ref().unwrap().flux[0],
                     self.mag_packet.as_ref().unwrap().flux[1],
                     self.mag_packet.as_ref().unwrap().flux[2],
                     self.mag_packet.as_ref().unwrap().temperature);
+
+                #[cfg(feature = "default")]
+                write!(&mut writer, "Mag: ({},{},{}) uT, Temp: {} C\n",
+                    self.mag_packet.as_ref().unwrap().flux[0],
+                    self.mag_packet.as_ref().unwrap().flux[1],
+                    self.mag_packet.as_ref().unwrap().flux[2],
+                    self.mag_packet.as_ref().unwrap().temperature).unwrap();
+
             },
             Some(Err(e)) => {
-                defmt::trace!("Mag error: {:?}", e);
+                #[cfg(feature="nucleo")]
+                trace!("Mag error: {:?}", e);
+
+                #[cfg(feature = "default")]
+                write!(&mut writer, "Mag error: {:?}", e).unwrap();
+
                 self.mag_packet = None;
             },
-            None => {
+            None => { // <-- if we don't have a mag, we can set the packet to None, and then we don't even need extra functions for checking if the mag is present or not...
                 self.mag_packet = None;
+
+                #[cfg(feature = "default")]
+                write!(&mut writer, "Mag not present\n").unwrap();
             }
         }
+
+        #[cfg(feature = "default")]
+        writer.flush().unwrap();
     }
 }

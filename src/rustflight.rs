@@ -8,7 +8,13 @@ pub struct ROSFlight<B: Board> {
     loop_time_us: u32,
     /* TODO: Is `Box<>` the best way to do this? Ensures that we use the Board trait, but requires
     heap allocation */
-    board: B,
+    
+    #[cfg(feature = "nucleo")]
+    board: B, // <-- TODO remove public access to board when testing is done!!!
+    
+    #[cfg(feature = "default")]
+    pub board: B, // <-- TODO remove public access to board when testing is done!!!
+    
 }
 
 impl<B: Board> ROSFlight<B> {
@@ -30,36 +36,7 @@ impl<B: Board> ROSFlight<B> {
 
         // simulate sensor input and reading!!! <-- ultimately replace this loop with a sensors module!!!
         loop {
-
             sensors.run(&self.board);
-
-            // if self.board.baro_has_new_data() {
-            //     let mut pressure: f32 = 0.0;
-            //     let mut temperature: f32 = 0.0;
-            //     let baro_data = self.board.baro_read(&mut pressure, &mut temperature);
-
-            //     #[cfg(feature = "nucleo")]
-            //     defmt::trace!("Baro: {} C, ({}) kPa\n",
-            //         pressure,
-            //         temperature);
-
-            //     #[cfg(feature = "nucleo")]
-            //     defmt::trace!("Sin test: {}\n", micro_algebra::mathlib::sin(0.5));
-            // }
-
-            // if self.board.mag_has_new_data() {
-            //     let mut data = [0.0; 3];
-            //     let mut temperature: f32 = 0.0;
-            //     let mag_data = self.board.mag_read(&mut data, &mut temperature);
-
-            //     #[cfg(feature = "nucleo")]
-            //     defmt::trace!("Mag: ({},{},{}) uT, Temp: {} C\n",
-            //         data[0],
-            //         data[1],
-            //         data[2],
-            //         temperature,
-            //     );
-            // }
         }
     }
 }
