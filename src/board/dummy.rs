@@ -79,7 +79,7 @@ impl Board for DummyBoard {
     // }
 
     fn mag_read(&self) -> Option<Result<sensors::MagPacket, sensors::SensorError>> {
-        None 
+        Some(Err(sensors::SensorError::GenericSensorError("Dummy error")))
     }
     
     // fn baro_present(&self) -> bool {
@@ -95,7 +95,14 @@ impl Board for DummyBoard {
     // }
     
     fn baro_read(&self) -> Option<Result<sensors::BaroPacket, sensors::SensorError>> {
-        None
+        Some(Ok(sensors::BaroPacket {
+            header: sensors::RosflightPacketHeader {
+                timestamp: sensors::Instant::now(),
+                status: 0,
+            },
+            pressure: 15.0,
+            temperature: 22.0,
+        }))
     }
 
     fn diff_pressure_present(&self) -> bool {

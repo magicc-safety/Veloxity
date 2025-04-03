@@ -50,7 +50,7 @@ impl Duration {
 }
 
 #[cfg(feature = "default")]
-use {
+pub use {
     mock_instant::global::Instant, // <-- relies on "duration"
     log::info,
 };
@@ -358,15 +358,18 @@ impl Sensors {
             },
             Some(Err(e)) => {
                 #[cfg(feature="nucleo")]
-                trace!("Baro error: {:?}", e);
+                trace!("Baro error: {:?}\n", e);
 
                 #[cfg(feature = "default")]
-                write!(&mut writer, "Mag error: {:?}", e).unwrap();
+                write!(&mut writer, "Baro error: {:?}\n", e).unwrap();
 
                 self.baro_packet = None;
             },
             None => {
                 self.baro_packet = None;
+
+                #[cfg(feature = "default")]
+                write!(&mut writer, "Baro not present\n").unwrap();
             }
         }
 
@@ -391,10 +394,10 @@ impl Sensors {
             },
             Some(Err(e)) => {
                 #[cfg(feature="nucleo")]
-                trace!("Mag error: {:?}", e);
+                trace!("Mag error: {:?}\n", e);
 
                 #[cfg(feature = "default")]
-                write!(&mut writer, "Mag error: {:?}", e).unwrap();
+                write!(&mut writer, "Mag error: {:?}\n", e).unwrap();
 
                 self.mag_packet = None;
             },
