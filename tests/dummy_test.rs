@@ -2,6 +2,13 @@
 #![cfg_attr(not(feature = "use_std"), no_std)] // if the feature "use_std" is not enabled, definitely turn off the entire std environment using the compiler directive "no_std"
 
 
+// prior to running this test, make sure to open the port with
+// mkfifo /tmp/rustflight_rtt
+
+// if it's already opened, we don't need to do that...
+// the test won't pass until we do something with the info that's been sent through the pipe...
+// so you can run it, but then go to /tmp/rustflight_rtt and either "cat" it to the terminal or save it off before the test
+
 use rustflight_alpha::{board::dummy::DummyBoard, rustflight::ROSFlight, comm_manager, params, sensors};
 
 #[test]
