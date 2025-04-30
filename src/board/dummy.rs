@@ -105,16 +105,15 @@ impl Board for DummyBoard {
         }))
     }
 
-    fn diff_pressure_present(&self) -> bool {
-        false
-    }
-
-    fn diff_pressure_has_new_data(&self) -> bool {
-        false
-    }
-
-    fn diff_pressure_read(&self, diff_pressure: &mut f32, temperature: &mut f32) -> bool {
-        false
+    fn diff_pressure_read(&self) -> Option<Result<sensors::PitotPacket, sensors::SensorError>> {
+        Some(Ok(sensors::PitotPacket {
+            header: sensors::RosflightPacketHeader {
+                timestamp: sensors::Instant::now(),
+                status: 0,
+            },
+            pressure: 15.0,
+            temperature: 22.0,
+        }))
     }
 
     fn sonar_present(&self) -> bool {

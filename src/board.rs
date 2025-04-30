@@ -56,9 +56,10 @@ pub trait Board {
     fn baro_read(&self) -> Option<Result<sensors::BaroPacket, sensors::SensorError>>;
 
     // Pitot
-    fn diff_pressure_present(&self) -> bool;
-    fn diff_pressure_has_new_data(&self) -> bool;
-    fn diff_pressure_read(&self, diff_pressure: &mut f32, temperature: &mut f32) -> bool;
+    // fn diff_pressure_present(&self) -> bool;
+    // fn diff_pressure_has_new_data(&self) -> bool;
+    // fn diff_pressure_read(&self, diff_pressure: &mut f32, temperature: &mut f32) -> bool;
+    fn diff_pressure_read(&self) -> Option<Result<sensors::PitotPacket, sensors::SensorError>>;
 
     // Sonar
     fn sonar_present(&self) -> bool;

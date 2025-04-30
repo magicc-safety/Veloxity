@@ -233,13 +233,13 @@ impl Board for Nucleo {
     }
 
     // Pitot
-    fn diff_pressure_present(&self) -> bool {
-        false
-    }
-
-    fn diff_pressure_has_new_data(&self) -> bool {
-        false
-    }
+    // fn diff_pressure_present(&self) -> bool {
+    //     false
+    // }
+    //
+    // fn diff_pressure_has_new_data(&self) -> bool {
+    //     false
+    // }
 
     fn diff_pressure_read(&self, diff_pressure: &mut f32, temperature: &mut f32) -> bool {
         false
