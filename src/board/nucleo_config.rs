@@ -11,7 +11,7 @@ pub fn board_config() -> Config
     let mut config = Config::default();
     {
         use embassy_stm32::rcc::*;
-        config.rcc.hsi = Some(HSIPrescaler::DIV1); // (not used)
+        config.rcc.hsi = Some(HSIPrescaler::DIV1); // (64 mHz, not used)
 
         config.rcc.csi = true;
         // Select External 8MHz clock for Nucleo-H753ZI board
@@ -22,8 +22,10 @@ pub fn board_config() -> Config
         });
 
         config.rcc.pll1 = Some(Pll {
-            source: PllSource::HSE,   // 8MHz
-            prediv: PllPreDiv::DIV4,  // 8MHz OSC / 4 = 2 MHz
+            // note: PllSource::HSI <-- internal oscillator (8 MHz)
+            //       PllSource::HSE <-- external oscillator (8 MHz)
+            source: PllSource::HSI,   // 8MHz
+            prediv: PllPreDiv::DIV32,  // 8MHz OSC / 4 = 2 MHz
             mul: PllMul::MUL400,      // 800 MHz
             divp: Some(PllDiv::DIV2), // 400 MHz for System Clock
             divq: Some(PllDiv::DIV8), // 100 MHz for SDMMC
@@ -31,8 +33,8 @@ pub fn board_config() -> Config
         });
 
         config.rcc.pll2 = Some(Pll {
-            source: PllSource::HSE,    // 8MHz 
-            prediv: PllPreDiv::DIV4,   // 8MHz OSC / 4 = 2 MHz
+            source: PllSource::HSI,    // 8MHz 
+            prediv: PllPreDiv::DIV32,   // 8MHz OSC / 4 = 2 MHz
             mul: PllMul::MUL240,       // 480 MHz
             divp: Some(PllDiv::DIV30), // 16 MHz for SPI 1,2,3
             divq: Some(PllDiv::DIV30), // 16 MHz for SPI 4,5, and FDCAN
@@ -40,8 +42,8 @@ pub fn board_config() -> Config
         });
 
         config.rcc.pll3 = Some(Pll {
-            source: PllSource::HSE,    // 8MHz 
-            prediv: PllPreDiv::DIV4,   // 8MHz OSC / 4 = 2 MHz
+            source: PllSource::HSI,    // 8MHz 
+            prediv: PllPreDiv::DIV32,   // 8MHz OSC / 4 = 2 MHz
             mul: PllMul::MUL480,       // 960 MHz 
             divp: Some(PllDiv::DIV48), // 20 MHz (not used)
             divq: Some(PllDiv::DIV20), // 48 MHz for USB
@@ -60,7 +62,7 @@ pub fn board_config() -> Config
         config.rcc.apb4_pre = APBPrescaler::DIV2; // 100 MHz APB4 Peripheral Clocks
         // SYSTICK Clock Prescaler 
         config.rcc.timer_prescaler = TimerPrescaler::DefaultX2; // 400 MHz
-        // 48MHz Clock used by USB (and RNG)
+        // 48MHz Clock used by USB? maybe (and RNG maybe)
         // config.rcc.hsi48 = Some(Default::default()); // Used for RNG
         config.rcc.hsi48 = Some(Hsi48Config { sync_from_usb: true }); // For USB
         // Analog Voltage Detector level ??? (for startup?)        

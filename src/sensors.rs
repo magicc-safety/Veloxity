@@ -11,7 +11,7 @@ pub(crate) mod telem;
 
 // Create enum of rosflight return types
 #[cfg(feature = "nucleo")]
-use {
+pub use {
     embassy_time::{Instant, Duration},
     defmt::{trace, Format},
 };
