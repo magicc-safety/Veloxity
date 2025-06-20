@@ -44,3 +44,7 @@ Tests have been created so far for the nucleo board. These are inside the src/bi
 2. running "cargo r_nucleo_mavlink" will start the nucleo board, spin up the tasks for each sensor, and use the comm_manager in the highest level loop to process incoming serial stream data and match on mavlink messages.
 
 Debug statements throughout the code can be uncommented for debugging/visualization.
+
+
+## Mavlink Specifics
+The mavlink parser is not nucleo specific. Rather, any implementation of the comm_link_trait that wishes to use mavlink should take advantage of the mavlink parser. The mavlink parser takes in raw bytes (&[u8]) and will return a frame once it matches on the start bytes, collects the message, and checks against the crc. It then returns the frame. There is also a function for processing mavlink frames and returning mavlink messages. Together, those two functions allow any implementation of the comm_link_trait to receive mavlink messages from a byte stream. 
