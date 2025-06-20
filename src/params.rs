@@ -1,3 +1,39 @@
+// /**
+// ******************************************************************************
+// * File     : params.rs
+// * Date     : May 8, 2025
+// ******************************************************************************
+// *
+// * Copyright (c) 2023, AeroVironment, Inc.
+// * All rights reserved.
+// *
+// * Redistribution and use in source and binary forms, with or without
+// * modification, are permitted provided that the following conditions are met:
+// *
+// * 1.Redistributions of source code must retain the above copyright notice, this
+// * list of conditions and the following disclaimer.
+// *
+// * 2.Redistributions in binary form must reproduce the above copyright notice,
+// * this list of conditions and the following disclaimer in the documentation
+// * and/or other materials provided with the distribution.
+// *
+// * 3.Neither the name of the copyright holder nor the names of its
+// * contributors may be used to endorse or promote products derived from
+// * this software without specific prior written permission.
+// *
+// * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// *
+// ******************************************************************************
+// **/
 use super::board::Board;
 mod param_types;
 pub use param_types::*;
@@ -106,7 +142,6 @@ pub struct Params {
 }
 
 impl Params {
-
     //************************************************
     //***************** Getters **********************
     //************************************************
@@ -121,391 +156,391 @@ impl Params {
     pub fn get_system_id(&self) -> &ParamValue {
         return &self.system_id.value;
     }
-    
+
     pub fn get_max_command(&self) -> &ParamValue {
         return &self.max_command.value;
     }
-    
+
     pub fn get_pid_roll_rate_p(&self) -> &ParamValue {
         return &self.pid_roll_rate_p.value;
     }
-    
+
     pub fn get_pid_roll_rate_i(&self) -> &ParamValue {
         return &self.pid_roll_rate_i.value;
     }
-    
+
     pub fn get_pid_roll_rate_d(&self) -> &ParamValue {
         return &self.pid_roll_rate_d.value;
     }
-    
+
     pub fn get_pid_pitch_rate_p(&self) -> &ParamValue {
         return &self.pid_pitch_rate_p.value;
     }
-    
+
     pub fn get_pid_pitch_rate_i(&self) -> &ParamValue {
         return &self.pid_pitch_rate_i.value;
     }
-    
+
     pub fn get_pid_pitch_rate_d(&self) -> &ParamValue {
         return &self.pid_pitch_rate_d.value;
     }
-    
+
     pub fn get_pid_yaw_rate_p(&self) -> &ParamValue {
         return &self.pid_yaw_rate_p.value;
     }
-    
+
     pub fn get_pid_yaw_rate_i(&self) -> &ParamValue {
         return &self.pid_yaw_rate_i.value;
     }
-    
+
     pub fn get_pid_yaw_rate_d(&self) -> &ParamValue {
         return &self.pid_yaw_rate_d.value;
     }
-    
+
     pub fn get_pid_roll_angle_p(&self) -> &ParamValue {
         return &self.pid_roll_angle_p.value;
     }
-    
+
     pub fn get_pid_roll_angle_i(&self) -> &ParamValue {
         return &self.pid_roll_angle_i.value;
     }
-    
+
     pub fn get_pid_roll_angle_d(&self) -> &ParamValue {
         return &self.pid_roll_angle_d.value;
     }
-    
+
     pub fn get_pid_pitch_angle_p(&self) -> &ParamValue {
         return &self.pid_pitch_angle_p.value;
     }
-    
+
     pub fn get_pid_pitch_angle_i(&self) -> &ParamValue {
         return &self.pid_pitch_angle_i.value;
     }
-    
+
     pub fn get_pid_pitch_angle_d(&self) -> &ParamValue {
         return &self.pid_pitch_angle_d.value;
     }
-    
+
     pub fn get_x_eq_torque(&self) -> &ParamValue {
         return &self.x_eq_torque.value;
     }
-    
+
     pub fn get_y_eq_torque(&self) -> &ParamValue {
         return &self.y_eq_torque.value;
     }
-    
+
     pub fn get_z_eq_torque(&self) -> &ParamValue {
         return &self.z_eq_torque.value;
     }
-    
+
     pub fn get_pid_tau(&self) -> &ParamValue {
         return &self.pid_tau.value;
     }
-    
+
     pub fn get_motor_pwm_send_rate(&self) -> &ParamValue {
         return &self.motor_pwm_send_rate.value;
     }
-    
+
     pub fn get_motor_idle_throttle(&self) -> &ParamValue {
         return &self.motor_idle_throttle.value;
     }
-    
+
     pub fn get_failsafe_throttle(&self) -> &ParamValue {
         return &self.failsafe_throttle.value;
     }
-    
+
     pub fn get_spin_motors_when_armed(&self) -> &ParamValue {
         return &self.spin_motors_when_armed.value;
     }
-    
+
     pub fn get_init_time(&self) -> &ParamValue {
         return &self.init_time.value;
     }
-    
+
     pub fn get_filter_kp_acc(&self) -> &ParamValue {
         return &self.filter_kp_acc.value;
     }
-    
+
     pub fn get_filter_ki(&self) -> &ParamValue {
         return &self.filter_ki.value;
     }
-    
+
     pub fn get_filter_kp_ext(&self) -> &ParamValue {
         return &self.filter_kp_ext.value;
     }
-    
+
     pub fn get_filter_accel_margin(&self) -> &ParamValue {
         return &self.filter_accel_margin.value;
     }
-    
+
     pub fn get_filter_use_quad_int(&self) -> &ParamValue {
         return &self.filter_use_quad_int.value;
     }
-    
+
     pub fn get_filter_use_mat_exp(&self) -> &ParamValue {
         return &self.filter_use_mat_exp.value;
     }
-    
+
     pub fn get_filter_use_acc(&self) -> &ParamValue {
         return &self.filter_use_acc.value;
     }
-    
+
     pub fn get_calibrate_gyro_on_arm(&self) -> &ParamValue {
         return &self.calibrate_gyro_on_arm.value;
     }
-    
+
     pub fn get_gyro_xy_alpha(&self) -> &ParamValue {
         return &self.gyro_xy_alpha.value;
     }
-    
+
     pub fn get_gyro_z_alpha(&self) -> &ParamValue {
         return &self.gyro_z_alpha.value;
     }
-    
+
     pub fn get_acc_alpha(&self) -> &ParamValue {
         return &self.acc_alpha.value;
     }
-    
+
     pub fn get_gyro_x_bias(&self) -> &ParamValue {
         return &self.gyro_x_bias.value;
     }
-    
+
     pub fn get_gyro_y_bias(&self) -> &ParamValue {
         return &self.gyro_y_bias.value;
     }
-    
+
     pub fn get_gyro_z_bias(&self) -> &ParamValue {
         return &self.gyro_z_bias.value;
     }
-    
+
     pub fn get_acc_x_bias(&self) -> &ParamValue {
         return &self.acc_x_bias.value;
     }
-    
+
     pub fn get_acc_y_bias(&self) -> &ParamValue {
         return &self.acc_y_bias.value;
     }
-    
+
     pub fn get_acc_z_bias(&self) -> &ParamValue {
         return &self.acc_z_bias.value;
     }
-    
+
     pub fn get_acc_x_temp_comp(&self) -> &ParamValue {
         return &self.acc_x_temp_comp.value;
     }
-    
+
     pub fn get_acc_y_temp_comp(&self) -> &ParamValue {
         return &self.acc_y_temp_comp.value;
     }
-    
+
     pub fn get_acc_z_temp_comp(&self) -> &ParamValue {
         return &self.acc_z_temp_comp.value;
     }
-    
+
     pub fn get_mag_a11_comp(&self) -> &ParamValue {
         return &self.mag_a11_comp.value;
     }
-    
+
     pub fn get_mag_a12_comp(&self) -> &ParamValue {
         return &self.mag_a12_comp.value;
     }
-    
+
     pub fn get_mag_a13_comp(&self) -> &ParamValue {
         return &self.mag_a13_comp.value;
     }
-    
+
     pub fn get_mag_a21_comp(&self) -> &ParamValue {
         return &self.mag_a21_comp.value;
     }
-    
+
     pub fn get_mag_a22_comp(&self) -> &ParamValue {
         return &self.mag_a22_comp.value;
     }
-    
+
     pub fn get_mag_a23_comp(&self) -> &ParamValue {
         return &self.mag_a23_comp.value;
     }
-    
+
     pub fn get_mag_a31_comp(&self) -> &ParamValue {
         return &self.mag_a31_comp.value;
     }
-    
+
     pub fn get_mag_a32_comp(&self) -> &ParamValue {
         return &self.mag_a32_comp.value;
     }
-    
+
     pub fn get_mag_a33_comp(&self) -> &ParamValue {
         return &self.mag_a33_comp.value;
     }
-    
+
     pub fn get_mag_x_bias(&self) -> &ParamValue {
         return &self.mag_x_bias.value;
     }
-    
+
     pub fn get_mag_y_bias(&self) -> &ParamValue {
         return &self.mag_y_bias.value;
     }
-    
+
     pub fn get_mag_z_bias(&self) -> &ParamValue {
         return &self.mag_z_bias.value;
     }
-    
+
     pub fn get_baro_bias(&self) -> &ParamValue {
         return &self.baro_bias.value;
     }
-    
+
     pub fn get_ground_level(&self) -> &ParamValue {
         return &self.ground_level.value;
     }
-    
+
     pub fn get_diff_press_bias(&self) -> &ParamValue {
         return &self.diff_press_bias.value;
     }
-    
+
     pub fn get_rc_type(&self) -> &ParamValue {
         return &self.rc_type.value;
     }
-    
+
     pub fn get_rc_x_channel(&self) -> &ParamValue {
         return &self.rc_x_channel.value;
     }
-    
+
     pub fn get_rc_y_channel(&self) -> &ParamValue {
         return &self.rc_y_channel.value;
     }
-    
+
     pub fn get_rc_z_channel(&self) -> &ParamValue {
         return &self.rc_z_channel.value;
     }
-    
+
     pub fn get_rc_f_channel(&self) -> &ParamValue {
         return &self.rc_f_channel.value;
     }
-    
+
     pub fn get_rc_attitude_override_channel(&self) -> &ParamValue {
         return &self.rc_attitude_override_channel.value;
     }
-    
+
     pub fn get_rc_throttle_override_channel(&self) -> &ParamValue {
         return &self.rc_throttle_override_channel.value;
     }
-    
+
     pub fn get_rc_att_control_type_channel(&self) -> &ParamValue {
         return &self.rc_att_control_type_channel.value;
     }
-    
+
     pub fn get_rc_arm_channel(&self) -> &ParamValue {
         return &self.rc_arm_channel.value;
     }
-    
+
     pub fn get_rc_num_channels(&self) -> &ParamValue {
         return &self.rc_num_channels.value;
     }
-    
+
     pub fn get_rc_switch_5_direction(&self) -> &ParamValue {
         return &self.rc_switch_5_direction.value;
     }
-    
+
     pub fn get_rc_switch_6_direction(&self) -> &ParamValue {
         return &self.rc_switch_6_direction.value;
     }
-    
+
     pub fn get_rc_switch_7_direction(&self) -> &ParamValue {
         return &self.rc_switch_7_direction.value;
     }
-    
+
     pub fn get_rc_switch_8_direction(&self) -> &ParamValue {
         return &self.rc_switch_8_direction.value;
     }
-    
+
     pub fn get_rc_override_deviation(&self) -> &ParamValue {
         return &self.rc_override_deviation.value;
     }
-    
+
     pub fn get_override_lag_time(&self) -> &ParamValue {
         return &self.override_lag_time.value;
     }
-    
+
     pub fn get_rc_override_take_min_throttle(&self) -> &ParamValue {
         return &self.rc_override_take_min_throttle.value;
     }
-    
+
     pub fn get_rc_attitude_mode(&self) -> &ParamValue {
         return &self.rc_attitude_mode.value;
     }
-    
+
     pub fn get_rc_max_roll(&self) -> &ParamValue {
         return &self.rc_max_roll.value;
     }
-    
+
     pub fn get_rc_max_pitch(&self) -> &ParamValue {
         return &self.rc_max_pitch.value;
     }
-    
+
     pub fn get_rc_max_rollrate(&self) -> &ParamValue {
         return &self.rc_max_rollrate.value;
     }
-    
+
     pub fn get_rc_max_pitchrate(&self) -> &ParamValue {
         return &self.rc_max_pitchrate.value;
     }
-    
+
     pub fn get_rc_max_yawrate(&self) -> &ParamValue {
         return &self.rc_max_yawrate.value;
     }
-    
+
     pub fn get_mixer(&self) -> &ParamValue {
         return &self.mixer.value;
     }
-    
+
     pub fn get_fixed_wing(&self) -> &ParamValue {
         return &self.fixed_wing.value;
     }
-    
+
     pub fn get_elevator_reverse(&self) -> &ParamValue {
         return &self.elevator_reverse.value;
     }
-    
+
     pub fn get_aileron_reverse(&self) -> &ParamValue {
         return &self.aileron_reverse.value;
     }
-    
+
     pub fn get_rudder_reverse(&self) -> &ParamValue {
         return &self.rudder_reverse.value;
     }
-    
+
     pub fn get_fc_roll(&self) -> &ParamValue {
         return &self.fc_roll.value;
     }
-    
+
     pub fn get_fc_pitch(&self) -> &ParamValue {
         return &self.fc_pitch.value;
     }
-    
+
     pub fn get_fc_yaw(&self) -> &ParamValue {
         return &self.fc_yaw.value;
     }
-    
+
     pub fn get_arm_threshold(&self) -> &ParamValue {
         return &self.arm_threshold.value;
     }
-    
+
     pub fn get_offboard_timeout(&self) -> &ParamValue {
         return &self.offboard_timeout.value;
     }
-    
+
     pub fn get_battery_voltage_multiplier(&self) -> &ParamValue {
         return &self.battery_voltage_multiplier.value;
     }
-    
+
     pub fn get_battery_current_multiplier(&self) -> &ParamValue {
         return &self.battery_current_multiplier.value;
     }
-    
+
     pub fn get_battery_voltage_alpha(&self) -> &ParamValue {
         return &self.battery_voltage_alpha.value;
     }
-    
+
     pub fn get_battery_current_alpha(&self) -> &ParamValue {
         return &self.battery_current_alpha.value;
     }
@@ -544,372 +579,423 @@ impl Params {
     pub fn set_pid_pitch_rate_p<'a>(&mut self, input: <PidPitchRateP as Callback>::Args<'a>) {
         self.pid_pitch_rate_p.set(input);
     }
-    
+
     pub fn set_pid_pitch_rate_i<'a>(&mut self, input: <PidPitchRateI as Callback>::Args<'a>) {
         self.pid_pitch_rate_i.set(input);
     }
-    
+
     pub fn set_pid_pitch_rate_d<'a>(&mut self, input: <PidPitchRateD as Callback>::Args<'a>) {
         self.pid_pitch_rate_d.set(input);
     }
-    
+
     pub fn set_pid_yaw_rate_p<'a>(&mut self, input: <PidYawRateP as Callback>::Args<'a>) {
         self.pid_yaw_rate_p.set(input);
     }
-    
+
     pub fn set_pid_yaw_rate_i<'a>(&mut self, input: <PidYawRateI as Callback>::Args<'a>) {
         self.pid_yaw_rate_i.set(input);
     }
-    
+
     pub fn set_pid_yaw_rate_d<'a>(&mut self, input: <PidYawRateD as Callback>::Args<'a>) {
         self.pid_yaw_rate_d.set(input);
     }
-    
+
     pub fn set_pid_roll_angle_p<'a>(&mut self, input: <PidRollAngleP as Callback>::Args<'a>) {
         self.pid_roll_angle_p.set(input);
     }
-    
+
     pub fn set_pid_roll_angle_i<'a>(&mut self, input: <PidRollAngleI as Callback>::Args<'a>) {
         self.pid_roll_angle_i.set(input);
     }
-    
+
     pub fn set_pid_roll_angle_d<'a>(&mut self, input: <PidRollAngleD as Callback>::Args<'a>) {
         self.pid_roll_angle_d.set(input);
     }
-    
+
     pub fn set_pid_pitch_angle_p<'a>(&mut self, input: <PidPitchAngleP as Callback>::Args<'a>) {
         self.pid_pitch_angle_p.set(input);
     }
-    
+
     pub fn set_pid_pitch_angle_i<'a>(&mut self, input: <PidPitchAngleI as Callback>::Args<'a>) {
         self.pid_pitch_angle_i.set(input);
     }
-    
+
     pub fn set_pid_pitch_angle_d<'a>(&mut self, input: <PidPitchAngleD as Callback>::Args<'a>) {
         self.pid_pitch_angle_d.set(input);
     }
-    
+
     pub fn set_x_eq_torque<'a>(&mut self, input: <XEqTorque as Callback>::Args<'a>) {
         self.x_eq_torque.set(input);
     }
-    
+
     pub fn set_y_eq_torque<'a>(&mut self, input: <YEqTorque as Callback>::Args<'a>) {
         self.y_eq_torque.set(input);
     }
-    
+
     pub fn set_z_eq_torque<'a>(&mut self, input: <ZEqTorque as Callback>::Args<'a>) {
         self.z_eq_torque.set(input);
     }
-    
+
     pub fn set_pid_tau<'a>(&mut self, input: <PidTau as Callback>::Args<'a>) {
         self.pid_tau.set(input);
     }
-    
+
     pub fn set_motor_pwm_send_rate<'a>(&mut self, input: <MotorPwmSendRate as Callback>::Args<'a>) {
         self.motor_pwm_send_rate.set(input);
     }
-    
-    pub fn set_motor_idle_throttle<'a>(&mut self, input: <MotorIdleThrottle as Callback>::Args<'a>) {
+
+    pub fn set_motor_idle_throttle<'a>(
+        &mut self,
+        input: <MotorIdleThrottle as Callback>::Args<'a>,
+    ) {
         self.motor_idle_throttle.set(input);
     }
-    
+
     pub fn set_failsafe_throttle<'a>(&mut self, input: <FailsafeThrottle as Callback>::Args<'a>) {
         self.failsafe_throttle.set(input);
     }
-    
-    pub fn set_spin_motors_when_armed<'a>(&mut self, input: <SpinMotorsWhenArmed as Callback>::Args<'a>) {
+
+    pub fn set_spin_motors_when_armed<'a>(
+        &mut self,
+        input: <SpinMotorsWhenArmed as Callback>::Args<'a>,
+    ) {
         self.spin_motors_when_armed.set(input);
     }
-    
+
     pub fn set_init_time<'a>(&mut self, input: <InitTime as Callback>::Args<'a>) {
         self.init_time.set(input);
     }
-    
+
     pub fn set_filter_kp_acc<'a>(&mut self, input: <FilterKpAcc as Callback>::Args<'a>) {
         self.filter_kp_acc.set(input);
     }
-    
+
     pub fn set_filter_ki<'a>(&mut self, input: <FilterKi as Callback>::Args<'a>) {
         self.filter_ki.set(input);
     }
-    
+
     pub fn set_filter_kp_ext<'a>(&mut self, input: <FilterKpExt as Callback>::Args<'a>) {
         self.filter_kp_ext.set(input);
     }
-    
-    pub fn set_filter_accel_margin<'a>(&mut self, input: <FilterAccelMargin as Callback>::Args<'a>) {
+
+    pub fn set_filter_accel_margin<'a>(
+        &mut self,
+        input: <FilterAccelMargin as Callback>::Args<'a>,
+    ) {
         self.filter_accel_margin.set(input);
     }
-    
+
     pub fn set_filter_use_quad_int<'a>(&mut self, input: <FilterUseQuadInt as Callback>::Args<'a>) {
         self.filter_use_quad_int.set(input);
     }
-    
+
     pub fn set_filter_use_mat_exp<'a>(&mut self, input: <FilterUseMatExp as Callback>::Args<'a>) {
         self.filter_use_mat_exp.set(input);
     }
-    
+
     pub fn set_filter_use_acc<'a>(&mut self, input: <FilterUseAcc as Callback>::Args<'a>) {
         self.filter_use_acc.set(input);
     }
-    
-    pub fn set_calibrate_gyro_on_arm<'a>(&mut self, input: <CalibrateGyroOnArm as Callback>::Args<'a>) {
+
+    pub fn set_calibrate_gyro_on_arm<'a>(
+        &mut self,
+        input: <CalibrateGyroOnArm as Callback>::Args<'a>,
+    ) {
         self.calibrate_gyro_on_arm.set(input);
     }
-    
+
     pub fn set_gyro_xy_alpha<'a>(&mut self, input: <GyroXyAlpha as Callback>::Args<'a>) {
         self.gyro_xy_alpha.set(input);
     }
-    
+
     pub fn set_gyro_z_alpha<'a>(&mut self, input: <GyroZAlpha as Callback>::Args<'a>) {
         self.gyro_z_alpha.set(input);
     }
-    
+
     pub fn set_acc_alpha<'a>(&mut self, input: <AccAlpha as Callback>::Args<'a>) {
         self.acc_alpha.set(input);
     }
-    
+
     pub fn set_gyro_x_bias<'a>(&mut self, input: <GyroXBias as Callback>::Args<'a>) {
         self.gyro_x_bias.set(input);
     }
-    
+
     pub fn set_gyro_y_bias<'a>(&mut self, input: <GyroYBias as Callback>::Args<'a>) {
         self.gyro_y_bias.set(input);
     }
-    
+
     pub fn set_gyro_z_bias<'a>(&mut self, input: <GyroZBias as Callback>::Args<'a>) {
         self.gyro_z_bias.set(input);
     }
-    
+
     pub fn set_acc_x_bias<'a>(&mut self, input: <AccXBias as Callback>::Args<'a>) {
         self.acc_x_bias.set(input);
     }
-    
+
     pub fn set_acc_y_bias<'a>(&mut self, input: <AccYBias as Callback>::Args<'a>) {
         self.acc_y_bias.set(input);
     }
-    
+
     pub fn set_acc_z_bias<'a>(&mut self, input: <AccZBias as Callback>::Args<'a>) {
         self.acc_z_bias.set(input);
     }
-    
+
     pub fn set_acc_x_temp_comp<'a>(&mut self, input: <AccXTempComp as Callback>::Args<'a>) {
         self.acc_x_temp_comp.set(input);
     }
-    
+
     pub fn set_acc_y_temp_comp<'a>(&mut self, input: <AccYTempComp as Callback>::Args<'a>) {
         self.acc_y_temp_comp.set(input);
     }
-    
+
     pub fn set_acc_z_temp_comp<'a>(&mut self, input: <AccZTempComp as Callback>::Args<'a>) {
         self.acc_z_temp_comp.set(input);
     }
-    
+
     pub fn set_mag_a11_comp<'a>(&mut self, input: <MagA11Comp as Callback>::Args<'a>) {
         self.mag_a11_comp.set(input);
     }
-    
+
     pub fn set_mag_a12_comp<'a>(&mut self, input: <MagA12Comp as Callback>::Args<'a>) {
         self.mag_a12_comp.set(input);
     }
-    
+
     pub fn set_mag_a13_comp<'a>(&mut self, input: <MagA13Comp as Callback>::Args<'a>) {
         self.mag_a13_comp.set(input);
     }
-    
+
     pub fn set_mag_a21_comp<'a>(&mut self, input: <MagA21Comp as Callback>::Args<'a>) {
         self.mag_a21_comp.set(input);
     }
-    
+
     pub fn set_mag_a22_comp<'a>(&mut self, input: <MagA22Comp as Callback>::Args<'a>) {
         self.mag_a22_comp.set(input);
     }
-    
+
     pub fn set_mag_a23_comp<'a>(&mut self, input: <MagA23Comp as Callback>::Args<'a>) {
         self.mag_a23_comp.set(input);
     }
-    
+
     pub fn set_mag_a31_comp<'a>(&mut self, input: <MagA31Comp as Callback>::Args<'a>) {
         self.mag_a31_comp.set(input);
     }
-    
+
     pub fn set_mag_a32_comp<'a>(&mut self, input: <MagA32Comp as Callback>::Args<'a>) {
         self.mag_a32_comp.set(input);
     }
-    
+
     pub fn set_mag_a33_comp<'a>(&mut self, input: <MagA33Comp as Callback>::Args<'a>) {
         self.mag_a33_comp.set(input);
     }
-    
+
     pub fn set_mag_x_bias<'a>(&mut self, input: <MagXBias as Callback>::Args<'a>) {
         self.mag_x_bias.set(input);
     }
-    
+
     pub fn set_mag_y_bias<'a>(&mut self, input: <MagYBias as Callback>::Args<'a>) {
         self.mag_y_bias.set(input);
     }
-    
+
     pub fn set_mag_z_bias<'a>(&mut self, input: <MagZBias as Callback>::Args<'a>) {
         self.mag_z_bias.set(input);
     }
-    
+
     pub fn set_baro_bias<'a>(&mut self, input: <BaroBias as Callback>::Args<'a>) {
         self.baro_bias.set(input);
     }
-    
+
     pub fn set_ground_level<'a>(&mut self, input: <GroundLevel as Callback>::Args<'a>) {
         self.ground_level.set(input);
     }
-    
+
     pub fn set_diff_press_bias<'a>(&mut self, input: <DiffPressBias as Callback>::Args<'a>) {
         self.diff_press_bias.set(input);
     }
-    
+
     pub fn set_rc_type<'a>(&mut self, input: <RcType as Callback>::Args<'a>) {
         self.rc_type.set(input);
     }
-    
+
     pub fn set_rc_x_channel<'a>(&mut self, input: <RcXChannel as Callback>::Args<'a>) {
         self.rc_x_channel.set(input);
     }
-    
+
     pub fn set_rc_y_channel<'a>(&mut self, input: <RcYChannel as Callback>::Args<'a>) {
         self.rc_y_channel.set(input);
     }
-    
+
     pub fn set_rc_z_channel<'a>(&mut self, input: <RcZChannel as Callback>::Args<'a>) {
         self.rc_z_channel.set(input);
     }
-    
+
     pub fn set_rc_f_channel<'a>(&mut self, input: <RcFChannel as Callback>::Args<'a>) {
         self.rc_f_channel.set(input);
     }
-    
-    pub fn set_rc_attitude_override_channel<'a>(&mut self, input: <RcAttitudeOverrideChannel as Callback>::Args<'a>) {
+
+    pub fn set_rc_attitude_override_channel<'a>(
+        &mut self,
+        input: <RcAttitudeOverrideChannel as Callback>::Args<'a>,
+    ) {
         self.rc_attitude_override_channel.set(input);
     }
-    
-    pub fn set_rc_throttle_override_channel<'a>(&mut self, input: <RcThrottleOverrideChannel as Callback>::Args<'a>) {
+
+    pub fn set_rc_throttle_override_channel<'a>(
+        &mut self,
+        input: <RcThrottleOverrideChannel as Callback>::Args<'a>,
+    ) {
         self.rc_throttle_override_channel.set(input);
     }
-    
-    pub fn set_rc_att_control_type_channel<'a>(&mut self, input: <RcAttControlTypeChannel as Callback>::Args<'a>) {
+
+    pub fn set_rc_att_control_type_channel<'a>(
+        &mut self,
+        input: <RcAttControlTypeChannel as Callback>::Args<'a>,
+    ) {
         self.rc_att_control_type_channel.set(input);
     }
-    
+
     pub fn set_rc_arm_channel<'a>(&mut self, input: <RcArmChannel as Callback>::Args<'a>) {
         self.rc_arm_channel.set(input);
     }
-    
+
     pub fn set_rc_num_channels<'a>(&mut self, input: <RcNumChannels as Callback>::Args<'a>) {
         self.rc_num_channels.set(input);
     }
-    
-    pub fn set_rc_switch_5_direction<'a>(&mut self, input: <RcSwitch5Direction as Callback>::Args<'a>) {
+
+    pub fn set_rc_switch_5_direction<'a>(
+        &mut self,
+        input: <RcSwitch5Direction as Callback>::Args<'a>,
+    ) {
         self.rc_switch_5_direction.set(input);
     }
-    
-    pub fn set_rc_switch_6_direction<'a>(&mut self, input: <RcSwitch6Direction as Callback>::Args<'a>) {
+
+    pub fn set_rc_switch_6_direction<'a>(
+        &mut self,
+        input: <RcSwitch6Direction as Callback>::Args<'a>,
+    ) {
         self.rc_switch_6_direction.set(input);
     }
-    
-    pub fn set_rc_switch_7_direction<'a>(&mut self, input: <RcSwitch7Direction as Callback>::Args<'a>) {
+
+    pub fn set_rc_switch_7_direction<'a>(
+        &mut self,
+        input: <RcSwitch7Direction as Callback>::Args<'a>,
+    ) {
         self.rc_switch_7_direction.set(input);
     }
-    
-    pub fn set_rc_switch_8_direction<'a>(&mut self, input: <RcSwitch8Direction as Callback>::Args<'a>) {
+
+    pub fn set_rc_switch_8_direction<'a>(
+        &mut self,
+        input: <RcSwitch8Direction as Callback>::Args<'a>,
+    ) {
         self.rc_switch_8_direction.set(input);
     }
-    
-    pub fn set_rc_override_deviation<'a>(&mut self, input: <RcOverrideDeviation as Callback>::Args<'a>) {
+
+    pub fn set_rc_override_deviation<'a>(
+        &mut self,
+        input: <RcOverrideDeviation as Callback>::Args<'a>,
+    ) {
         self.rc_override_deviation.set(input);
     }
-    
+
     pub fn set_override_lag_time<'a>(&mut self, input: <OverrideLagTime as Callback>::Args<'a>) {
         self.override_lag_time.set(input);
     }
-    
-    pub fn set_rc_override_take_min_throttle<'a>(&mut self, input: <RcOverrideTakeMinThrottle as Callback>::Args<'a>) {
+
+    pub fn set_rc_override_take_min_throttle<'a>(
+        &mut self,
+        input: <RcOverrideTakeMinThrottle as Callback>::Args<'a>,
+    ) {
         self.rc_override_take_min_throttle.set(input);
     }
-    
+
     pub fn set_rc_attitude_mode<'a>(&mut self, input: <RcAttitudeMode as Callback>::Args<'a>) {
         self.rc_attitude_mode.set(input);
     }
-    
+
     pub fn set_rc_max_roll<'a>(&mut self, input: <RcMaxRoll as Callback>::Args<'a>) {
         self.rc_max_roll.set(input);
     }
-    
+
     pub fn set_rc_max_pitch<'a>(&mut self, input: <RcMaxPitch as Callback>::Args<'a>) {
         self.rc_max_pitch.set(input);
     }
-    
+
     pub fn set_rc_max_rollrate<'a>(&mut self, input: <RcMaxRollRate as Callback>::Args<'a>) {
         self.rc_max_rollrate.set(input);
     }
-    
+
     pub fn set_rc_max_pitchrate<'a>(&mut self, input: <RcMaxPitchRate as Callback>::Args<'a>) {
         self.rc_max_pitchrate.set(input);
     }
-    
+
     pub fn set_rc_max_yawrate<'a>(&mut self, input: <RcMaxYawRate as Callback>::Args<'a>) {
         self.rc_max_yawrate.set(input);
     }
-    
+
     pub fn set_mixer<'a>(&mut self, input: <Mixer as Callback>::Args<'a>) {
         self.mixer.set(input);
     }
-    
+
     pub fn set_fixed_wing<'a>(&mut self, input: <FixedWing as Callback>::Args<'a>) {
         self.fixed_wing.set(input);
     }
-    
+
     pub fn set_elevator_reverse<'a>(&mut self, input: <ElevatorReverse as Callback>::Args<'a>) {
         self.elevator_reverse.set(input);
     }
-    
+
     pub fn set_aileron_reverse<'a>(&mut self, input: <AileronReverse as Callback>::Args<'a>) {
         self.aileron_reverse.set(input);
     }
-    
+
     pub fn set_rudder_reverse<'a>(&mut self, input: <RudderReverse as Callback>::Args<'a>) {
         self.rudder_reverse.set(input);
     }
-    
+
     pub fn set_fc_roll<'a>(&mut self, input: <FcRoll as Callback>::Args<'a>) {
         self.fc_roll.set(input);
     }
-    
+
     pub fn set_fc_pitch<'a>(&mut self, input: <FcPitch as Callback>::Args<'a>) {
         self.fc_pitch.set(input);
     }
-    
+
     pub fn set_fc_yaw<'a>(&mut self, input: <FcYaw as Callback>::Args<'a>) {
         self.fc_yaw.set(input);
     }
-    
+
     pub fn set_arm_threshold<'a>(&mut self, input: <ArmThreshold as Callback>::Args<'a>) {
         self.arm_threshold.set(input);
     }
-    
+
     pub fn set_offboard_timeout<'a>(&mut self, input: <OffboardTimeout as Callback>::Args<'a>) {
         self.offboard_timeout.set(input);
     }
-    
-    pub fn set_battery_voltage_multiplier<'a>(&mut self, input: <BatteryVoltageMultiplier as Callback>::Args<'a>) {
+
+    pub fn set_battery_voltage_multiplier<'a>(
+        &mut self,
+        input: <BatteryVoltageMultiplier as Callback>::Args<'a>,
+    ) {
         self.battery_voltage_multiplier.set(input);
     }
-    
-    pub fn set_battery_current_multiplier<'a>(&mut self, input: <BatteryCurrentMultiplier as Callback>::Args<'a>) {
+
+    pub fn set_battery_current_multiplier<'a>(
+        &mut self,
+        input: <BatteryCurrentMultiplier as Callback>::Args<'a>,
+    ) {
         self.battery_current_multiplier.set(input);
     }
-    
-    pub fn set_battery_voltage_alpha<'a>(&mut self, input: <BatteryVoltageAlpha as Callback>::Args<'a>) {
+
+    pub fn set_battery_voltage_alpha<'a>(
+        &mut self,
+        input: <BatteryVoltageAlpha as Callback>::Args<'a>,
+    ) {
         self.battery_voltage_alpha.set(input);
     }
-    
-    pub fn set_battery_current_alpha<'a>(&mut self, input: <BatteryCurrentAlpha as Callback>::Args<'a>) {
+
+    pub fn set_battery_current_alpha<'a>(
+        &mut self,
+        input: <BatteryCurrentAlpha as Callback>::Args<'a>,
+    ) {
         self.battery_current_alpha.set(input);
     }
 
@@ -1220,7 +1306,10 @@ impl Params {
 
     pub fn set_defaults(&mut self) {
         // Hardware Configuration
-        self.set_baud_rate((&mut TestStruct { val: 10, val2: 20 }, ParamValue::Int(91600)));
+        self.set_baud_rate((
+            &mut TestStruct { val: 10, val2: 20 },
+            ParamValue::Int(91600),
+        ));
         self.set_serial_device(ParamValue::Int(0));
 
         // MAVLink Configuration
@@ -1228,7 +1317,6 @@ impl Params {
 
         // Controller Configuration
         self.set_max_command(ParamValue::Float(0.100));
-
 
         // PID Rate Parameters
         self.set_pid_roll_rate_p(ParamValue::Float(0.070));
@@ -1240,8 +1328,6 @@ impl Params {
         self.set_pid_yaw_rate_p(ParamValue::Float(0.250));
         self.set_pid_yaw_rate_i(ParamValue::Float(0.000));
         self.set_pid_yaw_rate_d(ParamValue::Float(0.000));
-
-
 
         // PID Angle Parameters
         self.set_pid_roll_angle_p(ParamValue::Float(0.150));
@@ -1263,7 +1349,6 @@ impl Params {
         self.set_failsafe_throttle(ParamValue::Float(-1.00));
         self.set_spin_motors_when_armed(ParamValue::Bool(true));
 
-
         // Estimator Configuration
         self.set_init_time(ParamValue::Int(3000));
         self.set_filter_kp_acc(ParamValue::Float(0.500));
@@ -1275,12 +1360,10 @@ impl Params {
         self.set_filter_use_acc(ParamValue::Bool(true));
         self.set_calibrate_gyro_on_arm(ParamValue::Bool(false));
 
-
         // Gyro and Acc Alpha
         self.set_gyro_xy_alpha(ParamValue::Float(0.300));
         self.set_gyro_z_alpha(ParamValue::Float(0.300));
         self.set_acc_alpha(ParamValue::Float(0.500));
-
 
         // Bias Parameters
         self.set_gyro_x_bias(ParamValue::Float(0.000));
@@ -1290,12 +1373,10 @@ impl Params {
         self.set_acc_y_bias(ParamValue::Float(0.000));
         self.set_acc_z_bias(ParamValue::Float(0.000));
 
-
         // Temperature Compensation
         self.set_acc_x_temp_comp(ParamValue::Float(0.000));
         self.set_acc_y_temp_comp(ParamValue::Float(0.000));
         self.set_acc_z_temp_comp(ParamValue::Float(0.000));
-
 
         // Magnetometer Compensation
         self.set_mag_a11_comp(ParamValue::Float(1.000));
@@ -1308,18 +1389,15 @@ impl Params {
         self.set_mag_a32_comp(ParamValue::Float(0.000));
         self.set_mag_a33_comp(ParamValue::Float(1.000));
 
-
         // Magnetometer Bias
         self.set_mag_x_bias(ParamValue::Float(0.000));
         self.set_mag_y_bias(ParamValue::Float(0.000));
         self.set_mag_z_bias(ParamValue::Float(0.000));
 
-
         // Barometer and Pressure
         self.set_baro_bias(ParamValue::Float(0.000));
         self.set_ground_level(ParamValue::Float(1387.0));
         self.set_diff_press_bias(ParamValue::Float(0.000));
-      
 
         // RC Configuration
         self.set_rc_type(ParamValue::Int(0));
@@ -1333,19 +1411,16 @@ impl Params {
         self.set_rc_arm_channel(ParamValue::Int(-1));
         self.set_rc_num_channels(ParamValue::Int(6));
 
-
         // RC Switch Directions
         self.set_rc_switch_5_direction(ParamValue::Int(1));
         self.set_rc_switch_6_direction(ParamValue::Int(1));
         self.set_rc_switch_7_direction(ParamValue::Int(1));
         self.set_rc_switch_8_direction(ParamValue::Int(1));
 
-
         // RC Override Parameters
         self.set_rc_override_deviation(ParamValue::Float(0.100));
         self.set_override_lag_time(ParamValue::Int(1000));
         self.set_rc_override_take_min_throttle(ParamValue::Bool(true));
-
 
         // RC Attitude Parameters
         self.set_rc_attitude_mode(ParamValue::Int(1));
@@ -1355,7 +1430,6 @@ impl Params {
         self.set_rc_max_pitchrate(ParamValue::Float(3.14159));
         self.set_rc_max_yawrate(ParamValue::Float(1.507));
 
-
         // Frame Configuration
         self.set_mixer(ParamValue::Int(0));
         self.set_fixed_wing(ParamValue::Bool(false));
@@ -1363,12 +1437,10 @@ impl Params {
         self.set_aileron_reverse(ParamValue::Bool(false));
         self.set_rudder_reverse(ParamValue::Bool(false));
 
-
         // Frame Compensation
         self.set_fc_roll(ParamValue::Float(0.000));
         self.set_fc_pitch(ParamValue::Float(0.000));
         self.set_fc_yaw(ParamValue::Float(0.000));
-
 
         // Arming Setup
         self.set_arm_threshold(ParamValue::Float(0.150));
@@ -1376,13 +1448,11 @@ impl Params {
         // Offboard Control
         self.set_offboard_timeout(ParamValue::Int(100));
 
-
         // Battery Monitor
         self.set_battery_voltage_multiplier(ParamValue::Float(0.000));
         self.set_battery_current_multiplier(ParamValue::Float(0.000));
         self.set_battery_voltage_alpha(ParamValue::Float(0.995));
         self.set_battery_current_alpha(ParamValue::Float(0.995));
-
     }
 
     pub fn get_param(&self, param_name: &str) -> Option<&ParamValue> {
@@ -1497,17 +1567,17 @@ impl Params {
     }
 
     pub fn write(&mut self, board: &mut dyn Board) -> bool {
-        if !board.memory_write(self) {
-            return false;
-        }
+        // if !board.memory_write(self) {
+        //     return false;
+        // }
 
         true
     }
 
     pub fn read(&mut self, board: &dyn Board) -> bool {
-        if !board.memory_read(self) {
-            return false;
-        }
+        // if !board.memory_read(self, p: &Params) {
+        //     return false;
+        // }
 
         true
     }

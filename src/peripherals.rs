@@ -1,6 +1,6 @@
 // /**
 // ******************************************************************************
-// * File     : dummy.rs
+// * File     : peripherals.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,70 +34,13 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
-use crate::errors;
-use crate::packets;
-use crate::params::Params;
-use crate::sensors;
-
-pub struct DummyBoard;
-
-impl Board for DummyBoard {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        None
-    }
-
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        None
-    }
-
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        None
-    }
-
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        None
-    }
-
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        None
-    }
-
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        None
-    }
-
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
-    }
-
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
-        None
-    }
-
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
-        //#[cfg(feature = "default")]
-        //use core::fmt::Write;
-        //#[cfg(feature = "default")]
-        //let mut writer = sensors::host_rtt::RttWriter::new();
-
-        //#[cfg(feature = "default")]
-        //write!(&mut writer, "Wrote Telemetry!!!!\n\n").unwrap();
-
-        //#[cfg(feature = "default")]
-        //writer.flush().unwrap();
-
-        None
-    }
-}
+pub(crate) mod bmi08x;
+pub(crate) mod dlhrl20g;
+pub(crate) mod dps310;
+pub(crate) mod iis2mdc;
+pub(crate) mod pps;
+pub(crate) mod pwm;
+pub(crate) mod sbus;
+pub(crate) mod sd_card;
+pub(crate) mod telem;
+pub(crate) mod ublox;

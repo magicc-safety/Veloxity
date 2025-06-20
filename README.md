@@ -31,3 +31,11 @@ This project is licensed under the [NO IDEA](LICENSE).
 ## Acknowledgments
 
 This project is a port of [ROSFlight](https://github.com/rosflight/rosflight), originally written in C++.
+
+## How to Run The Project:
+ - cargo test --test [name of test if specific] --features [feature] / ["feature1 feature2"]
+ - cargo bn
+ - cargo rn
+ - cat /tmp/rustflight_rtt <-- requires you to set up a fifo rtt in /tmp
+ - screen /dev/cu.usbserial-FTD3PVZT 921600
+ - cargo rtty | grep -E "Transmission|Accel|..."

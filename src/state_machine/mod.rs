@@ -1,5 +1,41 @@
 #![allow(non_camel_case_types)]
 
+// /**
+// ******************************************************************************
+// * File     : mod.rs
+// * Date     : May 8, 2025
+// ******************************************************************************
+// *
+// * Copyright (c) 2023, AeroVironment, Inc.
+// * All rights reserved.
+// *
+// * Redistribution and use in source and binary forms, with or without
+// * modification, are permitted provided that the following conditions are met:
+// *
+// * 1.Redistributions of source code must retain the above copyright notice, this
+// * list of conditions and the following disclaimer.
+// *
+// * 2.Redistributions in binary form must reproduce the above copyright notice,
+// * this list of conditions and the following disclaimer in the documentation
+// * and/or other materials provided with the distribution.
+// *
+// * 3.Neither the name of the copyright holder nor the names of its
+// * contributors may be used to endorse or promote products derived from
+// * this software without specific prior written permission.
+// *
+// * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// *
+// ******************************************************************************
+// **/
 // Submodules
 #[cfg(test)]
 mod tests;
@@ -106,68 +142,94 @@ impl State<Init> {
         All other states must be created from previous states. They
         do not have direct constructors.
          */
-        StateEnum::INIT(State { _state: PhantomData })
+        StateEnum::INIT(State {
+            _state: PhantomData,
+        })
     }
 
     fn initialize(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State { _state: PhantomData })
+        StateEnum::PREFLIGHT(State {
+            _state: PhantomData,
+        })
     }
 }
 
 impl State<Preflight> {
     fn request_arm(self) -> StateEnum {
-        StateEnum::ARMED(State { _state: PhantomData })
+        StateEnum::ARMED(State {
+            _state: PhantomData,
+        })
     }
 
     fn request_arm_and_calibrate(self) -> StateEnum {
-        StateEnum::CALIBRATING(State { _state: PhantomData })
+        StateEnum::CALIBRATING(State {
+            _state: PhantomData,
+        })
     }
 }
 
 impl State<Calibrating> {
     fn calibration_complete(self) -> StateEnum {
-        StateEnum::ARMED(State { _state: PhantomData })
+        StateEnum::ARMED(State {
+            _state: PhantomData,
+        })
     }
 
     fn calibration_failed(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State { _state: PhantomData })
+        StateEnum::PREFLIGHT(State {
+            _state: PhantomData,
+        })
     }
 }
 
 impl State<Armed> {
     fn request_disarm(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State { _state: PhantomData })
+        StateEnum::PREFLIGHT(State {
+            _state: PhantomData,
+        })
     }
 
     fn request_disarm_and_error(self) -> StateEnum {
-        StateEnum::ERROR_PRESENT(State { _state: PhantomData })
+        StateEnum::ERROR_PRESENT(State {
+            _state: PhantomData,
+        })
     }
 
     fn rc_lost(self) -> StateEnum {
-        StateEnum::FAILSAFE(State { _state: PhantomData })
+        StateEnum::FAILSAFE(State {
+            _state: PhantomData,
+        })
     }
 }
 
 impl State<Failsafe> {
     fn rc_found(self) -> StateEnum {
-        StateEnum::ARMED(State { _state: PhantomData })
+        StateEnum::ARMED(State {
+            _state: PhantomData,
+        })
     }
 
     fn request_disarm(self) -> StateEnum {
-        StateEnum::ERROR_PRESENT(State { _state: PhantomData })
+        StateEnum::ERROR_PRESENT(State {
+            _state: PhantomData,
+        })
     }
 }
 
 impl State<ErrorPresent> {
     fn clear_errors(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State { _state: PhantomData })
+        StateEnum::PREFLIGHT(State {
+            _state: PhantomData,
+        })
     }
 }
 
 impl<State_Value> State<State_Value> {
     fn error(self) -> StateEnum {
         // TODO: Pass in an error bitflag?
-        StateEnum::ERROR_PRESENT(State { _state: PhantomData })
+        StateEnum::ERROR_PRESENT(State {
+            _state: PhantomData,
+        })
     }
 }
 
@@ -209,11 +271,19 @@ impl StateMachine {
             Ok(_event) => match (self.state, _event) {
                 (StateEnum::INIT(state), Event::INITIALIZED) => state.initialize(),
                 (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM) => state.request_arm(),
-                (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM_AND_CALIBRATE) => state.request_arm_and_calibrate(),
-                (StateEnum::CALIBRATING(state), Event::CALIBRATION_COMPLETE) => state.calibration_complete(),
-                (StateEnum::CALIBRATING(state), Event::CALIBRATION_FAILED) => state.calibration_failed(),
+                (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM_AND_CALIBRATE) => {
+                    state.request_arm_and_calibrate()
+                }
+                (StateEnum::CALIBRATING(state), Event::CALIBRATION_COMPLETE) => {
+                    state.calibration_complete()
+                }
+                (StateEnum::CALIBRATING(state), Event::CALIBRATION_FAILED) => {
+                    state.calibration_failed()
+                }
                 (StateEnum::ARMED(state), Event::REQUEST_DISARM) => state.request_disarm(),
-                (StateEnum::ARMED(state), Event::REQUEST_DISARM_AND_ERROR) => state.request_disarm_and_error(),
+                (StateEnum::ARMED(state), Event::REQUEST_DISARM_AND_ERROR) => {
+                    state.request_disarm_and_error()
+                }
                 (StateEnum::ARMED(state), Event::RC_LOST) => state.rc_lost(),
                 (StateEnum::FAILSAFE(state), Event::RC_FOUND) => state.rc_found(),
                 (StateEnum::FAILSAFE(state), Event::REQUEST_DISARM) => state.request_disarm(),

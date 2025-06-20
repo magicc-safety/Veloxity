@@ -1,6 +1,6 @@
 // /**
 // ******************************************************************************
-// * File     : dummy.rs
+// * File     : rustflight_heartbeat.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,70 +34,58 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
-use crate::errors;
-use crate::packets;
-use crate::params::Params;
-use crate::sensors;
+// THIS CODE HAS NOT BEEN MADE SAFE YET
+//use crate::mavlink::dialects::rosflight::{self as rosflight_dialect};
+use crate::{
+    board::Board, comm_manager, comm_manager::comm_link_trait::CommInterface, errors, packets,
+    params, sensors,
+};
 
-pub struct DummyBoard;
+pub struct ROSFlight<B, T>
+where
+    B: Board,
+    T: CommInterface<B>,
+{
+    loop_time_us: u32,
+    pub board: B, // <-- made public on purpose: so that the tests we write aren't subject to the loop. we need to pull both board and comm_link out...
+    pub comm_link: Option<T>, // <-- see above
+}
 
-impl Board for DummyBoard {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        None
+impl<B, T> ROSFlight<B, T>
+where
+    B: Board,
+    T: CommInterface<B>,
+{
+    pub fn init(_loop_time_us: u32, _board: B, _comm_link: T) -> Self {
+        Self {
+            loop_time_us: _loop_time_us,
+            board: _board,
+            comm_link: Some(_comm_link),
+        }
     }
 
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        None
-    }
+    pub fn run(&mut self) -> bool {
+        let mut p = params::Params::new();
+        let comm_link = if let Some(link) = self.comm_link.take() {
+            link
+        } else {
+            return false;
+        };
+        let mut comm_manager = comm_manager::CommManager::new(comm_link);
+        let mut sensors = sensors::Sensors::new();
+        let loop_count: u64 = 0;
 
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        None
-    }
+        loop {
+            sensors.run(&self.board);
+            comm_manager.process_incoming_messages();
+            comm_manager.send_heartbeat(&self.board);
 
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        None
-    }
+            #[cfg(feature = "nucleo")]
+            if loop_count % 1000 == 0 {
+                defmt::trace!("one loop!");
+            }
+        }
 
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        None
-    }
-
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        None
-    }
-
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
-    }
-
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
-        None
-    }
-
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
-        //#[cfg(feature = "default")]
-        //use core::fmt::Write;
-        //#[cfg(feature = "default")]
-        //let mut writer = sensors::host_rtt::RttWriter::new();
-
-        //#[cfg(feature = "default")]
-        //write!(&mut writer, "Wrote Telemetry!!!!\n\n").unwrap();
-
-        //#[cfg(feature = "default")]
-        //writer.flush().unwrap();
-
-        None
+        return true;
     }
 }

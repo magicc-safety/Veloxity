@@ -1,6 +1,6 @@
 // /**
 // ******************************************************************************
-// * File     : dummy.rs
+// * File     : pps.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,70 +34,41 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
-use crate::errors;
+// THIS CODE HAS BEEN MADE SAFE BUT SAFETY HAS NOT BEEN TESTED
+use embassy_stm32::exti::ExtiInput;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+use embassy_time::Instant;
+use embassy_time::Timer;
+
 use crate::packets;
-use crate::params::Params;
-use crate::sensors;
+//use defmt::trace;
 
-pub struct DummyBoard;
+pub static PPS_SIGNAL: Signal<CriticalSectionRawMutex, packets::PpsPacket> =
+    Signal::<CriticalSectionRawMutex, packets::PpsPacket>::new();
 
-impl Board for DummyBoard {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        None
+pub struct PpsSensor {
+    pub pps: ExtiInput<'static>,
+}
+
+impl PpsSensor {
+    pub async fn run(&mut self) {
+        loop {
+            //trace!("PPS did a thing!");
+            self.pps.wait_for_rising_edge().await;
+            let timestamp = Instant::now();
+            let status = 1;
+            let header = packets::RosflightPacketHeader {
+                timestamp: timestamp.as_micros(),
+                status,
+            };
+            let pps_packet = packets::PpsPacket { header };
+            PPS_SIGNAL.signal(pps_packet);
+        }
     }
+}
 
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        None
-    }
-
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        None
-    }
-
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        None
-    }
-
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        None
-    }
-
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        None
-    }
-
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
-    }
-
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
-        None
-    }
-
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
-        //#[cfg(feature = "default")]
-        //use core::fmt::Write;
-        //#[cfg(feature = "default")]
-        //let mut writer = sensors::host_rtt::RttWriter::new();
-
-        //#[cfg(feature = "default")]
-        //write!(&mut writer, "Wrote Telemetry!!!!\n\n").unwrap();
-
-        //#[cfg(feature = "default")]
-        //writer.flush().unwrap();
-
-        None
-    }
+#[embassy_executor::task]
+pub async fn task(mut pps: PpsSensor) {
+    pps.run().await;
 }

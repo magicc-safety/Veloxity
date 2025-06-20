@@ -1,6 +1,9 @@
+#![cfg_attr(not(feature = "use_std"), no_std)]
+#![cfg(feature = "nucleo")]
+#![no_main]
 // /**
 // ******************************************************************************
-// * File     : dummy.rs
+// * File     : heartbeat_test.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,70 +37,20 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
-use crate::errors;
-use crate::packets;
-use crate::params::Params;
-use crate::sensors;
+use crate::board::nucleo::Nucleo;
+use crate::comm_manager::comm_link_trait::mavlink::MavlinkInterface;
+use rustflight_alpha::*;
 
-pub struct DummyBoard;
+use cortex_m_rt::entry;
 
-impl Board for DummyBoard {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        None
-    }
+#[entry]
+fn main() -> ! {
+    let nucleo = Nucleo::new();
+    let mavlink = MavlinkInterface::new();
+    let mut rosflight =
+        rustflight::rustflight_sensors_comms::ROSFlight::init(1000, nucleo, mavlink);
+    rosflight.run();
 
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        None
-    }
-
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        None
-    }
-
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        None
-    }
-
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        None
-    }
-
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        None
-    }
-
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
-    }
-
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
-        None
-    }
-
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
-        //#[cfg(feature = "default")]
-        //use core::fmt::Write;
-        //#[cfg(feature = "default")]
-        //let mut writer = sensors::host_rtt::RttWriter::new();
-
-        //#[cfg(feature = "default")]
-        //write!(&mut writer, "Wrote Telemetry!!!!\n\n").unwrap();
-
-        //#[cfg(feature = "default")]
-        //writer.flush().unwrap();
-
-        None
-    }
+    // Never get here.
+    loop {}
 }

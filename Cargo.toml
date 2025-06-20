@@ -1,3 +1,39 @@
+#
+# ******************************************************************************
+# File     : Cargo.toml
+# Date     : May 8, 2025
+# ******************************************************************************
+#
+# Copyright (c) 2023, AeroVironment, Inc.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1.Redistributions of source code must retain the above copyright notice, this
+# list of conditions and the following disclaimer.
+
+# 2.Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+
+# 3.Neither the name of the copyright holder nor the names of its
+# contributors may be used to endorse or promote products derived from
+# this software without specific prior written permission.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+#******************************************************************************
+
 [package]
 name = "rustflight_alpha"
 version = "0.1.0"
@@ -8,26 +44,36 @@ bitflags = "2.6.0"
 micro_algebra = { git = "ssh://git@github.com/Derekbenj/micro_algebra.git", branch="turbomath_replace" }
 
 # everything needed specifically for nucleo
-embassy-embedded-hal = { version = "0.3.0", optional=true}
-embedded-hal-async = { version = "1.0", optional=true}
-embedded-io-async = { version = "0.6.1", optional=true}
-embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"], optional=true}
-embassy-stm32 = { version = "0.2.0", features = ["defmt", "stm32h753zi", "time-driver-tim2", "exti", "unstable-pac", "chrono", "rt", "memory-x"], optional=true}
-embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"], optional=true}
-embassy-sync = { version = "0.6.1",  features = ["defmt"], optional=true}
-cortex-m-rt = { version = "0.7.0", optional=true}
-cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"], optional=true}
-panic-probe = { version = "0.3", features = ["print-defmt"], optional=true}
-static_cell = { version = "2", optional=true}
-defmt-rtt = { version = "0.4", optional=true}
-defmt = {version= "0.3", optional=true}
-heapless = { version = "0.8", default-features = false, optional=true}
+embassy-embedded-hal = { version = "0.3.0", optional=true }
+embedded-hal-async = { version = "1.0", optional=true }
+embedded-io-async = { version = "0.6.1", optional=true }
+embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"], optional=true }
+embassy-stm32 = { version = "0.2.0", features = ["defmt", "stm32h753zi", "time-driver-tim5", "exti", "unstable-pac", "chrono", "rt", "memory-x"], optional=true }
+embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"], optional=true }
+embassy-sync = { version = "0.6.1",  features = ["defmt"], optional=true }
+embassy-futures = { version = "0.1.0", optional = true }
+cortex-m-rt = { version = "0.7.0", optional=true }
+cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"], optional=true }
+panic-probe = { version = "0.3", features = ["print-defmt"], optional=true }
+static_cell = { version = "2", optional=true }
+defmt-rtt = { version = "0.4", optional=true }
+defmt = { version= "0.3", optional=true }
+
+# Mavlink stuff
+mavio = { version = "0.5.5", default-features = false , features = ["embedded-io"], optional=true }
+mavspec = { version = "0.6.4", default-features = false, features = ["rust"], optional=true }
+embedded-hal-nb = { version = "1.0.0", optional=true }
 
 # things we need for host debugging
-mock_instant = { version = "0.5.3", default-features=false, optional=true}
-log = { version = "0.4.27", optional=true}
-libc = { version = "0.2.171", optional=true}
-arrayvec = { version = "0.7.6", optional=true}
+#mock_instant = { version = "0.5.3", default-features=false, optional=true}
+#log = { version = "0.4.27", optional=true}
+#libc = { version = "0.2.171", optional=true}
+#arrayvec = { version = "0.7.6", optional=true}
+serialport = { version = "4.7.2", optional=true }
+#mio-serial = { version = "5.0.6", optional=true }
+
+[build-dependencies]
+mavspec = { version = "0.6.4", features = ["rust_gen"] }
 
 [lints.rust]
 non_camel_case_types = "allow"
@@ -37,10 +83,11 @@ unused = "allow"
 [features]
 use_std = []
 default = [
-    "mock_instant",
-    "log",
-    "libc",
-    "arrayvec",
+  "mavio",
+  "mavspec",
+  "embedded-hal-nb",
+  "serialport",
+  #"mio-serial",
 ]
 nucleo = [
     "embassy-embedded-hal",
@@ -50,13 +97,16 @@ nucleo = [
     "embassy-stm32",
     "embassy-time",
     "embassy-sync",
+    "embassy-futures",
     "cortex-m-rt",
     "cortex-m",
     "panic-probe",
     "static_cell",
     "defmt-rtt",
     "defmt",
-    "heapless",
+    "mavio",
+    "mavspec",
+    "embedded-hal-nb",
 ]
 
 # cargo build/run
@@ -99,11 +149,16 @@ overflow-checks = false
 
 # nucleo test binary
 [[bin]]
-name = "nucleo_test"
+name = "nucleo_sensors_test"
 test = false
 bench = false
 required-features = ["nucleo"]
 
-# dummy test binary
+[[bin]]
+name = "nucleo_mavlink_test"
+test = false
+bench = false
+required-features = ["nucleo"]
+
 [[test]]
-name = "dummy_test"
+name = "dummy_mavlink_test"

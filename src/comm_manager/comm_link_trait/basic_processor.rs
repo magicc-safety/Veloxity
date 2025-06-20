@@ -1,6 +1,6 @@
 // /**
 // ******************************************************************************
-// * File     : dummy.rs
+// * File     : basic_pocessor.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,70 +34,14 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
-use crate::errors;
-use crate::packets;
-use crate::params::Params;
-use crate::sensors;
+use crate::comm_manager::comm_link_trait::EmbeddedComInterface;
+use crate::peripherals::telem::TELEM_RX;
 
-pub struct DummyBoard;
+pub struct BasicProcessor;
 
-impl Board for DummyBoard {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        None
-    }
-
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        None
-    }
-
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        None
-    }
-
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        None
-    }
-
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        None
-    }
-
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        None
-    }
-
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
-    }
-
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
-        None
-    }
-
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
-        //#[cfg(feature = "default")]
-        //use core::fmt::Write;
-        //#[cfg(feature = "default")]
-        //let mut writer = sensors::host_rtt::RttWriter::new();
-
-        //#[cfg(feature = "default")]
-        //write!(&mut writer, "Wrote Telemetry!!!!\n\n").unwrap();
-
-        //#[cfg(feature = "default")]
-        //writer.flush().unwrap();
-
-        None
+impl EmbeddedComInterface for BasicProcessor {
+    async fn process_bytes(&mut self, buf: &[u8], num_bytes: usize) {
+        TELEM_RX.write_all(&buf[0..num_bytes]).await;
+        //defmt::trace!("Heartbeat: gets {} bytes", num_bytes);
     }
 }
