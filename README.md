@@ -32,10 +32,15 @@ This project is licensed under the [NO IDEA](LICENSE).
 
 This project is a port of [ROSFlight](https://github.com/rosflight/rosflight), originally written in C++.
 
+## How to Build the Project:
+
+1. running "cargo build" builds all the Rustflight specific features
+2. running "cargo b_nucleo" builds for the nucleo board (stm32 architecture target: see .cargo/config.toml for details). This build includes all the embedded code, peripherals, and embassy specific code.
+
 ## How to Run The Project:
- - cargo test --test [name of test if specific] --features [feature] / ["feature1 feature2"]
- - cargo bn
- - cargo rn
- - cat /tmp/rustflight_rtt <-- requires you to set up a fifo rtt in /tmp
- - screen /dev/cu.usbserial-FTD3PVZT 921600
- - cargo rtty | grep -E "Transmission|Accel|..."
+Tests have been created so far for the nucleo board. These are inside the src/bin directory. Shortcuts have been generated for running a test that only includes sensors, and a test for sending/receiving heartbeats:
+
+1. running "cargo r_nucleo_sensors" will start the nucleo board, spinning up tasks for each sensor, and processing them with the sensors module
+2. running "cargo r_nucleo_mavlink" will start the nucleo board, spin up the tasks for each sensor, and use the comm_manager in the highest level loop to process incoming serial stream data and match on mavlink messages.
+
+Debug statements throughout the code can be uncommented for debugging/visualization.
