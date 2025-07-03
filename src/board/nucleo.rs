@@ -39,7 +39,6 @@ use crate::board::Board;
 use crate::comm_manager;
 use crate::errors;
 use crate::packets;
-use crate::packets::PAYLOAD_SIZE;
 use crate::peripherals;
 
 use cortex_m_rt::entry;

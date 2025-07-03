@@ -40,6 +40,10 @@ pub mod dummy;
 pub mod nucleo;
 #[cfg(feature = "nucleo")]
 pub mod nucleo_config;
+#[cfg(feature = "sim")]
+pub mod sim_board;
+#[cfg(feature = "sim")]
+pub mod sim_config;
 
 use crate::{errors, packets, params::Params, sensors};
 

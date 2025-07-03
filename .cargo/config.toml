@@ -48,5 +48,6 @@ DEFMT_LOG = "trace"
 
 [alias]
 b_nucleo = "build --no-default-features --features nucleo --target thumbv7em-none-eabihf"
+b_sim = "build --features sim,use_std"
 r_nucleo_sensors = "run --no-default-features --features nucleo --target thumbv7em-none-eabihf --release --bin nucleo_sensors_test" # most up to date "clean" nucleo run
 r_nucleo_mavlink = "run --no-default-features --features nucleo --target thumbv7em-none-eabihf --release --bin nucleo_mavlink_test" # another specific test for mavlink
