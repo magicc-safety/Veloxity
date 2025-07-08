@@ -43,50 +43,47 @@ use crate::sensors;
 pub struct DummyBoard;
 
 impl Board for DummyBoard {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
+    fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         None
     }
 
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
+    fn mag_read(&mut self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
         None
     }
 
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
+    fn baro_read(&mut self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
         None
     }
 
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
+    fn diff_pressure_read(&mut self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
         None
     }
 
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
+    fn sonar_read(&mut self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
         None
     }
 
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
+    fn gnss_read(&mut self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
         None
     }
 
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
+    fn battery_read(&mut self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
         None
     }
 
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
+    fn rc_read(&mut self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
         None
     }
 
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
+    fn attitude_read(&mut self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
         None
     }
 
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         None
     }
 
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         //#[cfg(feature = "default")]
         //use core::fmt::Write;
         //#[cfg(feature = "default")]

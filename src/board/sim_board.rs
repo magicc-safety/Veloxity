@@ -3,18 +3,20 @@ use crate::board::Board;
 use crate::comm_manager;
 use crate::errors;
 use crate::packets;
+use crate::packets::GNSSPacket;
 
-use cdr::Infinite;
+use cdr::{CdrLe, Infinite};
 use tokio::sync::mpsc;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::handlers::FifoChannelHandler;
 use zenoh::pubsub::{Publisher, Subscriber};
 use zenoh::sample::Sample;
 use zenoh::session::Session;
+use zenoh::Config;
 
 pub struct Sim {
     zenoh_connect_session: Session,
-    zenoh_listen_session: Session,
+    pub zenoh_listen_session: Session,
     //imu_temp_chan: mpsc::Receiver<sim_config::Status>,
     //imu_data_chan: mpsc::Receiver<sim_config::Status>,
     //battery_chan: mpsc::Receiver<sim_config::BatteryStatus>,
@@ -25,54 +27,78 @@ pub struct Sim {
 }
 
 impl Board for Sim {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
+    fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         None
     }
 
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
+    fn mag_read(&mut self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
         None
     }
 
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
+    fn baro_read(&mut self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
         None
     }
 
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
+    fn diff_pressure_read(&mut self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
         None
     }
 
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
+    fn sonar_read(&mut self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
         None
     }
 
     //TODO getting lots of errors here...
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
+    fn gnss_read(&mut self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
         match self.gnss_chan.try_recv() {
-            Some(gnss) => {}
-            None => {}
+            Ok(gnss) => {
+                Some(Ok(GNSSPacket {
+                    header: crate::packets::RosflightPacketHeader {
+                        status: 0u16,
+                        timestamp: gnss.header.stamp.sec as u64,
+                    },
+                    lat: 0.0f64,    // radians
+                    lon: 0.0f64,    // radians
+                    height: 0.0f32, // m/s above ellipsoid
+                    vel_n: 0.0f32,  // m/s north
+                    vel_e: 0.0f32,  // m/s east
+                    vel_d: 0.0f32,  // m/s down
+                    h_acc: 0.0f32,  // m north/east
+                    v_acc: 0.0f32,  // m down
+                    s_acc: 0.0f32,  // m/s
+                    month: 0u8,     // 0-11
+                    year: 0u16,     // 0-65535 UTC
+                    day: 0u8,       // 0-31 UTS day of month
+                    hour: 0u8,      // 0-23 UTC
+                    min: 0u8,       // 0-59 UTC
+                    sec: 0u8,       // 0-59 UTC
+                    nano: 0i32,     // adjustment +/1 to seconds
+                    fix_type: crate::packets::GNSSFixType::DeadReckoningOnly,
+                    num_sats: 0u8,   // 0-255
+                    mag_dec: 0.0f32, // Magnetic Declination ??
+                    time_correction: 0u64,
+                }))
+            }
+            Err(_) => None,
         }
     }
 
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
+    fn battery_read(&mut self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
         None
     }
 
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
+    fn rc_read(&mut self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
         None
     }
 
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
+    fn attitude_read(&mut self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
         None
     }
 
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         None
     }
 
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         None
     }
 }
@@ -80,16 +106,18 @@ impl Board for Sim {
 impl Sim {
     pub async fn new() -> Sim {
         let mut zenoh_connect_config = Config::default();
-        config
+        zenoh_connect_config
             .insert_json5("connect/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
             .unwrap();
         let mut zenoh_listen_config = Config::default();
-        config
+        zenoh_listen_config
             .insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
             .unwrap();
 
         let zenoh_connect_session = zenoh::open(zenoh_connect_config).await.unwrap();
         let zenoh_listen_session = zenoh::open(zenoh_listen_config).await.unwrap();
+
+        println!("Zenoh sessions opened!");
 
         // Establish all channels for sub
         //let (chan_send_imu_temp, mut chan_recv_imu_temp) = mpsc::channel::<sim_config::Status>(1);
@@ -115,11 +143,11 @@ impl Sim {
         //    .await
         //    .unwrap();
         let sub_gnss = zenoh_listen_session
-            .declare_subscriber("/rt/simulated_sensors/gnss")
+            .declare_subscriber("rt/simulated_sensors/gnss")
             .await
             .unwrap();
         let sub_baro = zenoh_listen_session
-            .declare_subscriber("/rt/simulated_sensors/baro")
+            .declare_subscriber("rt/simulated_sensors/baro")
             .await
             .unwrap();
         //let sub_mag = zenoh_listen_session
@@ -135,12 +163,14 @@ impl Sim {
         //    .await
         //    .unwrap();
 
+        println!("Zenoh subscribers established");
+
         // establish all channels for pub
         let (chan_send_pwm, mut chan_recv_pwm) = mpsc::channel::<sim_config::Status>(1);
 
         // establish publisher
         let pub_pwm_output = zenoh_connect_session
-            .declare_publisher("/rt/sim/pwm_output")
+            .declare_publisher("rt/sim/pwm_output")
             .encoding(Encoding::APPLICATION_OCTET_STREAM)
             .await
             .unwrap();
@@ -153,6 +183,8 @@ impl Sim {
             baro_chan: chan_recv_baro,
         };
 
+        println!("Zenoh publishers established");
+
         // Spin up async functions for senders and receivers
         //tokio::spawn(capture_imu_temp());
         //tokio::spawn(capture_imu_data());
@@ -163,6 +195,10 @@ impl Sim {
         //tokio::spawn(capture_sonar());
         //tokio::spawn(capture:diff_pressure());
         tokio::spawn(publish_pwm(pub_pwm_output, chan_recv_pwm));
+
+        println!("Zenoh spawns finished");
+
+        to_return
     }
 }
 
@@ -192,8 +228,8 @@ async fn capture_gnss(
 ) {
     while let Ok(sample) = sub.recv_async().await {
         match cdr::deserialize::<sim_config::GNSS>(&sample.payload().to_bytes()) {
-            Ok(battery_status) => {
-                if chan.send(battery_status).await.is_err() {
+            Ok(gnss) => {
+                if chan.send(gnss).await.is_err() {
                     println!("Error putting gnss in channel!");
                 }
             }
@@ -207,9 +243,9 @@ async fn capture_baro(
     chan: mpsc::Sender<sim_config::Barometer>,
 ) {
     while let Ok(sample) = sub.recv_async().await {
-        match cdr::deserialize::<sim_config::GNSS>(&sample.payload().to_bytes()) {
-            Ok(battery_status) => {
-                if chan.send(battery_status).await.is_err() {
+        match cdr::deserialize::<sim_config::Barometer>(&sample.payload().to_bytes()) {
+            Ok(barometer) => {
+                if chan.send(barometer).await.is_err() {
                     println!("Error putting barometer in channel!");
                 }
             }
@@ -224,9 +260,9 @@ async fn capture_baro(
 
 //async fn capture_diff_pressure(sub: Subscriber<FifoChannelHandler<Sample>>) {}
 
-async fn publish_pwm(publisher: Publisher<'_>, chan: mpsc::Receiver<sim_config::Status>) {
-    if let Some(pwm) = chan.recv() {
-        zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&pwm, Infinite).unwrap());
+async fn publish_pwm(publisher: Publisher<'_>, mut chan: mpsc::Receiver<sim_config::Status>) {
+    if let Some(pwm) = chan.recv().await {
+        let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&pwm, Infinite).unwrap());
         if publisher.put(zb).await.is_err() {
             println!("Error sending zbytes: pwm");
         }

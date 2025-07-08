@@ -36,7 +36,6 @@
 // **/
 #[cfg(feature = "nucleo")]
 pub mod basic_processor;
-#[cfg(feature = "nucleo")]
 pub mod mavlink;
 
 use crate::board;
@@ -44,10 +43,10 @@ use crate::packets;
 use crate::params;
 
 pub trait CommInterface<B: board::Board> {
-    fn send_heartbeat(&mut self, board: &B, system_id: u8, fixed_wing: bool) -> bool;
+    fn send_heartbeat(&mut self, board: &mut B, system_id: u8, fixed_wing: bool) -> bool;
     fn send_named_value(
         &mut self,
-        board: &B,
+        board: &mut B,
         system_id: u8,
         timestamp_ms: u32,
         name: &[u8],
@@ -55,7 +54,7 @@ pub trait CommInterface<B: board::Board> {
     );
     fn send_status(
         &mut self,
-        board: &B,
+        board: &mut B,
         system_id: u8,
         armed: bool,
         failsafe: bool,
@@ -66,27 +65,27 @@ pub trait CommInterface<B: board::Board> {
         num_errors: i16,
         loop_time_us: i16,
     );
-    fn send_timesync(&mut self, board: &B, system_id: u8, tc1: i64, ts1: i64) -> bool;
-    fn send_version(&mut self, board: &B, system_id: u8, version: &[u8]);
+    fn send_timesync(&mut self, board: &mut B, system_id: u8, tc1: i64, ts1: i64) -> bool;
+    fn send_version(&mut self, board: &mut B, system_id: u8, version: &[u8]);
 
     fn send_output_raw(
         &mut self,
-        board: &B,
+        board: &mut B,
         system_id: u8,
         timestamp_ms: u32,
         raw_outputs: [f32; 14],
     );
-    fn send_attitude(&mut self, board: &B, system_id: u8, packet: &packets::AttitudePacket);
-    fn send_baro(&mut self, board: &B, sysem_id: u8, packet: &packets::BaroPacket);
-    fn send_diff_pressure(&mut self, board: &B, system_id: u8, packet: &packets::PitotPacket);
-    fn send_imu(&mut self, board: &B, system_id: u8, packet: &packets::ImuPacket);
-    fn send_log_message(&mut self, board: &B, system_id: u8, packet: &packets::LogPacket);
-    fn send_mag(&mut self, board: &B, system_id: u8, packet: &packets::MagPacket);
-    fn send_rc_raw(&mut self, board: &B, system_id: u8, packet: &packets::RcPacket);
-    fn send_range(&mut self, board: &B, system_id: u8, packet: &packets::RangePacket);
-    fn send_gnss(&mut self, board: &B, system_id: u8, data: &packets::GNSSPacket);
-    fn send_gnss_full(&mut self, board: &B, system_id: u8, data: &packets::GNSSPacket);
-    fn handle_incoming_messages(&mut self);
+    fn send_attitude(&mut self, board: &mut B, system_id: u8, packet: &packets::AttitudePacket);
+    fn send_baro(&mut self, board: &mut B, sysem_id: u8, packet: &packets::BaroPacket);
+    fn send_diff_pressure(&mut self, board: &mut B, system_id: u8, packet: &packets::PitotPacket);
+    fn send_imu(&mut self, board: &mut B, system_id: u8, packet: &packets::ImuPacket);
+    fn send_log_message(&mut self, board: &mut B, system_id: u8, packet: &packets::LogPacket);
+    fn send_mag(&mut self, board: &mut B, system_id: u8, packet: &packets::MagPacket);
+    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, packet: &packets::RcPacket);
+    fn send_range(&mut self, board: &mut B, system_id: u8, packet: &packets::RangePacket);
+    fn send_gnss(&mut self, board: &mut B, system_id: u8, data: &packets::GNSSPacket);
+    fn send_gnss_full(&mut self, board: &mut B, system_id: u8, data: &packets::GNSSPacket);
+    fn handle_incoming_messages(&mut self, board: &mut B);
 }
 
 #[allow(async_fn_in_trait)]

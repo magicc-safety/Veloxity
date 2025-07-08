@@ -154,50 +154,54 @@ pub struct Nucleo {
 }
 
 impl Board for Nucleo {
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
+    fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         peripherals::bmi08x::IMU_SIGNAL.try_take()
     }
 
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
+    fn mag_read(&mut self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
         peripherals::iis2mdc::MAG_SIGNAL.try_take()
     }
 
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
+    fn baro_read(&mut self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
         peripherals::dps310::BARO_SIGNAL.try_take()
     }
 
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
+    fn diff_pressure_read(&mut self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
         peripherals::dlhrl20g::PITOT_SIGNAL.try_take()
     }
 
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
+    fn sonar_read(&mut self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
         None
     }
 
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
+    fn gnss_read(&mut self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
         peripherals::ublox::GNSS_SIGNAL.try_take()
     }
 
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
+    fn battery_read(&mut self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
         None
     }
 
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
+    fn rc_read(&mut self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
         peripherals::sbus::RC_SIGNAL.try_take()
     }
 
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
+    fn attitude_read(&mut self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
         None
     }
 
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>> {
-        None
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+        match peripherals::telem::TELEM_RX.try_read(buf) {
+            Ok(n) => return Some(Ok(n)),
+            Err(_) => {
+                return Some(Err(errors::TelemError::GenericTelemError(
+                    "Error Reading Telem Packet",
+                )))
+            }
+        }
     }
 
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>> {
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         let mut n = 0;
         //let len = byte_count;
         let len = bytes.len();
@@ -218,7 +222,7 @@ impl Board for Nucleo {
                 }
             }
         }
-        None
+        Some(Ok(n))
     }
 }
 

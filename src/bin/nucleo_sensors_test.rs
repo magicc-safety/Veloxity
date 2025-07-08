@@ -46,8 +46,8 @@ use cortex_m_rt::entry;
 fn main() -> ! {
     let mut b = Nucleo::new();
     let mut rosflight = rustflight::rustflight_sensors::ROSFlight::init(1000, b);
-    rosflight.run();
 
-    // Never get here.
-    loop {}
+    loop {
+        rosflight.run();
+    }
 }

@@ -48,7 +48,9 @@ where
 {
     loop_time_us: u32,
     pub board: B, // <-- made public on purpose: so that the tests we write aren't subject to the loop. we need to pull both board and comm_link out...
-    pub comm_link: Option<T>, // <-- see above
+    params: params::Params,
+    comm_manager: comm_manager::CommManager<B, T>,
+    sensors: sensors::Sensors,
 }
 
 impl<B, T> ROSFlight<B, T>
@@ -56,36 +58,20 @@ where
     B: Board,
     T: CommInterface<B>,
 {
-    pub fn init(_loop_time_us: u32, _board: B, _comm_link: T) -> Self {
+    pub fn init(_loop_time_us: u32, board: B, comm_link: T) -> Self {
         Self {
             loop_time_us: _loop_time_us,
-            board: _board,
-            comm_link: Some(_comm_link),
+            board,
+            params: params::Params::new(),
+            comm_manager: comm_manager::CommManager::new(comm_link),
+            sensors: sensors::Sensors::new(),
         }
     }
 
     pub fn run(&mut self) -> bool {
-        let mut p = params::Params::new();
-        let comm_link = if let Some(link) = self.comm_link.take() {
-            link
-        } else {
-            return false;
-        };
-        let mut comm_manager = comm_manager::CommManager::new(comm_link);
-        let mut sensors = sensors::Sensors::new();
-        let loop_count: u64 = 0;
-
-        loop {
-            sensors.run(&self.board);
-            comm_manager.process_incoming_messages();
-            comm_manager.send_heartbeat(&self.board);
-
-            #[cfg(feature = "nucleo")]
-            if loop_count % 1000 == 0 {
-                defmt::trace!("one loop!");
-            }
-        }
-
+        self.sensors.run(&mut self.board);
+        self.comm_manager.process_incoming_messages(&mut self.board);
+        self.comm_manager.send_heartbeat(&mut self.board);
         return true;
     }
 }

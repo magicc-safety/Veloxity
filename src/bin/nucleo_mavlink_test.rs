@@ -49,8 +49,8 @@ fn main() -> ! {
     let mavlink = MavlinkInterface::new();
     let mut rosflight =
         rustflight::rustflight_sensors_comms::ROSFlight::init(1000, nucleo, mavlink);
-    rosflight.run();
 
-    // Never get here.
-    loop {}
+    loop {
+        rosflight.run();
+    }
 }

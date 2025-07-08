@@ -38,9 +38,10 @@ use crate::board;
 use crate::comm_manager::comm_link_trait::CommInterface;
 use crate::comm_manager::mavlink_parser;
 use crate::mavlink::dialects::rosflight::{messages, Rosflight};
-use crate::peripherals::telem;
 use mavio::prelude::*;
 use mavio::Frame;
+
+static RX_BUFF_SIZE: usize = 2048;
 
 // only include options for messages you'd receive...
 pub struct MavlinkInterface {
@@ -129,22 +130,22 @@ impl MavlinkInterface {
     }
 
     pub fn handle_msg_heartbeat(&mut self, msg: messages::Heartbeat) {
-        defmt::trace!(
-            "🎉 Heartbeat: autopilot={}, mode={}, status={}, custom_mode: {}",
-            msg.autopilot,
-            msg.base_mode,
-            msg.system_status,
-            msg.custom_mode,
-        );
-        self.heartbeat = Some(msg);
+        //defmt::trace!(
+        //    "🎉 Heartbeat: autopilot={}, mode={}, status={}, custom_mode: {}",
+        //    msg.autopilot,
+        //    msg.base_mode,
+        //    msg.system_status,
+        //    msg.custom_mode,
+        //);
+        //self.heartbeat = Some(msg);
     }
 }
 
 impl<B: board::Board> CommInterface<B> for MavlinkInterface {
-    fn handle_incoming_messages(&mut self) {
-        let mut buf = [0u8; telem::RX_BUFF_SIZE];
-        match telem::TELEM_RX.try_read(&mut buf) {
-            Ok(n) => {
+    fn handle_incoming_messages(&mut self, board: &mut B) {
+        let mut buf = [0u8; RX_BUFF_SIZE];
+        match board.serial_rx_read(&mut buf) {
+            Some(Ok(n)) => {
                 //defmt::trace!("Heartbeat: got {} bytes", n);
                 for i in 0..n {
                     if let Some(frame) = self.mav_parser.feed_byte(buf[i]) {
@@ -186,12 +187,13 @@ impl<B: board::Board> CommInterface<B> for MavlinkInterface {
                     }
                 }
             }
-            Err(_) => {}
+            Some(Err(_)) => {}
+            None => {}
         }
     }
     fn send_status(
         &mut self,
-        board: &B,
+        board: &mut B,
         system_id: u8,
         armed: bool,
         failsafe: bool,
@@ -203,7 +205,7 @@ impl<B: board::Board> CommInterface<B> for MavlinkInterface {
         loop_time_us: i16,
     ) {
     }
-    fn send_timesync(&mut self, board: &B, system_id: u8, tc1: i64, ts1: i64) -> bool {
+    fn send_timesync(&mut self, board: &mut B, system_id: u8, tc1: i64, ts1: i64) -> bool {
         let mut buf = [0u8; 100];
         //let byte_count = telem::heartbeat(&mut buf);
 
@@ -256,14 +258,14 @@ impl<B: board::Board> CommInterface<B> for MavlinkInterface {
     }
     fn send_named_value(
         &mut self,
-        board: &B,
+        board: &mut B,
         system_id: u8,
         timestamp_ms: u32,
         name: &[u8],
         value: crate::params::ParamValue,
     ) {
     }
-    fn send_heartbeat(&mut self, board: &B, system_id: u8, fixed_wing: bool) -> bool {
+    fn send_heartbeat(&mut self, board: &mut B, system_id: u8, fixed_wing: bool) -> bool {
         let mut buf = [0u8; 100];
         //let byte_count = telem::heartbeat(&mut buf);
 
@@ -325,30 +327,41 @@ impl<B: board::Board> CommInterface<B> for MavlinkInterface {
         board.serial_tx_write(&buf[..pos]);
         return true;
     }
-    fn send_version(&mut self, board: &B, system_id: u8, version: &[u8]) {}
+    fn send_version(&mut self, board: &mut B, system_id: u8, version: &[u8]) {}
     fn send_diff_pressure(
         &mut self,
-        board: &B,
+        board: &mut B,
         system_id: u8,
         packet: &crate::packets::PitotPacket,
     ) {
     }
-    fn send_baro(&mut self, board: &B, sysem_id: u8, packet: &crate::packets::BaroPacket) {}
-    fn send_imu(&mut self, board: &B, system_id: u8, packet: &crate::packets::ImuPacket) {}
-    fn send_attitude(&mut self, board: &B, system_id: u8, packet: &crate::packets::AttitudePacket) {
+    fn send_baro(&mut self, board: &mut B, sysem_id: u8, packet: &crate::packets::BaroPacket) {}
+    fn send_imu(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::ImuPacket) {}
+    fn send_attitude(
+        &mut self,
+        board: &mut B,
+        system_id: u8,
+        packet: &crate::packets::AttitudePacket,
+    ) {
     }
-    fn send_log_message(&mut self, board: &B, system_id: u8, packet: &crate::packets::LogPacket) {}
+    fn send_log_message(
+        &mut self,
+        board: &mut B,
+        system_id: u8,
+        packet: &crate::packets::LogPacket,
+    ) {
+    }
     fn send_output_raw(
         &mut self,
-        board: &B,
+        board: &mut B,
         system_id: u8,
         timestamp_ms: u32,
         raw_outputs: [f32; 14],
     ) {
     }
-    fn send_rc_raw(&mut self, board: &B, system_id: u8, packet: &crate::packets::RcPacket) {}
-    fn send_range(&mut self, board: &B, system_id: u8, packet: &crate::packets::RangePacket) {}
-    fn send_mag(&mut self, board: &B, system_id: u8, packet: &crate::packets::MagPacket) {}
-    fn send_gnss(&mut self, board: &B, system_id: u8, data: &crate::packets::GNSSPacket) {}
-    fn send_gnss_full(&mut self, board: &B, system_id: u8, data: &crate::packets::GNSSPacket) {}
+    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::RcPacket) {}
+    fn send_range(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::RangePacket) {}
+    fn send_mag(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::MagPacket) {}
+    fn send_gnss(&mut self, board: &mut B, system_id: u8, data: &crate::packets::GNSSPacket) {}
+    fn send_gnss_full(&mut self, board: &mut B, system_id: u8, data: &crate::packets::GNSSPacket) {}
 }

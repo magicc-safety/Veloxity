@@ -40,21 +40,20 @@ use crate::{board::Board, packets, params, sensors};
 pub struct ROSFlight<B: Board> {
     loop_time_us: u32,
     pub board: B, // <-- made public on purpose: so that the tests we write aren't subject to the
-                  // loop. we need to pull both board and comm_link out...
+    // loop. we need to pull both board and comm_link out...
+    sensors: sensors::Sensors,
 }
 
 impl<B: Board> ROSFlight<B> {
-    pub fn init(_loop_time_us: u32, _board: B) -> Self {
+    pub fn init(_loop_time_us: u32, board: B) -> Self {
         Self {
             loop_time_us: _loop_time_us,
-            board: _board,
+            board,
+            sensors: sensors::Sensors::new(),
         }
     }
 
     pub fn run(&mut self) {
-        let mut sensors = sensors::Sensors::new();
-        loop {
-            sensors.run(&self.board);
-        }
+        self.sensors.run(&mut self.board);
     }
 }

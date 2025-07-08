@@ -72,24 +72,21 @@ pub trait Board {
     // fn sensors_init(&mut self);
     // fn num_sensor_errors(&self) -> u16;
 
-    fn imu_read(&self) -> Option<Result<packets::ImuPacket, errors::SensorError>>;
-    fn mag_read(&self) -> Option<Result<packets::MagPacket, errors::SensorError>>;
-    fn baro_read(&self) -> Option<Result<packets::BaroPacket, errors::SensorError>>;
-    fn diff_pressure_read(&self) -> Option<Result<packets::PitotPacket, errors::SensorError>>;
-    fn sonar_read(&self) -> Option<Result<packets::RangePacket, errors::SensorError>>;
+    fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>>;
+    fn mag_read(&mut self) -> Option<Result<packets::MagPacket, errors::SensorError>>;
+    fn baro_read(&mut self) -> Option<Result<packets::BaroPacket, errors::SensorError>>;
+    fn diff_pressure_read(&mut self) -> Option<Result<packets::PitotPacket, errors::SensorError>>;
+    fn sonar_read(&mut self) -> Option<Result<packets::RangePacket, errors::SensorError>>;
     // GPS <-- remember that at some point we're going to want to distinguish between gnss and
     //         gnss_full
-    fn gnss_read(&self) -> Option<Result<packets::GNSSPacket, errors::SensorError>>;
-    fn battery_read(&self) -> Option<Result<packets::BatteryPacket, errors::SensorError>>;
+    fn gnss_read(&mut self) -> Option<Result<packets::GNSSPacket, errors::SensorError>>;
+    fn battery_read(&mut self) -> Option<Result<packets::BatteryPacket, errors::SensorError>>;
     // fn battery_voltage_set_multiplier(&mut self, multiplier: f64);
     // fn battery_current_set_multiplier(&mut self, multiplier: f64);
-    fn rc_read(&self) -> Option<Result<packets::RcPacket, errors::SensorError>>;
-    fn attitude_read(&self) -> Option<Result<packets::AttitudePacket, errors::SensorError>>;
-    fn serial_rx_read(&self) -> Option<Result<packets::SerialRxPacket, errors::TelemError>>;
-    fn serial_tx_write(
-        &self,
-        bytes: &[u8],
-    ) -> Option<Result<packets::SerialTxPacket, errors::TelemError>>;
+    fn rc_read(&mut self) -> Option<Result<packets::RcPacket, errors::SensorError>>;
+    fn attitude_read(&mut self) -> Option<Result<packets::AttitudePacket, errors::SensorError>>;
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>>;
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>>;
 
     // PWM
     // fn pwm_init(&mut self, refresh_rate: u32, idle_pwm: u16);

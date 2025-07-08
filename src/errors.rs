@@ -34,19 +34,19 @@
 // *
 // ******************************************************************************
 // **/
-#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+//#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub enum TelemError {
     GenericTelemError(&'static str),
 }
 
-#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+//#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub enum EstimatorError {
     GenericEstimatorError(&'static str),
 }
 
-#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
+//#[cfg_attr(feature = "nucleo", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub enum SensorError {
     GenericSensorError(&'static str),

@@ -162,5 +162,12 @@ test = false
 bench = false
 required-features = ["nucleo"]
 
+[[bin]]
+name = "sim_sensors_test"
+test = false
+bench = false
+required-features = ["sim"]
+
 [[test]]
 name = "dummy_mavlink_test"
+

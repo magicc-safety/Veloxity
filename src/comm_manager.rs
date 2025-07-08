@@ -63,11 +63,11 @@ where
         }
     }
 
-    pub fn process_incoming_messages(&mut self) {
-        self.comm_link.handle_incoming_messages();
+    pub fn process_incoming_messages(&mut self, board: &mut B) {
+        self.comm_link.handle_incoming_messages(board);
     }
 
-    pub fn send_heartbeat(&mut self, board: &B) {
+    pub fn send_heartbeat(&mut self, board: &mut B) {
         self.comm_link.send_heartbeat(board, self.sysid, false);
     }
 }

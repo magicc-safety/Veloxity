@@ -283,7 +283,7 @@ impl Sensors {
 
     // pub fn update_battery_monitor_multipliers() {}
 
-    pub fn run<B: Board>(&mut self, board: &B) {
+    pub fn run<B: Board>(&mut self, board: &mut B) {
         // ------------------------ IMU ------------------------
         match board.imu_read() {
             Some(Ok(imu_data)) => {
@@ -462,7 +462,10 @@ impl Sensors {
         // ------------------------ GNSS ------------------------
         match board.gnss_read() {
             Some(Ok(gnss_data)) => {
+                println!("GNSS: {}", gnss_data.header.timestamp);
+
                 self.gnss_packet = Some(gnss_data);
+
                 //#[cfg(feature = "nucleo")]
                 //trace!(
                 //    "Sensor: GNSS: {} lat, {} lon\n",
@@ -674,53 +677,53 @@ impl Sensors {
         }
 
         // ------------------------ Serial_rx ------------------------
-        match board.serial_rx_read() {
-            Some(Ok(serial_data)) => {
-                self.serial_rx_packet = Some(serial_data);
+        //match board.serial_rx_read() {
+        //    Some(Ok(serial_data)) => {
+        //        self.serial_rx_packet = Some(serial_data);
 
-                //#[cfg(feature = "nucleo")]
-                //trace!(
-                //    "Sensor: Serial_rx: qos {}, ({}) len\n",
-                //    match self.serial_rx_packet.as_ref().unwrap().qos {
-                //        packets::Qos::High => 0,
-                //        packets::Qos::Medium => 1,
-                //        packets::Qos::Low => 2,
-                //    },
-                //    self.serial_rx_packet.as_ref().unwrap().len
-                //);
+        //#[cfg(feature = "nucleo")]
+        //trace!(
+        //    "Sensor: Serial_rx: qos {}, ({}) len\n",
+        //    match self.serial_rx_packet.as_ref().unwrap().qos {
+        //        packets::Qos::High => 0,
+        //        packets::Qos::Medium => 1,
+        //        packets::Qos::Low => 2,
+        //    },
+        //    self.serial_rx_packet.as_ref().unwrap().len
+        //);
 
-                //#[cfg(feature = "default")]
-                //write!(
-                //    &mut writer,
-                //    "Sensor: Serial_rx: qos {}, ({}) len\n\n",
-                //    match self.serial_rx_packet.as_ref().unwrap().qos {
-                //        packets::Qos::High => 0,
-                //        packets::Qos::Medium => 1,
-                //        packets::Qos::Low => 2,
-                //    },
-                //    self.serial_rx_packet.as_ref().unwrap().len
-                //)
-                //.unwrap();
-            }
-            Some(Err(e)) => {
-                //#[cfg(feature = "nucleo")]
-                //trace!("Sensor: Serial_rx error: {:?}\n", e);
+        //#[cfg(feature = "default")]
+        //write!(
+        //    &mut writer,
+        //    "Sensor: Serial_rx: qos {}, ({}) len\n\n",
+        //    match self.serial_rx_packet.as_ref().unwrap().qos {
+        //        packets::Qos::High => 0,
+        //        packets::Qos::Medium => 1,
+        //        packets::Qos::Low => 2,
+        //    },
+        //    self.serial_rx_packet.as_ref().unwrap().len
+        //)
+        //.unwrap();
+        //        }
+        //        Some(Err(e)) => {
+        //#[cfg(feature = "nucleo")]
+        //trace!("Sensor: Serial_rx error: {:?}\n", e);
 
-                //#[cfg(feature = "default")]
-                //write!(&mut writer, "Sensor: Serial_rx error: {:?}\n\n", e).unwrap();
+        //#[cfg(feature = "default")]
+        //write!(&mut writer, "Sensor: Serial_rx error: {:?}\n\n", e).unwrap();
 
-                self.serial_rx_packet = None;
-            }
-            None => {
-                self.pitot_packet = None;
+        //            self.serial_rx_packet = None;
+        //        }
+        //        None => {
+        //            self.pitot_packet = None;
 
-                //#[cfg(feature = "default")]
-                //write!(&mut writer, "Sensor: Serial_rx not present\n").unwrap();
+        //#[cfg(feature = "default")]
+        //write!(&mut writer, "Sensor: Serial_rx not present\n").unwrap();
 
-                //#[cfg(feature = "nucleo")]
-                //trace!("Sensor: Serial_rx not present.\n");
-            }
-        }
+        //#[cfg(feature = "nucleo")]
+        //trace!("Sensor: Serial_rx not present.\n");
+        //}
+        //}
 
         //#[cfg(feature = "default")]
         //writer.flush().unwrap();
