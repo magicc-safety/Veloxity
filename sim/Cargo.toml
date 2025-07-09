@@ -1,0 +1,15 @@
+[package]
+name = "sim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustflight_core = { workspace = true }
+
+serde = { version = "1.0", features = ["derive"], optional = true }
+tokio = { version = "1.45", optional = true }
+zenoh = { version = "1.4", optional = true }
+cdr = { version = "0.2.4", optional = true }
+
+[lints]
+workspace = true

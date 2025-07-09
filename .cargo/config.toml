@@ -1,53 +1,28 @@
-#
-# ******************************************************************************
-# File     : config.toml
-# Date     : May 8, 2025
-# ******************************************************************************
-#
-# Copyright (c) 2023, AeroVironment, Inc.
-# All rights reserved.
+# Your preferred settings for release builds (`cargo build` or `cargo build --release`)
+[profile.release]
+codegen-units = 1        # No parallel compilation for better optimization
+debug = 2                # Include full debug info, even in release builds
+debug-assertions = false # Disable runtime checks for speed
+incremental = false      # Disable incremental compilation for more stable optimizations
+lto = 'fat'              # Enable aggressive Link-Time Optimization
+opt-level = 3            # Maximum optimization level
+overflow-checks = false  # Disable integer overflow checks for performance
 
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1.Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
+# Your preferred settings for tests (`cargo test`)
+[profile.test]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+opt-level = 3           # Optimize tests for faster runtime
+overflow-checks = true
 
-# 2.Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-
-# 3.Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-#******************************************************************************
-
-[target.thumbv7em-none-eabihf]
-runner = 'probe-rs run --chip STM32H753ZITx'
-rustflags = [
-    "-C", "linker=rust-lld",
-    "-C", "link-arg=--nmagic",
-    "-C", "link-arg=-Tlink.x",
-    "-C", "link-arg=-Tdefmt.x"
-]
-
-[env]
-DEFMT_LOG = "trace"
-
-[alias]
-b_nucleo = "build --no-default-features --features nucleo --target thumbv7em-none-eabihf"
-b_sim = "build --features sim,use_std"
-r_nucleo_sensors = "run --no-default-features --features nucleo --target thumbv7em-none-eabihf --release --bin nucleo_sensors_test" # most up to date "clean" nucleo run
-r_nucleo_mavlink = "run --no-default-features --features nucleo --target thumbv7em-none-eabihf --release --bin nucleo_mavlink_test" # another specific test for mavlink
+# Your preferred settings for benchmarks (`cargo bench`)
+[profile.bench]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false

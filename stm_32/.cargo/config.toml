@@ -1,0 +1,18 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+rustflags = [
+  "-C",
+  "linker=rust-lld",
+  "-C",
+  "link-arg=--nmagic",
+  #"-C",
+  #"link-arg=-Tlink.x",
+  #"-C",
+  #"link-arg=-Tdefmt.x",
+]
+
+# Environment variables are also applied correctly from this file
+[env]
+DEFMT_LOG = "trace"

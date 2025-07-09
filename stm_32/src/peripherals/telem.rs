@@ -1,0 +1,134 @@
+// /**
+// ******************************************************************************
+// * File     : telem.rs
+// * Date     : May 8, 2025
+// ******************************************************************************
+// *
+// * Copyright (c) 2023, AeroVironment, Inc.
+// * All rights reserved.
+// *
+// * Redistribution and use in source and binary forms, with or without
+// * modification, are permitted provided that the following conditions are met:
+// *
+// * 1.Redistributions of source code must retain the above copyright notice, this
+// * list of conditions and the following disclaimer.
+// *
+// * 2.Redistributions in binary form must reproduce the above copyright notice,
+// * this list of conditions and the following disclaimer in the documentation
+// * and/or other materials provided with the distribution.
+// *
+// * 3.Neither the name of the copyright holder nor the names of its
+// * contributors may be used to endorse or promote products derived from
+// * this software without specific prior written permission.
+// *
+// * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// *
+// ******************************************************************************
+// **/
+// THIS CODE HAS BEEN MADE SAFE BUT SAFETY HAS NOT BEEN TESTED
+//use defmt::info;
+use embassy_stm32::mode::Async;
+use embassy_stm32::usart::UartRx;
+use embassy_stm32::usart::UartTx;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use embassy_sync::pipe::Pipe;
+use embassy_time::Timer;
+
+//use defmt::trace;
+
+use rustflight_core::comm_manager::comm_link_trait::EmbeddedComInterface;
+use rustflight_core::errors;
+use rustflight_core::packets;
+
+pub static TX_BUFF_SIZE: usize = 2048;
+pub static RX_BUFF_SIZE: usize = 2048;
+
+pub static TELEM_TX: Pipe<CriticalSectionRawMutex, TX_BUFF_SIZE> = Pipe::new();
+pub static TELEM_RX: Pipe<CriticalSectionRawMutex, RX_BUFF_SIZE> = Pipe::new();
+
+//pub static LOGGER_CHANNEL: Channel<CriticalSectionRawMutex, packets::LogPacket, 64> = Channel::new();
+//pub static TELEMETRY_CHANNEL: Channel<CriticalSectionRawMutex, packets::RosflightPacket, 64> =
+//    Channel::new();
+//pub static IMU_CHANNEL: Channel<CriticalSectionRawMutex, packets::ImuPacket, 64> = Channel::new();
+
+// ----------------------------- Telemetry Specific Structures ----------------------------
+
+pub struct BasicProcessor;
+
+impl EmbeddedComInterface for BasicProcessor {
+    async fn process_bytes(&mut self, buf: &[u8], num_bytes: usize) {
+        TELEM_RX.write_all(&buf[0..num_bytes]).await;
+        //defmt::trace!("Heartbeat: gets {} bytes", num_bytes);
+    }
+}
+
+pub struct TelemTx {
+    pub uart_tx: UartTx<'static, Async>,
+}
+
+pub struct TelemRx<ECI: EmbeddedComInterface> {
+    pub uart_rx: UartRx<'static, Async>,
+    pub byte_processor: ECI,
+}
+
+impl TelemTx {
+    pub async fn run(&mut self) {
+        loop {
+            let mut buf = [0u8; TX_BUFF_SIZE]; // read up to the whole buffer
+            let n = TELEM_TX.read(&mut buf).await;
+            if n > 0 && n <= TX_BUFF_SIZE {
+                let result = self
+                    .uart_tx
+                    .write(&mut buf[0..n])
+                    .await
+                    .map_err(|e| match e {
+                        _ => errors::TelemError::GenericTelemError("TelemTx Failed!"),
+                    });
+            }
+        }
+    }
+}
+
+// is this impl how this is supposed to work?
+impl<ECI: EmbeddedComInterface> TelemRx<ECI> {
+    pub async fn run(&mut self) {
+        let mut buf = [0u8; RX_BUFF_SIZE]; // Read as much as we can.
+        loop {
+            let result = self.uart_rx.read_until_idle(&mut buf).await;
+            match result {
+                Err(_) => {
+                    //defmt::trace!("System: Uart read error");
+                    Timer::after_millis(1).await;
+                }
+                Ok(n) => {
+                    if n > 0 && n <= RX_BUFF_SIZE {
+                        // added the above if statement to match phil's code
+                        //defmt::trace!("Heartbeat: Got {} bytes", n);
+                        self.byte_processor.process_bytes(&buf, n).await;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[embassy_executor::task]
+pub async fn task_rx(mut telem_rx: TelemRx<BasicProcessor>) {
+    telem_rx.run().await;
+}
+
+#[embassy_executor::task]
+pub async fn task_tx(mut telem_tx: TelemTx) {
+    //info!("task_tx");
+    telem_tx.run().await;
+}

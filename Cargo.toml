@@ -1,124 +1,25 @@
-#
-# ******************************************************************************
-# File     : Cargo.toml
-# Date     : May 8, 2025
-# ******************************************************************************
-#
-# Copyright (c) 2023, AeroVironment, Inc.
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1.Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
+[workspace]
+resolver = "3"
+members = ["nucleo", "rustflight_core", "sim", "stm_32"]
 
-# 2.Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
+# Define your core library as a shared dependency
+[workspace.dependencies]
+rustflight_core = { path = "./rustflight_core" }
+stm_32 = { path = "./stm_32" }
 
-# 3.Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-#******************************************************************************
-
-[package]
-name = "rustflight_alpha"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-bitflags = "2.6.0"
-micro_algebra = { git = "ssh://git@github.com/Derekbenj/micro_algebra.git", branch="turbomath_replace" }
-
-# everything needed specifically for nucleo
-embassy-embedded-hal = { version = "0.3.0", optional=true }
-embedded-hal-async = { version = "1.0", optional=true }
-embedded-io-async = { version = "0.6.1", optional=true }
-embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"], optional=true }
-embassy-stm32 = { version = "0.2.0", features = ["defmt", "stm32h753zi", "time-driver-tim5", "exti", "unstable-pac", "chrono", "rt", "memory-x"], optional=true }
-embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"], optional=true }
-embassy-sync = { version = "0.6.1",  features = ["defmt"], optional=true }
-embassy-futures = { version = "0.1.0", optional = true }
-cortex-m-rt = { version = "0.7.0", optional=true }
-cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"], optional=true }
-panic-probe = { version = "0.3", features = ["print-defmt"], optional=true }
-static_cell = { version = "2", optional=true }
-defmt-rtt = { version = "0.4", optional=true }
-defmt = { version= "0.3", optional=true }
-
-# Mavlink stuff
-mavio = { version = "0.5.5", default-features = false , features = ["embedded-io"], optional=true }
-mavspec = { version = "0.6.4", default-features = false, features = ["rust"], optional=true }
-embedded-hal-nb = { version = "1.0.0", optional=true }
-
-# Sim stuff
-serde = { version = "1.0", features = ["derive"], optional=true }
-tokio = { version = "1.45", optional=true }
-zenoh = { version = "1.4", optional=true }
-cdr = { version = "0.2.4", optional=true }
-
-[build-dependencies]
-mavspec = { version = "0.6.4", features = ["rust_gen"] }
-
-[lints.rust]
+[workspace.lints.rust]
 non_camel_case_types = "allow"
 non_snake_case = "allow"
 unused = "allow"
 
-[features]
-use_std = []
-default = [
-  "mavio",
-  "mavspec",
-  "embedded-hal-nb",
-]
-nucleo = [
-  "embassy-embedded-hal",
-  "embedded-hal-async",
-  "embedded-io-async",
-  "embassy-executor",
-  "embassy-stm32",
-  "embassy-time",
-  "embassy-sync",
-  "embassy-futures",
-  "cortex-m-rt",
-  "cortex-m",
-  "panic-probe",
-  "static_cell",
-  "defmt-rtt",
-  "defmt",
-  "mavio",
-  "mavspec",
-  "embedded-hal-nb",
-]
-sim = [
-  "serde",
-  "tokio",
-  "zenoh",
-  "cdr",
-]
-
 # cargo build/run
 [profile.dev]
-codegen-units = 1 # no parallel compilation (better optimization but slower build)
-debug = 2 # includes full debug info
+codegen-units = 1       # no parallel compilation (better optimization but slower build)
+debug = 2               # includes full debug info
 debug-assertions = true # runtime checks enabled
-incremental = false # no incremental compliation so more stable optimizations
-opt-level = 0 # no optimizations
-overflow-checks = true # integer overflow checks
+incremental = false     # no incremental compliation so more stable optimizations
+opt-level = 0           # no optimizations
+overflow-checks = true  # integer overflow checks
 
 # cargo build/run --release
 [profile.release]
@@ -126,17 +27,17 @@ codegen-units = 1
 debug = 2
 debug-assertions = false # disables debug checks
 incremental = false
-lto = 'fat' # link-time optimization (agressive whole-program optimization)
-opt-level = 3 # maximum optimization
-overflow-checks = false # no overflow checks... faster but less safe
+lto = 'fat'              # link-time optimization (agressive whole-program optimization)
+opt-level = 3            # maximum optimization
+overflow-checks = false  # no overflow checks... faster but less safe
 
 # cargo test
 [profile.test]
 codegen-units = 1
-debug = 2 # full debug info for test failure
+debug = 2               # full debug info for test failure
 debug-assertions = true # debug checks during tests enabled
 incremental = false
-opt-level = 3 # agressive optimization (faster runtime during tests)
+opt-level = 3           # agressive optimization (faster runtime during tests)
 overflow-checks = true
 
 # cargo test --release
@@ -148,26 +49,3 @@ incremental = false
 lto = 'fat'
 opt-level = 3
 overflow-checks = false
-
-# nucleo test binary
-[[bin]]
-name = "nucleo_sensors_test"
-test = false
-bench = false
-required-features = ["nucleo"]
-
-[[bin]]
-name = "nucleo_mavlink_test"
-test = false
-bench = false
-required-features = ["nucleo"]
-
-[[bin]]
-name = "sim_sensors_test"
-test = false
-bench = false
-required-features = ["sim"]
-
-[[test]]
-name = "dummy_mavlink_test"
-
