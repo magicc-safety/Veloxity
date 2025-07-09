@@ -1,8 +1,7 @@
-use crate::board::sim_board::Sim;
-use crate::comm_manager::comm_link_trait::mavlink::MavlinkInterface;
 use cdr::{CdrLe, Infinite};
-use rustflight_alpha::*;
+use rustflight_core::comm_manager::comm_link_trait::mavlink::MavlinkInterface;
 use serde::{Deserialize, Serialize};
+use sim::board::Sim;
 use zenoh::bytes::ZBytes;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -20,7 +19,8 @@ async fn main() {
         .unwrap();
 
     let mavlink = MavlinkInterface::new();
-    let mut rosflight = rustflight::rustflight_sensors_comms::ROSFlight::init(1000, sim, mavlink);
+    let mut rosflight =
+        rustflight_core::rustflight::rustflight_sensors_comms::ROSFlight::init(1000, sim, mavlink);
 
     while let Ok(query) = tick_handler.recv_async().await {
         println!("Received query!");
