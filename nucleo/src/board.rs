@@ -35,11 +35,12 @@
 // ******************************************************************************
 // **/
 use crate::board_config::board_config;
-use rustflight_core::board::Board;
+use rustflight_core::board::BoardTrait;
 use rustflight_core::comm_manager;
 use rustflight_core::errors;
 use rustflight_core::packets;
 use stm_32::peripherals;
+use stm_32::*;
 
 use cortex_m_rt::entry;
 use defmt::*;
@@ -148,12 +149,12 @@ unsafe fn SAI4() {
     unsafe { P4_EXECUTOR.on_interrupt() };
 }
 
-pub struct Nucleo {
+pub struct Board {
     probe: [Output<'static>; 4],
     servos: peripherals::pwm::ServoMonstrosity,
 }
 
-impl Board for Nucleo {
+impl BoardTrait for Board {
     fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         peripherals::bmi08x::IMU_SIGNAL.try_take()
     }
@@ -226,7 +227,7 @@ impl Board for Nucleo {
     }
 }
 
-impl Nucleo {
+impl Board {
     fn probe_hi(&mut self, id: usize) {
         self.probe[id].set_high(); // so we can see something on the logic analyzer.
     }
@@ -239,7 +240,7 @@ impl Nucleo {
         self.probe[id].toggle(); // so we can see something on the logic analyzer.
     }
 
-    pub fn new() -> Nucleo {
+    pub fn new() -> Board {
         let p: EMBASSY_Peripherals = embassy_stm32::init(board_config());
         //let t = TestBoard{p: embassy_stm32::init(board_config())};
         // SPI1 Bus ///////////////////////////////////////////
@@ -579,6 +580,6 @@ impl Nucleo {
             Output::new(p.PF2, Level::Low, Speed::Low),
             Output::new(p.PG0, Level::Low, Speed::Low),
         ];
-        Nucleo { probe, servos }
+        Board { probe, servos }
     }
 }

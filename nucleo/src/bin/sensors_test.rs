@@ -36,14 +36,15 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Nucleo;
+use crate::board::Board;
 use nucleo::*;
+use stm_32::*;
 
 use cortex_m_rt::entry;
 
 #[entry]
 fn main() -> ! {
-    let mut b = Nucleo::new();
+    let mut b = Board::new();
     let mut rosflight = rustflight_core::rustflight::rustflight_sensors::ROSFlight::init(1000, b);
     rosflight.run();
 

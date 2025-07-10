@@ -173,7 +173,7 @@ use micro_algebra::stack::quaternion::Quaternion;
 
 // ---------------------------------------------------------------------- End Logging on Host Computer ---------------------------------------------------------------------
 
-use crate::board::Board;
+use crate::board::BoardTrait;
 use crate::errors;
 use crate::packets;
 use crate::params::Params;
@@ -283,7 +283,7 @@ impl Sensors {
 
     // pub fn update_battery_monitor_multipliers() {}
 
-    pub fn run<B: Board>(&mut self, board: &mut B) {
+    pub fn run<B: BoardTrait>(&mut self, board: &mut B) {
         // ------------------------ IMU ------------------------
         match board.imu_read() {
             Some(Ok(imu_data)) => {
@@ -462,7 +462,7 @@ impl Sensors {
         // ------------------------ GNSS ------------------------
         match board.gnss_read() {
             Some(Ok(gnss_data)) => {
-                //println!("GNSS: {}", gnss_data.header.timestamp);
+                println!("GNSS: {}", gnss_data.header.timestamp);
 
                 self.gnss_packet = Some(gnss_data);
 

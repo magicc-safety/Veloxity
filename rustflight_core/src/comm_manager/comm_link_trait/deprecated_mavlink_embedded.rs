@@ -45,7 +45,7 @@ use defmt;
 
 use crate::board;
 use crate::comm_manager::comm_link_trait::CommInterface;
-use crate::mavlink::dialects::rosflight::{messages, Rosflight};
+use crate::mavlink::dialects::rosflight::{Rosflight, messages};
 use crate::packets;
 use crate::params;
 
@@ -139,7 +139,7 @@ pub struct MavlinkInterface {
     pub offboard_control: Option<messages::OffboardControl>,
 }
 
-impl<B: board::Board> CommInterface<B> for MavlinkInterface {
+impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
     fn send_heartbeat(&mut self, board: &B, system_id: u8, fixed_wing: bool) -> bool {
         let mut buf = [0u8; 100];
         //let byte_count = telem::heartbeat(&mut buf);

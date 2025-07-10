@@ -40,7 +40,7 @@ use crate::board;
 use crate::packets;
 use crate::params;
 
-pub trait CommInterface<B: board::Board> {
+pub trait CommInterface<B: board::BoardTrait> {
     fn send_heartbeat(&mut self, board: &mut B, system_id: u8, fixed_wing: bool) -> bool;
     fn send_named_value(
         &mut self,

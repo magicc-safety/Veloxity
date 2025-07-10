@@ -41,7 +41,7 @@ mod dummy;
 TODO: Should encode the priority of the packet, with 0 being highest.
 */
 
-pub trait Board {
+pub trait BoardTrait {
     /*
     TODO:
         * Check which functions actually need `&mut self` vs just passing &self

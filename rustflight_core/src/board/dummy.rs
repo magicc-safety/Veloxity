@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
+use crate::board::BoardTrait;
 use crate::errors;
 use crate::packets;
 use crate::params::Params;
@@ -42,7 +42,7 @@ use crate::sensors;
 
 pub struct DummyBoard;
 
-impl Board for DummyBoard {
+impl BoardTrait for DummyBoard {
     fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         None
     }

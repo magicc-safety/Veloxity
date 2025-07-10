@@ -35,16 +35,16 @@
 // ******************************************************************************
 // **/
 // THIS CODE HAS BEEN MADE SAFE BUT SAFETY HAS NOT BEEN TESTED
-use crate::{board::Board, packets, params, sensors};
+use crate::{board::BoardTrait, packets, params, sensors};
 
-pub struct ROSFlight<B: Board> {
+pub struct ROSFlight<B: BoardTrait> {
     loop_time_us: u32,
     pub board: B, // <-- made public on purpose: so that the tests we write aren't subject to the
     // loop. we need to pull both board and comm_link out...
     sensors: sensors::Sensors,
 }
 
-impl<B: Board> ROSFlight<B> {
+impl<B: BoardTrait> ROSFlight<B> {
     pub fn init(_loop_time_us: u32, board: B) -> Self {
         Self {
             loop_time_us: _loop_time_us,

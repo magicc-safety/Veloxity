@@ -37,9 +37,9 @@
 use crate::board;
 use crate::comm_manager::comm_link_trait::CommInterface;
 use crate::comm_manager::mavlink_parser;
-use crate::mavlink::dialects::rosflight::{messages, Rosflight};
-use mavio::prelude::*;
+use crate::mavlink::dialects::rosflight::{Rosflight, messages};
 use mavio::Frame;
+use mavio::prelude::*;
 
 static RX_BUFF_SIZE: usize = 2048;
 
@@ -141,7 +141,7 @@ impl MavlinkInterface {
     }
 }
 
-impl<B: board::Board> CommInterface<B> for MavlinkInterface {
+impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
     fn handle_incoming_messages(&mut self, board: &mut B) {
         let mut buf = [0u8; RX_BUFF_SIZE];
         match board.serial_rx_read(&mut buf) {

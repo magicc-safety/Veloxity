@@ -1,5 +1,5 @@
 use crate::board_config;
-use rustflight_core::board::Board;
+use rustflight_core::board::BoardTrait;
 use rustflight_core::comm_manager;
 use rustflight_core::errors;
 use rustflight_core::packets;
@@ -14,7 +14,7 @@ use zenoh::pubsub::{Publisher, Subscriber};
 use zenoh::sample::Sample;
 use zenoh::session::Session;
 
-pub struct Sim {
+pub struct Board {
     zenoh_connect_session: Session,
     pub zenoh_listen_session: Session,
     //imu_temp_chan: mpsc::Receiver<board_config::Status>,
@@ -26,7 +26,7 @@ pub struct Sim {
     //diffpress_chan: mpsc::Receiver<board_config::Status>,
 }
 
-impl Board for Sim {
+impl BoardTrait for Board {
     fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         None
     }
@@ -103,8 +103,8 @@ impl Board for Sim {
     }
 }
 
-impl Sim {
-    pub async fn new() -> Sim {
+impl Board {
+    pub async fn new() -> Board {
         let mut zenoh_connect_config = Config::default();
         zenoh_connect_config
             .insert_json5("connect/endpoints", r#"["tcp/127.0.0.1:7447"]"#)

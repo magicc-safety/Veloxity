@@ -37,13 +37,13 @@
 // THIS CODE HAS NOT BEEN MADE SAFE YET
 //use crate::mavlink::dialects::rosflight::{self as rosflight_dialect};
 use crate::{
-    board::Board, comm_manager, comm_manager::comm_link_trait::CommInterface, errors, packets,
+    board::BoardTrait, comm_manager, comm_manager::comm_link_trait::CommInterface, errors, packets,
     params, sensors,
 };
 
 pub struct ROSFlight<B, T>
 where
-    B: Board,
+    B: BoardTrait,
     T: CommInterface<B>,
 {
     loop_time_us: u32,
@@ -55,7 +55,7 @@ where
 
 impl<B, T> ROSFlight<B, T>
 where
-    B: Board,
+    B: BoardTrait,
     T: CommInterface<B>,
 {
     pub fn init(_loop_time_us: u32, board: B, comm_link: T) -> Self {

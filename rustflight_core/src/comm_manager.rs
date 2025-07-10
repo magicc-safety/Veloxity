@@ -42,7 +42,7 @@ use core::marker::PhantomData;
 
 pub struct CommManager<B, T>
 where
-    B: board::Board,
+    B: board::BoardTrait,
     T: comm_link_trait::CommInterface<B>,
 {
     sysid: u8,
@@ -52,7 +52,7 @@ where
 
 impl<B, T> CommManager<B, T>
 where
-    B: board::Board,
+    B: board::BoardTrait,
     T: comm_link_trait::CommInterface<B>,
 {
     pub fn new(comm_link: T) -> Self {

@@ -36,15 +36,16 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Nucleo;
+use crate::board::Board;
 use nucleo::*;
 use rustflight_core::comm_manager::comm_link_trait::mavlink::MavlinkInterface;
+use stm_32::*;
 
 use cortex_m_rt::entry;
 
 #[entry]
 fn main() -> ! {
-    let nucleo = Nucleo::new();
+    let nucleo = Board::new();
     let mavlink = MavlinkInterface::new();
     let mut rosflight = rustflight_core::rustflight::rustflight_sensors_comms::ROSFlight::init(
         1000, nucleo, mavlink,

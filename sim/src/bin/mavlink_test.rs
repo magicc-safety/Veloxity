@@ -1,7 +1,7 @@
 use cdr::{CdrLe, Infinite};
 use rustflight_core::comm_manager::comm_link_trait::mavlink::MavlinkInterface;
 use serde::{Deserialize, Serialize};
-use sim::board::Sim;
+use sim::board::Board;
 use zenoh::bytes::ZBytes;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -11,7 +11,7 @@ struct SimpleBoolResponse {
 
 #[tokio::main]
 async fn main() {
-    let sim = Sim::new().await;
+    let sim = Board::new().await;
     let tick_handler = sim
         .zenoh_listen_session
         .declare_queryable("rt/tick")

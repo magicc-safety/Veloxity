@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use super::board::Board;
+use crate::board::BoardTrait;
 mod param_types;
 pub use param_types::*;
 
@@ -1561,12 +1561,12 @@ impl Params {
         }
     }
 
-    pub fn init(&mut self, board: &mut dyn Board) {
+    pub fn init(&mut self, board: &mut dyn BoardTrait) {
         self.set_defaults();
         self.write(board);
     }
 
-    pub fn write(&mut self, board: &mut dyn Board) -> bool {
+    pub fn write(&mut self, board: &mut dyn BoardTrait) -> bool {
         // if !board.memory_write(self) {
         //     return false;
         // }
@@ -1574,7 +1574,7 @@ impl Params {
         true
     }
 
-    pub fn read(&mut self, board: &dyn Board) -> bool {
+    pub fn read(&mut self, board: &dyn BoardTrait) -> bool {
         // if !board.memory_read(self, p: &Params) {
         //     return false;
         // }

@@ -55,3 +55,20 @@ pub fn synch_at_slot(slot_rate: Duration) -> Instant {
 pub fn current_slot(timestamp: Instant, sample_period: Duration, slot_period: Duration) -> u64 {
     (timestamp.as_micros() % sample_period.as_micros()) / slot_period.as_micros()
 }
+
+//------------ Re-Exports ------------
+pub use cortex_m;
+pub use cortex_m_rt;
+pub use defmt;
+pub use defmt_rtt;
+pub use embassy_embedded_hal;
+pub use embassy_executor;
+pub use embassy_futures;
+pub use embassy_stm32;
+pub use embassy_sync;
+pub use embassy_time;
+pub use embedded_hal_async;
+pub use embedded_hal_nb;
+pub use embedded_io_async;
+pub use panic_probe;
+pub use static_cell;
