@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board_config::board_config;
 use rustflight_core::board::BoardTrait;
 use rustflight_core::comm_manager;
 use rustflight_core::errors;
@@ -42,112 +41,7 @@ use rustflight_core::packets;
 use stm_32::peripherals;
 use stm_32::*;
 
-use cortex_m_rt::entry;
-use defmt::*;
-
-use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
-use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
-use embassy_executor::InterruptExecutor;
-use embassy_stm32::Peripherals as EMBASSY_Peripherals;
-use embassy_stm32::bind_interrupts;
-use embassy_stm32::dma::NoDma;
-use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::OutputType;
-use embassy_stm32::gpio::Pull;
-use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::i2c;
-use embassy_stm32::interrupt;
-use embassy_stm32::interrupt::InterruptExt;
-use embassy_stm32::interrupt::Priority;
-use embassy_stm32::mode::Async;
-use embassy_stm32::peripherals as EMBASSY_peripherals;
-use embassy_stm32::sdmmc;
-use embassy_stm32::spi;
-use embassy_stm32::time::Hertz;
-use embassy_stm32::time::mhz;
-use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_stm32::usart;
-use embassy_stm32::usart::BufferedUart;
-use embassy_stm32::usart::BufferedUartTx;
-use embassy_stm32::usart::Uart;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_sync::mutex::Mutex;
-use embassy_sync::pipe::Pipe;
-use embassy_time::Duration;
-use embassy_time::Instant;
-use embedded_io_async::BufRead;
-use static_cell::StaticCell;
-use {defmt_rtt as _, panic_probe as _};
-
-use embedded_hal_async::spi::SpiDevice as _;
-
-static SPI1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
-    StaticCell::new();
-static SPI2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
-    StaticCell::new();
-static SPI4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
-    StaticCell::new();
-static I2C1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
-    StaticCell::new();
-
-pub struct UartResources {
-    pub uart: usart::BufferedUart<'static>,
-}
-
-bind_interrupts!(struct IrqsI2c1 {
-    I2C1_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C1>;
-    I2C1_ER => i2c::ErrorInterruptHandler<EMBASSY_peripherals::I2C1>;
-});
-
-bind_interrupts!(struct Usart1Irqs {
-    USART1 => usart::InterruptHandler<EMBASSY_peripherals::USART1>;
-});
-
-bind_interrupts!(struct Usart2Irqs {
-    USART2 => usart::InterruptHandler<EMBASSY_peripherals::USART2>;
-});
-
-bind_interrupts!(struct Uart7Irqs {
-    UART7 => usart::InterruptHandler<EMBASSY_peripherals::UART7>;
-});
-
-bind_interrupts!(struct Sdmmc1Irqs {
-    SDMMC1 => sdmmc::InterruptHandler<EMBASSY_peripherals::SDMMC1>;
-});
-
-// Use SAI1,2,3,4 as interrupt vectors since we are not using audio
-// 1-4 are only conciedntally the same as I picked for the interrupt levels
-
-static P0_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-#[interrupt]
-unsafe fn SDMMC2() {
-    unsafe { P0_EXECUTOR.on_interrupt() };
-}
-
-static P1_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-#[interrupt]
-unsafe fn SAI1() {
-    unsafe { P1_EXECUTOR.on_interrupt() };
-}
-
-static P2_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-#[interrupt]
-unsafe fn SAI2() {
-    unsafe { P2_EXECUTOR.on_interrupt() };
-}
-
-static P3_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-#[interrupt]
-unsafe fn SAI3() {
-    unsafe { P3_EXECUTOR.on_interrupt() };
-}
-
-static P4_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-#[interrupt]
-unsafe fn SAI4() {
-    unsafe { P4_EXECUTOR.on_interrupt() };
-}
+include!("../../stm_32/stm32h7x3_common.rs");
 
 pub struct Board {
     probe: [Output<'static>; 4],
@@ -241,8 +135,8 @@ impl Board {
     }
 
     pub fn new() -> Board {
-        let p: EMBASSY_Peripherals = embassy_stm32::init(board_config());
-        //let t = TestBoard{p: embassy_stm32::init(board_config())};
+        let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(8));
+        //let t = TestBoard{p: embassy_stm32::init(clock_config())};
         // SPI1 Bus ///////////////////////////////////////////
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
         spi1_config.frequency = mhz(1);
