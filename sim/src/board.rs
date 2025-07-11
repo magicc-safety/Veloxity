@@ -1,4 +1,4 @@
-use crate::board_config;
+use crate::ros_messages;
 use rustflight_core::board::BoardTrait;
 use rustflight_core::comm_manager;
 use rustflight_core::errors;
@@ -17,13 +17,13 @@ use zenoh::session::Session;
 pub struct Board {
     zenoh_connect_session: Session,
     pub zenoh_listen_session: Session,
-    //imu_temp_chan: mpsc::Receiver<board_config::Status>,
-    //imu_data_chan: mpsc::Receiver<board_config::Status>,
-    //battery_chan: mpsc::Receiver<board_config::BatteryStatus>,
-    gnss_chan: mpsc::Receiver<board_config::GNSS>,
-    baro_chan: mpsc::Receiver<board_config::Barometer>,
-    //mag_chan: mpsc::Receiver<board_config::Status>,
-    //diffpress_chan: mpsc::Receiver<board_config::Status>,
+    //imu_temp_chan: mpsc::Receiver<ros_messages::Status>,
+    //imu_data_chan: mpsc::Receiver<ros_messages::Status>,
+    //battery_chan: mpsc::Receiver<ros_messages::BatteryStatus>,
+    gnss_chan: mpsc::Receiver<ros_messages::GNSS>,
+    baro_chan: mpsc::Receiver<ros_messages::Barometer>,
+    //mag_chan: mpsc::Receiver<ros_messages::Status>,
+    //diffpress_chan: mpsc::Receiver<ros_messages::Status>,
 }
 
 impl BoardTrait for Board {
@@ -120,14 +120,14 @@ impl Board {
         println!("Zenoh sessions opened!");
 
         // Establish all channels for sub
-        //let (chan_send_imu_temp, mut chan_recv_imu_temp) = mpsc::channel::<board_config::Status>(1);
-        //let (chan_send_imu_data, mut chan_recv_imu_data) = mpsc::channel::<board_config::Status>(1);
+        //let (chan_send_imu_temp, mut chan_recv_imu_temp) = mpsc::channel::<ros_messages::Status>(1);
+        //let (chan_send_imu_data, mut chan_recv_imu_data) = mpsc::channel::<ros_messages::Status>(1);
         //let (chan_send_battery, mut chan_recv_battery) =
-        //    mpsc::channel::<board_config::BatteryStatus>(1);
-        let (chan_send_gnss, mut chan_recv_gnss) = mpsc::channel::<board_config::GNSS>(1);
-        let (chan_send_baro, mut chan_recv_baro) = mpsc::channel::<board_config::Barometer>(1);
-        //let (send_mag, mut recv_baro) = mpsc::channel::<board_config::Barometer>(1);
-        //let (send_diffpressure, mut recv_diffpressure) = mpsc::channel::<board_config::Barometer>(1);
+        //    mpsc::channel::<ros_messages::BatteryStatus>(1);
+        let (chan_send_gnss, mut chan_recv_gnss) = mpsc::channel::<ros_messages::GNSS>(1);
+        let (chan_send_baro, mut chan_recv_baro) = mpsc::channel::<ros_messages::Barometer>(1);
+        //let (send_mag, mut recv_baro) = mpsc::channel::<ros_messages::Barometer>(1);
+        //let (send_diffpressure, mut recv_diffpressure) = mpsc::channel::<ros_messages::Barometer>(1);
 
         // Establish all subscribers
         //let sub_imu_temp = zenoh_listen_session
@@ -166,7 +166,7 @@ impl Board {
         println!("Zenoh subscribers established");
 
         // establish all channels for pub
-        let (chan_send_pwm, mut chan_recv_pwm) = mpsc::channel::<board_config::Status>(1);
+        let (chan_send_pwm, mut chan_recv_pwm) = mpsc::channel::<ros_messages::Status>(1);
 
         // establish publisher
         let pub_pwm_output = zenoh_connect_session
@@ -208,10 +208,10 @@ impl Board {
 
 //async fn capture_battery(
 //    sub: Subscriber<FifoChannelHandler<Sample>>,
-//    chan: mpsc::Sender<board_config::BatteryStatus>,
+//    chan: mpsc::Sender<ros_messages::BatteryStatus>,
 //) {
 //    while let Ok(sample) = sub.recv_async().await {
-//        match cdr::deserialize::<board_config::BatteryStatus>(&sample.payload().to_bytes()) {
+//        match cdr::deserialize::<ros_messages::BatteryStatus>(&sample.payload().to_bytes()) {
 //            Ok(battery_status) => {
 //                if chan.send(battery_status).await.is_err() {
 //                    println!("Error putting battery status in channel!");
@@ -224,10 +224,10 @@ impl Board {
 
 async fn capture_gnss(
     sub: Subscriber<FifoChannelHandler<Sample>>,
-    chan: mpsc::Sender<board_config::GNSS>,
+    chan: mpsc::Sender<ros_messages::GNSS>,
 ) {
     while let Ok(sample) = sub.recv_async().await {
-        match cdr::deserialize::<board_config::GNSS>(&sample.payload().to_bytes()) {
+        match cdr::deserialize::<ros_messages::GNSS>(&sample.payload().to_bytes()) {
             Ok(gnss) => {
                 if chan.send(gnss).await.is_err() {
                     println!("Error putting gnss in channel!");
@@ -240,10 +240,10 @@ async fn capture_gnss(
 
 async fn capture_baro(
     sub: Subscriber<FifoChannelHandler<Sample>>,
-    chan: mpsc::Sender<board_config::Barometer>,
+    chan: mpsc::Sender<ros_messages::Barometer>,
 ) {
     while let Ok(sample) = sub.recv_async().await {
-        match cdr::deserialize::<board_config::Barometer>(&sample.payload().to_bytes()) {
+        match cdr::deserialize::<ros_messages::Barometer>(&sample.payload().to_bytes()) {
             Ok(barometer) => {
                 if chan.send(barometer).await.is_err() {
                     println!("Error putting barometer in channel!");
@@ -260,7 +260,7 @@ async fn capture_baro(
 
 //async fn capture_diff_pressure(sub: Subscriber<FifoChannelHandler<Sample>>) {}
 
-async fn publish_pwm(publisher: Publisher<'_>, mut chan: mpsc::Receiver<board_config::Status>) {
+async fn publish_pwm(publisher: Publisher<'_>, mut chan: mpsc::Receiver<ros_messages::Status>) {
     if let Some(pwm) = chan.recv().await {
         let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&pwm, Infinite).unwrap());
         if publisher.put(zb).await.is_err() {

@@ -34,6 +34,8 @@
 // *
 // ******************************************************************************
 // **/
+//use defmt;
+
 use crate::board;
 use crate::comm_manager::comm_link_trait::CommInterface;
 use crate::comm_manager::mavlink_parser;
@@ -130,7 +132,7 @@ impl MavlinkInterface {
     }
 
     pub fn handle_msg_heartbeat(&mut self, msg: messages::Heartbeat) {
-        //defmt::trace!(
+        //defmt::debug!(
         //    "🎉 Heartbeat: autopilot={}, mode={}, status={}, custom_mode: {}",
         //    msg.autopilot,
         //    msg.base_mode,

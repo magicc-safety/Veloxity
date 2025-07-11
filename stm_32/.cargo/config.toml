@@ -7,10 +7,10 @@ rustflags = [
   "linker=rust-lld",
   "-C",
   "link-arg=--nmagic",
-  #"-C",
-  #"link-arg=-Tlink.x",
-  #"-C",
-  #"link-arg=-Tdefmt.x",
+  "-C",
+  "link-arg=-Tlink.x",
+  "-C",
+  "link-arg=-Tdefmt.x",
 ]
 
 # Environment variables are also applied correctly from this file

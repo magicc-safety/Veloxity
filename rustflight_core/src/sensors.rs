@@ -462,7 +462,7 @@ impl Sensors {
         // ------------------------ GNSS ------------------------
         match board.gnss_read() {
             Some(Ok(gnss_data)) => {
-                println!("GNSS: {}", gnss_data.header.timestamp);
+                //println!("GNSS: {}", gnss_data.header.timestamp);
 
                 self.gnss_packet = Some(gnss_data);
 
