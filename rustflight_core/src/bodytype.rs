@@ -1,8 +1,6 @@
-#![no_std]
-
-// /*
+// /**
 // ******************************************************************************
-// * File     : lib.rs
+// * File     : bodytype.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -36,21 +34,13 @@
 // *
 // ******************************************************************************
 // **/
-pub mod board;
-pub mod bodytype;
-pub mod comm_manager;
-pub mod controller;
-pub mod errors;
-pub mod estimator;
-pub mod mixer;
-pub mod packets;
-pub mod params;
-pub mod rustflight;
-pub mod sensors;
-mod state_machine;
-//pub(crate) mod units;
+use crate::{controller::Controller, estimator::Estimator, mixer::Mixer, packets};
 
-// MAVLINK Specific
-pub mod mavlink {
-    include!(concat!(env!("OUT_DIR"), "/mavlink_generated/mod.rs"));
+pub trait BodyType {
+    type RequiredSensors: packets::HList;
+    type SculptIndicies: packets::HList;
+
+    type Estimator: Estimator;
+    type Controller: Controller;
+    type Mixer: Mixer;
 }

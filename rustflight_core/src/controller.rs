@@ -1,8 +1,6 @@
-#![no_std]
-
 // /*
 // ******************************************************************************
-// * File     : lib.rs
+// * File     : controller.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -36,21 +34,8 @@
 // *
 // ******************************************************************************
 // **/
-pub mod board;
-pub mod bodytype;
-pub mod comm_manager;
-pub mod controller;
-pub mod errors;
-pub mod estimator;
-pub mod mixer;
-pub mod packets;
-pub mod params;
-pub mod rustflight;
-pub mod sensors;
-mod state_machine;
-//pub(crate) mod units;
-
-// MAVLINK Specific
-pub mod mavlink {
-    include!(concat!(env!("OUT_DIR"), "/mavlink_generated/mod.rs"));
+pub trait Controller {
+    type State;
+    type ControlOutput;
+    fn control(&mut self, state: &Self::State) -> Self::ControlOutput;
 }

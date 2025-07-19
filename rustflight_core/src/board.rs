@@ -49,6 +49,14 @@ pub trait BoardTrait {
         * Check return types. Can we encode anything in Enums? For example, change booleans to enums
      */
 
+    type RawSensorSet: packets::HList + Default;
+    type ProcessedSensorSet: packets::HList;
+    type Processor: packets::PolyFunc;
+
+    fn update_sensors(&self, sensors: &mut Self::RawSensorSet);
+}
+/*
+
     // Setup
     // fn init_board(&mut self);
     // fn board_reset(&mut self, bootloader: bool);
@@ -106,3 +114,4 @@ pub trait BoardTrait {
     // fn backup_memory_write(&mut self, src: &[u8]);
     // fn backup_memory_clear(&mut self, len: usize);
 }
+*/

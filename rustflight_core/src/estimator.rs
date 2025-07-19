@@ -34,6 +34,15 @@
 // *
 // ******************************************************************************
 // **/
+use crate::packets;
+
+pub trait Estimator {
+    type Inputs: packets::HList;
+    type State;
+    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State;
+}
+
+/*
 use crate::errors::*;
 use crate::params::Params;
 use crate::sensors::*;
@@ -112,7 +121,7 @@ impl Estimator {
     pub fn run(&self) {}
 
     pub fn can_use_accel() {} // TODO rather than have a boolean to mark true or false, just use a
-                              // Result<> type... then you can get rid of this function
+    // Result<> type... then you can get rid of this function
 
     pub fn can_use_extatt() {} // DITTO
 
@@ -132,3 +141,4 @@ impl Estimator {
 
     pub fn quaternion_to_dcm() {} // TODO should this be in the math library?
 }
+*/

@@ -34,17 +34,35 @@
 // *
 // ******************************************************************************
 // **/
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum TelemError {
     GenericTelemError(&'static str),
 }
 
-#[derive(Debug, Clone)]
+impl Default for TelemError {
+    fn default() -> Self {
+        TelemError::GenericTelemError("Default TelemError")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum EstimatorError {
     GenericEstimatorError(&'static str),
 }
 
-#[derive(Debug, Clone)]
+impl Default for EstimatorError {
+    fn default() -> Self {
+        EstimatorError::GenericEstimatorError("Default EstimatorError")
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum SensorError {
     GenericSensorError(&'static str),
+}
+
+impl Default for SensorError {
+    fn default() -> Self {
+        SensorError::GenericSensorError("Default SensorError")
+    }
 }
