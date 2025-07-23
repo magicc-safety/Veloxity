@@ -77,7 +77,7 @@ pub trait CommInterface<B: board::BoardTrait> {
     fn send_baro(&mut self, board: &mut B, sysem_id: u8, packet: &packets::BaroPacket);
     fn send_diff_pressure(&mut self, board: &mut B, system_id: u8, packet: &packets::PitotPacket);
     fn send_imu(&mut self, board: &mut B, system_id: u8, packet: &packets::ImuPacket);
-    fn send_log_message(&mut self, board: &mut B, system_id: u8, packet: &packets::LogPacket);
+    //fn send_log_message(&mut self, board: &mut B, system_id: u8, packet: &packets::LogPacket);
     fn send_mag(&mut self, board: &mut B, system_id: u8, packet: &packets::MagPacket);
     fn send_rc_raw(&mut self, board: &mut B, system_id: u8, packet: &packets::RcPacket);
     fn send_range(&mut self, board: &mut B, system_id: u8, packet: &packets::RangePacket);

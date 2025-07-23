@@ -51,7 +51,6 @@ use embedded_hal_async::spi::SpiDevice as _;
 use crate::synch_at;
 use rustflight_core::errors;
 use rustflight_core::packets;
-use rustflight_core::sensors;
 
 use core::module_path;
 //use defmt::info;

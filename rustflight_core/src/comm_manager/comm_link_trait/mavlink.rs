@@ -139,7 +139,8 @@ impl MavlinkInterface {
         //    msg.system_status,
         //    msg.custom_mode,
         //);
-        //self.heartbeat = Some(msg);
+        self.heartbeat = Some(msg);
+        //println!("🎉 Heartbeat Received!!!")
     }
 }
 
@@ -346,13 +347,13 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
         packet: &crate::packets::AttitudePacket,
     ) {
     }
-    fn send_log_message(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        packet: &crate::packets::LogPacket,
-    ) {
-    }
+    //fn send_log_message(
+    //    &mut self,
+    //    board: &mut B,
+    //    system_id: u8,
+    //    packet: &crate::packets::LogPacket,
+    //) {
+    //}
     fn send_output_raw(
         &mut self,
         board: &mut B,

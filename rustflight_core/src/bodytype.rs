@@ -34,11 +34,12 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{controller::Controller, estimator::Estimator, mixer::Mixer, packets};
+use crate::{controller::Controller, estimator::Estimator, hlist::*, mixer::Mixer};
+
+pub mod quadrotor;
 
 pub trait BodyType {
-    type RequiredSensors: packets::HList;
-    type SculptIndicies: packets::HList;
+    type RequiredSensors: HList;
 
     type Estimator: Estimator;
     type Controller: Controller;

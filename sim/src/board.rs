@@ -2,10 +2,12 @@ use crate::ros_messages;
 use rustflight_core::board::BoardTrait;
 use rustflight_core::comm_manager;
 use rustflight_core::errors;
+use rustflight_core::hlist_type;
 use rustflight_core::packets;
-use rustflight_core::packets::GNSSPacket;
+use rustflight_core::sensorprocessors;
 
 use cdr::{CdrLe, Infinite};
+use tokio::io::Empty;
 use tokio::sync::mpsc;
 use zenoh::Config;
 use zenoh::bytes::{Encoding, ZBytes};
@@ -26,6 +28,72 @@ pub struct Board {
     //diffpress_chan: mpsc::Receiver<ros_messages::Status>,
 }
 
+impl BoardTrait for Board {
+    type RawSensorSet = hlist_type![
+        Option<Result<packets::ImuPacket, errors::SensorError>>,
+        Option<Result<packets::MagPacket, errors::SensorError>>,
+        Option<Result<packets::BaroPacket, errors::SensorError>>,
+        Option<Result<packets::PitotPacket, errors::SensorError>>,
+        Option<Result<packets::RangePacket, errors::SensorError>>,
+        Option<Result<packets::GNSSPacket, errors::SensorError>>,
+        Option<Result<packets::BatteryPacket, errors::SensorError>>,
+        Option<Result<packets::RcPacket, errors::SensorError>>,
+        Option<Result<packets::AttitudePacket, errors::SensorError>>
+    ];
+
+    type ProcessedSensorSet = hlist_type![
+        Option<packets::ImuPacket>,
+        Option<packets::MagPacket>,
+        Option<packets::BaroPacket>,
+        Option<packets::PitotPacket>,
+        Option<packets::RangePacket>,
+        Option<packets::GNSSPacket>,
+        Option<packets::BatteryPacket>,
+        Option<packets::RcPacket>,
+        Option<packets::AttitudePacket>
+    ];
+
+    type ProcessorHList = hlist_type![
+        sensorprocessors::PassthroughImuProcessor,
+        sensorprocessors::PassthroughMagProcessor,
+        sensorprocessors::PassthroughBaroProcessor,
+        sensorprocessors::PassthroughPitotProcessor,
+        sensorprocessors::PassthroughRangeProcessor,
+        sensorprocessors::PassthroughGNSSProcessor,
+        sensorprocessors::PassthroughBatteryProcessor,
+        sensorprocessors::PassthroughRcProcessor,
+        sensorprocessors::PassthroughAttitudeProcessor
+    ];
+
+    fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
+        sensors.0 = Some(Ok(packets::ImuPacket::default()));
+        sensors.1.0 = Some(Ok(packets::MagPacket::default()));
+        sensors.1.1.0 = Some(Ok(packets::BaroPacket::default()));
+        sensors.1.1.1.0 = Some(Ok(packets::PitotPacket::default()));
+        sensors.1.1.1.1.0 = Some(Ok(packets::RangePacket::default()));
+        sensors.1.1.1.1.1.0 = match self.gnss_chan.try_recv() {
+            Ok(gnss) => Some(Ok(packets::GNSSPacket::default())),
+            Err(e) => match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => None,
+                _ => Some(Err(errors::SensorError::GenericSensorError(
+                    "generic gnss error",
+                ))),
+            },
+        };
+        sensors.1.1.1.1.1.1.0 = Some(Ok(packets::BatteryPacket::default()));
+        sensors.1.1.1.1.1.1.1.0 = Some(Ok(packets::RcPacket::default()));
+        sensors.1.1.1.1.1.1.1.1.0 = Some(Ok(packets::AttitudePacket::default()));
+    }
+
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+        None
+    }
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
+        None
+    }
+}
+
+/*
 impl BoardTrait for Board {
     fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         None
@@ -102,6 +170,7 @@ impl BoardTrait for Board {
         None
     }
 }
+*/
 
 impl Board {
     pub async fn new() -> Board {

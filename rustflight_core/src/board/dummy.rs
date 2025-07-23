@@ -36,160 +36,66 @@
 // **/
 use crate::board::BoardTrait;
 use crate::errors;
+use crate::hlist_type;
 use crate::packets;
-use crate::params::Params;
-use crate::sensors;
+use crate::sensorprocessors;
 
 #[derive(Default)]
 pub struct DummyBoard;
 
-#[derive(Default, Copy, Clone)]
-struct ImuProcessor;
-impl<'a> packets::Func<&'a mut Option<packets::ImuPacket>> for ImuProcessor {
-    type Output = Result<Option<packets::ImuPacket>>;
-    fn call(
-        &self,
-        arg: &'a mut Option<packets::ImuPacket>,
-        state: &packets::SystemState,
-    ) -> Self::Output {
-        match state {
-            packets::SystemState::CalibratingImu => {
-                if let Some(_packet) = arg.take() {
-                    // do your processing on it and return it.
-                }
-                None // Don't pass data to estimator during IMU calibration
-            }
-            _ => {
-                // In all other states, process normally <-- this is like passthrough
-                arg.take().map(|p| p);
-            }
-        }
-    }
-}
-
 impl BoardTrait for DummyBoard {
-    type RawSensorSet = packets::HCons<
+    type RawSensorSet = hlist_type![
         Option<Result<packets::ImuPacket, errors::SensorError>>,
-        packets::HCons<
-            Option<Result<packets::MagPacket, errors::SensorError>>,
-            packets::HCons<
-                Option<Result<packets::BaroPacket, errors::SensorError>>,
-                packets::HCons<
-                    Option<Result<packets::PitotPacket, errors::SensorError>>,
-                    packets::HCons<
-                        Option<Result<packets::RangePacket, errors::SensorError>>,
-                        packets::HCons<
-                            Option<Result<packets::GNSSPacket, errors::SensorError>>,
-                            packets::HCons<
-                                Option<Result<packets::BatteryPacket, errors::SensorError>>,
-                                packets::HCons<
-                                    Option<Result<packets::RcPacket, errors::SensorError>>,
-                                    packets::HCons<
-                                        Option<
-                                            Result<packets::AttitudePacket, errors::SensorError>,
-                                        >,
-                                        packets::HCons<
-                                            Option<Result<usize, errors::SensorError>>,
-                                            packets::HCons<
-                                                Option<Result<usize, errors::SensorError>>,
-                                                packets::HNil,
-                                            >,
-                                        >,
-                                    >,
-                                >,
-                            >,
-                        >,
-                    >,
-                >,
-            >,
-        >,
-    >;
+        Option<Result<packets::MagPacket, errors::SensorError>>,
+        Option<Result<packets::BaroPacket, errors::SensorError>>,
+        Option<Result<packets::PitotPacket, errors::SensorError>>,
+        Option<Result<packets::RangePacket, errors::SensorError>>,
+        Option<Result<packets::GNSSPacket, errors::SensorError>>,
+        Option<Result<packets::BatteryPacket, errors::SensorError>>,
+        Option<Result<packets::RcPacket, errors::SensorError>>,
+        Option<Result<packets::AttitudePacket, errors::SensorError>>
+    ];
 
-    // ultimately you're goin to need to replace the packet types with new packet types for the
-    // processed sensors if their information changes... if not you can just put it back in the
-    // packets
-    type ProcessedSensorSet = packets::HCons<
-        Option<Result<packets::ImuPacket, errors::SensorError>>,
-        packets::HCons<
-            Option<Result<packets::MagPacket, errors::SensorError>>,
-            packets::HCons<
-                Option<Result<packets::BaroPacket, errors::SensorError>>,
-                packets::HCons<
-                    Option<Result<packets::PitotPacket, errors::SensorError>>,
-                    packets::HCons<
-                        Option<Result<packets::RangePacket, errors::SensorError>>,
-                        packets::HCons<
-                            Option<Result<packets::GNSSPacket, errors::SensorError>>,
-                            packets::HCons<
-                                Option<Result<packets::BatteryPacket, errors::SensorError>>,
-                                packets::HCons<
-                                    Option<Result<packets::RcPacket, errors::SensorError>>,
-                                    packets::HCons<
-                                        Option<
-                                            Result<packets::AttitudePacket, errors::SensorError>,
-                                        >,
-                                        packets::HCons<
-                                            Option<Result<usize, errors::SensorError>>,
-                                            packets::HCons<
-                                                Option<Result<usize, errors::SensorError>>,
-                                                packets::HNil,
-                                            >,
-                                        >,
-                                    >,
-                                >,
-                            >,
-                        >,
-                    >,
-                >,
-            >,
-        >,
-    >;
-}
+    type ProcessedSensorSet = hlist_type![
+        Option<packets::ImuPacket>,
+        Option<packets::MagPacket>,
+        Option<packets::BaroPacket>,
+        Option<packets::PitotPacket>,
+        Option<packets::RangePacket>,
+        Option<packets::GNSSPacket>,
+        Option<packets::BatteryPacket>,
+        Option<packets::RcPacket>,
+        Option<packets::AttitudePacket>
+    ];
 
-/*
-impl BoardTrait for DummyBoard {
-    fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        None
-    }
+    type ProcessorHList = hlist_type![
+        sensorprocessors::PassthroughImuProcessor,
+        sensorprocessors::PassthroughMagProcessor,
+        sensorprocessors::PassthroughBaroProcessor,
+        sensorprocessors::PassthroughPitotProcessor,
+        sensorprocessors::PassthroughRangeProcessor,
+        sensorprocessors::PassthroughGNSSProcessor,
+        sensorprocessors::PassthroughBatteryProcessor,
+        sensorprocessors::PassthroughRcProcessor,
+        sensorprocessors::PassthroughAttitudeProcessor
+    ];
 
-    fn mag_read(&mut self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        None
-    }
-
-    fn baro_read(&mut self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        None
-    }
-
-    fn diff_pressure_read(&mut self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        None
-    }
-
-    fn sonar_read(&mut self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    fn gnss_read(&mut self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        None
-    }
-
-    fn battery_read(&mut self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&mut self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        None
-    }
-
-    fn attitude_read(&mut self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
+    fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
+        sensors.0 = Some(Ok(packets::ImuPacket::default()));
+        sensors.1.0 = Some(Ok(packets::MagPacket::default()));
+        sensors.1.1.0 = Some(Ok(packets::BaroPacket::default()));
+        sensors.1.1.1.0 = Some(Ok(packets::PitotPacket::default()));
+        sensors.1.1.1.1.0 = Some(Ok(packets::RangePacket::default()));
+        sensors.1.1.1.1.1.0 = Some(Ok(packets::GNSSPacket::default()));
+        sensors.1.1.1.1.1.1.0 = Some(Ok(packets::BatteryPacket::default()));
+        sensors.1.1.1.1.1.1.1.0 = Some(Ok(packets::RcPacket::default()));
+        sensors.1.1.1.1.1.1.1.1.0 = Some(Ok(packets::AttitudePacket::default()));
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         None
     }
-
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         None
     }
 }
-*/

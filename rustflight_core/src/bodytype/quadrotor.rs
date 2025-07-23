@@ -1,8 +1,6 @@
-#![no_main]
-#![no_std]
 // /**
 // ******************************************************************************
-// * File     : heartbeat_test.rs
+// * File     : dummy.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -36,22 +34,70 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
-use nucleo::*;
-use rustflight_core::comm_manager::comm_link_trait::mavlink::MavlinkInterface;
-use stm_32::*;
+use crate::bodytype::BodyType;
+use crate::controller::Controller;
+use crate::estimator::Estimator;
+use crate::hlist_type;
+use crate::mixer::Mixer;
+use crate::packets;
+use crate::packets::*;
 
-use cortex_m_rt::entry;
+pub struct Quadrotor;
+pub struct AttitudeState;
+pub struct MixerInput;
 
-#[entry]
-fn main() -> ! {
-    let nucleo = Board::new();
-    let mavlink = MavlinkInterface::new();
-    let mut rosflight = rustflight_core::rustflight::rustflight_sensors_comms::ROSFlight::init(
-        1000, nucleo, mavlink,
-    );
+impl BodyType for Quadrotor {
+    // shopping list of required sensors...
+    type RequiredSensors = hlist_type![
+        Option<packets::ImuPacket>,
+        Option<packets::MagPacket>,
+        Option<packets::BaroPacket>,
+        Option<packets::GNSSPacket>
+    ];
 
-    loop {
-        rosflight.run();
+    type Estimator = QuadEstimator;
+    type Controller = QuadController;
+    type Mixer = QuadMixer;
+}
+
+#[derive(Default)]
+pub struct QuadEstimator;
+impl Estimator for QuadEstimator {
+    type Inputs = hlist_type![
+        Option<packets::ImuPacket>,
+        Option<packets::MagPacket>,
+        Option<packets::BaroPacket>,
+        Option<packets::GNSSPacket>
+    ];
+
+    type State = AttitudeState;
+
+    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State {
+        //println!("Estimating!");
+        AttitudeState {}
+    }
+}
+
+#[derive(Default)]
+pub struct QuadController;
+impl Controller for QuadController {
+    type State = AttitudeState;
+    type ControlOutput = MixerInput;
+
+    fn control(&mut self, state: &Self::State) -> Self::ControlOutput {
+        //println!("Controlling!");
+        MixerInput {}
+    }
+}
+
+#[derive(Default)]
+pub struct QuadMixer;
+impl Mixer for QuadMixer {
+    type ControlOutput = MixerInput;
+    type ActuatorCommands = u32;
+
+    fn mix(&mut self, controls: &Self::ControlOutput) -> Self::ActuatorCommands {
+        //println!("Mixing!");
+        0u32
     }
 }

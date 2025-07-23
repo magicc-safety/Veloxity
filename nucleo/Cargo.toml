@@ -10,13 +10,7 @@ rustflight_core = { workspace = true }
 [lints]
 workspace = true
 
-# nucleo test binary
 [[bin]]
-name = "sensors_test"
-test = false
-bench = false
-
-[[bin]]
-name = "mavlink_test"
+name = "typed_test"
 test = false
 bench = false

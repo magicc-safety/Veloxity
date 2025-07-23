@@ -46,7 +46,6 @@ use embassy_time::with_timeout;
 use super::pps;
 use rustflight_core::errors;
 use rustflight_core::packets;
-use rustflight_core::sensors;
 
 //use defmt::trace;
 

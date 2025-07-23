@@ -1561,12 +1561,12 @@ impl Params {
         }
     }
 
-    pub fn init(&mut self, board: &mut dyn BoardTrait) {
+    pub fn init<B: BoardTrait>(&mut self, board: &mut B) {
         self.set_defaults();
         self.write(board);
     }
 
-    pub fn write(&mut self, board: &mut dyn BoardTrait) -> bool {
+    pub fn write<B: BoardTrait>(&mut self, board: &mut B) -> bool {
         // if !board.memory_write(self) {
         //     return false;
         // }
@@ -1574,7 +1574,7 @@ impl Params {
         true
     }
 
-    pub fn read(&mut self, board: &dyn BoardTrait) -> bool {
+    pub fn read<B: BoardTrait>(&mut self, board: &B) -> bool {
         // if !board.memory_read(self, p: &Params) {
         //     return false;
         // }

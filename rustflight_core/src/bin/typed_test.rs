@@ -1,8 +1,8 @@
-#![no_std]
-#![no_main]
+use std::time::Duration;
+
 // /**
 // ******************************************************************************
-// * File     : sensors_test.rs
+// * File     : rustflight_typed.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -36,19 +36,53 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::Board;
-use nucleo::*;
-use stm_32::*;
+use rustflight_core::{
+    board::BoardTrait,
+    board::dummy::DummyBoard,
+    bodytype::BodyType,
+    bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
+    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
+    controller::Controller,
+    estimator::Estimator,
+    hlist::{Here, There},
+    hlist_type,
+    mixer::Mixer,
+    packets,
+    rustflight::Configuration,
+    rustflight::rustflight_typed::ROSFlight,
+};
 
-use cortex_m_rt::entry;
+// define the wiring diagram
+#[derive(Default)]
+pub struct DummyQuadConfig;
+impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
+    type SculptIndices = hlist_type![Here, Here, Here, There<There<Here>>];
+}
 
-#[entry]
-fn main() -> ! {
-    let mut b = Board::new();
-    let mut rosflight = rustflight_core::rustflight::rustflight_sensors::ROSFlight::init(1000, b);
-    rosflight.run();
+fn main() {
+    // board implementation
+    let board = DummyBoard::default();
+
+    // body type instantiations...
+    let estimator = QuadEstimator::default();
+    let controller = QuadController::default();
+    let mixer = QuadMixer::default();
+
+    // zero-sized configuration marker (necessary)
+    let config = DummyQuadConfig::default();
+
+    // comm_link implementation
+    let mavlink = MavlinkInterface::new();
+
+    let mut rosflight = ROSFlight::init(1000, board, mavlink, estimator, controller, mixer, config);
 
     loop {
+        println!("Highest Level Loop");
+        println!("---------------------------------");
         rosflight.run();
+        println!("---------------------------------");
+        println!("");
+
+        std::thread::sleep(Duration::from_secs(1));
     }
 }

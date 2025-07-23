@@ -1,6 +1,8 @@
+#![no_std]
+#![no_main]
 // /**
 // ******************************************************************************
-// * File     : estimator.rs
+// * File     : typed_test.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,10 +36,54 @@
 // *
 // ******************************************************************************
 // **/
-use crate::hlist::*;
+use cortex_m_rt::entry;
+use defmt;
+use nucleo::*;
+use rustflight_core::{
+    board::BoardTrait,
+    board::dummy::DummyBoard,
+    bodytype::BodyType,
+    bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
+    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
+    controller::Controller,
+    estimator::Estimator,
+    hlist::{Here, There},
+    hlist_type,
+    mixer::Mixer,
+    packets,
+    rustflight::Configuration,
+    rustflight::rustflight_typed::ROSFlight,
+};
+use stm_32::*;
 
-pub trait Estimator {
-    type Inputs: HList;
-    type State;
-    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State;
+// define the wiring diagram
+#[derive(Default)]
+pub struct NucleoQuadConfig;
+impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {
+    // needs IMU, Baro, Mag, GNSS
+    type SculptIndices = hlist_type![Here, Here, Here, There<Here>];
+}
+
+#[entry]
+fn main() -> ! {
+    // board implementation
+    let mut board = board::Board::new();
+
+    // body type instantiations
+    let estimator = QuadEstimator::default();
+    let controller = QuadController::default();
+    let mixer = QuadMixer::default();
+
+    // zero-sized configuration marker (necessary)
+    let config = NucleoQuadConfig::default();
+
+    // comm_link implementation
+    let mavlink = MavlinkInterface::new();
+
+    let mut rosflight = ROSFlight::init(1000, board, mavlink, estimator, controller, mixer, config);
+
+    loop {
+        defmt::debug!("One Loop");
+        rosflight.run();
+    }
 }

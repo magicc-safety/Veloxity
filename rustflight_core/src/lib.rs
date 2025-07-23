@@ -42,11 +42,12 @@ pub mod comm_manager;
 pub mod controller;
 pub mod errors;
 pub mod estimator;
+pub mod hlist;
 pub mod mixer;
 pub mod packets;
 pub mod params;
 pub mod rustflight;
-pub mod sensors;
+pub mod sensorprocessors;
 mod state_machine;
 //pub(crate) mod units;
 

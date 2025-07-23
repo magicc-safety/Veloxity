@@ -35,9 +35,11 @@
 // ******************************************************************************
 // **/
 use rustflight_core::board::BoardTrait;
-use rustflight_core::comm_manager;
 use rustflight_core::errors;
+use rustflight_core::hlist_type;
 use rustflight_core::packets;
+use rustflight_core::sensorprocessors;
+
 use stm_32::peripherals;
 use stm_32::*;
 
@@ -48,6 +50,79 @@ pub struct Board {
     servos: peripherals::pwm::ServoMonstrosity,
 }
 
+impl BoardTrait for Board {
+    type RawSensorSet = hlist_type![
+        Option<Result<packets::ImuPacket, errors::SensorError>>,
+        Option<Result<packets::MagPacket, errors::SensorError>>,
+        Option<Result<packets::BaroPacket, errors::SensorError>>,
+        Option<Result<packets::PitotPacket, errors::SensorError>>,
+        Option<Result<packets::GNSSPacket, errors::SensorError>>,
+        Option<Result<packets::RcPacket, errors::SensorError>>
+    ];
+
+    type ProcessedSensorSet = hlist_type![
+        Option<packets::ImuPacket>,
+        Option<packets::MagPacket>,
+        Option<packets::BaroPacket>,
+        Option<packets::PitotPacket>,
+        Option<packets::GNSSPacket>,
+        Option<packets::RcPacket>
+    ];
+
+    type ProcessorHList = hlist_type![
+        sensorprocessors::PassthroughImuProcessor,
+        sensorprocessors::PassthroughMagProcessor,
+        sensorprocessors::PassthroughBaroProcessor,
+        sensorprocessors::PassthroughPitotProcessor,
+        sensorprocessors::PassthroughGNSSProcessor,
+        sensorprocessors::PassthroughRcProcessor
+    ];
+
+    fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
+        sensors.0 = peripherals::bmi08x::IMU_SIGNAL.try_take();
+        sensors.1.0 = peripherals::iis2mdc::MAG_SIGNAL.try_take();
+        sensors.1.1.0 = peripherals::dps310::BARO_SIGNAL.try_take();
+        sensors.1.1.1.0 = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
+        sensors.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+    }
+
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+        match peripherals::telem::TELEM_RX.try_read(buf) {
+            Ok(n) => return Some(Ok(n)),
+            Err(_) => {
+                return Some(Err(errors::TelemError::GenericTelemError(
+                    "Error Reading Telem Packet",
+                )));
+            }
+        }
+    }
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
+        let mut n = 0;
+        //let len = byte_count;
+        let len = bytes.len();
+
+        loop {
+            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
+                Ok(wrote) => {
+                    if wrote == (len - n) {
+                        break;
+                    } else {
+                        n += wrote;
+                    }
+                }
+                Err(_) => {
+                    return Some(Err(errors::TelemError::GenericTelemError(
+                        "Error Writing Telem Packet!",
+                    )));
+                }
+            }
+        }
+        Some(Ok(n))
+    }
+}
+
+/*
 impl BoardTrait for Board {
     fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
         peripherals::bmi08x::IMU_SIGNAL.try_take()
@@ -120,6 +195,7 @@ impl BoardTrait for Board {
         Some(Ok(n))
     }
 }
+*/
 
 impl Board {
     fn probe_hi(&mut self, id: usize) {

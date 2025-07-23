@@ -50,10 +50,15 @@ mavio = { version = "0.5.5", default-features = false, features = [
 mavspec = { version = "0.6.4", default-features = false, features = ["rust"] }
 
 # for debugging stm32 devices:
-#defmt = { version = "0.3" }
+# defmt = { version = "0.3" }
 
 [build-dependencies]
 mavspec = { version = "0.6.4", features = ["rust_gen"] }
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "typed_test"
+test = false
+bench = false
