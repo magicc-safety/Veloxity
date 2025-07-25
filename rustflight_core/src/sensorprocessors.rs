@@ -250,7 +250,7 @@ impl<'a> Func<&'a mut Option<Result<GNSSPacket, errors::SensorError>>>
     ) -> Self::Output {
         if let Some(Ok(_packet)) = arg.take() {
             // do something with the parameters access...
-            //println!("Got GNSS");
+            println!("Got GNSS");
             Some(_packet)
         } else {
             None

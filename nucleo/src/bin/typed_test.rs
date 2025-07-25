@@ -50,7 +50,6 @@ use rustflight_core::{
     hlist::{Here, There},
     hlist_type,
     mixer::Mixer,
-    packets,
     rustflight::Configuration,
     rustflight::rustflight_typed::ROSFlight,
 };
