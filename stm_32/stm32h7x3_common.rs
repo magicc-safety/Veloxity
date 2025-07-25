@@ -70,6 +70,8 @@ use embassy_stm32::usart;
 use embassy_stm32::usart::BufferedUart;
 use embassy_stm32::usart::BufferedUartTx;
 use embassy_stm32::usart::Uart;
+use embassy_stm32::usb;
+use embassy_stm32::usb::{Driver, Instance};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
@@ -162,6 +164,11 @@ bind_interrupts!(struct Uart8Irqs {
 // SDMMC 1 Interrupts
 bind_interrupts!(struct Sdmmc1Irqs {
     SDMMC1 => sdmmc::InterruptHandler<EMBASSY_peripherals::SDMMC1>;
+});
+
+// USB Interrupt
+bind_interrupts!(struct Irqs {
+    OTG_FS => usb::InterruptHandler<EMBASSY_peripherals::USB_OTG_FS>;
 });
 
 // Executor Interrupts

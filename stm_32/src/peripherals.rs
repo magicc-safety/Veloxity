@@ -45,3 +45,4 @@ pub mod sd_card;
 pub mod telem;
 pub mod ublox;
 pub mod adis16500;
+pub mod vcp;
