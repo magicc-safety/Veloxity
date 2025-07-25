@@ -135,8 +135,8 @@ impl Adis16500Sensor
         self.dev.write(& tx).await.map_err(|e| match e {
             _ => errors::SensorError::GenericSensorError("SPI failed: write_register"),
         })?;
-        // TODO: I think these read delays are unnecessary for the write function
-        //Timer::after_micros(100).await; // (100) Required 16us delay till you can read again
+        // TODO: I think these read delays could be unnecessary for the write function. Ask Phil
+        Timer::after_micros(100).await; // (100) Required 16us delay till you can read again
 
         let hi = ((value>>8)&0x00FF) as u8; //
         let tx = [(reg_addr+1)|SPI_WRITE, hi];
@@ -144,7 +144,7 @@ impl Adis16500Sensor
         self.dev.write(& tx).await.map_err(|e| match e {
             _ => errors::SensorError::GenericSensorError("SPI failed: write_register"),
         })?;
-        //Timer::after_micros(100).await; // (100) Required 16us delay till you can read again
+        Timer::after_micros(100).await; // (100) Required 16us delay till you can read again
         Ok(())
     }
 
