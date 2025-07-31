@@ -8,6 +8,10 @@ use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
 
+use rustflight_core::errors::SensorError;
+
+use crate::peripherals::sbus::RC_SIGNAL;
+
 pub struct Vcp {
     pub driver: Driver<'static, USB_OTG_FS>,
 }
@@ -54,8 +58,12 @@ impl Vcp {
             loop {
                 class.wait_connection().await;
                 info!("Connected");
-                let _ = echo(&mut class).await;
-                info!("Disconnected");
+                let result = echo(&mut class).await;
+                if let Err(e) = result {
+                    warn!("VCP echo error");
+                    // TODO: Signal error?
+                }
+                // TODO: Currently an echo. What is it's purpose?
             }
         };
 
@@ -70,34 +78,29 @@ pub async fn task(mut vcp: Vcp ) {
     vcp.run().await;
 }
 
-struct Disconnected {}
-
-impl From<EndpointError> for Disconnected {
-    fn from(val: EndpointError) -> Self {
-        match val {
-            EndpointError::BufferOverflow => panic!("Buffer overflow"),
-            EndpointError::Disabled => Disconnected {},
-        }
-    }
-}
-
-async fn echo<'d, T: Instance + 'd>(class: &mut CdcAcmClass<'d, Driver<'d, T>>) -> Result<(), Disconnected> {
+async fn echo<'d, T: Instance + 'd>(class: &mut CdcAcmClass<'d, Driver<'d, T>>) -> Result<(), SensorError> {
     let mut buf = [0; 64];
     loop {
-        // TODO: map to rustflight core errors
         let n = match class.read_packet(&mut buf).await {
             Ok(n) => n, 
             Err(e) => { 
                 match e {
-                    EndpointError::BufferOverflow => warn!("USB read buffer overflow!"),
-                    EndpointError::Disabled => info!("USB endpoint disabled."),
+                    EndpointError::BufferOverflow => {
+                        warn!("USB read buffer overflow!");
+                        Err(SensorError::GenericSensorError("USB buffer overflow"))
+                    } 
+                    EndpointError::Disabled => {
+                        info!("USB endpoint disabled.");
+                        Err(SensorError::GenericSensorError("USB endpoint disabled"))
+                    }
                 }
-                return Err(Disconnected {});
-            }
+            }?
         };
 
         let data = &buf[..n];
         info!("data: {:x}", data);
-        class.write_packet(data).await?;
+        class.write_packet(data).await.map_err(|e| match e {
+            _ => SensorError::GenericSensorError("USB failed: write packet"),
+        })?;
     }
 }

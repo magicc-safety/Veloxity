@@ -318,8 +318,7 @@ impl Board {
         // VCP
         static EP_BUF_CELL: StaticCell<[u8; 256]> = StaticCell::new();
         let mut config = embassy_stm32::usb::Config::default();
-        // TODO: I'm pretty sure this needs to be enabled, but the documentation has default as false. Check this
-        config.vbus_detection = true; // nucleo has VBUS PA9, ID PA10
+        config.vbus_detection = true;
         let driver = Driver::new_fs(
             p.USB_OTG_FS, 
             Irqs, 
@@ -336,7 +335,7 @@ impl Board {
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
         spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
-        // TODO: What priority should this be?
+        // TODO: What priority should VCP be?
         spawner1
             .spawn(peripherals::vcp::task(vcp))
             .unwrap();
