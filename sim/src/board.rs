@@ -17,8 +17,8 @@ use zenoh::sample::Sample;
 use zenoh::session::Session;
 
 pub struct Board {
-    zenoh_connect_session: Session,
-    pub zenoh_listen_session: Session,
+    pub zenoh_connect_session: Session,
+    //pub zenoh_listen_session: Session,
     //imu_temp_chan: mpsc::Receiver<ros_messages::Status>,
     //imu_data_chan: mpsc::Receiver<ros_messages::Status>,
     //battery_chan: mpsc::Receiver<ros_messages::BatteryStatus>,
@@ -66,11 +66,11 @@ impl BoardTrait for Board {
     ];
 
     fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
-        sensors.0 = Some(Ok(packets::ImuPacket::default()));
-        sensors.1.0 = Some(Ok(packets::MagPacket::default()));
-        sensors.1.1.0 = Some(Ok(packets::BaroPacket::default()));
-        sensors.1.1.1.0 = Some(Ok(packets::PitotPacket::default()));
-        sensors.1.1.1.1.0 = Some(Ok(packets::RangePacket::default()));
+        sensors.0 = None;
+        sensors.1.0 = None;
+        sensors.1.1.0 = None;
+        sensors.1.1.1.0 = None;
+        sensors.1.1.1.1.0 = None;
         sensors.1.1.1.1.1.0 = match self.gnss_chan.try_recv() {
             Ok(gnss) => Some(Ok(packets::GNSSPacket::default())),
             Err(e) => match e {
@@ -80,9 +80,9 @@ impl BoardTrait for Board {
                 ))),
             },
         };
-        sensors.1.1.1.1.1.1.0 = Some(Ok(packets::BatteryPacket::default()));
-        sensors.1.1.1.1.1.1.1.0 = Some(Ok(packets::RcPacket::default()));
-        sensors.1.1.1.1.1.1.1.1.0 = Some(Ok(packets::AttitudePacket::default()));
+        sensors.1.1.1.1.1.1.0 = None;
+        sensors.1.1.1.1.1.1.1.0 = None;
+        sensors.1.1.1.1.1.1.1.1.0 = None;
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -92,99 +92,24 @@ impl BoardTrait for Board {
         None
     }
 }
-
-/*
-impl BoardTrait for Board {
-    fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        None
-    }
-
-    fn mag_read(&mut self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        None
-    }
-
-    fn baro_read(&mut self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        None
-    }
-
-    fn diff_pressure_read(&mut self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        None
-    }
-
-    fn sonar_read(&mut self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    //TODO getting lots of errors here...
-    fn gnss_read(&mut self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        match self.gnss_chan.try_recv() {
-            Ok(gnss) => {
-                Some(Ok(GNSSPacket {
-                    header: packets::RosflightPacketHeader {
-                        status: 0u16,
-                        timestamp: gnss.header.stamp.sec as u64,
-                    },
-                    lat: 0.0f64,    // radians
-                    lon: 0.0f64,    // radians
-                    height: 0.0f32, // m/s above ellipsoid
-                    vel_n: 0.0f32,  // m/s north
-                    vel_e: 0.0f32,  // m/s east
-                    vel_d: 0.0f32,  // m/s down
-                    h_acc: 0.0f32,  // m north/east
-                    v_acc: 0.0f32,  // m down
-                    s_acc: 0.0f32,  // m/s
-                    month: 0u8,     // 0-11
-                    year: 0u16,     // 0-65535 UTC
-                    day: 0u8,       // 0-31 UTS day of month
-                    hour: 0u8,      // 0-23 UTC
-                    min: 0u8,       // 0-59 UTC
-                    sec: 0u8,       // 0-59 UTC
-                    nano: 0i32,     // adjustment +/1 to seconds
-                    fix_type: packets::GNSSFixType::DeadReckoningOnly,
-                    num_sats: 0u8,   // 0-255
-                    mag_dec: 0.0f32, // Magnetic Declination ??
-                    time_correction: 0u64,
-                }))
-            }
-            Err(_) => None,
-        }
-    }
-
-    fn battery_read(&mut self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&mut self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        None
-    }
-
-    fn attitude_read(&mut self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
-    }
-
-    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        None
-    }
-
-    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        None
-    }
-}
-*/
 
 impl Board {
     pub async fn new() -> Board {
         let mut zenoh_connect_config = Config::default();
         zenoh_connect_config
-            .insert_json5("connect/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
+            .insert_json5("mode", "\"client\"")
             .unwrap();
-        let mut zenoh_listen_config = Config::default();
-        zenoh_listen_config
-            .insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
+        zenoh_connect_config
+            .insert_json5("connect/endpoints", "[\"tcp/127.0.0.1:7447\"]")
             .unwrap();
 
+        //let mut zenoh_listen_config = Config::default();
+        //zenoh_listen_config
+        //    .insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
+        //    .unwrap();
+
         let zenoh_connect_session = zenoh::open(zenoh_connect_config).await.unwrap();
-        let zenoh_listen_session = zenoh::open(zenoh_listen_config).await.unwrap();
+        //let zenoh_listen_session = zenoh::open(zenoh_listen_config).await.unwrap();
 
         println!("Zenoh sessions opened!");
 
@@ -211,12 +136,12 @@ impl Board {
         //    .declare_subscriber("/rt/simulated_sensors/battery")
         //    .await
         //    .unwrap();
-        let sub_gnss = zenoh_listen_session
-            .declare_subscriber("rt/simulated_sensors/gnss")
+        let sub_gnss = zenoh_connect_session
+            .declare_subscriber("simulated_sensors/gnss")
             .await
             .unwrap();
-        let sub_baro = zenoh_listen_session
-            .declare_subscriber("rt/simulated_sensors/baro")
+        let sub_baro = zenoh_connect_session
+            .declare_subscriber("simulated_sensors/baro")
             .await
             .unwrap();
         //let sub_mag = zenoh_listen_session
@@ -239,7 +164,7 @@ impl Board {
 
         // establish publisher
         let pub_pwm_output = zenoh_connect_session
-            .declare_publisher("rt/sim/pwm_output")
+            .declare_publisher("sim/pwm_output")
             .encoding(Encoding::APPLICATION_OCTET_STREAM)
             .await
             .unwrap();
@@ -247,7 +172,7 @@ impl Board {
         // construct self for return
         let to_return = Self {
             zenoh_connect_session,
-            zenoh_listen_session,
+            //zenoh_listen_session,
             gnss_chan: chan_recv_gnss,
             baro_chan: chan_recv_baro,
         };

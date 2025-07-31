@@ -58,8 +58,8 @@ async fn main() {
     // board implementation
     let mut board = board::Board::new().await;
     let tick_handler = board
-        .zenoh_listen_session
-        .declare_queryable("rt/tick")
+        .zenoh_connect_session
+        .declare_subscriber("tick")
         .await
         .unwrap();
 
@@ -76,13 +76,12 @@ async fn main() {
 
     let mut rosflight = ROSFlight::init(1000, board, mavlink, estimator, controller, mixer, config);
 
-    while let Ok(query) = tick_handler.recv_async().await {
+    while let Ok(_tick) = tick_handler.recv() {
         println!("Received query!");
 
         rosflight.run();
 
         let response = SimpleBoolResponse { result: true };
         let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&response, Infinite).unwrap());
-        query.reply(query.key_expr().to_string(), zb).await.unwrap();
     }
 }

@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 
 // ============ Standard ROS Types ============
 
+#[derive(Serialize, Deserialize)]
+struct TriggerRequest;
+
+#[derive(Serialize, Deserialize)]
+struct TriggerResponse {
+    success: bool,
+    message: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Time {
     pub sec: i32,
