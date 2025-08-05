@@ -328,7 +328,8 @@ impl Board {
             config
         );
         let vcp = peripherals::vcp::Vcp {
-            driver
+            driver,
+            byte_processor: stm_32::peripherals::vcp::BasicProcessor {},
         };
 
         // P1 Priority Task for Rx Tememetry
