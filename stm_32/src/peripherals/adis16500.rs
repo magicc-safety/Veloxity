@@ -58,7 +58,6 @@ use crate::peripherals::pwm;
 use crate::peripherals::pwm::TimerEnum;
 use rustflight_core::errors;
 use rustflight_core::packets::{RosflightPacketHeader, ImuPacket};
-use rustflight_core::sensors;
 
 use core::module_path;
 //use defmt::info;
