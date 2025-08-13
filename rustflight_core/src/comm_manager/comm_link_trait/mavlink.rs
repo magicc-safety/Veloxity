@@ -36,11 +36,12 @@
 // **/
 //use defmt;
 
-use crate::board;
+use crate::mavlink::dialects::rosflight::messages::SmallMag;
+use crate::{board, packets};
 use crate::comm_manager::comm_link_trait::CommInterface;
 use crate::comm_manager::mavlink_parser;
-use crate::comm_manager::comm_messages;
-use crate::mavlink::dialects::rosflight::{Rosflight, messages};
+use crate::comm_messages;
+use crate::mavlink::dialects::rosflight::{Rosflight, messages, enums};
 use mavio::Frame;
 use mavio::prelude::*;
 
@@ -49,6 +50,9 @@ static RX_BUFF_SIZE: usize = 2048;
 // only include options for messages you'd receive...
 
 pub struct MavlinkInterface {
+    pub system_id: u8,
+    pub component_id: u8,
+    sequence: u8,
     pub param_set: Option<messages::ParamSet>,
     pub external_attitude: Option<messages::ExternalAttitude>,
     pub time_sync: Option<messages::Timesync>,
@@ -64,6 +68,9 @@ pub struct MavlinkInterface {
 impl MavlinkInterface {
     pub fn new() -> Self {
         Self {
+            system_id: 1, // Should this be passed into each function or hardcoded?
+            component_id: 1,
+            sequence: 0,
             param_set: None,
             external_attitude: None,
             time_sync: None,
@@ -142,7 +149,68 @@ impl MavlinkInterface {
         //    msg.custom_mode,
         //);
         self.heartbeat = Some(msg);
-        //println!("🎉 Heartbeat Received!!!")
+    }
+
+    fn frame_builder<T: Message>(&mut self, msg: &T) -> mavio::Result<Frame<V1>> {
+        let frame = Frame::builder()
+            .version(V1)
+            .system_id(self.system_id)
+            .component_id(self.component_id)
+            .sequence(self.sequence)
+            .message(msg)?
+            .build();
+
+        // Increment the sequence number, wrapping on overflow
+        self.sequence = self.sequence.wrapping_add(1);
+
+        Ok(frame)
+    }
+
+    fn send_message<B: board::BoardTrait, T: Message>(&mut self, board: &mut B, msg: &T) {
+        let frame = match self.frame_builder(msg) {
+            Ok(f) => f,
+            Err(_) => {
+                //defmt::trace!("Error with FrameBuilder!");
+                return;
+            }
+        };
+
+        // MAVLink V1 specification shows up to 263 bytes possible (Previously 100). Is this right?
+        let mut buf = [0u8; 263]; 
+
+        if frame.body_length() > buf.len() {
+            //defmt::trace!("Body Length Error");
+            return;
+        }
+
+        let mut pos = 0;
+        let header = frame.header();
+        let payload = frame.payload().bytes();
+        let crc = frame.checksum();
+
+        // MAVLink v1 wire format
+        buf[pos] = 0xFE;
+        pos += 1; // Start marker
+        buf[pos] = payload.len() as u8;
+        pos += 1; // Payload length
+        buf[pos] = header.sequence();
+        pos += 1; // Sequence
+        buf[pos] = header.system_id();
+        pos += 1; // System ID
+        buf[pos] = header.component_id();
+        pos += 1; // Component ID
+        buf[pos] = header.message_id() as u8;
+        pos += 1; // Message ID (low byte)
+
+        // Copy payload
+        buf[pos..pos + payload.len()].copy_from_slice(payload);
+        pos += payload.len();
+
+        // CRC (little-endian)
+        buf[pos..pos + 2].copy_from_slice(&crc.to_le_bytes());
+        pos += 2;
+
+        board.serial_tx_write(&buf[..pos]);
     }
 }
 
@@ -209,56 +277,22 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
         num_errors: i16,
         loop_time_us: i16,
     ) {
+        // TODO: Figure out how to convert to Rosflight error types
+        // let status = messages::RosflightStatus {
+        //     armed: if armed {1} else {0},
+        //     failsafe: if failsafe {1} else {0}, 
+        //     rc_override: if rc_override {1} else {0},
+        //     offboard: if offboard {1} else {0},
+        //     error_code: error_code, // convert to RosflightErrorCode?
+        //     control_mode: control_mode, // convert to OffboardControlMode?
+        //     num_errors: num_errors,
+        //     loop_time_us: loop_time_us,
+        // };
+        // self.send_message(board, &status);
     }
     fn send_timesync(&mut self, board: &mut B, system_id: u8, tc1: i64, ts1: i64) -> bool {
-        let mut buf = [0u8; 100];
-        //let byte_count = telem::heartbeat(&mut buf);
-
         let timesync = messages::Timesync { tc1, ts1 };
-
-        let frame = match Frame::builder()
-            .version(V1)
-            .sequence(0)
-            .system_id(1)
-            .component_id(1)
-            .message(&timesync)
-        {
-            Ok(builder) => builder.build(),
-            Err(_) => {
-                //defmt::trace!("Heartbeat: Error with FrameBuilder!");
-                return false;
-            }
-        };
-
-        if frame.body_length() > buf.len() {
-            //defmt::trace!("Heartbeat: Body Length Error");
-            return false;
-        }
-
-        let mut pos = 0;
-        let header = frame.header();
-        let payload = frame.payload().bytes();
-        let crc = frame.checksum();
-
-        // MAVLink v1 wire format
-        buf[pos] = 0xFE;
-        pos += 1; // Start marker
-        buf[pos] = payload.len() as u8;
-        pos += 1; // Payload length
-        buf[pos] = header.sequence();
-        pos += 1; // Sequence
-        buf[pos] = header.system_id();
-        pos += 1; // System ID
-        buf[pos] = header.component_id();
-        pos += 1; // Component ID
-        buf[pos] = header.message_id() as u8;
-        pos += 1; // Message ID (low byte)
-
-        // Copy payload
-        buf[pos..pos + payload.len()].copy_from_slice(payload);
-        pos += payload.len();
-
-        board.serial_tx_write(&buf[..pos]);
+        self.send_message(board, &timesync);
         return true;
     }
     fn send_named_value(
@@ -269,11 +303,9 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
         name: &[u8],
         value: crate::params::ParamValue,
     ) {
+        // TODO: Parameters
     }
     fn send_heartbeat(&mut self, board: &mut B, system_id: u8, fixed_wing: bool) -> bool {
-        let mut buf = [0u8; 100];
-        //let byte_count = telem::heartbeat(&mut buf);
-
         let heartbeat = messages::Heartbeat {
             autopilot: 1,
             base_mode: 1,
@@ -282,72 +314,70 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
             system_status: 1,
             mavlink_version: 1,
         };
-
-        let frame = match Frame::builder()
-            .version(V1)
-            .sequence(0)
-            .system_id(1)
-            .component_id(1)
-            .message(&heartbeat)
-        {
-            Ok(builder) => builder.build(),
-            Err(_) => {
-                //defmt::trace!("Heartbeat: Error with FrameBuilder!");
-                return false;
-            }
-        };
-
-        if frame.body_length() > buf.len() {
-            //defmt::trace!("Heartbeat: Body Length Error");
-            return false;
-        }
-
-        let mut pos = 0;
-        let header = frame.header();
-        let payload = frame.payload().bytes();
-        let crc = frame.checksum();
-
-        // MAVLink v1 wire format
-        buf[pos] = 0xFE;
-        pos += 1; // Start marker
-        buf[pos] = payload.len() as u8;
-        pos += 1; // Payload length
-        buf[pos] = header.sequence();
-        pos += 1; // Sequence
-        buf[pos] = header.system_id();
-        pos += 1; // System ID
-        buf[pos] = header.component_id();
-        pos += 1; // Component ID
-        buf[pos] = header.message_id() as u8;
-        pos += 1; // Message ID (low byte)
-
-        // Copy payload
-        buf[pos..pos + payload.len()].copy_from_slice(payload);
-        pos += payload.len();
-
-        // CRC (little-endian)
-        buf[pos..pos + 2].copy_from_slice(&crc.to_le_bytes());
-        pos += 2;
-
-        board.serial_tx_write(&buf[..pos]);
+        self.send_message(board, &heartbeat);
         return true;
     }
-    fn send_version(&mut self, board: &mut B, system_id: u8, version: &[u8]) {}
+    fn send_version(&mut self, board: &mut B, system_id: u8, version: &[u8]) {
+        let version = messages::RosflightVersion {
+            version: [0; 50] // TODO: Figure out what to put here
+        };
+        self.send_message(board, &version);
+    }
     fn send_diff_pressure(
         &mut self,
         board: &mut B,
         system_id: u8,
         packet: &crate::packets::PitotPacket,
     ) {
+        // TODO: velocity?
+        // let diff = messages::DiffPressure {
+        //     velocity: idk,
+        //     diff_pressure: packet.pressure,
+        //     temperature: packet.temperature
+        // };
+        // self.send_message(board, &diff);
     }
-    fn send_baro(&mut self, board: &mut B, sysem_id: u8, packet: &crate::packets::BaroPacket) {}
-    fn send_imu(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::ImuPacket) {}
+    fn send_baro(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::BaroPacket) {
+        // TODO: altitude?
+        // let baro = messages::SmallBaro {
+        //     altitude: idk, 
+        //     pressure: packet.pressure,
+        //     temperature: packet.temperature,
+        // };
+        // self.send_message(board, &baro);
+    }
+    fn send_imu(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::ImuPacket) {
+        // TODO: make sure acc and gyro ordering is correct. Figure out where time_boot comes from.
+        // let imu = messages::SmallImu {
+        //     time_boot_us: idk,
+        //     xacc: packet.accel[0],
+        //     yacc: packet.accel[1],
+        //     zacc: packet.accel[2],
+        //     xgyro: packet.gyro[0],
+        //     ygyro: packet.gyro[1],
+        //     zgyro: packet.gyro[2],
+        //     temperature: packet.temperature
+        // };
+        // self.send_message(board, &imu);
+    }
     fn send_attitude(
         &mut self,
         board: &mut B,
         system_id: u8,
         packet: &crate::packets::AttitudePacket,
     ) {
+        // TODO: Time boot, check ordering
+        // let attitude = messages::AttitudeQuaternion {
+        //     time_boot_ms: idk,
+        //     q1: packet.q[0],
+        //     q2: packet.q[1],
+        //     q3: packet.q[2],
+        //     q4: packet.q[3],
+        //     rollspeed: packet.rate[0],
+        //     pitchspeed: packet.rate[1],
+        //     yawspeed: packet.rate[2]
+        // };
+        // self.send_message(board, &attitude);
     }
     //fn send_log_message(
     //    &mut self,
@@ -363,10 +393,59 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
         timestamp_ms: u32,
         raw_outputs: [f32; 14],
     ) {
+        // TODO: u64 to u32 timestamp
+        // let output = messages::RosflightOutputRaw {
+        //     stamp: timestamp_ms,
+        //     values: raw_outputs
+        // };
+        // self.send_message(board, &output);
     }
-    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::RcPacket) {}
-    fn send_range(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::RangePacket) {}
-    fn send_mag(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::MagPacket) {}
-    fn send_gnss(&mut self, board: &mut B, system_id: u8, data: &crate::packets::GNSSPacket) {}
-    fn send_gnss_full(&mut self, board: &mut B, system_id: u8, data: &crate::packets::GNSSPacket) {}
+    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::RcPacket) {
+        // TODO: ROSflight packet is hardcoded to 18 channels. RC packet is not.
+    }
+    fn send_range(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::RangePacket) {
+        let rosflight_range: enums::RosflightRangeType = match packet.range_type {
+            packets::RangeType::Sonar => enums::RosflightRangeType::RosflightRangeSonar,
+            packets::RangeType::Lidar => enums::RosflightRangeType::RosflightRangeLidar,
+        };
+        let range = messages::SmallRange {
+            type_: rosflight_range,
+            range: packet.range,
+            max_range: packet.max_range,
+            min_range: packet.min_range
+        };
+        self.send_message(board, &range);
+    }
+    fn send_mag(&mut self, board: &mut B, system_id: u8, packet: &crate::packets::MagPacket) {
+        // TODO: Check order
+        let mag = messages::SmallMag {
+            xmag: packet.flux[0],
+            ymag: packet.flux[1],
+            zmag: packet.flux[2]
+        };
+        self.send_message(board, &mag);
+    }
+    fn send_gnss(&mut self, board: &mut B, system_id: u8, data: &crate::packets::GNSSPacket) {
+        // let gnss = messages::RosflightGnss {
+        //     // TODO: Some type conversions needed
+        //     seconds: data.sec,
+        //     nanos: data.nano,
+        //     fix_type: data.fix_type,
+        //     num_sat: data.num_sats,
+        //     lat: data.lat,
+        //     lon: data.lon,
+        //     height: data.height,
+        //     vel_n: data.vel_n,
+        //     vel_e: data.vel_e,
+        //     vel_d: data.vel_d,
+        //     h_acc: data.h_acc,
+        //     v_acc: data.v_acc,
+        //     s_acc: data.s_acc,
+        //     rosflight_timestamp: data.header.timestamp // Is this right?
+        // };
+        // self.send_message(board, &gnss);
+    }
+    fn send_gnss_full(&mut self, board: &mut B, system_id: u8, data: &crate::packets::GNSSPacket) {
+        // TODO: What is the difference between full and not full?
+    }
 }
