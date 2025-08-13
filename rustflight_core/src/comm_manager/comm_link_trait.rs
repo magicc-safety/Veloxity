@@ -37,6 +37,8 @@
 pub mod mavlink;
 
 use crate::board;
+use crate::comm_messages;
+use crate::comm_messages::Messages;
 use crate::packets;
 use crate::params;
 
@@ -83,7 +85,7 @@ pub trait CommInterface<B: board::BoardTrait> {
     fn send_range(&mut self, board: &mut B, system_id: u8, packet: &packets::RangePacket);
     fn send_gnss(&mut self, board: &mut B, system_id: u8, data: &packets::GNSSPacket);
     fn send_gnss_full(&mut self, board: &mut B, system_id: u8, data: &packets::GNSSPacket);
-    fn handle_incoming_messages(&mut self, board: &mut B);
+    fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut comm_messages::Messages);
 }
 
 #[allow(async_fn_in_trait)]

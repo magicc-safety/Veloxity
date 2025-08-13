@@ -38,6 +38,7 @@ pub mod comm_link_trait;
 pub mod mavlink_parser;
 
 use crate::board;
+use crate::comm_messages;
 use core::marker::PhantomData;
 
 pub struct CommManager<B, T>
@@ -47,6 +48,7 @@ where
 {
     sysid: u8,
     comm_link: T,
+    pub msgs: comm_messages::Messages,
     _board_marker: PhantomData<B>,
 }
 
@@ -59,12 +61,14 @@ where
         CommManager {
             sysid: 0,
             comm_link,
+            msgs: comm_messages::Messages::default(),
             _board_marker: PhantomData,
         }
     }
 
     pub fn process_incoming_messages(&mut self, board: &mut B) {
-        self.comm_link.handle_incoming_messages(board);
+        self.comm_link
+            .handle_incoming_messages(board, &mut self.msgs);
     }
 
     pub fn send_heartbeat(&mut self, board: &mut B) {

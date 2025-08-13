@@ -46,6 +46,7 @@ use mavio::prelude::*;
 static RX_BUFF_SIZE: usize = 2048;
 
 // only include options for messages you'd receive...
+
 pub struct MavlinkInterface {
     pub param_set: Option<messages::ParamSet>,
     pub external_attitude: Option<messages::ExternalAttitude>,

@@ -39,6 +39,7 @@
 pub mod board;
 pub mod bodytype;
 pub mod comm_manager;
+pub mod comm_messages;
 pub mod controller;
 pub mod errors;
 pub mod estimator;
