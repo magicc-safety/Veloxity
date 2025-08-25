@@ -37,7 +37,8 @@ pub mod comm_link_trait;
 pub mod mavlink_parser;
 
 use crate::board;
-use crate::comm_messages;
+use crate::comm_messages::{self, messages::*, enums::*};
+use crate::params::ParamValue;
 use core::marker::PhantomData;
 
 pub struct CommManager<B, T>
@@ -70,7 +71,146 @@ where
             .handle_incoming_messages(board, &mut self.msgs);
     }
 
+    // SENDING PLACEHOLDER MESSAGES
     pub fn send_heartbeat(&mut self, board: &mut B) {
-        self.comm_link.send_heartbeat(board, self.sysid, false);
+        let msg = HeartbeatMsg { type_: 1, autopilot: 1, base_mode: 1, custom_mode: 1, system_status: 1, mavlink_version: 1 };
+        self.comm_link.send_heartbeat(board, self.sysid, msg);
+    }
+
+    pub fn send_timesync(&mut self, board: &mut B) {
+        let msg = TimesyncMsg { tc1: 1, ts1: 1 };
+        self.comm_link.send_timesync(board, self.sysid, msg);
+    }
+
+    pub fn send_status(&mut self, board: &mut B) {
+        let msg = RosflightStatusMsg {
+            armed: 0,
+            failsafe: 0,
+            rc_override: 0,
+            offboard: 0,
+            error_code: RosflightErrorCode::RosflightErrorNone,
+            control_mode: OffboardControlMode::ModePassThrough,
+            num_errors: 0,
+            loop_time_us: 0
+        };
+        self.comm_link.send_status(board, self.sysid, msg);
+    }
+
+    pub fn send_named_value(&mut self, board: &mut B) {
+        let msg = ParamValueMsg {
+            param_id: *b"TEST_PARAM_ID___",
+            param_value: ParamValue::Float(123.45),
+            param_count: 1,
+            param_index: 0,
+        };
+        self.comm_link.send_named_value(board, self.sysid, msg);
+    }
+
+    pub fn send_version(&mut self, board: &mut B) {
+        let msg = RosflightVersionMsg {
+            version: [42; 50], // Fill with arbitrary byte value
+        };
+        self.comm_link.send_version(board, self.sysid, msg);
+    }
+
+    pub fn send_output_raw(&mut self, board: &mut B) {
+        let msg = RosflightOutputRawMsg {
+            stamp: 123456789,
+            values: [0.5; 14],
+        };
+        self.comm_link.send_output_raw(board, self.sysid, msg);
+    }
+
+    pub fn send_attitude(&mut self, board: &mut B) {
+        let msg = AttitudeQuaternionMsg {
+            time_boot_ms: 1000,
+            q1: 1.0, // w
+            q2: 0.0, // x
+            q3: 0.0, // y
+            q4: 0.0, // z
+            rollspeed: 0.1,
+            pitchspeed: 0.2,
+            yawspeed: 0.3,
+        };
+        self.comm_link.send_attitude(board, self.sysid, msg);
+    }
+
+    pub fn send_baro(&mut self, board: &mut B) {
+        let msg = SmallBaroMsg {
+            altitude: 123.4,
+            pressure: 101.325,
+            temperature: 25.0,
+        };
+        self.comm_link.send_baro(board, self.sysid, msg);
+    }
+
+    pub fn send_diff_pressure(&mut self, board: &mut B) {
+        let msg = DiffPressureMsg {
+            velocity: 15.5,
+            diff_pressure: 50.2,
+            temperature: 26.0,
+        };
+        self.comm_link.send_diff_pressure(board, self.sysid, msg);
+    }
+
+    pub fn send_imu(&mut self, board: &mut B) {
+        let msg = SmallImuMsg {
+            time_boot_us: 50000,
+            xacc: 0.01,
+            yacc: 0.02,
+            zacc: 9.8,
+            xgyro: 0.001,
+            ygyro: 0.002,
+            zgyro: 0.003,
+            temperature: 45.5,
+        };
+        self.comm_link.send_imu(board, self.sysid, msg);
+    }
+
+    pub fn send_mag(&mut self, board: &mut B) {
+        let msg = SmallMagMsg {
+            xmag: 0.1,
+            ymag: 0.2,
+            zmag: 0.3,
+        };
+        self.comm_link.send_mag(board, self.sysid, msg);
+    }
+
+    pub fn send_rc_raw(&mut self, board: &mut B) {
+        let msg = RosflightOutputRawMsg {
+            stamp: 987654321,
+            values: [0.7; 14],
+        };
+        self.comm_link.send_rc_raw(board, self.sysid, msg);
+    }
+
+    pub fn send_range(&mut self, board: &mut B) {
+        let msg = SmallRangeMsg {
+            type_: RosflightRangeType::RosflightRangeLidar,
+            range: 5.5,
+            max_range: 40.0,
+            min_range: 0.1,
+        };
+        self.comm_link.send_range(board, self.sysid, msg);
+    }
+
+    pub fn send_gnss(&mut self, board: &mut B) {
+        let msg = RosflightGnssMsg {
+            seconds: 12345,
+            nanos: 0,
+            fix_type: GnssFixType::GnssFix3dFix,
+            num_sat: 12,
+            lat: 40.2338,
+            lon: -111.6585,
+            height: 1400.0,
+            vel_n: 0.1,
+            vel_e: -0.1,
+            vel_d: 0.0,
+            h_acc: 1.5,
+            v_acc: 2.5,
+            s_acc: 0.5,
+            rosflight_timestamp: 1,
+        };
+        self.comm_link.send_gnss(board, self.sysid, msg);
     }
 }

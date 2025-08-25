@@ -38,6 +38,7 @@
 pub enum ParamValue {
     Float(f32),
     Int(i32),
+    Uint(u32),
     Bool(bool),
 }
 

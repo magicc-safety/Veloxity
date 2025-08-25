@@ -117,9 +117,30 @@ impl MavlinkParser {
         let crc_extra = match msg_id {
             // Must define for all messages in the future
             0 => 50,   // HEARTBEAT
-            21 => 159, // PARAM_REQUEST_LIST
             20 => 214, // PARAM_REQUEST_READ
+            21 => 159, // PARAM_REQUEST_LIST
+            22 => 220, // PARAM_VALUE
+            23 => 168, // PARAM_SET
+            31 => 246, // ATTITIDE_QUATERNION
+            65 => 118, // RC_CHANNELS
             111 => 34, // TIMESYNC
+            180 => 190, // OFFBOARD_CONTROL
+            181 => 67, // SMALL_IMU
+            182 => 218, // SMALL_MAG
+            183 => 206, // SMALL_BARO
+            184 => 169, // DIFF_PRESSURE
+            187 => 60, // SMALL_RANGE
+            188 => 249, // ROSFLIGHT_CMD
+            189 => 113, // ROSFLIGHT_CMD_ACK
+            190 => 181, // ROSFLIGHT_OUTPUT_RAW
+            191 => 183, // ROSFLIGHT_STATUS
+            192 => 134, // ROSFLIGHT_VERSION
+            193 => 1, // ROSFLIGHT_AUX_CMD
+            195 => 65, // EXTERNAL_ATTITUDE
+            196 => 10, // ROSFLIGHT_HARD_ERROR
+            197 => 192, // ROSFLIGHT_GNSS
+            199 => 48, // ROSFLIGHT_BATTERY_STATUS
+            253 => 83, // STATUSTEXT
             _ => {
                 // Unknown message, will fail CRC
                 //defmt::trace!("Unknown message ID: {}", msg_id);
