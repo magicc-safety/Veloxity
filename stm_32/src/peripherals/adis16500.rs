@@ -34,32 +34,19 @@
 // *
 // ******************************************************************************
 // **/
-// #![allow(unused)]
 
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
-use embassy_stm32::gpio::AnyPin;
 use embassy_stm32::mode::Async;
-use embassy_stm32::peripherals::TIM14;
-use embassy_stm32::rcc::enable_and_reset;
 use embassy_stm32::spi;
-use embassy_stm32::timer::simple_pwm::{SimplePwm, SimplePwmChannel};
-use embassy_stm32::timer::GeneralInstance4Channel;
-use embassy_stm32::timer::GeneralInstance1Channel;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::Duration;
-use embassy_time::Timer;
-use embassy_time::Instant;
+use embassy_time::{Timer, Instant};
 use embedded_hal_async::spi::SpiDevice as _;
-
-use crate::peripherals::pwm;
-use crate::peripherals::pwm::TimerEnum;
+use crate::peripherals::pwm::{self, TimerEnum};
 use rustflight_core::errors;
 use rustflight_core::packets::{RosflightPacketHeader, ImuPacket};
-
-use core::module_path;
 //use defmt::info;
 
 // Device dependent 

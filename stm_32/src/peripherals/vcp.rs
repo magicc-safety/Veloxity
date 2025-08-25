@@ -1,18 +1,51 @@
-//#![allow(unused)]
+// /**
+// ******************************************************************************
+// * File     : vcp.rs
+// * Date     : Jul 14, 2025
+// ******************************************************************************
+// *
+// * Copyright (c) 2023, AeroVironment, Inc.
+// * All rights reserved.
+// *
+// * Redistribution and use in source and binary forms, with or without
+// * modification, are permitted provided that the following conditions are met:
+// *
+// * 1.Redistributions of source code must retain the above copyright notice, this
+// * list of conditions and the following disclaimer.
+// *
+// * 2.Redistributions in binary form must reproduce the above copyright notice,
+// * this list of conditions and the following disclaimer in the documentation
+// * and/or other materials provided with the distribution.
+// *
+// * 3.Neither the name of the copyright holder nor the names of its
+// * contributors may be used to endorse or promote products derived from
+// * this software without specific prior written permission.
+// *
+// * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// *
+// ******************************************************************************
+// **/
 
 use embassy_stm32::usb::{Driver, Instance};
 use embassy_stm32::peripherals::USB_OTG_FS;
-use defmt::{panic, *};
 use embassy_futures::join::join;
-use embassy_time::Timer;
+use embassy_futures::select::{select, Either};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
-
 use rustflight_core::comm_manager::comm_link_trait::EmbeddedComInterface;
-use rustflight_core::errors::{self, SensorError};
+use rustflight_core::errors::SensorError;
+// use defmt;
 
 pub const VCP_TX_BUFF_SIZE: usize = 2048;
 pub const VCP_RX_BUFF_SIZE: usize = 2048;
@@ -74,10 +107,10 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
         let vcp_fut = async {
             loop {
                 class.wait_connection().await;
-                info!("Connected");
+                // defmt::info!("Connected");
                 let result = Self::tx_rx(&mut byte_processor, &mut class).await;
                 if let Err(_) = result {
-                    warn!("VCP error");
+                    // defmt::warn!("VCP error");
                 }
             }
         };
@@ -86,43 +119,35 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
     }
 
     async fn tx_rx<'d, T: Instance + 'd>(
-        byte_processor: &mut ECI, 
+        byte_processor: &mut ECI,
         class: &mut CdcAcmClass<'d, Driver<'d, T>>,
     ) -> Result<(), SensorError> {
-        const MAX_PACKET_SIZE: usize = 64;
         let mut tx_buf = [0u8; VCP_TX_BUFF_SIZE];
         let mut rx_buf = [0u8; VCP_RX_BUFF_SIZE];
+
         loop {
-            // tx
-            // defmt::debug!("Waiting for data to send...");
-            let n = VCP_TX.read(&mut tx_buf).await;
-            // defmt::debug!("Read {} bytes from VCP_TX", n);
-            if n > 0 {
-                let data_to_send = &tx_buf[..n];
-                for chunk in data_to_send.chunks(MAX_PACKET_SIZE) {
-                    // defmt::debug!("Sending {} bytes to USB host", chunk.len());
-                    let result = class
-                        .write_packet(chunk)
-                        .await
-                        .map_err(|e| match e {
-                            _ => errors::TelemError::GenericTelemError("UsbTx failed!"),
-                        });
-                }
-            }
-            // rx
-            // defmt::debug!("Waiting for data from USB host...");
-            let result = class.read_packet(&mut rx_buf).await;
-            match result {
-                Err(_) => {
-                    // defmt::warn!("System: Usb read error");
-                    Timer::after_millis(1).await;
-                },
-                Ok(n) => {
-                    // defmt::debug!("Received {} bytes from USB host", n);
-                    if n > 0 && n <= VCP_RX_BUFF_SIZE {
-                        byte_processor.process_bytes(&rx_buf[..n], n).await;
+            let tx_fut = VCP_TX.read(&mut tx_buf);
+            let rx_fut = class.read_packet(&mut rx_buf);
+
+            match select(tx_fut, rx_fut).await {
+                Either::First(n) => {
+                    if n > 0 {
+                        if let Err(_) = class.write_packet(&tx_buf[..n]).await {
+                            // defmt::warn!("VCP TX failed, disconnecting.");
+                            return Err(SensorError::GenericSensorError("VCP TX failed")); // Assume disconnect, return to outer loop
+                        }
                     }
                 }
+                Either::Second(result) => match result {
+                    Ok(n) if n > 0 => {
+                        byte_processor.process_bytes(&rx_buf[..n], n).await;
+                    }
+                    Err(_) => {
+                        // defmt::warn!("VCP RX failed, disconnecting.");
+                        return Err(SensorError::GenericSensorError("VCP RX failed")); // Assume disconnect, return to outer loop
+                    }
+                    _ => {} // no data, do nothing
+                },
             }
         }
     }
