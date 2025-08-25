@@ -66,3 +66,16 @@ impl Default for SensorError {
         SensorError::GenericSensorError("Default SensorError")
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum CommsError {
+    SlotOccupied(&'static str),
+    UnknownMessage(&'static str),
+    GenericCommsError(&'static str),
+}
+
+impl Default for CommsError {
+    fn default() -> Self {
+        CommsError::GenericCommsError("Default CommsError")
+    }
+}
