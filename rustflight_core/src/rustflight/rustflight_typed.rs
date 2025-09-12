@@ -43,6 +43,7 @@ use crate::{
     board::BoardTrait,
     bodytype::BodyType,
     comm_manager::{self, comm_link_trait::CommInterface},
+    comm_messages,
     controller::Controller,
     errors,
     estimator::Estimator,
@@ -51,7 +52,7 @@ use crate::{
     params,
     rustflight::Configuration,
     sensorprocessors::CalibrationFlags,
-    comm_messages,
+    state_machine::StateMachine,
 };
 
 pub struct ROSFlight<B, BT, C, CI>
@@ -70,6 +71,7 @@ where
     estimator: BT::Estimator,
     controller: BT::Controller,
     mixer: BT::Mixer,
+    state_machine: StateMachine,
     cal_flags: CalibrationFlags,
 
     // necessary to tell the compiler these generics are in use.
@@ -112,6 +114,7 @@ where
             estimator,
             controller,
             mixer,
+            state_machine: StateMachine::new(),
             cal_flags: CalibrationFlags::empty(),
             _body_type: PhantomData,     // field initialization
             _configuration: PhantomData, // field initialization

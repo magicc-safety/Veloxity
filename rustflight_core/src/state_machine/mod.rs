@@ -46,12 +46,13 @@ use core::cmp::{Eq, PartialEq};
 use core::default::Default;
 use core::fmt::Debug;
 use core::marker::{Copy, PhantomData};
-
+use core::result::Result;
+use core::error::Error;
 use bitflags::bitflags;
 
 /*
 All possible states of the state manager
- */
+*/
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct State<State_Value> {
@@ -119,7 +120,7 @@ pub(crate) enum Event {
     REQUEST_ARM_AND_CALIBRATE,
     REQUEST_DISARM,
     REQUEST_DISARM_AND_ERROR,
-    RC_LOST,
+    RC_LOST, 
     RC_FOUND,
     CALIBRATION_COMPLETE,
     CALIBRATION_FAILED,
@@ -189,6 +190,7 @@ impl State<Armed> {
         })
     }
 
+    // do we need this if we deal with errors immediately?
     fn request_disarm_and_error(self) -> StateEnum {
         StateEnum::ERROR_PRESENT(State {
             _state: PhantomData,
@@ -211,6 +213,13 @@ impl State<Failsafe> {
 
     fn request_disarm(self) -> StateEnum {
         StateEnum::ERROR_PRESENT(State {
+            _state: PhantomData,
+        })
+    }
+
+    // Failsafe does not transition to error state unless there is a disarm request
+    fn failsafe_error(self) -> StateEnum {
+        StateEnum::FAILSAFE(State {
             _state: PhantomData,
         })
     }
@@ -237,9 +246,31 @@ impl<State_Value> State<State_Value> {
 pub(crate) struct StateMachine {
     state: StateEnum,
     error_flags: ErrorFlag,
+    armed: bool,
+    failsafe: bool,
 }
 
 impl StateMachine {
+    pub fn new() -> Self {
+        let mut sm = StateMachine { 
+            state: State::new(), 
+            error_flags: ErrorFlag::empty(), 
+            armed: false, 
+            failsafe: false 
+        };
+        sm.update(Ok(Event::INITIALIZED));
+        sm
+    }
+
+    pub fn run(&self) {
+        // not sure how this will work
+        self.process_errors();
+    }
+
+    pub fn process_errors(&self) {
+        // TODO: possibly iterate over current errors to see if error state transition is necessary?
+    }
+
     pub fn get_state(&self) -> &StateEnum {
         &self.state
     }
@@ -253,8 +284,15 @@ impl StateMachine {
     }
 
     pub fn unset_error(&mut self, error_flag: ErrorFlag) {
-        // TODO: Check this
         self.error_flags &= !error_flag;
+    }
+
+    pub fn is_armed(&self) -> bool {
+        self.armed
+    }
+
+    pub fn is_in_failsafe(&self) -> bool {
+        self.failsafe
     }
 
     pub fn update(&mut self, event: Result<Event, ErrorFlag>) {
@@ -266,27 +304,58 @@ impl StateMachine {
         previous one using the typestate pattern.
 
         For example, going from init -> preflight would be State<Init>::to_preflight() -> State<Preflight>
-         */
+        */
         self.state = match event {
             Ok(_event) => match (self.state, _event) {
-                (StateEnum::INIT(state), Event::INITIALIZED) => state.initialize(),
-                (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM) => state.request_arm(),
+                (StateEnum::INIT(state), Event::INITIALIZED) => {
+                    state.initialize()
+                },
+                (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM) => {
+                    // Require low throttle to arm
+                    // require either min throttle or override switch
+                    // check to ensure calibration
+                    // move these checks to sensors
+                    self.armed = true;
+                    state.request_arm()
+                },
                 (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM_AND_CALIBRATE) => {
+                    // start gyro calibration
+                    self.armed = true;
                     state.request_arm_and_calibrate()
-                }
+                },
+                // (StateEnum::PREFLIGHT(state), Event::RC_FOUND) => {
+                //     self.unset_error(ErrorFlag::RC_LOST);
+                //     // Stay in the same state
+                // },
                 (StateEnum::CALIBRATING(state), Event::CALIBRATION_COMPLETE) => {
+                    self.armed = true;
                     state.calibration_complete()
-                }
+                },
                 (StateEnum::CALIBRATING(state), Event::CALIBRATION_FAILED) => {
                     state.calibration_failed()
-                }
-                (StateEnum::ARMED(state), Event::REQUEST_DISARM) => state.request_disarm(),
+                },
+                (StateEnum::ARMED(state), Event::REQUEST_DISARM) => {
+                    self.armed = false;
+                    state.request_disarm()
+                },
                 (StateEnum::ARMED(state), Event::REQUEST_DISARM_AND_ERROR) => {
                     state.request_disarm_and_error()
+                },
+                (StateEnum::ARMED(state), Event::RC_LOST) => {
+                    self.failsafe = true;
+                    // update status
+                    state.rc_lost()
+                },
+                (StateEnum::FAILSAFE(state), Event::RC_FOUND) => {
+                    self.failsafe = false;
+                    self.unset_error(ErrorFlag::RC_LOST);
+                    // clear error
+                    state.rc_found()
+                },
+                (StateEnum::FAILSAFE(state), Event::REQUEST_DISARM) => {
+                    self.armed = false;
+                    state.request_disarm()
                 }
-                (StateEnum::ARMED(state), Event::RC_LOST) => state.rc_lost(),
-                (StateEnum::FAILSAFE(state), Event::RC_FOUND) => state.rc_found(),
-                (StateEnum::FAILSAFE(state), Event::REQUEST_DISARM) => state.request_disarm(),
                 (state, _) => state,
             },
             Err(_error) => {
@@ -295,11 +364,15 @@ impl StateMachine {
                     StateEnum::INIT(state) => state.error(),
                     StateEnum::PREFLIGHT(state) => state.error(),
                     StateEnum::CALIBRATING(state) => state.error(),
-                    StateEnum::ARMED(state) => state.error(),
-                    StateEnum::FAILSAFE(state) => state.error(),
+                    StateEnum::ARMED(state) => state.error(), // need to not go to error state
+                    StateEnum::FAILSAFE(state) => state.failsafe_error(), // does not transition to error state
                     StateEnum::ERROR_PRESENT(state) => state.error(),
                 }
             }
         };
     }
+}
+
+fn update_leds() {
+    // TODO
 }

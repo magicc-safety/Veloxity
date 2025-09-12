@@ -55,6 +55,7 @@ fn test_bitflags() {
 }
 
 #[test]
+#[allow(non_snake_case)]
 fn test_bitflags_OR() {
     assert_eq!(
         (ErrorFlag::RC_LOST | ErrorFlag::TIME_GOING_BACKWARDS).bits(),
@@ -63,7 +64,7 @@ fn test_bitflags_OR() {
 }
 
 #[test]
-fn test_SM_no_clone() {
+fn test_sm_no_clone() {
     let sm = StateMachine::default();
 
     // Implicit copies are made
@@ -216,4 +217,155 @@ fn test_state_transitions_init_preflight_calibrating_armed_failsafe_error() {
     } else {
         assert!(false);
     }
+}
+
+/// Assert the state machine is in the given StateEnum variant.
+/// Usage: assert_state!(sm, StateEnum::INIT);
+macro_rules! assert_state {
+    ($sm:expr, $variant:path) => {
+        match *$sm.get_state() {
+            $variant(_) => {}
+            other => panic!(
+                "expected state `{}`, got `{:?}`",
+                stringify!($variant),
+                other
+            ),
+        }
+    };
+}
+
+macro_rules! assert_not_state {
+    ($sm:expr, $variant:path) => {
+        match *$sm.get_state() {
+            $variant(_) => panic!("expected NOT state `{}`, but it was", stringify!($variant)),
+            _ => {}
+        }
+    };
+}
+
+#[test]
+fn test_init() {
+    let mut sm = StateMachine::new();
+    // Should be in PREFLIGHT MODE
+    assert_not_state!(sm, StateEnum::INIT);
+    assert_state!(sm, StateEnum::PREFLIGHT);
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    assert!(sm.error_flags == ErrorFlag::empty());
+}
+
+#[test]
+fn test_set_and_clear_all_errors() {
+    let mut sm = StateMachine::default();
+    const ALL_ERRORS: [ErrorFlag; 8] = [
+        ErrorFlag::INVALID_MIXER,
+        ErrorFlag::IMU_NOT_RESPONDING,
+        ErrorFlag::RC_LOST,
+        ErrorFlag::UNHEALTHY_ESTIMATOR,
+        ErrorFlag::TIME_GOING_BACKWARDS,
+        ErrorFlag::UNCALIBRATED_IMU,
+        ErrorFlag::INVALID_FAILSAFE,
+        ErrorFlag::INVALID_STATE_MACHINE_TRANSITION,
+    ];
+    for error in ALL_ERRORS {
+        // set error
+        sm.set_error(error);
+        assert!(sm.armed == false);
+        assert!(sm.failsafe == false);
+        assert!(sm.error_flags == error);
+
+        // clear error
+        sm.unset_error(error);
+        assert!(sm.armed == false);
+        assert!(sm.failsafe == false);
+        assert!(sm.error_flags == ErrorFlag::empty());
+    };
+}
+
+#[test]
+fn test_set_and_clear_multiple_errors() {
+    let mut sm = StateMachine::default();
+    let error =  ErrorFlag::IMU_NOT_RESPONDING | 
+                            ErrorFlag::UNHEALTHY_ESTIMATOR | 
+                            ErrorFlag::TIME_GOING_BACKWARDS;
+    // set multiple errors                        
+    sm.set_error(error);
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    assert!(sm.error_flags == error);
+
+    // clear all errors
+    sm.unset_error(error);
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    assert!(sm.error_flags == ErrorFlag::empty());
+}
+
+#[test]
+fn test_add_error_after_previous_error() {
+    let mut sm = StateMachine::default();
+    let error =  ErrorFlag::IMU_NOT_RESPONDING | 
+                            ErrorFlag::UNHEALTHY_ESTIMATOR | 
+                            ErrorFlag::TIME_GOING_BACKWARDS;
+    // set multiple errors                        
+    sm.set_error(error);
+    sm.set_error(ErrorFlag::INVALID_MIXER);
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    let combined_error = error | ErrorFlag::INVALID_MIXER;
+    assert!(sm.error_flags == combined_error);
+}
+
+#[test]
+fn test_clear_one_of_many_errors() {
+    let mut sm = StateMachine::default();
+    let error =  ErrorFlag::IMU_NOT_RESPONDING | 
+                            ErrorFlag::UNHEALTHY_ESTIMATOR | 
+                            ErrorFlag::TIME_GOING_BACKWARDS;                     
+    sm.set_error(error);
+    sm.unset_error(ErrorFlag::TIME_GOING_BACKWARDS);
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    let remaining_errors = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::UNHEALTHY_ESTIMATOR;
+    assert!(sm.error_flags == remaining_errors);
+}
+
+#[test]
+#[ignore]
+fn test_do_not_arm_if_error() {
+    let mut sm = StateMachine::new();
+    sm.set_error(ErrorFlag::INVALID_MIXER);
+    sm.update(Ok(Event::REQUEST_ARM));
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    assert!(sm.get_errors() == ErrorFlag::INVALID_MIXER);
+    assert_not_state!(sm, StateEnum::ARMED);
+}
+
+#[test]
+fn test_arm_if_no_error() {
+    let mut sm = StateMachine::new();
+    assert!(sm.get_errors() == ErrorFlag::empty());
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    sm.update(Ok(Event::REQUEST_ARM));
+    assert!(sm.armed == true);
+    assert!(sm.failsafe == false);
+    assert_state!(sm, StateEnum::ARMED);
+}
+
+#[test]
+fn test_arm_and_disarm() {
+    let mut sm = StateMachine::new();
+    assert!(sm.get_errors() == ErrorFlag::empty());
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    sm.update(Ok(Event::REQUEST_ARM));
+    assert!(sm.armed == true);
+    assert!(sm.failsafe == false);
+    assert_state!(sm, StateEnum::ARMED);
+    sm.update(Ok(Event::REQUEST_DISARM));
+    assert!(sm.armed == false);
+    assert!(sm.failsafe == false);
+    assert_state!(sm, StateEnum::PREFLIGHT);
 }
