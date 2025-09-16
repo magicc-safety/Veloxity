@@ -1,6 +1,6 @@
 // /**
 // ******************************************************************************
-// * File     : estimator.rs
+// * File     : quad_estimator.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -33,12 +33,60 @@
 // * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // *
 // ******************************************************************************
-// **/
-use crate::hlist::*;
-pub mod quad_estimator;
+// **
 
-pub trait Estimator {
-    type Inputs: HList;
-    type State;
-    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State;
+use crate::hlist::*;
+use crate::hlist_type;
+use crate::packets;
+use super::Estimator;
+
+use micro_algebra::stack::{
+    quaternion::Quaternion,
+    vector::Vector,
+};
+
+#[derive(Debug, Clone, Copy)]
+pub struct AttitudeState {
+    pub q_hat: Quaternion<f64>,
+    pub b_hat: Vector<f64, 3>,
+}
+
+pub struct QuadEstimator {
+     k_p: f64,
+     k_i: f64,
+     q_hat: Quaternion<f64>,
+     b_hat: Vector<f64, 3>,
+}
+
+impl QuadEstimator {
+    pub fn new(k_p: f64, k_i: f64) -> Self {
+        Self {
+            k_p,
+            k_i,
+            q_hat: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
+            b_hat: Vector::from_array([0.0, 0.0, 0.0]),
+        }
+    }
+}
+
+impl Default for QuadEstimator {
+    fn default() -> Self {
+        Self::new(1.5, 0.05)
+    }
+}
+
+impl Estimator for QuadEstimator {
+    type Inputs = hlist_type![
+        Option<packets::ImuPacket>,
+        Option<packets::MagPacket>
+    ];
+
+    type State = AttitudeState;
+
+    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State {
+        AttitudeState {
+            q_hat: self.q_hat,
+            b_hat: self.b_hat,
+        }
+    }
 }
