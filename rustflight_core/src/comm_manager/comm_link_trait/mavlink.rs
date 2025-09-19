@@ -39,7 +39,6 @@ use crate::{board, packets};
 use crate::comm_manager::{comm_link_trait::CommInterface, mavlink_parser};
 use crate::comm_messages::{Messages, Store, messages::*, enums as comm_enums};
 use crate::mavlink::dialects::rosflight::{Rosflight, messages, messages::*, enums};
-use crate::errors::CommsError;
 use mavio::protocol::{DialectVersion, FrameBuilder};
 use mavio::Frame;
 use mavio::prelude::*;
@@ -126,7 +125,7 @@ impl MavlinkInterface {
         board.serial_tx_write(&buf[..pos]);
     }
 
-    fn process_rosflight_message(&mut self, message: Rosflight, msgs: &mut Messages) -> Result<(), CommsError> {
+    fn process_rosflight_message(&mut self, message: Rosflight, msgs: &mut Messages){
         match (message) {
             Rosflight::ExternalAttitude(es) => {
                 // defmt::debug!("External attitude: qw={}, qx={}, qy={}, qz={}", es.qw, es.qx, es.qy, es.qz);
@@ -169,7 +168,6 @@ impl MavlinkInterface {
             }
             _ => {
                 // defmt::debug!("System: Other ROSflight message received");
-                Err(CommsError::UnknownMessage("Attempted to process unknown message type"))
             }
         }
     }
