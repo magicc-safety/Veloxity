@@ -36,7 +36,6 @@
 // **/
 
 use core::marker::PhantomData;
-use crate::errors::CommsError;
 use messages::*;
 use enums::*;
 
@@ -53,29 +52,25 @@ pub struct Messages {
     pub external_attitude: Option<ExternalAttitudeMsg>,
 }
 
-fn set_option<T>(slot: &mut Option<T>, value: T, name: &'static str)
-    -> core::result::Result<(), CommsError>
-{
-    if slot.is_none() {
-        *slot = Some(value);
-        Ok(())
-    } else {
-        *slot = Some(value); // Overwrite by default for testing
-        Err(CommsError::SlotOccupied(name))
-    }
-}
-
 pub trait Store<T> {
-    fn store(&mut self, msg: T) -> core::result::Result<(), CommsError>;
+    fn store(&mut self, msg: T);
+    fn take(&mut self) -> Option<T>;
 }
 
 // implements store function for each message type. comm_manager should only receive known messages
 macro_rules! impl_store {
     ($ty:ty, $field:ident, $name:literal) => {
         impl Store<$ty> for Messages {
-            fn store(&mut self, msg: $ty) -> core::result::Result<(), CommsError> {
-                // defmt::debug!("I stored a {} message!", $name);
-                set_option(&mut self.$field, msg, $name)
+            fn store(&mut self, msg: $ty) {
+                if self.$field.is_some() {
+                    // println!("Overwrote {} message!", $name);
+                }
+                self.$field.insert(msg);
+                // println!("Stored {} message", $name);
+            }
+            fn take(&mut self) -> Option<$ty> {
+                // println!("Took {} message", $name)
+                self.$field.take()
             }
         }
     };
