@@ -69,7 +69,7 @@ impl<'a> Func<&'a mut Option<Result<BatteryPacket, errors::SensorError>>>
         params: &mut Params,
     ) -> Self::Output {
         if let Some(Ok(_packet)) = arg.take() {
-            println!("Got Battery");
+            // println!("Got Battery");
             // do something with the parameters access...
             Some(_packet)
         } else {
@@ -121,7 +121,7 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>>
     ) -> Self::Output {
         if let Some(Ok(_packet)) = arg.take() {
             // do something with the parameters access...
-            println!("Got Baro");
+            // println!("Got Baro");
             //defmt::debug!("Got Baro");
             Some(_packet)
         } else {
@@ -148,7 +148,7 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>>
     ) -> Self::Output {
         if let Some(Ok(_packet)) = arg.take() {
             // do something with the parameters access...
-            println!("Got Pitot");
+            // println!("Got Pitot");
             //defmt::debug!("Got Pitot");
             Some(_packet)
         } else {
@@ -251,7 +251,7 @@ impl<'a> Func<&'a mut Option<Result<GNSSPacket, errors::SensorError>>>
     ) -> Self::Output {
         if let Some(Ok(_packet)) = arg.take() {
             // do something with the parameters access...
-            println!("Got GNSS");
+            // println!("Got GNSS");
             Some(_packet)
         } else {
             None
