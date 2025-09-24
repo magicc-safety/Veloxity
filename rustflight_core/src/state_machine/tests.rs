@@ -37,7 +37,7 @@
 /*
 Unit tests
 */
-use crate::state_machine::{ErrorFlag, Event, Init, State, StateEnum, StateMachine};
+use crate::state_machine::{ErrorFlag, ErrorPresent, Event, Init, State, StateMachine};
 use core::marker::PhantomData;
 use core::result::Result;
 
@@ -73,9 +73,7 @@ fn test_sm_no_clone() {
 
     assert_eq!(
         *sm.get_state(),
-        StateEnum::INIT(State::<Init> {
-            _state: PhantomData
-        })
+        State::Init(Init)
     );
     assert_eq!(temp_state, temp_state_2)
 }
@@ -92,11 +90,11 @@ fn test_state_transitions_init_error() {
     the test.
      */
     let mut sm = StateMachine::default();
-    if let StateEnum::INIT(_) = *sm.get_state() {
+    if let State::Init(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Err(ErrorFlag::IMU_NOT_RESPONDING)); // Now in ERROR_PRESENT
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING)); // Now in ERROR_PRESENT
 
     // Check that the IMU_NOT_RESPONDING error got recorded in sm.error_flags
     assert_eq!(sm.error_flags.bits(), 2u16)
@@ -105,17 +103,17 @@ fn test_state_transitions_init_error() {
 #[test]
 fn test_state_transitions_init_preflight_error() {
     let mut sm = StateMachine::default();
-    if let StateEnum::INIT(_) = *sm.get_state() {
+    if let State::Init(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::INITIALIZED)); // Now in PREFLIGHT
-    if let StateEnum::PREFLIGHT(_) = *sm.get_state() {
+    sm.update(Event::INITIALIZED); // Now in PREFLIGHT
+    if let State::Preflight(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Err(ErrorFlag::UNHEALTHY_ESTIMATOR)); // Now in ERROR_PRESENT
-    if let StateEnum::ERROR_PRESENT(_) = *sm.get_state() {
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR)); // Now in ERROR_PRESENT
+    if let State::ErrorPresent(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
@@ -127,22 +125,22 @@ fn test_state_transitions_init_preflight_error() {
 #[test]
 fn test_state_transitions_init_preflight_calibrating_error() {
     let mut sm = StateMachine::default();
-    if let StateEnum::INIT(_) = *sm.get_state() {
+    if let State::Init(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::INITIALIZED)); // Now in PREFLIGHT
-    if let StateEnum::PREFLIGHT(_) = *sm.get_state() {
+    sm.update(Event::INITIALIZED); // Now in PREFLIGHT
+    if let State::Preflight(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::REQUEST_ARM_AND_CALIBRATE)); // Now in CALIBRATING
-    if let StateEnum::CALIBRATING(_) = *sm.get_state() {
+    sm.update(Event::REQUEST_ARM_AND_CALIBRATE); // Now in CALIBRATING
+    if let State::Calibrating(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Err(ErrorFlag::INVALID_MIXER)); // Now in ERROR_PRESENT
-    if let StateEnum::ERROR_PRESENT(_) = *sm.get_state() {
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER)); // Now in ERROR_PRESENT
+    if let State::ErrorPresent(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
@@ -154,32 +152,32 @@ fn test_state_transitions_init_preflight_calibrating_error() {
 #[test]
 fn test_state_transitions_init_preflight_armed_failsafe_armed_error() {
     let mut sm = StateMachine::default();
-    if let StateEnum::INIT(_) = *sm.get_state() {
+    if let State::Init(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::INITIALIZED)); // Now in PREFLIGHT
-    if let StateEnum::PREFLIGHT(_) = *sm.get_state() {
+    sm.update(Event::INITIALIZED); // Now in PREFLIGHT
+    if let State::Preflight(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::REQUEST_ARM)); // Now in ARMED
-    if let StateEnum::ARMED(_) = *sm.get_state() {
+    sm.update(Event::REQUEST_ARM); // Now in ARMED
+    if let State::Armed(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::RC_LOST)); // Now in FAILSAFE
-    if let StateEnum::FAILSAFE(_) = *sm.get_state() {
+    sm.update(Event::RC_LOST); // Now in FAILSAFE
+    if let State::Failsafe(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::RC_FOUND)); // Now in ARMED
-    if let StateEnum::ARMED(_) = *sm.get_state() {
+    sm.update(Event::RC_FOUND); // Now in ARMED
+    if let State::Armed(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::REQUEST_DISARM_AND_ERROR)); // Now in ERROR_PRESENT
-    if let StateEnum::ERROR_PRESENT(_) = *sm.get_state() {
+    sm.update(Event::REQUEST_DISARM_AND_ERROR); // Now in ERROR_PRESENT
+    if let State::ErrorPresent(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
@@ -188,32 +186,32 @@ fn test_state_transitions_init_preflight_armed_failsafe_armed_error() {
 #[test]
 fn test_state_transitions_init_preflight_calibrating_armed_failsafe_error() {
     let mut sm = StateMachine::default();
-    if let StateEnum::INIT(_) = *sm.get_state() {
+    if let State::Init(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::INITIALIZED)); // Now in PREFLIGHT
-    if let StateEnum::PREFLIGHT(_) = *sm.get_state() {
+    sm.update(Event::INITIALIZED); // Now in PREFLIGHT
+    if let State::Preflight(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::REQUEST_ARM_AND_CALIBRATE)); // Now in CALIBRATING
-    if let StateEnum::CALIBRATING(_) = *sm.get_state() {
+    sm.update(Event::REQUEST_ARM_AND_CALIBRATE); // Now in CALIBRATING
+    if let State::Calibrating(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::CALIBRATION_COMPLETE)); // Now in ARMED
-    if let StateEnum::ARMED(_) = *sm.get_state() {
+    sm.update(Event::CALIBRATION_COMPLETE); // Now in ARMED
+    if let State::Armed(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::RC_LOST)); // Now in FAILSAFE
-    if let StateEnum::FAILSAFE(_) = *sm.get_state() {
+    sm.update(Event::RC_LOST); // Now in FAILSAFE
+    if let State::Failsafe(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
-    sm.update(Ok(Event::REQUEST_DISARM)); // Now in ERROR_PRESENT
-    if let StateEnum::ERROR_PRESENT(_) = *sm.get_state() {
+    sm.update(Event::REQUEST_DISARM); // Now in ERROR_PRESENT
+    if let State::ErrorPresent(_) = *sm.get_state() {
     } else {
         assert!(false);
     }
@@ -247,17 +245,17 @@ macro_rules! assert_not_state {
 fn test_init() {
     let mut sm = StateMachine::new();
     // Should be in PREFLIGHT MODE
-    assert_not_state!(sm, StateEnum::INIT);
-    assert_state!(sm, StateEnum::PREFLIGHT);
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
-    assert!(sm.error_flags == ErrorFlag::empty());
+    assert_not_state!(sm, State::Init);
+    assert_state!(sm, State::Preflight);
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
+    assert!(sm.get_errors() == ErrorFlag::empty());
 }
 
 #[test]
 fn test_set_and_clear_all_errors() {
     let mut sm = StateMachine::default();
-    const ALL_ERRORS: [ErrorFlag; 8] = [
+    const ALL_ERRORS: [ErrorFlag; 7] = [
         ErrorFlag::INVALID_MIXER,
         ErrorFlag::IMU_NOT_RESPONDING,
         ErrorFlag::RC_LOST,
@@ -265,20 +263,19 @@ fn test_set_and_clear_all_errors() {
         ErrorFlag::TIME_GOING_BACKWARDS,
         ErrorFlag::UNCALIBRATED_IMU,
         ErrorFlag::INVALID_FAILSAFE,
-        ErrorFlag::INVALID_STATE_MACHINE_TRANSITION,
     ];
     for error in ALL_ERRORS {
         // set error
-        sm.set_error(error);
-        assert!(sm.armed == false);
-        assert!(sm.failsafe == false);
-        assert!(sm.error_flags == error);
+        sm.update(Event::ERROR_OCCURRED(error));
+        assert!(sm.is_armed() == false);
+        assert!(sm.is_in_failsafe() == false);
+        assert!(sm.get_errors() == error);
 
         // clear error
-        sm.unset_error(error);
-        assert!(sm.armed == false);
-        assert!(sm.failsafe == false);
-        assert!(sm.error_flags == ErrorFlag::empty());
+        sm.update(Event::ERROR_CLEARED(error));
+        assert!(sm.is_armed() == false);
+        assert!(sm.is_in_failsafe() == false);
+        assert!(sm.get_errors() == ErrorFlag::empty());
     };
 }
 
@@ -289,16 +286,16 @@ fn test_set_and_clear_multiple_errors() {
                             ErrorFlag::UNHEALTHY_ESTIMATOR | 
                             ErrorFlag::TIME_GOING_BACKWARDS;
     // set multiple errors                        
-    sm.set_error(error);
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
-    assert!(sm.error_flags == error);
+    sm.update(Event::ERROR_OCCURRED(error));
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
+    assert!(sm.get_errors() == error);
 
     // clear all errors
-    sm.unset_error(error);
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
-    assert!(sm.error_flags == ErrorFlag::empty());
+    sm.update(Event::ERROR_CLEARED(error));
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
+    assert!(sm.get_errors() == ErrorFlag::empty());
 }
 
 #[test]
@@ -308,10 +305,10 @@ fn test_add_error_after_previous_error() {
                             ErrorFlag::UNHEALTHY_ESTIMATOR | 
                             ErrorFlag::TIME_GOING_BACKWARDS;
     // set multiple errors                        
-    sm.set_error(error);
-    sm.set_error(ErrorFlag::INVALID_MIXER);
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
+    sm.update(Event::ERROR_OCCURRED(error));
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER));
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
     let combined_error = error | ErrorFlag::INVALID_MIXER;
     assert!(sm.error_flags == combined_error);
 }
@@ -322,50 +319,295 @@ fn test_clear_one_of_many_errors() {
     let error =  ErrorFlag::IMU_NOT_RESPONDING | 
                             ErrorFlag::UNHEALTHY_ESTIMATOR | 
                             ErrorFlag::TIME_GOING_BACKWARDS;                     
-    sm.set_error(error);
-    sm.unset_error(ErrorFlag::TIME_GOING_BACKWARDS);
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
+    sm.update(Event::ERROR_OCCURRED(error));
+    sm.update(Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS));
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
     let remaining_errors = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::UNHEALTHY_ESTIMATOR;
     assert!(sm.error_flags == remaining_errors);
 }
 
 #[test]
-#[ignore]
 fn test_do_not_arm_if_error() {
     let mut sm = StateMachine::new();
-    sm.set_error(ErrorFlag::INVALID_MIXER);
-    sm.update(Ok(Event::REQUEST_ARM));
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER));
+    sm.update(Event::REQUEST_ARM);
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
     assert!(sm.get_errors() == ErrorFlag::INVALID_MIXER);
-    assert_not_state!(sm, StateEnum::ARMED);
+    assert_not_state!(sm, State::Armed);
 }
 
 #[test]
 fn test_arm_if_no_error() {
     let mut sm = StateMachine::new();
     assert!(sm.get_errors() == ErrorFlag::empty());
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
-    sm.update(Ok(Event::REQUEST_ARM));
-    assert!(sm.armed == true);
-    assert!(sm.failsafe == false);
-    assert_state!(sm, StateEnum::ARMED);
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
+    sm.update(Event::REQUEST_ARM);
+    assert!(sm.is_armed() == true);
+    assert!(sm.is_in_failsafe() == false);
+    assert_state!(sm, State::Armed);
+}
+
+#[test]
+fn test_clear_multiple_errors_at_once() {
+    let mut sm = StateMachine::new();
+    let errors = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::TIME_GOING_BACKWARDS | ErrorFlag::UNCALIBRATED_IMU;
+    sm.update(Event::ERROR_OCCURRED(errors));
+
+    let to_clear = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::TIME_GOING_BACKWARDS;
+    sm.update(Event::ERROR_CLEARED(to_clear));
+
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::UNCALIBRATED_IMU);
+}
+
+#[test]
+fn test_clear_all_errors() {
+    let mut sm = StateMachine::new();
+    let errors = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::TIME_GOING_BACKWARDS | ErrorFlag::UNCALIBRATED_IMU;
+    sm.update(Event::ERROR_OCCURRED(errors));
+    sm.update(Event::ERROR_CLEARED(errors));
+
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
 }
 
 #[test]
 fn test_arm_and_disarm() {
     let mut sm = StateMachine::new();
     assert!(sm.get_errors() == ErrorFlag::empty());
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
-    sm.update(Ok(Event::REQUEST_ARM));
-    assert!(sm.armed == true);
-    assert!(sm.failsafe == false);
-    assert_state!(sm, StateEnum::ARMED);
-    sm.update(Ok(Event::REQUEST_DISARM));
-    assert!(sm.armed == false);
-    assert!(sm.failsafe == false);
-    assert_state!(sm, StateEnum::PREFLIGHT);
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
+    sm.update(Event::REQUEST_ARM);
+    assert!(sm.is_armed() == true);
+    assert!(sm.is_in_failsafe() == false);
+    assert_state!(sm, State::Armed);
+    sm.update(Event::REQUEST_DISARM);
+    assert!(sm.is_armed() == false);
+    assert!(sm.is_in_failsafe() == false);
+    assert_state!(sm, State::Preflight);
 }
+
+#[test]
+fn test_wait_for_calibration_to_arm() {
+    let mut sm = StateMachine::new();
+    // set PARAM_CALIBRATE_GYRO_ON_ARM
+    // Requesting arm should move to a calibrating state, not armed
+    sm.update(Event::REQUEST_ARM);
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+    assert_state!(sm, State::Calibrating); // Assumed state
+
+    // Once calibration completes, the state machine should arm automatically
+    sm.update(Event::CALIBRATION_COMPLETE);
+    assert!(sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+    assert_state!(sm, State::Armed);
+}
+
+#[test]
+fn test_calibration_failed_dont_arm() {
+    let mut sm = StateMachine::new();
+    // set PARAM_CALIBRATE_GYRO_ON_ARM
+
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::CALIBRATION_FAILED);
+
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+    assert_state!(sm, State::Preflight);
+}
+
+#[test]
+fn test_error_during_calibration_dont_arm() {
+    let mut sm = StateMachine::new();
+    // set PARAM_CALIBRATE_GYRO_ON_ARM
+
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER));
+
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::INVALID_MIXER);
+    assert_state!(sm, State::ErrorPresent);
+}
+
+#[test]
+fn test_rc_lost_during_calibration_dont_arm() {
+    let mut sm = StateMachine::new();
+    // set PARAM_CALIBRATE_GYRO_ON_ARM
+
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::RC_LOST);
+
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::RC_LOST);
+    assert_state!(sm, State::ErrorPresent);
+}
+
+#[test]
+fn test_clear_error_stay_disarmed() {
+    let mut sm = StateMachine::new();
+    // set PARAM_CALIBRATE_GYRO_ON_ARM
+
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER));
+    assert!(!sm.is_armed()); // Should be in an error state
+
+    // Calibration finishing and clearing the error should not lead to arming
+    sm.update(Event::CALIBRATION_COMPLETE);
+    sm.update(Event::ERROR_CLEARED(ErrorFlag::INVALID_MIXER));
+
+    assert!(!sm.is_armed());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+    assert_state!(sm, State::Preflight);
+}
+
+#[test]
+fn test_recover_rc_stay_disarmed() {
+    let mut sm = StateMachine::new();
+    // set PARAM_CALIBRATE_GYRO_ON_ARM
+
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::RC_LOST);
+    assert!(!sm.is_armed()); // Should be in an error state
+
+    // Calibration finishing and finding RC should not lead to arming
+    sm.update(Event::CALIBRATION_COMPLETE);
+    sm.update(Event::RC_FOUND);
+
+    assert!(!sm.is_armed());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+    assert_state!(sm, State::Preflight);
+}
+
+#[test]
+fn test_set_errors_while_armed() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::REQUEST_ARM);
+    assert!(sm.is_armed());
+
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS));
+
+    assert!(sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::TIME_GOING_BACKWARDS);
+}
+
+#[test]
+fn test_errors_persist_when_disarmed() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS));
+    sm.update(Event::REQUEST_DISARM);
+
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::TIME_GOING_BACKWARDS);
+}
+
+#[test]
+fn test_unable_to_arm_with_persistent_errors() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS));
+    sm.update(Event::REQUEST_DISARM);
+
+    // Attempt to arm again with the error still present
+    sm.update(Event::REQUEST_ARM);
+
+    assert!(!sm.is_armed());
+    assert_eq!(sm.get_errors(), ErrorFlag::TIME_GOING_BACKWARDS);
+}
+
+// ignored throttle tests, should be implemented in RC logic
+
+#[test]
+fn test_lost_rc_when_disarmed_no_failsafe() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::RC_LOST);
+
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::RC_LOST);
+}
+
+#[test]
+fn test_unable_to_arm_without_rc() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::RC_LOST);
+    sm.update(Event::REQUEST_ARM);
+    assert!(!sm.is_armed());
+}
+
+#[test]
+fn test_able_to_arm_after_rc_recovery() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::RC_LOST);
+    sm.update(Event::REQUEST_ARM);
+    assert!(!sm.is_armed()); // Should fail
+
+    sm.update(Event::RC_FOUND);
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+
+    sm.update(Event::REQUEST_ARM);
+    assert!(sm.is_armed()); // Should succeed
+}
+
+#[test]
+fn test_rc_lost_while_armed_enter_failsafe() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::RC_LOST);
+
+    assert!(sm.is_armed());
+    assert!(sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::RC_LOST);
+    assert_state!(sm, State::Failsafe);
+}
+
+#[test]
+fn test_disarm_while_in_failsafe() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::RC_LOST); // Enters failsafe
+    sm.update(Event::REQUEST_DISARM);
+
+    assert!(!sm.is_armed());
+    assert!(sm.is_in_failsafe()); // Remains in a failsafe state
+    assert_eq!(sm.get_errors(), ErrorFlag::RC_LOST);
+}
+
+#[test]
+fn test_regain_rc_after_failsafe() {
+    let mut sm = StateMachine::new();
+    sm.update(Event::REQUEST_ARM);
+    sm.update(Event::RC_LOST); // Enters failsafe
+    assert!(sm.is_in_failsafe());
+
+    sm.update(Event::RC_FOUND); // Exits failsafe
+
+    assert!(sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+    assert_state!(sm, State::Armed);
+}
+
+#[test]
+fn test_normal_boot_initial_state() {
+    let sm = StateMachine::new();
+    assert!(!sm.is_armed());
+    assert!(!sm.is_in_failsafe());
+    assert_eq!(sm.get_errors(), ErrorFlag::empty());
+    assert_state!(sm, State::Preflight);
+}
+
+// Crash recovery tests skipped
