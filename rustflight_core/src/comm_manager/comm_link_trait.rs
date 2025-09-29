@@ -37,54 +37,26 @@
 pub mod mavlink;
 
 use crate::board;
-use crate::comm_messages;
-use crate::comm_messages::Messages;
+use crate::comm_messages::{self, messages::*};
 use crate::packets;
 use crate::params;
 
 pub trait CommInterface<B: board::BoardTrait> {
-    fn send_heartbeat(&mut self, board: &mut B, system_id: u8, fixed_wing: bool) -> bool;
-    fn send_named_value(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        timestamp_ms: u32,
-        name: &[u8],
-        value: params::ParamValue,
-    );
-    fn send_status(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        armed: bool,
-        failsafe: bool,
-        rc_override: bool,
-        offboard: bool,
-        error_code: u8,
-        control_mode: u8,
-        num_errors: i16,
-        loop_time_us: i16,
-    );
-    fn send_timesync(&mut self, board: &mut B, system_id: u8, tc1: i64, ts1: i64) -> bool;
-    fn send_version(&mut self, board: &mut B, system_id: u8, version: &[u8]);
+    fn send_heartbeat(&mut self, board: &mut B, system_id: u8, msg: HeartbeatMsg) -> bool;
+    fn send_named_value(&mut self, board: &mut B, system_id: u8, msg: ParamValueMsg);
+    fn send_status(&mut self, board: &mut B, system_id: u8, msg: RosflightStatusMsg);
+    fn send_timesync(&mut self, board: &mut B, system_id: u8, msg: TimesyncMsg) -> bool;
+    fn send_version(&mut self, board: &mut B, system_id: u8, msg: RosflightVersionMsg);
+    fn send_output_raw(&mut self, baord: &mut B, system_id: u8, msg: RosflightOutputRawMsg);
+    fn send_attitude(&mut self, board: &mut B, system_id: u8, msg: AttitudeQuaternionMsg);
+    fn send_baro(&mut self, board: &mut B, system_id: u8, msg: SmallBaroMsg);
+    fn send_diff_pressure(&mut self, board: &mut B, system_id: u8, msg: DiffPressureMsg);
+    fn send_imu(&mut self, board: &mut B, system_id: u8, msg: SmallImuMsg);
+    fn send_mag(&mut self, board: &mut B, system_id: u8, msg: SmallMagMsg);
+    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: RosflightOutputRawMsg);
+    fn send_range(&mut self, board: &mut B, system_id: u8, msg: SmallRangeMsg);
+    fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: RosflightGnssMsg);
 
-    fn send_output_raw(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        timestamp_ms: u32,
-        raw_outputs: [f32; 14],
-    );
-    fn send_attitude(&mut self, board: &mut B, system_id: u8, packet: &packets::AttitudePacket);
-    fn send_baro(&mut self, board: &mut B, sysem_id: u8, packet: &packets::BaroPacket);
-    fn send_diff_pressure(&mut self, board: &mut B, system_id: u8, packet: &packets::PitotPacket);
-    fn send_imu(&mut self, board: &mut B, system_id: u8, packet: &packets::ImuPacket);
-    //fn send_log_message(&mut self, board: &mut B, system_id: u8, packet: &packets::LogPacket);
-    fn send_mag(&mut self, board: &mut B, system_id: u8, packet: &packets::MagPacket);
-    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, packet: &packets::RcPacket);
-    fn send_range(&mut self, board: &mut B, system_id: u8, packet: &packets::RangePacket);
-    fn send_gnss(&mut self, board: &mut B, system_id: u8, data: &packets::GNSSPacket);
-    fn send_gnss_full(&mut self, board: &mut B, system_id: u8, data: &packets::GNSSPacket);
     fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut comm_messages::Messages);
 }
 
