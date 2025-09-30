@@ -9,6 +9,8 @@ use rustflight_core::sensorprocessors;
 use cdr::{CdrLe, Infinite};
 use tokio::io::Empty;
 use tokio::sync::mpsc;
+use tokio::net::UdpSocket;
+use tokio::io::ErrorKind;
 use zenoh::Config;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::handlers::FifoChannelHandler;
@@ -17,6 +19,7 @@ use zenoh::sample::Sample;
 use zenoh::session::Session;
 
 pub struct Board {
+    mavlink_socket: UdpSocket, 
     pub zenoh_connect_session: Session,
     //pub zenoh_listen_session: Session,
     //imu_temp_chan: mpsc::Receiver<ros_messages::Status>,
@@ -86,10 +89,40 @@ impl BoardTrait for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        None
+        // Use the non-blocking try_recv on the Tokio socket
+        match self.mavlink_socket.try_recv(buf) {
+            Ok(n) => Some(Ok(n)), // Successfully read n bytes
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                //println!("No MAVLink data received!!!");
+                None // No data available to read, not an error
+            }
+            Err(_) => {
+                // A real I/O error occurred
+                //println!("Real MAVLink error!!!");
+                Some(Err(errors::TelemError::GenericTelemError(
+                    "Error Reading From MAVLink UDP Socket",
+                )))
+            }
+        }
     }
+
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        None
+        // Use the non-blocking try_send on the Tokio socket
+        match self.mavlink_socket.try_send(bytes) {
+            Ok(n) => Some(Ok(n)), // Successfully wrote n bytes
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                 // OS buffer is full, treat as a transient error
+                 Some(Err(errors::TelemError::GenericTelemError(
+                    "MAVLink UDP Socket Send Buffer Full",
+                )))
+            }
+            Err(_) => {
+                // A real I/O error occurred
+                Some(Err(errors::TelemError::GenericTelemError(
+                    "Error Writing to MAVLink UDP Socket",
+                )))
+            }
+        }
     }
 }
 
@@ -169,15 +202,23 @@ impl Board {
             .await
             .unwrap();
 
+
+        println!("Zenoh publishers established");
+
+        // establish udp socket for mavlink
+        let mavlink_socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+        mavlink_socket.connect("127.0.0.1:14520").await.unwrap();
+
+        println!("Mavlink connection established");
+
         // construct self for return
         let to_return = Self {
+            mavlink_socket,
             zenoh_connect_session,
             //zenoh_listen_session,
             gnss_chan: chan_recv_gnss,
             baro_chan: chan_recv_baro,
         };
-
-        println!("Zenoh publishers established");
 
         // Spin up async functions for senders and receivers
         //tokio::spawn(capture_imu_temp());

@@ -129,31 +129,39 @@ impl MavlinkInterface {
         match (message) {
             Rosflight::ExternalAttitude(es) => {
                 // defmt::debug!("External attitude: qw={}, qx={}, qy={}, qz={}", es.qw, es.qx, es.qy, es.qz);
+                println!("Message: ExternalAttitude");
                 msgs.store(ExternalAttitudeMsg::from(es))
             }
             Rosflight::Timesync(ts) => {
+                println!("Message: Timesync");
                 // defmt::debug!("Timesync: tc1={} ts1={} ", ts.tc1, ts.ts1);
                 msgs.store(TimesyncMsg::from(ts))
             }
             Rosflight::RosflightCmd(cmd) => {
+                println!("Message: RosflightCmd");
                 // defmt::debug!("Rosflight command: {}", cmd.command as u8);
                 msgs.store(RosflightCmdMsg::from(cmd))
             }
             Rosflight::RosflightAuxCmd(aux_cmd) => {
+                println!("Message: RosflightAuxCmd");
                 // defmt::debug!("Rosflight aux command: type={}, aux_cmd={}", aux_cmd.type_array.map(|t| t as u8), aux_cmd.aux_cmd_array);
                 msgs.store(RosflightAuxCmdMsg::from(aux_cmd))
             }
             Rosflight::OffboardControl(oc) => {
+                println!("Message: OffboardControl");
                 // defmt::debug!("Offboard control: mode={}, ignore={}, qx={}, qy={}, qz={}", oc.mode as u8, oc.ignore as u8, oc.qx, oc.qy, oc.qz);
                 msgs.store(OffboardControlMsg::from(oc))
             }
             Rosflight::ParamRequestRead(pr) => {
+                println!("Message: ParamRequestRead");
                 msgs.store(ParamRequestReadMsg::from(pr))
             }
             Rosflight::ParamSet(ps) => {
+                println!("Message: ParamSet");
                 msgs.store(ParamSetMsg::from(ps))
             }
             Rosflight::ParamRequestList(pl) => {
+                println!("Message: ParamRequestList");
                 msgs.store(ParamRequestListMsg::from(pl))
             }
             Rosflight::Heartbeat(hb) => {
@@ -164,6 +172,7 @@ impl MavlinkInterface {
                 //     hb.system_status,
                 //     hb.custom_mode,
                 // );
+                println!("Message: Heartbeat");
                 msgs.store(HeartbeatMsg::from(hb))
             }
             _ => {
