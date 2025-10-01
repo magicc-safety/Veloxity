@@ -120,8 +120,7 @@ where
 
     pub fn run(&mut self) -> bool {
         self.comm_manager.process_incoming_messages(&mut self.board);
-        //self.comm_manager.send_heartbeat(&mut self.board);
-
+        
         // Data ingestion: let the board update the sensor data store
         self.board.update_sensors(&mut self.sensors);
 

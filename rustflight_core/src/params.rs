@@ -39,6 +39,9 @@ mod param_types;
 pub use param_types::*;
 
 pub struct Params {
+    num_params: u16,
+    sending_params: bool,
+    send_param_idx: u16,
     baud_rate: BaudRate,
     serial_device: SerialDevice,
     system_id: SystemId,
@@ -145,404 +148,404 @@ impl Params {
     //************************************************
     //***************** Getters **********************
     //************************************************
-    pub fn get_baud_rate(&self) -> &ParamValue {
-        return &self.baud_rate.value;
+    pub fn get_baud_rate(&self) -> ParamValue {
+        return self.baud_rate.value;
     }
 
-    pub fn get_serial_device(&self) -> &ParamValue {
-        return &self.serial_device.value;
+    pub fn get_serial_device(&self) -> ParamValue {
+        return self.serial_device.value;
     }
 
-    pub fn get_system_id(&self) -> &ParamValue {
-        return &self.system_id.value;
+    pub fn get_system_id(&self) -> ParamValue {
+        return self.system_id.value;
     }
 
-    pub fn get_max_command(&self) -> &ParamValue {
-        return &self.max_command.value;
+    pub fn get_max_command(&self) -> ParamValue {
+        return self.max_command.value;
     }
 
-    pub fn get_pid_roll_rate_p(&self) -> &ParamValue {
-        return &self.pid_roll_rate_p.value;
+    pub fn get_pid_roll_rate_p(&self) -> ParamValue {
+        return self.pid_roll_rate_p.value;
     }
 
-    pub fn get_pid_roll_rate_i(&self) -> &ParamValue {
-        return &self.pid_roll_rate_i.value;
+    pub fn get_pid_roll_rate_i(&self) -> ParamValue {
+        return self.pid_roll_rate_i.value;
     }
 
-    pub fn get_pid_roll_rate_d(&self) -> &ParamValue {
-        return &self.pid_roll_rate_d.value;
+    pub fn get_pid_roll_rate_d(&self) -> ParamValue {
+        return self.pid_roll_rate_d.value;
     }
 
-    pub fn get_pid_pitch_rate_p(&self) -> &ParamValue {
-        return &self.pid_pitch_rate_p.value;
+    pub fn get_pid_pitch_rate_p(&self) -> ParamValue {
+        return self.pid_pitch_rate_p.value;
     }
 
-    pub fn get_pid_pitch_rate_i(&self) -> &ParamValue {
-        return &self.pid_pitch_rate_i.value;
+    pub fn get_pid_pitch_rate_i(&self) -> ParamValue {
+        return self.pid_pitch_rate_i.value;
     }
 
-    pub fn get_pid_pitch_rate_d(&self) -> &ParamValue {
-        return &self.pid_pitch_rate_d.value;
+    pub fn get_pid_pitch_rate_d(&self) -> ParamValue {
+        return self.pid_pitch_rate_d.value;
     }
 
-    pub fn get_pid_yaw_rate_p(&self) -> &ParamValue {
-        return &self.pid_yaw_rate_p.value;
+    pub fn get_pid_yaw_rate_p(&self) -> ParamValue {
+        return self.pid_yaw_rate_p.value;
     }
 
-    pub fn get_pid_yaw_rate_i(&self) -> &ParamValue {
-        return &self.pid_yaw_rate_i.value;
+    pub fn get_pid_yaw_rate_i(&self) -> ParamValue {
+        return self.pid_yaw_rate_i.value;
     }
 
-    pub fn get_pid_yaw_rate_d(&self) -> &ParamValue {
-        return &self.pid_yaw_rate_d.value;
+    pub fn get_pid_yaw_rate_d(&self) -> ParamValue {
+        return self.pid_yaw_rate_d.value;
     }
 
-    pub fn get_pid_roll_angle_p(&self) -> &ParamValue {
-        return &self.pid_roll_angle_p.value;
+    pub fn get_pid_roll_angle_p(&self) -> ParamValue {
+        return self.pid_roll_angle_p.value;
     }
 
-    pub fn get_pid_roll_angle_i(&self) -> &ParamValue {
-        return &self.pid_roll_angle_i.value;
+    pub fn get_pid_roll_angle_i(&self) -> ParamValue {
+        return self.pid_roll_angle_i.value;
     }
 
-    pub fn get_pid_roll_angle_d(&self) -> &ParamValue {
-        return &self.pid_roll_angle_d.value;
+    pub fn get_pid_roll_angle_d(&self) -> ParamValue {
+        return self.pid_roll_angle_d.value;
     }
 
-    pub fn get_pid_pitch_angle_p(&self) -> &ParamValue {
-        return &self.pid_pitch_angle_p.value;
+    pub fn get_pid_pitch_angle_p(&self) -> ParamValue {
+        return self.pid_pitch_angle_p.value;
     }
 
-    pub fn get_pid_pitch_angle_i(&self) -> &ParamValue {
-        return &self.pid_pitch_angle_i.value;
+    pub fn get_pid_pitch_angle_i(&self) -> ParamValue {
+        return self.pid_pitch_angle_i.value;
     }
 
-    pub fn get_pid_pitch_angle_d(&self) -> &ParamValue {
-        return &self.pid_pitch_angle_d.value;
+    pub fn get_pid_pitch_angle_d(&self) -> ParamValue {
+        return self.pid_pitch_angle_d.value;
     }
 
-    pub fn get_x_eq_torque(&self) -> &ParamValue {
-        return &self.x_eq_torque.value;
+    pub fn get_x_eq_torque(&self) -> ParamValue {
+        return self.x_eq_torque.value;
     }
 
-    pub fn get_y_eq_torque(&self) -> &ParamValue {
-        return &self.y_eq_torque.value;
+    pub fn get_y_eq_torque(&self) -> ParamValue {
+        return self.y_eq_torque.value;
     }
 
-    pub fn get_z_eq_torque(&self) -> &ParamValue {
-        return &self.z_eq_torque.value;
+    pub fn get_z_eq_torque(&self) -> ParamValue {
+        return self.z_eq_torque.value;
     }
 
-    pub fn get_pid_tau(&self) -> &ParamValue {
-        return &self.pid_tau.value;
+    pub fn get_pid_tau(&self) -> ParamValue {
+        return self.pid_tau.value;
     }
 
-    pub fn get_motor_pwm_send_rate(&self) -> &ParamValue {
-        return &self.motor_pwm_send_rate.value;
+    pub fn get_motor_pwm_send_rate(&self) -> ParamValue {
+        return self.motor_pwm_send_rate.value;
     }
 
-    pub fn get_motor_idle_throttle(&self) -> &ParamValue {
-        return &self.motor_idle_throttle.value;
+    pub fn get_motor_idle_throttle(&self) -> ParamValue {
+        return self.motor_idle_throttle.value;
     }
 
-    pub fn get_failsafe_throttle(&self) -> &ParamValue {
-        return &self.failsafe_throttle.value;
+    pub fn get_failsafe_throttle(&self) -> ParamValue {
+        return self.failsafe_throttle.value;
     }
 
-    pub fn get_spin_motors_when_armed(&self) -> &ParamValue {
-        return &self.spin_motors_when_armed.value;
+    pub fn get_spin_motors_when_armed(&self) -> ParamValue {
+        return self.spin_motors_when_armed.value;
     }
 
-    pub fn get_init_time(&self) -> &ParamValue {
-        return &self.init_time.value;
+    pub fn get_init_time(&self) -> ParamValue {
+        return self.init_time.value;
     }
 
-    pub fn get_filter_kp_acc(&self) -> &ParamValue {
-        return &self.filter_kp_acc.value;
+    pub fn get_filter_kp_acc(&self) -> ParamValue {
+        return self.filter_kp_acc.value;
     }
 
-    pub fn get_filter_ki(&self) -> &ParamValue {
-        return &self.filter_ki.value;
+    pub fn get_filter_ki(&self) -> ParamValue {
+        return self.filter_ki.value;
     }
 
-    pub fn get_filter_kp_ext(&self) -> &ParamValue {
-        return &self.filter_kp_ext.value;
+    pub fn get_filter_kp_ext(&self) -> ParamValue {
+        return self.filter_kp_ext.value;
     }
 
-    pub fn get_filter_accel_margin(&self) -> &ParamValue {
-        return &self.filter_accel_margin.value;
+    pub fn get_filter_accel_margin(&self) -> ParamValue {
+        return self.filter_accel_margin.value;
     }
 
-    pub fn get_filter_use_quad_int(&self) -> &ParamValue {
-        return &self.filter_use_quad_int.value;
+    pub fn get_filter_use_quad_int(&self) -> ParamValue {
+        return self.filter_use_quad_int.value;
     }
 
-    pub fn get_filter_use_mat_exp(&self) -> &ParamValue {
-        return &self.filter_use_mat_exp.value;
+    pub fn get_filter_use_mat_exp(&self) -> ParamValue {
+        return self.filter_use_mat_exp.value;
     }
 
-    pub fn get_filter_use_acc(&self) -> &ParamValue {
-        return &self.filter_use_acc.value;
+    pub fn get_filter_use_acc(&self) -> ParamValue {
+        return self.filter_use_acc.value;
     }
 
-    pub fn get_calibrate_gyro_on_arm(&self) -> &ParamValue {
-        return &self.calibrate_gyro_on_arm.value;
+    pub fn get_calibrate_gyro_on_arm(&self) -> ParamValue {
+        return self.calibrate_gyro_on_arm.value;
     }
 
-    pub fn get_gyro_xy_alpha(&self) -> &ParamValue {
-        return &self.gyro_xy_alpha.value;
+    pub fn get_gyro_xy_alpha(&self) -> ParamValue {
+        return self.gyro_xy_alpha.value;
     }
 
-    pub fn get_gyro_z_alpha(&self) -> &ParamValue {
-        return &self.gyro_z_alpha.value;
+    pub fn get_gyro_z_alpha(&self) -> ParamValue {
+        return self.gyro_z_alpha.value;
     }
 
-    pub fn get_acc_alpha(&self) -> &ParamValue {
-        return &self.acc_alpha.value;
+    pub fn get_acc_alpha(&self) -> ParamValue {
+        return self.acc_alpha.value;
     }
 
-    pub fn get_gyro_x_bias(&self) -> &ParamValue {
-        return &self.gyro_x_bias.value;
+    pub fn get_gyro_x_bias(&self) -> ParamValue {
+        return self.gyro_x_bias.value;
     }
 
-    pub fn get_gyro_y_bias(&self) -> &ParamValue {
-        return &self.gyro_y_bias.value;
+    pub fn get_gyro_y_bias(&self) -> ParamValue {
+        return self.gyro_y_bias.value;
     }
 
-    pub fn get_gyro_z_bias(&self) -> &ParamValue {
-        return &self.gyro_z_bias.value;
+    pub fn get_gyro_z_bias(&self) -> ParamValue {
+        return self.gyro_z_bias.value;
     }
 
-    pub fn get_acc_x_bias(&self) -> &ParamValue {
-        return &self.acc_x_bias.value;
+    pub fn get_acc_x_bias(&self) ->ParamValue {
+        return self.acc_x_bias.value;
     }
 
-    pub fn get_acc_y_bias(&self) -> &ParamValue {
-        return &self.acc_y_bias.value;
+    pub fn get_acc_y_bias(&self) -> ParamValue {
+        return self.acc_y_bias.value;
     }
 
-    pub fn get_acc_z_bias(&self) -> &ParamValue {
-        return &self.acc_z_bias.value;
+    pub fn get_acc_z_bias(&self) -> ParamValue {
+        return self.acc_z_bias.value;
     }
 
-    pub fn get_acc_x_temp_comp(&self) -> &ParamValue {
-        return &self.acc_x_temp_comp.value;
+    pub fn get_acc_x_temp_comp(&self) -> ParamValue {
+        return self.acc_x_temp_comp.value;
     }
 
-    pub fn get_acc_y_temp_comp(&self) -> &ParamValue {
-        return &self.acc_y_temp_comp.value;
+    pub fn get_acc_y_temp_comp(&self) -> ParamValue {
+        return self.acc_y_temp_comp.value;
     }
 
-    pub fn get_acc_z_temp_comp(&self) -> &ParamValue {
-        return &self.acc_z_temp_comp.value;
+    pub fn get_acc_z_temp_comp(&self) -> ParamValue {
+        return self.acc_z_temp_comp.value;
     }
 
-    pub fn get_mag_a11_comp(&self) -> &ParamValue {
-        return &self.mag_a11_comp.value;
+    pub fn get_mag_a11_comp(&self) -> ParamValue {
+        return self.mag_a11_comp.value;
     }
 
-    pub fn get_mag_a12_comp(&self) -> &ParamValue {
-        return &self.mag_a12_comp.value;
+    pub fn get_mag_a12_comp(&self) -> ParamValue {
+        return self.mag_a12_comp.value;
     }
 
-    pub fn get_mag_a13_comp(&self) -> &ParamValue {
-        return &self.mag_a13_comp.value;
+    pub fn get_mag_a13_comp(&self) -> ParamValue {
+        return self.mag_a13_comp.value;
     }
 
-    pub fn get_mag_a21_comp(&self) -> &ParamValue {
-        return &self.mag_a21_comp.value;
+    pub fn get_mag_a21_comp(&self) -> ParamValue {
+        return self.mag_a21_comp.value;
     }
 
-    pub fn get_mag_a22_comp(&self) -> &ParamValue {
-        return &self.mag_a22_comp.value;
+    pub fn get_mag_a22_comp(&self) -> ParamValue {
+        return self.mag_a22_comp.value;
     }
 
-    pub fn get_mag_a23_comp(&self) -> &ParamValue {
-        return &self.mag_a23_comp.value;
+    pub fn get_mag_a23_comp(&self) -> ParamValue {
+        return self.mag_a23_comp.value;
     }
 
-    pub fn get_mag_a31_comp(&self) -> &ParamValue {
-        return &self.mag_a31_comp.value;
+    pub fn get_mag_a31_comp(&self) -> ParamValue {
+        return self.mag_a31_comp.value;
     }
 
-    pub fn get_mag_a32_comp(&self) -> &ParamValue {
-        return &self.mag_a32_comp.value;
+    pub fn get_mag_a32_comp(&self) -> ParamValue {
+        return self.mag_a32_comp.value;
     }
 
-    pub fn get_mag_a33_comp(&self) -> &ParamValue {
-        return &self.mag_a33_comp.value;
+    pub fn get_mag_a33_comp(&self) -> ParamValue {
+        return self.mag_a33_comp.value;
     }
 
-    pub fn get_mag_x_bias(&self) -> &ParamValue {
-        return &self.mag_x_bias.value;
+    pub fn get_mag_x_bias(&self) -> ParamValue {
+        return self.mag_x_bias.value;
     }
 
-    pub fn get_mag_y_bias(&self) -> &ParamValue {
-        return &self.mag_y_bias.value;
+    pub fn get_mag_y_bias(&self) -> ParamValue {
+        return self.mag_y_bias.value;
     }
 
-    pub fn get_mag_z_bias(&self) -> &ParamValue {
-        return &self.mag_z_bias.value;
+    pub fn get_mag_z_bias(&self) -> ParamValue {
+        return self.mag_z_bias.value;
     }
 
-    pub fn get_baro_bias(&self) -> &ParamValue {
-        return &self.baro_bias.value;
+    pub fn get_baro_bias(&self) -> ParamValue {
+        return self.baro_bias.value;
     }
 
-    pub fn get_ground_level(&self) -> &ParamValue {
-        return &self.ground_level.value;
+    pub fn get_ground_level(&self) -> ParamValue {
+        return self.ground_level.value;
     }
 
-    pub fn get_diff_press_bias(&self) -> &ParamValue {
-        return &self.diff_press_bias.value;
+    pub fn get_diff_press_bias(&self) -> ParamValue {
+        return self.diff_press_bias.value;
     }
 
-    pub fn get_rc_type(&self) -> &ParamValue {
-        return &self.rc_type.value;
+    pub fn get_rc_type(&self) -> ParamValue {
+        return self.rc_type.value;
     }
 
-    pub fn get_rc_x_channel(&self) -> &ParamValue {
-        return &self.rc_x_channel.value;
+    pub fn get_rc_x_channel(&self) -> ParamValue {
+        return self.rc_x_channel.value;
     }
 
-    pub fn get_rc_y_channel(&self) -> &ParamValue {
-        return &self.rc_y_channel.value;
+    pub fn get_rc_y_channel(&self) -> ParamValue {
+        return self.rc_y_channel.value;
     }
 
-    pub fn get_rc_z_channel(&self) -> &ParamValue {
-        return &self.rc_z_channel.value;
+    pub fn get_rc_z_channel(&self) -> ParamValue {
+        return self.rc_z_channel.value;
     }
 
-    pub fn get_rc_f_channel(&self) -> &ParamValue {
-        return &self.rc_f_channel.value;
+    pub fn get_rc_f_channel(&self) -> ParamValue {
+        return self.rc_f_channel.value;
     }
 
-    pub fn get_rc_attitude_override_channel(&self) -> &ParamValue {
-        return &self.rc_attitude_override_channel.value;
+    pub fn get_rc_attitude_override_channel(&self) -> ParamValue {
+        return self.rc_attitude_override_channel.value;
     }
 
-    pub fn get_rc_throttle_override_channel(&self) -> &ParamValue {
-        return &self.rc_throttle_override_channel.value;
+    pub fn get_rc_throttle_override_channel(&self) -> ParamValue {
+        return self.rc_throttle_override_channel.value;
     }
 
-    pub fn get_rc_att_control_type_channel(&self) -> &ParamValue {
-        return &self.rc_att_control_type_channel.value;
+    pub fn get_rc_att_control_type_channel(&self) -> ParamValue {
+        return self.rc_att_control_type_channel.value;
     }
 
-    pub fn get_rc_arm_channel(&self) -> &ParamValue {
-        return &self.rc_arm_channel.value;
+    pub fn get_rc_arm_channel(&self) -> ParamValue {
+        return self.rc_arm_channel.value;
     }
 
-    pub fn get_rc_num_channels(&self) -> &ParamValue {
-        return &self.rc_num_channels.value;
+    pub fn get_rc_num_channels(&self) -> ParamValue {
+        return self.rc_num_channels.value;
     }
 
-    pub fn get_rc_switch_5_direction(&self) -> &ParamValue {
-        return &self.rc_switch_5_direction.value;
+    pub fn get_rc_switch_5_direction(&self) -> ParamValue {
+        return self.rc_switch_5_direction.value;
     }
 
-    pub fn get_rc_switch_6_direction(&self) -> &ParamValue {
-        return &self.rc_switch_6_direction.value;
+    pub fn get_rc_switch_6_direction(&self) -> ParamValue {
+        return self.rc_switch_6_direction.value;
     }
 
-    pub fn get_rc_switch_7_direction(&self) -> &ParamValue {
-        return &self.rc_switch_7_direction.value;
+    pub fn get_rc_switch_7_direction(&self) -> ParamValue {
+        return self.rc_switch_7_direction.value;
     }
 
-    pub fn get_rc_switch_8_direction(&self) -> &ParamValue {
-        return &self.rc_switch_8_direction.value;
+    pub fn get_rc_switch_8_direction(&self) -> ParamValue {
+        return self.rc_switch_8_direction.value;
     }
 
-    pub fn get_rc_override_deviation(&self) -> &ParamValue {
-        return &self.rc_override_deviation.value;
+    pub fn get_rc_override_deviation(&self) -> ParamValue {
+        return self.rc_override_deviation.value;
     }
 
-    pub fn get_override_lag_time(&self) -> &ParamValue {
-        return &self.override_lag_time.value;
+    pub fn get_override_lag_time(&self) -> ParamValue {
+        return self.override_lag_time.value;
     }
 
-    pub fn get_rc_override_take_min_throttle(&self) -> &ParamValue {
-        return &self.rc_override_take_min_throttle.value;
+    pub fn get_rc_override_take_min_throttle(&self) -> ParamValue {
+        return self.rc_override_take_min_throttle.value;
     }
 
-    pub fn get_rc_attitude_mode(&self) -> &ParamValue {
-        return &self.rc_attitude_mode.value;
+    pub fn get_rc_attitude_mode(&self) -> ParamValue {
+        return self.rc_attitude_mode.value;
     }
 
-    pub fn get_rc_max_roll(&self) -> &ParamValue {
-        return &self.rc_max_roll.value;
+    pub fn get_rc_max_roll(&self) -> ParamValue {
+        return self.rc_max_roll.value;
     }
 
-    pub fn get_rc_max_pitch(&self) -> &ParamValue {
-        return &self.rc_max_pitch.value;
+    pub fn get_rc_max_pitch(&self) -> ParamValue {
+        return self.rc_max_pitch.value;
     }
 
-    pub fn get_rc_max_rollrate(&self) -> &ParamValue {
-        return &self.rc_max_rollrate.value;
+    pub fn get_rc_max_rollrate(&self) -> ParamValue {
+        return self.rc_max_rollrate.value;
     }
 
-    pub fn get_rc_max_pitchrate(&self) -> &ParamValue {
-        return &self.rc_max_pitchrate.value;
+    pub fn get_rc_max_pitchrate(&self) -> ParamValue {
+        return self.rc_max_pitchrate.value;
     }
 
-    pub fn get_rc_max_yawrate(&self) -> &ParamValue {
-        return &self.rc_max_yawrate.value;
+    pub fn get_rc_max_yawrate(&self) -> ParamValue {
+        return self.rc_max_yawrate.value;
     }
 
-    pub fn get_mixer(&self) -> &ParamValue {
-        return &self.mixer.value;
+    pub fn get_mixer(&self) -> ParamValue {
+        return self.mixer.value;
     }
 
-    pub fn get_fixed_wing(&self) -> &ParamValue {
-        return &self.fixed_wing.value;
+    pub fn get_fixed_wing(&self) -> ParamValue {
+        return self.fixed_wing.value;
     }
 
-    pub fn get_elevator_reverse(&self) -> &ParamValue {
-        return &self.elevator_reverse.value;
+    pub fn get_elevator_reverse(&self) -> ParamValue {
+        return self.elevator_reverse.value;
     }
 
-    pub fn get_aileron_reverse(&self) -> &ParamValue {
-        return &self.aileron_reverse.value;
+    pub fn get_aileron_reverse(&self) -> ParamValue {
+        return self.aileron_reverse.value;
     }
 
-    pub fn get_rudder_reverse(&self) -> &ParamValue {
-        return &self.rudder_reverse.value;
+    pub fn get_rudder_reverse(&self) -> ParamValue {
+        return self.rudder_reverse.value;
     }
 
-    pub fn get_fc_roll(&self) -> &ParamValue {
-        return &self.fc_roll.value;
+    pub fn get_fc_roll(&self) -> ParamValue {
+        return self.fc_roll.value;
     }
 
-    pub fn get_fc_pitch(&self) -> &ParamValue {
-        return &self.fc_pitch.value;
+    pub fn get_fc_pitch(&self) -> ParamValue {
+        return self.fc_pitch.value;
     }
 
-    pub fn get_fc_yaw(&self) -> &ParamValue {
-        return &self.fc_yaw.value;
+    pub fn get_fc_yaw(&self) -> ParamValue {
+        return self.fc_yaw.value;
     }
 
-    pub fn get_arm_threshold(&self) -> &ParamValue {
-        return &self.arm_threshold.value;
+    pub fn get_arm_threshold(&self) -> ParamValue {
+        return self.arm_threshold.value;
     }
 
-    pub fn get_offboard_timeout(&self) -> &ParamValue {
-        return &self.offboard_timeout.value;
+    pub fn get_offboard_timeout(&self) -> ParamValue {
+        return self.offboard_timeout.value;
     }
 
-    pub fn get_battery_voltage_multiplier(&self) -> &ParamValue {
-        return &self.battery_voltage_multiplier.value;
+    pub fn get_battery_voltage_multiplier(&self) -> ParamValue {
+        return self.battery_voltage_multiplier.value;
     }
 
-    pub fn get_battery_current_multiplier(&self) -> &ParamValue {
-        return &self.battery_current_multiplier.value;
+    pub fn get_battery_current_multiplier(&self) -> ParamValue {
+        return self.battery_current_multiplier.value;
     }
 
-    pub fn get_battery_voltage_alpha(&self) -> &ParamValue {
-        return &self.battery_voltage_alpha.value;
+    pub fn get_battery_voltage_alpha(&self) -> ParamValue {
+        return self.battery_voltage_alpha.value;
     }
 
-    pub fn get_battery_current_alpha(&self) -> &ParamValue {
-        return &self.battery_current_alpha.value;
+    pub fn get_battery_current_alpha(&self) -> ParamValue {
+        return self.battery_current_alpha.value;
     }
 
     //************************************************
@@ -811,7 +814,7 @@ impl Params {
     pub fn set_diff_press_bias<'a>(&mut self, input: <DiffPressBias as Callback>::Args<'a>) {
         self.diff_press_bias.set(input);
     }
-
+ 
     pub fn set_rc_type<'a>(&mut self, input: <RcType as Callback>::Args<'a>) {
         self.rc_type.set(input);
     }
@@ -1001,6 +1004,9 @@ impl Params {
 
     pub fn new() -> Self {
         Params {
+            num_params: 100,
+            sending_params: false,
+            send_param_idx: 0,
             baud_rate: BaudRate {
                 value: ParamValue::Int(0),
             },
@@ -1306,10 +1312,11 @@ impl Params {
 
     pub fn set_defaults(&mut self) {
         // Hardware Configuration
-        self.set_baud_rate((
-            &mut TestStruct { val: 10, val2: 20 },
-            ParamValue::Int(91600),
-        ));
+        // self.set_baud_rate((
+        //     &mut TestStruct { val: 10, val2: 20 },
+        //     ParamValue::Int(91600),
+        // ));
+        self.set_baud_rate(ParamValue::Int(91600));
         self.set_serial_device(ParamValue::Int(0));
 
         // MAVLink Configuration
@@ -1455,7 +1462,7 @@ impl Params {
         self.set_battery_current_alpha(ParamValue::Float(0.995));
     }
 
-    pub fn get_param(&self, param_name: &str) -> Option<&ParamValue> {
+    pub fn get_param_by_name(&self, param_name: &str) -> Option<ParamValue> {
         match param_name {
             "BAUD_RATE" => Some(self.get_baud_rate()),
             "SERIAL_DEVICE" => Some(self.get_serial_device()),
@@ -1561,6 +1568,123 @@ impl Params {
         }
     }
 
+
+    pub fn get_param_by_idx(&self, param_idx: u16) -> Option<ParamValue> {
+        match param_idx {
+            0  => Some(self.get_baud_rate()),
+            1  => Some(self.get_serial_device()),
+            2  => Some(self.get_system_id()),
+            3  => Some(self.get_max_command()),
+            4  => Some(self.get_pid_roll_rate_p()),
+            5  => Some(self.get_pid_roll_rate_i()),
+            6  => Some(self.get_pid_roll_rate_d()),
+            7  => Some(self.get_pid_pitch_rate_p()),
+            8  => Some(self.get_pid_pitch_rate_i()),
+            9  => Some(self.get_pid_pitch_rate_d()),
+            10 => Some(self.get_pid_yaw_rate_p()),
+            11 => Some(self.get_pid_yaw_rate_i()),
+            12 => Some(self.get_pid_yaw_rate_d()),
+            13 => Some(self.get_pid_roll_angle_p()),
+            14 => Some(self.get_pid_roll_angle_i()),
+            15 => Some(self.get_pid_roll_angle_d()),
+            16 => Some(self.get_pid_pitch_angle_p()),
+            17 => Some(self.get_pid_pitch_angle_i()),
+            18 => Some(self.get_pid_pitch_angle_d()),
+            19 => Some(self.get_x_eq_torque()),
+            20 => Some(self.get_y_eq_torque()),
+            21 => Some(self.get_z_eq_torque()),
+            22 => Some(self.get_pid_tau()),
+            23 => Some(self.get_motor_pwm_send_rate()),
+            24 => Some(self.get_motor_idle_throttle()),
+            25 => Some(self.get_failsafe_throttle()),
+            26 => Some(self.get_spin_motors_when_armed()),
+            27 => Some(self.get_init_time()),
+            28 => Some(self.get_filter_kp_acc()),
+            29 => Some(self.get_filter_ki()),
+            30 => Some(self.get_filter_kp_ext()),
+            31 => Some(self.get_filter_accel_margin()),
+            32 => Some(self.get_filter_use_quad_int()),
+            33 => Some(self.get_filter_use_mat_exp()),
+            34 => Some(self.get_filter_use_acc()),
+            35 => Some(self.get_calibrate_gyro_on_arm()),
+            36 => Some(self.get_gyro_xy_alpha()),
+            37 => Some(self.get_gyro_z_alpha()),
+            38 => Some(self.get_acc_alpha()),
+            39 => Some(self.get_gyro_x_bias()),
+            40 => Some(self.get_gyro_y_bias()),
+            41 => Some(self.get_gyro_z_bias()),
+            42 => Some(self.get_acc_x_bias()),
+            43 => Some(self.get_acc_y_bias()),
+            44 => Some(self.get_acc_z_bias()),
+            45 => Some(self.get_acc_x_temp_comp()),
+            46 => Some(self.get_acc_y_temp_comp()),
+            47 => Some(self.get_acc_z_temp_comp()),
+            48 => Some(self.get_mag_a11_comp()),
+            49 => Some(self.get_mag_a12_comp()),
+            50 => Some(self.get_mag_a13_comp()),
+            51 => Some(self.get_mag_a21_comp()),
+            52 => Some(self.get_mag_a22_comp()),
+            53 => Some(self.get_mag_a23_comp()),
+            54 => Some(self.get_mag_a31_comp()),
+            55 => Some(self.get_mag_a32_comp()),
+            56 => Some(self.get_mag_a33_comp()),
+            57 => Some(self.get_mag_x_bias()),
+            58 => Some(self.get_mag_y_bias()),
+            59 => Some(self.get_mag_z_bias()),
+            60 => Some(self.get_baro_bias()),
+            61 => Some(self.get_ground_level()),
+            62 => Some(self.get_diff_press_bias()),
+            63 => Some(self.get_rc_type()),
+            64 => Some(self.get_rc_x_channel()),
+            65 => Some(self.get_rc_y_channel()),
+            66 => Some(self.get_rc_z_channel()),
+            67 => Some(self.get_rc_f_channel()),
+            68 => Some(self.get_rc_attitude_override_channel()),
+            69 => Some(self.get_rc_throttle_override_channel()),
+            70 => Some(self.get_rc_att_control_type_channel()),
+            71 => Some(self.get_rc_arm_channel()),
+            72 => Some(self.get_rc_num_channels()),
+            73 => Some(self.get_rc_switch_5_direction()),
+            74 => Some(self.get_rc_switch_6_direction()),
+            75 => Some(self.get_rc_switch_7_direction()),
+            76 => Some(self.get_rc_switch_8_direction()),
+            77 => Some(self.get_rc_override_deviation()),
+            78 => Some(self.get_override_lag_time()),
+            79 => Some(self.get_rc_override_take_min_throttle()),
+            80 => Some(self.get_rc_attitude_mode()),
+            81 => Some(self.get_rc_max_roll()),
+            82 => Some(self.get_rc_max_pitch()),
+            83 => Some(self.get_rc_max_rollrate()),
+            84 => Some(self.get_rc_max_pitchrate()),
+            85 => Some(self.get_rc_max_yawrate()),
+            86 => Some(self.get_mixer()),
+            87 => Some(self.get_fixed_wing()),
+            88 => Some(self.get_elevator_reverse()),
+            89 => Some(self.get_aileron_reverse()),
+            90 => Some(self.get_rudder_reverse()),
+            91 => Some(self.get_fc_roll()),
+            92 => Some(self.get_fc_pitch()),
+            93 => Some(self.get_fc_yaw()),
+            94 => Some(self.get_arm_threshold()),
+            95 => Some(self.get_offboard_timeout()),
+            96 => Some(self.get_battery_voltage_multiplier()),
+            97 => Some(self.get_battery_current_multiplier()),
+            98 => Some(self.get_battery_voltage_alpha()),
+            99 => Some(self.get_battery_current_alpha()),
+            _ => None,
+        }
+    }
+
+    pub fn get_next_param(&mut self) -> Option<ParamValue> {
+        let to_return = self.get_param_by_idx(self.send_param_idx);
+        if to_return.is_some() {
+            self.send_param_idx += 1;
+        } else {
+            println!("Requested index that doesn't exist...");
+        }
+        to_return
+    }
+
     pub fn init<B: BoardTrait>(&mut self, board: &mut B) {
         self.set_defaults();
         self.write(board);
@@ -1591,21 +1715,28 @@ mod test_params {
     fn test_update() {
         let mut p = Params::new();
         p.set_acc_alpha(ParamValue::Bool(true));
-        assert_eq!(p.get_acc_alpha(), &ParamValue::Bool(true));
+        assert_eq!(p.get_acc_alpha(), ParamValue::Bool(true));
     }
 
-    #[test]
-    fn test_callback() {
-        let mut p = Params::new();
-        let mut x = TestStruct { val: 5, val2: 10 };
-
-        p.set_baud_rate((&mut x, ParamValue::Float(20.0)));
-    }
-
+    // #[test]
+    // fn test_callback() {
+    //     let mut p = Params::new();
+    //     let mut x = TestStruct { val: 5, val2: 10 };
+    //
+    //     p.set_baud_rate((&mut x, ParamValue::Float(20.0)));
+    // }
+    
     #[test]
     fn test_lookup_string() {
         let mut p = Params::new();
         p.set_defaults();
-        assert_eq!(p.get_param("BAUD_RATE").unwrap(), &ParamValue::Int(91600));
+        assert_eq!(p.get_param_by_name("BAUD_RATE").unwrap(), ParamValue::Int(91600));
+    }
+
+    #[test]
+    fn test_lookup_idx() {
+        let mut p = Params::new();
+        p.set_defaults();
+        assert_eq!(p.get_param_by_idx(0).unwrap(), ParamValue::Int(91600));
     }
 }
