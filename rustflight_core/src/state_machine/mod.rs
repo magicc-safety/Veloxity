@@ -36,270 +36,272 @@
 // *
 // ******************************************************************************
 // **/
-// Submodules
+
 #[cfg(test)]
 mod tests;
 
-// Imports
-use core::clone::Clone;
-use core::cmp::{Eq, PartialEq};
-use core::default::Default;
-use core::fmt::Debug;
-use core::marker::{Copy, PhantomData};
-
 use bitflags::bitflags;
+use crate::{board::BoardTrait, comm_manager::CommManager, params::{ParamValue, Params}};
+use core::mem::take;
 
-/*
-All possible states of the state manager
- */
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct State<State_Value> {
-    _state: PhantomData<State_Value>,
+// Events that trigger state transitions
+#[derive(Debug, Clone, Copy)]
+pub enum Event {
+    INITIALIZED,
+    REQUEST_ARM,
+    REQUEST_DISARM,
+    CALIBRATION_COMPLETE,
+    CALIBRATION_FAILED,
+    ERROR_OCCURRED(ErrorFlag),
+    ERROR_CLEARED(ErrorFlag),
 }
 
-// TODO: Implement methods / members for these structs
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Init;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Preflight;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Calibrating;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Armed;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Failsafe;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ErrorPresent;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StateEnum {
-    INIT(State<Init>),
-    PREFLIGHT(State<Preflight>),
-    CALIBRATING(State<Calibrating>),
-    ARMED(State<Armed>),
-    FAILSAFE(State<Failsafe>),
-    ERROR_PRESENT(State<ErrorPresent>),
-}
-
-impl Default for StateEnum {
-    fn default() -> Self {
-        State::<Init>::new()
-    }
-}
-
-/*
-Bitflags for errors
-*/
+// Bitflags for tracking specific error conditions
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub(crate) struct ErrorFlag: u16 {
+    pub struct ErrorFlag: u16 {
         const INVALID_MIXER = 1;
         const IMU_NOT_RESPONDING = 1 << 1;
         const RC_LOST = 1 << 2;
         const UNHEALTHY_ESTIMATOR = 1 << 3;
         const TIME_GOING_BACKWARDS = 1 << 4;
         const UNCALIBRATED_IMU = 1 << 5;
-        const INVALID_FAILSAFE = 1 << 6;
-        const INVALID_STATE_MACHINE_TRANSITION = 1 << 7;
+        const BUFFER_OVERRUN = 1 << 6;
+        const INVALID_FAILSAFE = 1 << 7;
     }
 }
 
-/*
-State Machine Events.
-
-Instead of having specific error events, it may be more idiomatic to have a
-Result<Event, ErrorFlag> enum that we match on.
-
- */
-#[derive(Debug)]
-pub(crate) enum Event {
-    INITIALIZED,
-    REQUEST_ARM,
-    REQUEST_ARM_AND_CALIBRATE,
-    REQUEST_DISARM,
-    REQUEST_DISARM_AND_ERROR,
-    RC_LOST,
-    RC_FOUND,
-    CALIBRATION_COMPLETE,
-    CALIBRATION_FAILED,
-    // ERROR,
-    // NO_ERROR,
-}
-
-/*
-State struct implementations
-
-Each struct should have methods that are unique to that state.
-
-*/
-
-impl State<Init> {
-    fn new() -> StateEnum {
-        /*
-        NOTE: This is the only way a state can be created directly.
-
-        All other states must be created from previous states. They
-        do not have direct constructors.
-         */
-        StateEnum::INIT(State {
-            _state: PhantomData,
-        })
-    }
-
-    fn initialize(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State {
-            _state: PhantomData,
-        })
-    }
-}
-
-impl State<Preflight> {
-    fn request_arm(self) -> StateEnum {
-        StateEnum::ARMED(State {
-            _state: PhantomData,
-        })
-    }
-
-    fn request_arm_and_calibrate(self) -> StateEnum {
-        StateEnum::CALIBRATING(State {
-            _state: PhantomData,
-        })
-    }
-}
-
-impl State<Calibrating> {
-    fn calibration_complete(self) -> StateEnum {
-        StateEnum::ARMED(State {
-            _state: PhantomData,
-        })
-    }
-
-    fn calibration_failed(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State {
-            _state: PhantomData,
-        })
-    }
-}
-
-impl State<Armed> {
-    fn request_disarm(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State {
-            _state: PhantomData,
-        })
-    }
-
-    fn request_disarm_and_error(self) -> StateEnum {
-        StateEnum::ERROR_PRESENT(State {
-            _state: PhantomData,
-        })
-    }
-
-    fn rc_lost(self) -> StateEnum {
-        StateEnum::FAILSAFE(State {
-            _state: PhantomData,
-        })
-    }
-}
-
-impl State<Failsafe> {
-    fn rc_found(self) -> StateEnum {
-        StateEnum::ARMED(State {
-            _state: PhantomData,
-        })
-    }
-
-    fn request_disarm(self) -> StateEnum {
-        StateEnum::ERROR_PRESENT(State {
-            _state: PhantomData,
-        })
-    }
-}
-
-impl State<ErrorPresent> {
-    fn clear_errors(self) -> StateEnum {
-        StateEnum::PREFLIGHT(State {
-            _state: PhantomData,
-        })
-    }
-}
-
-impl<State_Value> State<State_Value> {
-    fn error(self) -> StateEnum {
-        // TODO: Pass in an error bitflag?
-        StateEnum::ERROR_PRESENT(State {
-            _state: PhantomData,
-        })
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct StateMachine {
-    state: StateEnum,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct State<S> {
+    state: S,
     error_flags: ErrorFlag,
 }
 
+// Holds FSM as its type changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)] 
+pub enum StateMachine {
+    Init(State<Init>),
+    Preflight(State<Preflight>),
+    Calibrating(State<Calibrating>),
+    Armed(State<Armed>),
+    Failsafe(State<Failsafe>),
+    ErrorPresent(State<ErrorPresent>),
+}
+
 impl StateMachine {
-    pub fn get_state(&self) -> &StateEnum {
-        &self.state
+    // New state machine starts in the Preflight state.
+    pub fn new() -> Self {
+        let sm = State { state: Init, error_flags: ErrorFlag::empty() };
+        sm.state.on_event(sm, Event::INITIALIZED)
+    }
+
+    // gets a mutable reference to the error flags
+    fn error_flags_mut(&mut self) -> &mut ErrorFlag {
+        match self {
+            StateMachine::Init(sm) => &mut sm.error_flags,
+            StateMachine::Preflight(sm) => &mut sm.error_flags,
+            StateMachine::Calibrating(sm) => &mut sm.error_flags,
+            StateMachine::Armed(sm) => &mut sm.error_flags,
+            StateMachine::Failsafe(sm) => &mut sm.error_flags,
+            StateMachine::ErrorPresent(sm) => &mut sm.error_flags,
+        }
+    }
+
+    // Transitions machine based on Event
+    pub fn update(&mut self, event: Event, params: &Params) {
+        // Handle errors
+        match event {
+            Event::ERROR_OCCURRED(flag) => self.error_flags_mut().insert(flag),
+            Event::ERROR_CLEARED(flag) => self.error_flags_mut().remove(flag),
+            _ => (),
+        }
+
+        // Consume old state, replace with new one
+        let machine = take(self);
+        *self = machine.transition(event, params);
+    }
+
+    fn transition(self, event: Event, params: &Params) -> Self {
+        match self {
+            StateMachine::Init(sm) => sm.state.on_event(sm, event),
+            StateMachine::Preflight(sm) => sm.state.on_event(sm, event, params),
+            StateMachine::Calibrating(sm) => sm.state.on_event(sm, event, params),
+            StateMachine::Armed(sm) => sm.state.on_event(sm, event, params),
+            StateMachine::Failsafe(sm) => sm.state.on_event(sm, event, params),
+            StateMachine::ErrorPresent(sm) => sm.state.on_event(sm, event, params),
+        }
+    }
+    
+    pub fn get_errors(&self) -> ErrorFlag {
+        match self {
+            StateMachine::Init(sm) => sm.error_flags,
+            StateMachine::Preflight(sm) => sm.error_flags,
+            StateMachine::Calibrating(sm) => sm.error_flags,
+            StateMachine::Armed(sm) => sm.error_flags,
+            StateMachine::Failsafe(sm) => sm.error_flags,
+            StateMachine::ErrorPresent(sm) => sm.error_flags,
+        }
+    }
+    
+    pub fn is_armed(&self) -> bool {
+        matches!(self, StateMachine::Armed(_) | StateMachine::Failsafe(_))
+    }
+
+    pub fn is_in_failsafe(&self) -> bool {
+        matches!(self, StateMachine::Failsafe(_))
+    }
+}
+
+impl Default for StateMachine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// State structs
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+pub struct Init;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+pub struct Preflight;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+pub struct Calibrating;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+pub struct Armed;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+pub struct Failsafe;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+pub struct ErrorPresent;
+
+// State transition logic
+impl Init {
+    fn on_event(self, sm: State<Self>, event: Event) -> StateMachine {
+        match event {
+            Event::INITIALIZED => StateMachine::Preflight(State {
+                state: Preflight,
+                error_flags: sm.error_flags,
+            }),
+            _ => StateMachine::Init(sm),
+        }
+    }
+}
+
+impl Preflight {
+    fn on_event(self, sm: State<Self>, event: Event, params: &Params) -> StateMachine {
+        match event {
+            Event::REQUEST_ARM => {
+                if let ParamValue::Bool(true) = Params::get_calibrate_gyro_on_arm(params) {
+                    StateMachine::Calibrating(State { state: Calibrating, error_flags: sm.error_flags })
+                } else {
+                    StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags })
+                }
+            },
+            Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
+            _ => StateMachine::Preflight(sm),
+        }
+    }
+}
+
+impl Calibrating {
+    fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
+        match event {
+            Event::CALIBRATION_COMPLETE => StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags }),
+            Event::CALIBRATION_FAILED => StateMachine::Preflight(State { state: Preflight, error_flags: sm.error_flags }),
+            Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
+            _ => StateMachine::Calibrating(sm),
+        }
+    }
+}
+
+impl Armed {
+    fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
+        match event {
+            Event::REQUEST_DISARM => {
+                if !sm.error_flags.is_empty() {
+                    StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags })
+                } else {
+                    StateMachine::Preflight(State { state: Preflight, error_flags: sm.error_flags })
+                }
+            },
+            Event::ERROR_OCCURRED(ErrorFlag::RC_LOST) => StateMachine::Failsafe(State { state: Failsafe, error_flags: sm.error_flags }),
+            _ => StateMachine::Armed(sm),
+        }
+    }
+}
+
+impl Failsafe {
+    fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
+        match event {
+            Event::ERROR_CLEARED(ErrorFlag::RC_LOST) => StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags }),
+            Event::REQUEST_DISARM => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
+            _ => StateMachine::Failsafe(sm),
+        }
+    }
+}
+
+impl ErrorPresent {
+    fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
+        match event {
+            Event::ERROR_CLEARED(_) => {
+                if sm.error_flags.is_empty() {
+                    StateMachine::Preflight(State { state: Preflight, error_flags: sm.error_flags })
+                } else {
+                    StateMachine::ErrorPresent(sm)
+                }
+            },
+            _ => StateMachine::ErrorPresent(sm)
+        }
+    }
+}
+
+// Struct for state management
+pub struct StateManager {
+    machine: StateMachine,
+}
+
+impl StateManager {
+    pub fn new() -> Self {
+        StateManager { machine: StateMachine::new(), }
+    }
+
+    // The main update loop. Takes an event and applies it to the internal state machine.
+    pub fn update(&mut self, event: Event, params: &Params) {
+        let start_state = self.machine;
+        self.machine.update(event, params);
+        if start_state != self.machine {
+            // println!("Update: Armed {} | Failsafe {} | Errors {}", self.is_armed(), self.is_in_failsafe(), self.get_errors().bits());
+        }
+    }
+
+    pub fn run(&mut self, params: &Params) {
+        // process errors
+        if self.get_errors().is_empty() {
+            // Move out of error state if cleared
+            self.update(Event::ERROR_CLEARED(ErrorFlag::default()), params);
+        } else {
+            // Retry entering error state if errors still present
+            self.update(Event::ERROR_OCCURRED(self.machine.get_errors()), params);
+        }
+        self.update_leds();
+    }
+
+    pub fn is_armed(&self) -> bool {
+        self.machine.is_armed()
+    }
+
+    pub fn is_in_failsafe(&self) -> bool {
+        self.machine.is_in_failsafe()
     }
 
     pub fn get_errors(&self) -> ErrorFlag {
-        self.error_flags
+        self.machine.get_errors()
     }
 
-    pub fn set_error(&mut self, error_flag: ErrorFlag) {
-        self.error_flags |= error_flag;
+    fn update_leds(&self) {
+        // TODO: Add board ref for LED updates
+        // blink fast if in failsafe
+        // blink slowly if in error
+        // off if disarmed, on if armed
     }
 
-    pub fn unset_error(&mut self, error_flag: ErrorFlag) {
-        // TODO: Check this
-        self.error_flags &= !error_flag;
-    }
-
-    pub fn update(&mut self, event: Result<Event, ErrorFlag>) {
-        // TODO: Have this update function return a Result to indicate success or failure?
-
-        /*
-
-        TODO: Change the results of the match statement so that we construct the next state from the
-        previous one using the typestate pattern.
-
-        For example, going from init -> preflight would be State<Init>::to_preflight() -> State<Preflight>
-         */
-        self.state = match event {
-            Ok(_event) => match (self.state, _event) {
-                (StateEnum::INIT(state), Event::INITIALIZED) => state.initialize(),
-                (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM) => state.request_arm(),
-                (StateEnum::PREFLIGHT(state), Event::REQUEST_ARM_AND_CALIBRATE) => {
-                    state.request_arm_and_calibrate()
-                }
-                (StateEnum::CALIBRATING(state), Event::CALIBRATION_COMPLETE) => {
-                    state.calibration_complete()
-                }
-                (StateEnum::CALIBRATING(state), Event::CALIBRATION_FAILED) => {
-                    state.calibration_failed()
-                }
-                (StateEnum::ARMED(state), Event::REQUEST_DISARM) => state.request_disarm(),
-                (StateEnum::ARMED(state), Event::REQUEST_DISARM_AND_ERROR) => {
-                    state.request_disarm_and_error()
-                }
-                (StateEnum::ARMED(state), Event::RC_LOST) => state.rc_lost(),
-                (StateEnum::FAILSAFE(state), Event::RC_FOUND) => state.rc_found(),
-                (StateEnum::FAILSAFE(state), Event::REQUEST_DISARM) => state.request_disarm(),
-                (state, _) => state,
-            },
-            Err(_error) => {
-                self.set_error(_error);
-                match (self.state) {
-                    StateEnum::INIT(state) => state.error(),
-                    StateEnum::PREFLIGHT(state) => state.error(),
-                    StateEnum::CALIBRATING(state) => state.error(),
-                    StateEnum::ARMED(state) => state.error(),
-                    StateEnum::FAILSAFE(state) => state.error(),
-                    StateEnum::ERROR_PRESENT(state) => state.error(),
-                }
-            }
-        };
-    }
+    // left out backup data functionality
 }
