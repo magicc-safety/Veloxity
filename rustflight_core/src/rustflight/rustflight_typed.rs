@@ -51,6 +51,7 @@ use crate::{
     params,
     rustflight::Configuration,
     sensorprocessors::CalibrationFlags,
+    comm_messages,
 };
 
 pub struct ROSFlight<B, BT, C, CI>
@@ -90,13 +91,17 @@ where
 {
     pub fn init(
         loop_time_us: u32,
-        board: B,
-        comm_link: CI,
+        mut board: B,
+        mut comm_link: CI,
         estimator: BT::Estimator,
         controller: BT::Controller,
         mixer: BT::Mixer,
         _config: C, // zero-cost marker for deduction during "init" creation
-    ) -> Self {
+    ) -> Self { 
+
+        // send a heartbeat to initialize rosflight_io communicaiton 
+        comm_link.send_heartbeat(&mut board, 0, comm_messages::messages::HeartbeatMsg { type_: 0, autopilot: 0, base_mode: 0, custom_mode: 0, system_status: 0, mavlink_version: 0 });
+
         Self {
             loop_time_us,
             board,

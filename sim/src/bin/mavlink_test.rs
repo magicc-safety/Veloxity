@@ -72,9 +72,6 @@ async fn main() {
     // comm_link implementation
     let mut mavlink = MavlinkInterface::new();
 
-    // send one heratbeat message to establish udp connection, then give away to rosflight to work
-    mavlink.send_heartbeat(&mut board, 0, rustflight_core::comm_messages::messages::HeartbeatMsg { type_: 0, autopilot: 0, base_mode: 0, custom_mode: 0, system_status: 0, mavlink_version: 0 });
-
     let mut rosflight = ROSFlight::init(1000, board, mavlink, estimator, controller, mixer, config);
 
     while let Ok(_tick) = tick_handler.recv() {
