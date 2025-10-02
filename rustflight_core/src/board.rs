@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{errors, hlist::*, packets, params::Params};
+use crate::{errors, hlist::*, packets, params2::Params};
 pub mod dummy;
 
 pub trait BoardTrait {

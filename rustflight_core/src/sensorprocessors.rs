@@ -38,7 +38,7 @@
 use crate::errors;
 use crate::hlist::*;
 use crate::packets::*;
-use crate::params::Params;
+use crate::params2::Params;
 use bitflags::bitflags;
 //use defmt;
 

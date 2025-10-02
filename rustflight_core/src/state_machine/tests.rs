@@ -38,7 +38,7 @@
 Unit tests
 */
 use crate::state_machine::{StateManager, StateMachine, Event, ErrorFlag};
-use crate::params::{ParamValue, Params};
+use crate::params2::{ParamValue, Params, ParamId};
 
 fn setup_sm() -> (StateMachine, Params) {
     let params = Params::new();
@@ -250,7 +250,8 @@ fn test_arm_and_disarm() {
 #[test]
 fn test_wait_for_calibration_to_arm() {
     let (mut sm, mut params) = setup_sm();
-    params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    //params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool((true)));
     sm.update(Event::REQUEST_ARM, &params);
     assert!(!sm.is_armed());
     assert!(!sm.is_in_failsafe());
@@ -267,7 +268,8 @@ fn test_wait_for_calibration_to_arm() {
 #[test]
 fn test_calibration_failed_dont_arm() {
     let (mut sm, mut params) = setup_sm();
-    params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    //params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool(true));
 
     sm.update(Event::REQUEST_ARM, &params);
     sm.update(Event::CALIBRATION_FAILED, &params);
@@ -281,7 +283,8 @@ fn test_calibration_failed_dont_arm() {
 #[test]
 fn test_error_during_calibration_dont_arm() {
     let (mut sm, mut params) = setup_sm();
-    params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    // params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool(true));
 
     sm.update(Event::REQUEST_ARM, &params);
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER), &params);
@@ -295,7 +298,8 @@ fn test_error_during_calibration_dont_arm() {
 #[test]
 fn test_rc_lost_during_calibration_dont_arm() {
     let (mut sm, mut params) = setup_sm();
-    params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    // params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool(true));
 
     sm.update(Event::REQUEST_ARM, &params);
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), &params);
@@ -309,7 +313,9 @@ fn test_rc_lost_during_calibration_dont_arm() {
 #[test]
 fn test_clear_error_stay_disarmed() {
     let (mut sm, mut params) = setup_sm();
-    params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    // params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool(true));
+
 
     sm.update(Event::REQUEST_ARM, &params);
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER), &params);
@@ -327,7 +333,8 @@ fn test_clear_error_stay_disarmed() {
 #[test]
 fn test_recover_rc_stay_disarmed() {
     let (mut sm, mut params) = setup_sm();
-    params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    // params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
+    params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool(true));
 
     sm.update(Event::REQUEST_ARM, &params);
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), &params);

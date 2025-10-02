@@ -89,7 +89,7 @@ impl_store!(ExternalAttitudeMsg,     external_attitude,"external_attitude");
 
 pub mod messages {
     use super::enums::*;
-    use crate::params::ParamValue;
+    use crate::params2::ParamValue;
     // Heartbeat
     // I don't think we need all these fields for the generic message but I'm leaving them for now
     #[derive(Debug, Clone, Copy)]

@@ -38,8 +38,34 @@ pub mod mavlink_parser;
 
 use crate::board;
 use crate::comm_messages::{self, messages::*, enums::*};
-use crate::params::ParamValue;
+use crate::params2::{ParamDefinition, ParamValue, PARAMS_COUNT};
 use core::marker::PhantomData;
+
+// used for converting names of ParamValues ("id" during creation in params.cpp) to null-terminated characters
+pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
+    let mut buffer = [0u8; 16];
+    let input_bytes = input.as_bytes();
+
+    // Determine how many bytes to copy (at most 16)
+    let len_to_copy = if input_bytes.len() > 16 {
+        16
+    } else {
+        input_bytes.len()
+    };
+
+    // Copy the bytes from the input string
+    let mut i = 0;
+    while i < len_to_copy {
+        buffer[i] = input_bytes[i];
+        i += 1;
+    }
+
+    // If the input was shorter than 16, the spot after the last character
+    // is already a 0 from the initial buffer creation, so it is null-terminated.
+    // If the input was 16 or longer, the buffer is full and not null-terminated.
+
+    buffer
+}
 
 pub struct CommManager<B, T>
 where
@@ -96,12 +122,22 @@ where
         self.comm_link.send_status(board, self.sysid, msg);
     }
 
-    pub fn send_named_value(&mut self, board: &mut B) {
+    // pub fn send_named_value(&mut self, board: &mut B) {
+    //     let msg = ParamValueMsg {
+    //         param_id: *b"TEST_PARAM_ID___",
+    //         param_value: ParamValue::Float(123.45),
+    //         param_count: 1,
+    //         param_index: 0,
+    //     };
+    //     self.comm_link.send_named_value(board, self.sysid, msg);
+    // }
+
+    pub fn send_param_value(&mut self, def: &ParamDefinition, val: ParamValue, board: &mut B) {
         let msg = ParamValueMsg {
-            param_id: *b"TEST_PARAM_ID___",
-            param_value: ParamValue::Float(123.45),
-            param_count: 1,
-            param_index: 0,
+            param_id: str_to_fixed_bytes(def.name),
+            param_value: val,
+            param_count: PARAMS_COUNT as u16,
+            param_index: def.id as u16,
         };
         self.comm_link.send_named_value(board, self.sysid, msg);
     }

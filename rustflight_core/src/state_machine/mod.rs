@@ -41,8 +41,9 @@
 mod tests;
 
 use bitflags::bitflags;
-use crate::{board::BoardTrait, comm_manager::CommManager, params::{ParamValue, Params}};
+use crate::{board::BoardTrait, comm_manager::CommManager, params2::{ParamValue, Params, ParamId}};
 use core::mem::take;
+use std::default;
 
 // Events that trigger state transitions
 #[derive(Debug, Clone, Copy)]
@@ -71,7 +72,7 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct State<S> {
     state: S,
     error_flags: ErrorFlag,
@@ -91,8 +92,10 @@ pub enum StateMachine {
 impl StateMachine {
     // New state machine starts in the Preflight state.
     pub fn new() -> Self {
-        let sm = State { state: Init, error_flags: ErrorFlag::empty() };
-        sm.state.on_event(sm, Event::INITIALIZED)
+        // let sm = State { state: Init, error_flags: ErrorFlag::empty() };
+        // sm.state.on_event(sm, Event::INITIALIZED)
+
+        StateMachine::Init(State::<Init>::default())
     }
 
     // gets a mutable reference to the error flags
@@ -189,7 +192,8 @@ impl Preflight {
     fn on_event(self, sm: State<Self>, event: Event, params: &Params) -> StateMachine {
         match event {
             Event::REQUEST_ARM => {
-                if let ParamValue::Bool(true) = Params::get_calibrate_gyro_on_arm(params) {
+                //if let ParamValue::Bool(true) = Params::get_calibrate_gyro_on_arm(params) {
+                if let ParamValue::Bool(true) = params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM) {
                     StateMachine::Calibrating(State { state: Calibrating, error_flags: sm.error_flags })
                 } else {
                     StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags })
@@ -268,7 +272,7 @@ impl StateManager {
         let start_state = self.machine;
         self.machine.update(event, params);
         if start_state != self.machine {
-            // println!("Update: Armed {} | Failsafe {} | Errors {}", self.is_armed(), self.is_in_failsafe(), self.get_errors().bits());
+            println!("Update: Armed {} | Failsafe {} | Errors {}", self.is_armed(), self.is_in_failsafe(), self.get_errors().bits());
         }
     }
 

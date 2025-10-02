@@ -49,10 +49,10 @@ use crate::{
     estimator::Estimator,
     hlist::*,
     mixer::Mixer,
-    params,
+    params2::{self, ParamIter, PARAM_DEFINITIONS},
     rustflight::Configuration,
     sensorprocessors::CalibrationFlags,
-    state_machine::StateManager,
+    state_machine::{Event, StateManager},
 };
 
 pub struct ROSFlight<B, BT, C, CI>
@@ -64,7 +64,8 @@ where
 {
     loop_time_us: u32,
     pub board: B,
-    params: params::Params,
+    params: params2::Params,
+    params_iter: Option<ParamIter>,
     comm_manager: comm_manager::CommManager<B, CI>,
     sensors: B::RawSensorSet,
     processorhlist: B::ProcessorHList,
@@ -95,19 +96,24 @@ where
         loop_time_us: u32,
         mut board: B,
         mut comm_link: CI,
-        estimator: BT::Estimator,
-        controller: BT::Controller,
-        mixer: BT::Mixer,
+        mut state_manager: StateManager,
+        mut estimator: BT::Estimator,
+        mut controller: BT::Controller,
+        mut mixer: BT::Mixer,
         _config: C, // zero-cost marker for deduction during "init" creation
     ) -> Self { 
 
+        // Initialize all parameters.
         // send a heartbeat to initialize rosflight_io communicaiton 
+        let mut params = params2::Params::new();
         comm_link.send_heartbeat(&mut board, 0, comm_messages::messages::HeartbeatMsg { type_: 0, autopilot: 0, base_mode: 0, custom_mode: 0, system_status: 0, mavlink_version: 0 });
+        state_manager.update(Event::INITIALIZED, &params);
 
         Self {
             loop_time_us,
             board,
-            params: params::Params::new(),
+            params: params2::Params::new(),
+            params_iter: None,
             comm_manager: comm_manager::CommManager::new(comm_link),
             sensors: B::RawSensorSet::default(),
             processorhlist: B::ProcessorHList::default(),
@@ -123,7 +129,35 @@ where
 
     pub fn run(&mut self) -> bool {
         self.comm_manager.process_incoming_messages(&mut self.board);
+
+        // if we haven't already initialized the parameter iteration process, go ahead and start it... otherwise we'll use the iterator we already have
+        if self.comm_manager.msgs.param_request_list.take().is_some() {
+            if self.params_iter.is_none() {
+                self.params_iter = Some(self.params.iter());
+            }
+        }
+
+        // Parameter sending sequence        
+        if let Some(iterator) = &mut self.params_iter {
+
+            // Safely get the next item. This `if let` replaces your `.unwrap()`.
+            if let Some((param_id, param_val)) = iterator.next() {
+                let def = &PARAM_DEFINITIONS[param_id as usize];
         
+                // You now have everything you need to send the message:
+                // def.name    -> The parameter's string name (e.g., "SYS_ID")
+                // param_id    -> The enum ID (e.g., ParamId::PARAM_SYSTEM_ID)
+                // param_val   -> The current value (e.g., ParamValue::Int(1))
+
+                self.comm_manager.send_param_value(def, param_val, &mut self.board);
+
+            } else {
+                // The iterator is finished, so set it back to None.
+                // This is crucial for preventing future panics and resetting the state.
+                self.params_iter = None;
+            }
+        }
+
         // Data ingestion: let the board update the sensor data store
         self.board.update_sensors(&mut self.sensors);
 

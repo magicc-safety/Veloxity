@@ -9,6 +9,7 @@ use rustflight_core::{
     comm_manager::comm_link_trait::{mavlink::MavlinkInterface, CommInterface},
     controller::Controller,
     estimator::Estimator,
+    state_machine::StateManager,
     hlist::{Here, There},
     hlist_type,
     mixer::Mixer,
@@ -54,7 +55,9 @@ impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
 #[tokio::main]
 async fn main() {
     // board implementation
-    let mut board = board::Board::new().await;
+    let board = board::Board::new().await;
+    
+    // initialize the timing of the highest level loop through a tick callback 
     let tick_handler = board
         .zenoh_connect_session
         .declare_subscriber("tick")
@@ -70,9 +73,11 @@ async fn main() {
     let config = SimQuadConfig::default();
 
     // comm_link implementation
-    let mut mavlink = MavlinkInterface::new();
+    let mavlink = MavlinkInterface::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, mavlink, estimator, controller, mixer, config);
+    let state_manager = StateManager::new();
+
+    let mut rosflight = ROSFlight::init(1000, board, mavlink, state_manager, estimator, controller, mixer, config);
 
     while let Ok(_tick) = tick_handler.recv() {
         //println!("Received query!");

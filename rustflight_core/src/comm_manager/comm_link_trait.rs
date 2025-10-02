@@ -39,7 +39,7 @@ pub mod mavlink;
 use crate::board;
 use crate::comm_messages::{self, messages::*};
 use crate::packets;
-use crate::params;
+use crate::params2;
 
 pub trait CommInterface<B: board::BoardTrait> {
     fn send_heartbeat(&mut self, board: &mut B, system_id: u8, msg: HeartbeatMsg) -> bool;

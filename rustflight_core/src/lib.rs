@@ -46,10 +46,11 @@ pub mod estimator;
 pub mod hlist;
 pub mod mixer;
 pub mod packets;
-pub mod params;
+//pub mod params;
+pub mod params2;
 pub mod rustflight;
 pub mod sensorprocessors;
-mod state_machine;
+pub mod state_machine;
 //pub(crate) mod units;
 
 // MAVLINK Specific
