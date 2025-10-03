@@ -34,6 +34,9 @@
 // *
 // ******************************************************************************
 // **/
+
+pub mod quad_mixer;
+
 pub trait Mixer {
     type ControlOutput;
     type ActuatorCommands;

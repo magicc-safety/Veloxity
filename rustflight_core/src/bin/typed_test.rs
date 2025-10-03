@@ -37,10 +37,8 @@ use std::time::Duration;
 // ******************************************************************************
 // **/
 use rustflight_core::{
-    board::BoardTrait,
-    board::dummy::DummyBoard,
-    bodytype::BodyType,
-    bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
+    board::{dummy::DummyBoard, BoardTrait},
+    bodytype::{quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor}, BodyType},
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
     estimator::Estimator,
@@ -48,8 +46,8 @@ use rustflight_core::{
     hlist_type,
     mixer::Mixer,
     packets,
-    rustflight::Configuration,
-    rustflight::rustflight_typed::ROSFlight,
+    rustflight::{rustflight_typed::ROSFlight, Configuration},
+    state_machine::StateManager,
 };
 
 // define the wiring diagram
@@ -74,7 +72,9 @@ fn main() {
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, mavlink, estimator, controller, mixer, config);
+    let state_manager = StateManager::new();
+
+    let mut rosflight = ROSFlight::init(1000, board, mavlink, state_manager, estimator, controller, mixer, config);
 
     loop {
         println!("Highest Level Loop");

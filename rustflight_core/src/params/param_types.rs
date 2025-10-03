@@ -333,7 +333,7 @@ pub struct RcYChannel {
 pub struct RcZChannel {
     pub value: ParamValue,
 }
-
+ 
 pub struct RcFChannel {
     pub value: ParamValue,
 }
@@ -477,7 +477,7 @@ macro_rules! impl_callback {
 }
 
 impl_callback!(
-    // BaudRate,
+    BaudRate,
     SerialDevice,
     SystemId,
     MaxCommand,
@@ -578,10 +578,10 @@ impl_callback!(
     BatteryVoltageAlpha,
     BatteryCurrentAlpha
 );
-
-impl Callback for BaudRate {
-    type Args<'a> = (&'a mut TestStruct, ParamValue);
-}
+//
+// impl Callback for BaudRate {
+//     type Args<'a> = (&'a mut TestStruct, ParamValue);
+// }
 
 macro_rules! impl_setter {
     ($($type:ty),*) => {
@@ -597,7 +597,7 @@ macro_rules! impl_setter {
 }
 
 impl_setter!(
-    // BaudRate,
+    BaudRate,
     SerialDevice,
     SystemId,
     MaxCommand,
@@ -699,13 +699,13 @@ impl_setter!(
     BatteryCurrentAlpha
 );
 
-impl Setter for BaudRate {
-    fn set<'a>(&mut self, input: <Self as Callback>::Args<'a>) {
-        let (callee, data) = input;
-        self.value = data;
-        callee.do_something(data);
-    }
-}
+// impl Setter for BaudRate {
+//     fn set<'a>(&mut self, input: <Self as Callback>::Args<'a>) {
+//         let (callee, data) = input;
+//         self.value = data;
+//         callee.do_something(data);
+//     }
+// }
 
 pub struct TestStruct {
     pub val: i32,

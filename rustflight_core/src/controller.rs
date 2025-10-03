@@ -34,6 +34,9 @@
 // *
 // ******************************************************************************
 // **/
+use crate::hlist::*;
+pub mod quad_controller;
+
 pub trait Controller {
     type State;
     type ControlOutput;

@@ -37,7 +37,7 @@
 // ============================================================================
 // HList Definitions - For compile time decisions on sensors
 // ============================================================================
-use crate::params::Params;
+use crate::params2::Params;
 use crate::sensorprocessors::CalibrationFlags;
 use core::marker::PhantomData;
 

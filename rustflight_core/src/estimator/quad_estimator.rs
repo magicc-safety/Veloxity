@@ -45,10 +45,24 @@ use micro_algebra::stack::{
     vector::Vector,
 };
 
+const DT: f64 = 1.0/400.0f64;
+
 #[derive(Debug, Clone, Copy)]
 pub struct AttitudeState {
     pub q_hat: Quaternion<f64>,
     pub b_hat: Vector<f64, 3>,
+}
+
+impl From<AttitudeState> for Vector<f64, 3> {
+    fn from(state: AttitudeState) -> Self {
+        state.q_hat.to_euler_angles()
+    }
+}
+
+impl<'a> From<&'a AttitudeState> for Vector<f64, 3> {
+    fn from(state: &'a AttitudeState) -> Self {
+        state.q_hat.to_euler_angles()
+    }
 }
 
 pub struct QuadEstimator {
@@ -84,6 +98,39 @@ impl Estimator for QuadEstimator {
     type State = AttitudeState;
 
     fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State {
+
+        if let Some(imu_packet) = inputs.0 {
+            
+            // normalize accelerometer measurement 
+            let mut v_a = Vector::from_array(imu_packet.accel);
+            v_a.normalize_fill();
+            
+            // predict gravity in body frame using our latest estimate of q_hat
+            let g_intertial_q = Quaternion::from_array([0.0f64, 0.0f64, 0.0f64, 1.0f64]);
+            let q_conj = self.q_hat.conjugate();
+            let tmp = q_conj * g_intertial_q;
+            let gravity_in_body_q = tmp * self.q_hat;
+            let v_hat = Vector::from_array([gravity_in_body_q.get_x(), gravity_in_body_q.get_y(), gravity_in_body_q.get_z()]);
+
+            // vector error (predicted x measured)
+            let e = v_hat.cross3(&v_a);
+
+            // integral (bias) update
+            let b_dot = -self.k_i * e;
+            self.b_hat = self.b_hat + b_dot * DT;
+
+            // corrected angular rate (body frame)
+            // if signs are opposite in your convention, change +self.k_p*e to -self.k_p*e
+            let omega_corr = Vector::from_array(imu_packet.gyro) - self.b_hat + self.k_p * e;
+
+            // quaternion derivative
+            let omega_q = Quaternion::from_array([0.0, omega_corr[0], omega_corr[1], omega_corr[2]]);
+            let q_dot = 0.5 * (self.q_hat * omega_q);
+
+            self.q_hat = self.q_hat + q_dot * DT;
+            self.q_hat.normalize_fill();
+        }
+
         AttitudeState {
             q_hat: self.q_hat,
             b_hat: self.b_hat,
