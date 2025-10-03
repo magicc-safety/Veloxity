@@ -60,7 +60,7 @@ async fn main() {
     // initialize the timing of the highest level loop through a tick callback 
     let tick_handler = board
         .zenoh_connect_session
-        .declare_subscriber("tick")
+        .declare_subscriber("rust/tick")
         .await
         .unwrap();
 
