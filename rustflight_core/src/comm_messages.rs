@@ -36,6 +36,7 @@
 // **/
 
 use core::marker::PhantomData;
+use bitflags::bitflags;
 use messages::*;
 use enums::*;
 
@@ -180,7 +181,7 @@ pub mod messages {
         pub fy: f32,
         pub fz: f32,
     }
-
+    
     #[derive(Debug, Clone, Copy)]
     pub struct SmallImuMsg {
         pub time_boot_us: u64,
@@ -347,14 +348,16 @@ pub mod enums {
         RosflightErrorBufferOverrun,
     }
 
-    #[derive(Debug, Clone, Copy)]
+    #[repr(u8)]
+    #[derive(Clone, Copy, Debug, PartialEq, Default)]
     pub enum OffboardControlMode {
-        ModePassThrough,
-        ModeRollratePitchrateYawrateThrottle,
-        ModeRollPitchYawrateThrottle,
-        ModeRollPitchYawrateAltitude,
-        ModeXvelYvelYawrateAltitude,
-        ModeXposYposYawAltitude,
+        #[default]
+        ModePassThrough = 0,
+        ModeRollratePitchrateYawrateThrottle = 1,
+        ModeRollPitchYawrateThrottle = 2,
+        ModeRollPitchYawrateAltitude = 3,
+        ModeXvelYvelYawrateAltitude = 4,
+        ModeXposYposYawAltitude = 5,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -376,16 +379,44 @@ pub mod enums {
         Debug,
     }
 
-    #[derive(Debug, Clone, Copy)]
-    pub enum OffboardControlIgnore {
-        IgnoreNone,
-        IgnoreValue1,
-        IgnoreValue2,
-        IgnoreValue3,
-        IgnoreValue4,
-        IgnoreValue5,
-        IgnoreValue6,
+    bitflags! {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+        pub struct OffboardControlIgnore: u8 {
+            const IGNORE_QX = 1 << 0;
+            const IGNORE_QY = 1 << 1;
+            const IGNORE_QZ = 1 << 2;
+            const IGNORE_FX = 1 << 3;
+            const IGNORE_FY = 1 << 4;
+            const IGNORE_FZ = 1 << 5;
+        }
     }
+    
+    impl OffboardControlIgnore {
+        pub fn is_ignoring_qx(&self) -> bool {
+            self.intersects(Self::IGNORE_QX)
+        }
+        
+        pub fn is_ignoring_qy(&self) -> bool {
+            self.intersects(Self::IGNORE_QY)
+        }
+
+        pub fn is_ignoring_qz(&self) -> bool {
+            self.intersects(Self::IGNORE_QZ)
+        }
+
+        pub fn is_ignoring_fx(&self) -> bool {
+            self.intersects(Self::IGNORE_FX)
+        }
+
+        pub fn is_ignoring_fy(&self) -> bool {
+            self.intersects(Self::IGNORE_FY)
+        }
+
+        pub fn is_ignoring_fz(&self) -> bool {
+            self.intersects(Self::IGNORE_FZ)
+        }
+    }
+
 
     #[derive(Debug, Clone, Copy)]
     pub enum GnssFixType {
