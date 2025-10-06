@@ -38,11 +38,7 @@ pub mod mavlink_parser;
 
 use crate::board;
 use crate::comm_messages::{self, messages::*, enums::*};
-<<<<<<< HEAD
-use crate::params::ParamValue;
-=======
 use crate::params2::{ParamDefinition, ParamValue, PARAMS_COUNT};
->>>>>>> refs/remotes/origin/main
 use core::marker::PhantomData;
 
 // used for converting names of ParamValues ("id" during creation in params.cpp) to null-terminated characters
@@ -126,14 +122,6 @@ where
         self.comm_link.send_status(board, self.sysid, msg);
     }
 
-<<<<<<< HEAD
-    pub fn send_named_value(&mut self, board: &mut B) {
-        let msg = ParamValueMsg {
-            param_id: *b"TEST_PARAM_ID___",
-            param_value: ParamValue::Float(123.45),
-            param_count: 1,
-            param_index: 0,
-=======
     // pub fn send_named_value(&mut self, board: &mut B) {
     //     let msg = ParamValueMsg {
     //         param_id: *b"TEST_PARAM_ID___",
@@ -150,7 +138,6 @@ where
             param_value: val,
             param_count: PARAMS_COUNT as u16,
             param_index: def.id as u16,
->>>>>>> refs/remotes/origin/main
         };
         self.comm_link.send_named_value(board, self.sysid, msg);
     }

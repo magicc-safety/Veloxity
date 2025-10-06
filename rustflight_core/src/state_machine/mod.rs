@@ -43,7 +43,7 @@ mod tests;
 use bitflags::bitflags;
 use crate::{board::BoardTrait, comm_manager::CommManager, params2::{ParamValue, Params, ParamId}};
 use core::mem::take;
-use std::default;
+// use std::default;
 
 // Events that trigger state transitions
 #[derive(Debug, Clone, Copy)]
@@ -272,7 +272,7 @@ impl StateManager {
         let start_state = self.machine;
         self.machine.update(event, params);
         if start_state != self.machine {
-            println!("Update: Armed {} | Failsafe {} | Errors {}", self.is_armed(), self.is_in_failsafe(), self.get_errors().bits());
+            // println!("Update: Armed {} | Failsafe {} | Errors {}", self.is_armed(), self.is_in_failsafe(), self.get_errors().bits());
         }
     }
 
