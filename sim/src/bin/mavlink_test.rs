@@ -5,14 +5,15 @@ use zenoh::bytes::ZBytes;
 
 use rustflight_core::{
     board::BoardTrait,
-    bodytype::{quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor}, BodyType},
+    bodytype::{quadrotor::Quadrotor, BodyType},
     comm_manager::comm_link_trait::{mavlink::MavlinkInterface, CommInterface},
-    controller::Controller,
-    estimator::Estimator,
+    controller::{Controller, quad_controller::QuadController},
+    estimator::{Estimator, quad_estimator::QuadEstimator},
+    params2::Params,
     state_machine::StateManager,
     hlist::{Here, There},
     hlist_type,
-    mixer::Mixer,
+    mixer::{Mixer, quad_mixer::{QuadMixer}},
     rustflight::{rustflight_typed::ROSFlight, Configuration},
 };
 
@@ -49,13 +50,20 @@ struct SimpleBoolResponse {
 #[derive(Default)]
 pub struct SimQuadConfig;
 impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
-    type SculptIndices = hlist_type![Here, Here, Here, There<There<Here>>];
+    type SculptIndices = hlist_type![
+        Here,
+        Here, 
+        There<There<There<There<There<Here>>>>>
+    ];
+    type RcPacketIndex = There<There<Here>>;
 }
+
 
 #[tokio::main]
 async fn main() {
     // board implementation
     let board = board::Board::new().await;
+    let mut params = Params::new();
     
     // initialize the timing of the highest level loop through a tick callback 
     let tick_handler = board
@@ -67,7 +75,7 @@ async fn main() {
     // body type instantiations
     let estimator = QuadEstimator::default();
     let controller = QuadController::default();
-    let mixer = QuadMixer::default();
+    let mixer = QuadMixer::new(&params);
 
     // zero-sized configuration marker (necessary)
     let config = SimQuadConfig::default();
@@ -77,10 +85,10 @@ async fn main() {
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, mavlink, state_manager, estimator, controller, mixer, config);
+    let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config);
 
     while let Ok(_tick) = tick_handler.recv() {
-        //println!("Received query!");
+        println!("-------------------tick--------------------!");
 
         rosflight.run();
 

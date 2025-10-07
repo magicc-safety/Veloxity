@@ -41,7 +41,9 @@ use crate::packets;
 use crate::sensorprocessors;
 
 #[derive(Default)]
-pub struct DummyBoard;
+pub struct DummyBoard {
+    pub current_time_us: u64,
+}
 
 impl BoardTrait for DummyBoard {
     type RawSensorSet = hlist_type![
@@ -93,9 +95,23 @@ impl BoardTrait for DummyBoard {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        None
+        None // pretend we never receive any data
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        None
+        Some(Ok(bytes.len())) // pretend we've written the bytes successfully
+    }
+
+    fn clock_millis(&self) -> u32 {
+        (self.current_time_us / 1000) as u32
+    }
+
+    /// Returns the current dummy time in microseconds.
+    fn clock_micros(&self) -> u64 {
+        self.current_time_us
+    }
+
+    /// Simulates a delay by advancing the dummy time.
+    fn clock_delay(&mut self, ms: u32) {
+        self.current_time_us += ms as u64 * 1000;
     }
 }

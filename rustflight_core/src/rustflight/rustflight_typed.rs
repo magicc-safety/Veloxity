@@ -39,6 +39,8 @@
 
 use core::marker::PhantomData;
 
+use micro_algebra::stack::vector::Vector;
+
 use crate::{
     board::BoardTrait,
     bodytype::BodyType,
@@ -46,13 +48,16 @@ use crate::{
     comm_messages,
     controller::Controller,
     errors,
-    estimator::Estimator,
+    estimator::{Estimator, quad_estimator::AttitudeState},
     hlist::*,
     mixer::Mixer,
     params2::{self, ParamIter, PARAM_DEFINITIONS},
+    packets,
     rustflight::Configuration,
     sensorprocessors::CalibrationFlags,
     state_machine::{Event, StateManager},
+    rc::Rc,
+    command_manager::{CommandManager, ControlType},
 };
 
 pub struct ROSFlight<B, BT, C, CI>
@@ -72,6 +77,8 @@ where
     estimator: BT::Estimator,
     controller: BT::Controller,
     mixer: BT::Mixer,
+    rc_manager: Rc,
+    command_manager: CommandManager,
     state_manager: StateManager,
     cal_flags: CalibrationFlags,
 
@@ -88,13 +95,17 @@ where
     C: Configuration<B, BT>,
     for<'a> B::RawSensorSet: HMappable<'a, B::ProcessorHList, Output = B::ProcessedSensorSet>,
     B::ProcessedSensorSet: Sculptor<BT::RequiredSensors, C::SculptIndices>,
-    BT::Estimator: Estimator<Inputs = BT::RequiredSensors>,
+    BT::RequiredSensors: Plucker<Option<packets::RcPacket>, C::RcPacketIndex>,
+    BT::Estimator: Estimator<
+        Inputs = <BT::RequiredSensors as Plucker<Option<packets::RcPacket>, C::RcPacketIndex>>::Remainder,
+    >,
     BT::Controller: Controller<State = <BT::Estimator as Estimator>::State>,
-    BT::Mixer: Mixer<ControlOutput = <BT::Controller as Controller>::ControlOutput>,
+    BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
 {
     pub fn init(
         loop_time_us: u32,
         mut board: B,
+        mut params: params2::Params,
         mut comm_link: CI,
         mut state_manager: StateManager,
         mut estimator: BT::Estimator,
@@ -105,14 +116,19 @@ where
 
         // Initialize all parameters.
         // send a heartbeat to initialize rosflight_io communicaiton 
-        let mut params = params2::Params::new();
+        // update state manager
+        // update rc manager
+        // create command_manager
         comm_link.send_heartbeat(&mut board, 0, comm_messages::messages::HeartbeatMsg { type_: 0, autopilot: 0, base_mode: 0, custom_mode: 0, system_status: 0, mavlink_version: 0 });
         state_manager.update(Event::INITIALIZED, &params);
+        let mut rc_manager = Rc::new();
+        rc_manager.init(&params);
+        let command_manager = CommandManager::new();
 
         Self {
             loop_time_us,
             board,
-            params: params2::Params::new(),
+            params,
             params_iter: None,
             comm_manager: comm_manager::CommManager::new(comm_link),
             sensors: B::RawSensorSet::default(),
@@ -120,6 +136,8 @@ where
             estimator,
             controller,
             mixer,
+            rc_manager,
+            command_manager,
             state_manager: StateManager::new(),
             cal_flags: CalibrationFlags::empty(),
             _body_type: PhantomData,     // field initialization
@@ -128,6 +146,9 @@ where
     }
 
     pub fn run(&mut self) -> bool {
+
+        let now_ms = self.board.clock_millis(); 
+
         self.comm_manager.process_incoming_messages(&mut self.board);
 
         // if we haven't already initialized the parameter iteration process, go ahead and start it... otherwise we'll use the iterator we already have
@@ -148,7 +169,6 @@ where
                 // def.name    -> The parameter's string name (e.g., "SYS_ID")
                 // param_id    -> The enum ID (e.g., ParamId::PARAM_SYSTEM_ID)
                 // param_val   -> The current value (e.g., ParamValue::Int(1))
-
                 self.comm_manager.send_param_value(def, param_val, &mut self.board);
 
             } else {
@@ -171,9 +191,19 @@ where
                 .map(self.processorhlist, &mut self.cal_flags, &mut self.params);
 
         let (required_sensors, _remainder) = processed_sensors.sculpt();
+        let (rc_packet_option, estimator_sensors) = required_sensors.pluck();
+        if let Some(rc_packet) = rc_packet_option {
+            self.rc_manager.receive(&rc_packet, &mut self.state_manager, &self.params);
+        }
+        self.rc_manager.run(now_ms, &self.params, &mut self.state_manager);
+        self.command_manager.run(now_ms, &self.comm_manager, &self.params, &mut self.rc_manager, &self.state_manager);
 
-        let state = self.estimator.estimate(&required_sensors);
-        let controls = self.controller.control(&state);
+        // Now run the estimator 
+        let state= self.estimator.estimate(&estimator_sensors);
+
+        // Get the final command from the manager, and translate to what the Controller needs:
+        let combined_command = self.command_manager.combined_control();
+        let controls = self.controller.control(&state, &*combined_command);
         let actuator_commands = self.mixer.mix(&controls);
 
         true

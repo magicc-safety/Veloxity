@@ -313,6 +313,8 @@ pub mod messages {
 // Enums
 
 pub mod enums {
+    use super::bitflags;
+
     #[derive(Debug, Clone, Copy)]
     pub enum RosflightCmd {
         RcCalibration,
@@ -354,10 +356,6 @@ pub mod enums {
         #[default]
         ModePassThrough = 0,
         ModeRollratePitchrateYawrateThrottle = 1,
-        ModeRollPitchYawrateThrottle = 2,
-        ModeRollPitchYawrateAltitude = 3,
-        ModeXvelYvelYawrateAltitude = 4,
-        ModeXposYposYawAltitude = 5,
     }
 
     #[derive(Debug, Clone, Copy)]

@@ -35,69 +35,25 @@
 // ******************************************************************************
 // **/
 use crate::bodytype::BodyType;
-use crate::controller::Controller;
-use crate::estimator::Estimator;
+use crate::controller;
+use crate::estimator;
 use crate::hlist_type;
+use crate::mixer;
 use crate::mixer::Mixer;
 use crate::packets;
 use crate::packets::*;
 
 pub struct Quadrotor;
-pub struct AttitudeState;
-pub struct MixerInput;
 
 impl BodyType for Quadrotor {
     // shopping list of required sensors...
     type RequiredSensors = hlist_type![
         Option<packets::ImuPacket>,
         Option<packets::MagPacket>,
-        Option<packets::BaroPacket>,
-        Option<packets::GNSSPacket>
+        Option<packets::RcPacket>
     ];
 
-    type Estimator = QuadEstimator;
-    type Controller = QuadController;
-    type Mixer = QuadMixer;
-}
-
-#[derive(Default)]
-pub struct QuadEstimator;
-impl Estimator for QuadEstimator {
-    type Inputs = hlist_type![
-        Option<packets::ImuPacket>,
-        Option<packets::MagPacket>,
-        Option<packets::BaroPacket>,
-        Option<packets::GNSSPacket>
-    ];
-
-    type State = AttitudeState;
-
-    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State {
-        //println!("Estimating!");
-        AttitudeState {}
-    }
-}
-
-#[derive(Default)]
-pub struct QuadController;
-impl Controller for QuadController {
-    type State = AttitudeState;
-    type ControlOutput = MixerInput;
-
-    fn control(&mut self, state: &Self::State) -> Self::ControlOutput {
-        //println!("Controlling!");
-        MixerInput {}
-    }
-}
-
-#[derive(Default)]
-pub struct QuadMixer;
-impl Mixer for QuadMixer {
-    type ControlOutput = MixerInput;
-    type ActuatorCommands = u32;
-
-    fn mix(&mut self, controls: &Self::ControlOutput) -> Self::ActuatorCommands {
-        //println!("Mixing!");
-        0u32
-    }
+    type Estimator = estimator::quad_estimator::QuadEstimator;
+    type Controller = controller::quad_controller::QuadController;
+    type Mixer = mixer::quad_mixer::QuadMixer;
 }

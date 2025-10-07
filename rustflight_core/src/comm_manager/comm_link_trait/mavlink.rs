@@ -329,24 +329,41 @@ impl From<messages::OffboardControl> for OffboardControlMsg {
         use enums::OffboardControlIgnore as MavIgnore;
         use comm_enums::OffboardControlIgnore as CommIgnore;
         use comm_enums::OffboardControlMode as CommMode;
+
+        // --- Build the new `ignore` flags by checking the bits ---
+        let mut comm_ignore = CommIgnore::empty(); // Start with no flags set
+
+        // Cast the incoming enum to a u8 to treat it as a bitmask
+        let ignore_mask = msg.ignore as u8;
+
+        // Check each bit position using bitwise AND
+        if (ignore_mask & (MavIgnore::IgnoreValue1 as u8)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_QX;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue2 as u8)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_QY;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue3 as u8)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_QZ;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue4 as u8)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_FX;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue5 as u8)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_FY;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue6 as u8)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_FZ;
+        }
+        // --- End of flag building ---
+
         Self {
             mode: match msg.mode {
                 MavMode::ModePassThrough => CommMode::ModePassThrough,
-                MavMode::ModeRollPitchYawrateAltitude => CommMode::ModeRollPitchYawrateAltitude,
-                MavMode::ModeRollPitchYawrateThrottle => CommMode::ModeRollPitchYawrateThrottle,
                 MavMode::ModeRollratePitchrateYawrateThrottle => CommMode::ModeRollratePitchrateYawrateThrottle,
-                MavMode::ModeXposYposYawAltitude => CommMode::ModeXposYposYawAltitude,
-                MavMode::ModeXvelYvelYawrateAltitude => CommMode::ModeXvelYvelYawrateAltitude
+                _ => CommMode::ModePassThrough, // Default for other modes
             },
-            ignore: match msg.ignore {
-                MavIgnore::IgnoreNone => CommIgnore::IgnoreNone,
-                MavIgnore::IgnoreValue1 => CommIgnore::IgnoreValue1,
-                MavIgnore::IgnoreValue2 => CommIgnore::IgnoreValue2,
-                MavIgnore::IgnoreValue3 => CommIgnore::IgnoreValue3,
-                MavIgnore::IgnoreValue4 => CommIgnore::IgnoreValue4,
-                MavIgnore::IgnoreValue5 => CommIgnore::IgnoreValue5,
-                MavIgnore::IgnoreValue6 => CommIgnore::IgnoreValue6
-            },
+            ignore: comm_ignore, // Use the flags we just built
             qx: msg.qx,
             qy: msg.qy,
             qz: msg.qz,
@@ -469,10 +486,6 @@ impl From<comm_enums::OffboardControlMode> for enums::OffboardControlMode {
         match val {
             CommMode::ModePassThrough => MavMode::ModePassThrough,
             CommMode::ModeRollratePitchrateYawrateThrottle => MavMode::ModeRollratePitchrateYawrateThrottle,
-            CommMode::ModeRollPitchYawrateThrottle => MavMode::ModeRollPitchYawrateThrottle,
-            CommMode::ModeRollPitchYawrateAltitude => MavMode::ModeRollPitchYawrateAltitude,
-            CommMode::ModeXvelYvelYawrateAltitude => MavMode::ModeXvelYvelYawrateAltitude,
-            CommMode::ModeXposYposYawAltitude => MavMode::ModeXposYposYawAltitude,
         }
     }
 }

@@ -37,15 +37,16 @@
 use crate::comm_manager::comm_link_trait::CommInterface;
 use crate::state_machine::StateManager;
 use crate::comm_manager::CommManager;
-use crate::params2::{Params::{self, ParamId}, ParamValue};
+use crate::rc::{Rc, Stick, Switch};
+use crate::params2::{Params, ParamId, ParamValue};
 use crate::board::BoardTrait;
-use crate::comm_messages::{messages::OffboardControlMsg, enums::{OffboardControlIgnore::{self, *}, OffboardControlMode::{self, *}}};
+use crate::comm_messages::{messages::OffboardControlMsg, enums::{OffboardControlIgnore, OffboardControlMode::{self, *}}};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ControlType {
     Rate,        // Channel is is in rate mode (rad/s)
-    Angle,       // Channel command is in angle mode (rad)
-    Throttle,    // Channel is controlling throttle setting
+    //Angle,       // Channel command is in angle mode (rad)
+    //Throttle,    // Channel is controlling throttle setting
     Passthrough, // Channel directly passes PWM input to the mixer
 }
 
@@ -60,7 +61,7 @@ impl Default for ControlChannel {
     fn default() -> Self {
         Self {
             active: false,
-            control_type: ControlType::Angle,
+            control_type: ControlType::Rate,
             value: 0.0,
         }
     }
@@ -75,16 +76,6 @@ pub struct Control {
     pub fx: ControlChannel,
     pub fy: ControlChannel,
     pub fz: ControlChannel,
-}
-
-mod mock_rc {
-    pub struct Rc;
-    impl Rc {
-        pub fn new_command(&self) -> bool { true }
-        pub fn stick(&self, _stick: u8) -> f32 { 0.0 }
-        pub fn switch_mapped(&self, _switch: u8) -> bool { false }
-        pub fn switch_on(&self, _switch: u8) -> bool { false }
-    }
 }
 
 #[derive(Default)]
@@ -106,10 +97,10 @@ impl CommandManager {
     pub fn new() -> Self {
         Self {
             multirotor_failsafe_command: Control {
-                qx: ControlChannel { active: true, control_type: ControlType::Angle, value: 0.0 },
-                qy: ControlChannel { active: true, control_type: ControlType::Angle, value: 0.0 },
+                qx: ControlChannel { active: true, control_type: ControlType::Rate, value: 0.0 },
+                qy: ControlChannel { active: true, control_type: ControlType::Rate, value: 0.0 },
                 qz: ControlChannel { active: true, control_type: ControlType::Rate, value: 0.0 },
-                fz: ControlChannel { active: true, control_type: ControlType::Throttle, value: 0.3 },
+                fz: ControlChannel { active: true, control_type: ControlType::Passthrough, value: 0.3 },
                 ..Default::default()
             },
             fixedwing_failsafe_command: Control {
@@ -125,10 +116,10 @@ impl CommandManager {
 
     pub fn run<B: BoardTrait, CI: CommInterface<B>>(
         &mut self,
+        now_ms: u32,
         comm_manager: &CommManager<B, CI>,
-        board: &B,
         params: &Params,
-        rc: &mock_rc::Rc,
+        rc: &mut Rc,
         state_manager: &StateManager,
     ) -> bool
     where
@@ -139,7 +130,7 @@ impl CommandManager {
         if let Some(msg) = &comm_manager.msgs.offboard_control {
             // 1. Create a mutable new command to build into.
             let mut new_cmd = Control {
-                stamp_ms: board.clock_millis(),
+                stamp_ms: now_ms,
                 ..Default::default()
             };
 
@@ -157,33 +148,7 @@ impl CommandManager {
                     new_cmd.qx.control_type = ControlType::Rate;
                     new_cmd.qy.control_type = ControlType::Rate;
                     new_cmd.qz.control_type = ControlType::Rate;
-                    new_cmd.fz.control_type = ControlType::Throttle;
-                },
-                OffboardControlMode::ModeRollPitchYawrateThrottle => {
-                    new_cmd.qx.control_type = ControlType::Angle;
-                    new_cmd.qy.control_type = ControlType::Angle;
-                    new_cmd.qz.control_type = ControlType::Rate;
-                    new_cmd.fz.control_type = ControlType::Throttle;
-                },
-                OffboardControlMode::ModeRollPitchYawrateAltitude => {
-                    new_cmd.qx.control_type = ControlType::Angle;
-                    new_cmd.qy.control_type = ControlType::Angle;
-                    new_cmd.qz.control_type = ControlType::Rate;
-                    new_cmd.fz.control_type = ControlType::Altitude; // Command is altitude
-                },
-                OffboardControlMode::ModeXvelYvelYawrateAltitude => {
-                    // Here, fx and fy now represent body-fixed velocities
-                    new_cmd.fx.control_type = ControlType::Velocity; 
-                    new_cmd.fy.control_type = ControlType::Velocity;
-                    new_cmd.qz.control_type = ControlType::Rate;
-                    new_cmd.fz.control_type = ControlType::Altitude;
-                }
-                OffboardControlMode::ModeXposYposYawAltitude => {
-                    // Here, fx and fy now represent inertial positions
-                    new_cmd.fx.control_type = ControlType::Position; 
-                    new_cmd.fy.control_type = ControlType::Position;
-                    new_cmd.qz.control_type = ControlType::Angle;    // Yaw is an angle
-                    new_cmd.fz.control_type = ControlType::Altitude;
+                    new_cmd.fz.control_type = ControlType::Passthrough;
                 }
             }
 
@@ -228,42 +193,139 @@ impl CommandManager {
 
         // 3. Check for new RC command to trigger muxing logic
         if rc.new_command() {
-            self.interpret_rc(rc);
+            self.interpret_rc(rc, params);
 
             // 4. Check for offboard control timeout!
-            let offboard_timeout_ms = if let ParamValue(val) = params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) as u32 {
+            let offboard_timeout_ms = if let ParamValue::Uint(val) = params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) {
                 val
             } else {
-                1u32
+                // Default to a safe timeout (e.g., 100ms) if the parameter is not found or is the wrong type
+                100 
             };
             
-            if board.clock_millis() > self.offboard_command.stamp_ms + offboard_timeout_ms {
+            if now_ms > self.offboard_command.stamp_ms + offboard_timeout_ms {
                 // If it has been too long since the last offboard command, disable all channels.
                 // This prevents the drone from executing stale commands and allows the muxer
-                // to fall back to RC control.
+                // to fallback to RC control.
                 self.offboard_command.qx.active = false;
                 self.offboard_command.qy.active = false;
                 self.offboard_command.qz.active = false;
                 self.offboard_command.fx.active = false;
                 self.offboard_command.fy.active = false;
                 self.offboard_command.fz.active = false;
-            };
+            }
         
             // 5. Perform Muxing
             self.rc_attitude_override = self.do_attitude_muxing(params, rc);
-            self.rc_throttle_override = self.do_throttle_muxing(rc);
+            self.rc_throttle_override = self.do_throttle_muxing(params, rc);
 
-            true
+            // 6. Update combined command based on muxing results
+            if self.rc_attitude_override {
+                self.combined_command.qx = self.rc_command.qx;
+                self.combined_command.qy = self.rc_command.qy;
+                self.combined_command.qz = self.rc_command.qz;
+            } else {
+                self.combined_command.qx = self.offboard_command.qx;
+                self.combined_command.qy = self.offboard_command.qy;
+                self.combined_command.qz = self.offboard_command.qz;
+            }
+
+            if self.rc_throttle_override {
+                // Note: RC only commands Fz (throttle), so Fx and Fy are set to inactive from the RC command.
+                self.combined_command.fx = self.rc_command.fx;
+                self.combined_command.fy = self.rc_command.fy;
+                self.combined_command.fz = self.rc_command.fz;
+            } else {
+                self.combined_command.fx = self.offboard_command.fx;
+                self.combined_command.fy = self.offboard_command.fy;
+                self.combined_command.fz = self.offboard_command.fz;
+            }
+        } 
+
+        true
+    }
+
+    fn interpret_rc(&mut self, rc: &Rc, params: &Params) {
+        // Read all relevant stick values from the RC unit
+        self.rc_command.qx.value = rc.stick(Stick::X); // Corresponds to STICK_X
+        self.rc_command.qy.value = rc.stick(Stick::Y); // Corresponds to STICK_Y
+        self.rc_command.qz.value = rc.stick(Stick::Z); // Corresponds to STICK_Z
+        self.rc_command.fz.value = rc.stick(Stick::F); // Corresponds to STICK_F
+
+        // Set the control types according to the new default.
+        // In a full implementation, this logic would be more complex, likely
+        // checking a parameter to see if the pilot prefers angle or rate mode.
+        self.rc_command.qx.control_type = ControlType::Rate;
+        self.rc_command.qy.control_type = ControlType::Rate;
+        self.rc_command.qz.control_type = ControlType::Rate;
+        self.rc_command.fz.control_type = ControlType::Passthrough;
+    }
+
+    fn do_attitude_muxing(&self, params: &Params, rc: &Rc) -> bool {
+        // 1. Check if any of the attitude sticks have deviated from center.
+        let deviation_param = if let ParamValue::Float(val) = params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
+            val
         } else {
-            true
+            0.15 // A safe default deviation (15%)
+        };
+
+        let roll_stick = rc.stick(Stick::X);  // Corresponds to STICK_X
+        let pitch_stick = rc.stick(Stick::Y); // Corresponds to STICK_Y
+        let yaw_stick = rc.stick(Stick::Z);   // Corresponds to STICK_Z
+
+        if roll_stick.abs() > deviation_param
+            || pitch_stick.abs() > deviation_param
+            || yaw_stick.abs() > deviation_param
+        {
+            return true;
         }
 
+        // 3. If the offboard command is inactive, RC should take over by default.
+        if !self.offboard_command.qx.active
+            && !self.offboard_command.qy.active
+            && !self.offboard_command.qz.active
+        {
+            return true;
+        }
+
+        false
     }
 
-    fn interpret_rc(&mut self, rc: &mock_rc::Rc) {
-        self.rc_command.qx.value = rc.stick(0);
+    fn do_throttle_muxing(&self, params: &Params, rc: &Rc) -> bool {
+        // 1. Check for a dedicated override switch on the transmitter.
+        // Assumes switch 1 corresponds to RC::SWITCH_THROTTLE_OVERRIDE
+        if rc.switch_mapped(Switch::AttOverride) && rc.switch_on(Switch::AttOverride) {
+            return true;
+        }
+
+        // Check if any offboard force commands are active.
+        let offboard_force_active = self.offboard_command.fx.active
+            || self.offboard_command.fy.active
+            || self.offboard_command.fz.active;
+
+        if offboard_force_active {
+            // If offboard is active, check the "take minimum throttle" parameter.
+            let take_min_throttle = if let ParamValue::Bool(val) = params.get_by_id(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE) {
+                val
+            } else {
+                false // Default to not using this feature
+            };
+        
+            if take_min_throttle {
+                // RC overrides if its throttle is less than the offboard throttle.
+                // We only compare against Fz, as it's the primary throttle axis.
+                return self.rc_command.fz.value < self.offboard_command.fz.value;
+            } else {
+                // If not taking min, offboard has control.
+                return false;
+            }
+        } else {
+            // 3. If the offboard command is inactive, RC should take over by default.
+            return true;
+        }
     }
 
-    
-
+    pub fn combined_control(&self) -> &Control {
+        &self.combined_command
+    }
 }

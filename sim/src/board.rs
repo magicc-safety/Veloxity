@@ -19,6 +19,7 @@ use zenoh::sample::Sample;
 use zenoh::session::Session;
 
 pub struct Board {
+    pub current_time_us: u64,
     mavlink_socket: UdpSocket, 
     pub zenoh_connect_session: Session,
     //pub zenoh_listen_session: Session,
@@ -124,6 +125,20 @@ impl BoardTrait for Board {
             }
         }
     }
+
+    fn clock_millis(&self) -> u32 {
+        (self.current_time_us / 1000) as u32
+    }
+
+    /// Returns the current dummy time in microseconds.
+    fn clock_micros(&self) -> u64 {
+        self.current_time_us
+    }
+
+    /// Simulates a delay by advancing the dummy time.
+    fn clock_delay(&mut self, ms: u32) {
+        self.current_time_us += ms as u64 * 1000;
+    }
 }
 
 impl Board {
@@ -213,6 +228,7 @@ impl Board {
 
         // construct self for return
         let to_return = Self {
+            current_time_us: 0u64,
             mavlink_socket,
             zenoh_connect_session,
             //zenoh_listen_session,

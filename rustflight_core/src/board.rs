@@ -45,4 +45,8 @@ pub trait BoardTrait {
     fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet);
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>>;
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>>;
+
+    fn clock_millis(&self) -> u32;
+    fn clock_micros(&self) -> u64;
+    fn clock_delay(&mut self, ms: u32);
 }

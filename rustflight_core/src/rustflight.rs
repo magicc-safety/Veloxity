@@ -42,4 +42,5 @@ pub mod rustflight_typed;
 /// for a specific combination of a Board and a BodyType.
 pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {
     type SculptIndices: crate::hlist::HList;
+    type RcPacketIndex;
 }
