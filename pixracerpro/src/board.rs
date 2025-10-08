@@ -156,42 +156,49 @@ impl Board {
         let spi1_bus = Mutex::new(spi1);
         let spi1_bus = SPI1_BUS.init(spi1_bus);
 
-        // IIS2MDC Mag
-        let nss1 = Output::new(p.PA4, Level::High, Speed::Low);
-        let drdy1 = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down);
-        let iis_dev = SpiDevice::new(spi1_bus, nss1); // Todo implement new funciton
-        let iis_sensor = peripherals::iis2mdc::Iis2mdcSensor {
-            dev: iis_dev,
-            drdy: drdy1,
-        }; // Todo implement new funciton
+        // THIS BLOCK WAS AI GENERATED, THEN CORRECTED. PINS MAY BE INCORRECT
+        // Initialize the Onboard ICM-42688-P IMU // PRETTY SURE THIS ICM NUMBER IS WRONG
+        // Chip Select for the IMU is on pin PA4
+        let nss_imu = Output::new(p.PA4, Level::High, Speed::VeryHigh);
+        // Data Ready interrupt is on pin PG4
+        let drdy_imu = ExtiInput::new(p.PG4, p.EXTI4, Pull::Up);
 
-        // DPS210 Baro
-        let nss2 = Output::new(p.PC7, Level::High, Speed::Low);
-        let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down);
-        let dps_dev = SpiDevice::new(spi1_bus, nss2);
-        let dps_sensor = peripherals::dps310::Dps310Sensor {
-            dev: dps_dev,
-            drdy: drdy2,
-            three_wire: true,
-        }; // Todo implement new funciton
+        // // IIS2MDC Mag - NOT NEEDED - the PixRacer Pro has an internal mag
+        // let nss1 = Output::new(p.PA4, Level::High, Speed::Low);
+        // let drdy1 = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down);
+        // let iis_dev = SpiDevice::new(spi1_bus, nss1); // Todo implement new funciton
+        // let iis_sensor = peripherals::iis2mdc::Iis2mdcSensor {
+        //     dev: iis_dev,
+        //     drdy: drdy1,
+        // }; // Todo implement new funciton
 
-        // SPI2 Bus ///////////////////////////////////////////
-        let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
-        spi2_config.frequency = mhz(1);
-        spi2_config.mode = spi::MODE_3;
-        spi2_config.bit_order = spi::BitOrder::MsbFirst;
-        spi2_config.miso_pull = embassy_stm32::gpio::Pull::Up;
-        let spi2 = spi::Spi::new(
-            p.SPI2,
-            p.PB10,
-            p.PC3,
-            p.PC2,
-            p.DMA1_CH2,
-            p.DMA1_CH3,
-            spi2_config,
-        );
-        let spi2_bus = Mutex::new(spi2);
-        let spi2_bus = SPI2_BUS.init(spi2_bus);
+        // // DPS210 Baro - NOT NEEDED - the PixRacerPro has an internal Baro
+        // let nss2 = Output::new(p.PC7, Level::High, Speed::Low);
+        // let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down);
+        // let dps_dev = SpiDevice::new(spi1_bus, nss2);
+        // let dps_sensor = peripherals::dps310::Dps310Sensor {
+        //     dev: dps_dev,
+        //     drdy: drdy2,
+        //     three_wire: true,
+        // }; // Todo implement new funciton
+
+        // // SPI2 - NOT USED Bus ///////////////////////////////////////////
+        // let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
+        // spi2_config.frequency = mhz(1);
+        // spi2_config.mode = spi::MODE_3;
+        // spi2_config.bit_order = spi::BitOrder::MsbFirst;
+        // spi2_config.miso_pull = embassy_stm32::gpio::Pull::Up;
+        // let spi2 = spi::Spi::new(
+        //     p.SPI2,
+        //     p.PB10,
+        //     p.PC3,
+        //     p.PC2,
+        //     p.DMA1_CH2,
+        //     p.DMA1_CH3,
+        //     spi2_config,
+        // );
+        // let spi2_bus = Mutex::new(spi2);
+        // let spi2_bus = SPI2_BUS.init(spi2_bus);
 
         // I2C1 Bus  ///////////////////////////////////////////
         let mut i2c_config = i2c::Config::default();
@@ -324,50 +331,50 @@ impl Board {
             Default::default(),
         );
 
-        // SPI4 Bus ///////////////////////////////////////////
-        let mut spi4_config: embassy_stm32::spi::Config = spi::Config::default();
-        spi4_config.frequency = mhz(2);
-        spi4_config.mode = spi::MODE_3;
-        spi4_config.bit_order = spi::BitOrder::MsbFirst;
-        spi4_config.miso_pull = embassy_stm32::gpio::Pull::Up;
-        let spi4 = spi::Spi::new(
-            p.SPI4,
-            p.PE2,
-            p.PE6,
-            p.PE5,
-            p.DMA2_CH0,
-            p.DMA2_CH1,
-            spi4_config,
-        );
-        let spi4_ = Mutex::new(spi4);
-        let spi4_bus = SPI4_BUS.init(spi4_);
+        // // SPI4 - NOT NEEDED Bus ///////////////////////////////////////////
+        // let mut spi4_config: embassy_stm32::spi::Config = spi::Config::default();
+        // spi4_config.frequency = mhz(2);
+        // spi4_config.mode = spi::MODE_3;
+        // spi4_config.bit_order = spi::BitOrder::MsbFirst;
+        // spi4_config.miso_pull = embassy_stm32::gpio::Pull::Up;
+        // let spi4 = spi::Spi::new(
+        //     p.SPI4,
+        //     p.PE2,
+        //     p.PE6,
+        //     p.PE5,
+        //     p.DMA2_CH0,
+        //     p.DMA2_CH1,
+        //     spi4_config,
+        // );
+        // let spi4_ = Mutex::new(spi4);
+        // let spi4_bus = SPI4_BUS.init(spi4_);
 
-        // BMI08x
-        let nss_bmi08x_a = Output::new(p.PE3, Level::High, Speed::Low); // Accel
-        let drdy_bmi08x_a = ExtiInput::new(p.PE4, p.EXTI4, Pull::Down); // Accel
-        let nss_bmi08x_g = Output::new(p.PF8, Level::High, Speed::Low); // Gyro
-        let drdy_bmi08x_g = ExtiInput::new(p.PF7, p.EXTI7, Pull::Down); // Gyro
-        let bmi08x_dev_a = SpiDevice::new(spi4_bus, nss_bmi08x_a);
-        let bmi08x_dev_g = SpiDevice::new(spi4_bus, nss_bmi08x_g);
+        // // BMI08x - NOT NEEDED The PixRacerPro has an internal IMU
+        // let nss_bmi08x_a = Output::new(p.PE3, Level::High, Speed::Low); // Accel
+        // let drdy_bmi08x_a = ExtiInput::new(p.PE4, p.EXTI4, Pull::Down); // Accel
+        // let nss_bmi08x_g = Output::new(p.PF8, Level::High, Speed::Low); // Gyro
+        // let drdy_bmi08x_g = ExtiInput::new(p.PF7, p.EXTI7, Pull::Down); // Gyro
+        // let bmi08x_dev_a = SpiDevice::new(spi4_bus, nss_bmi08x_a);
+        // let bmi08x_dev_g = SpiDevice::new(spi4_bus, nss_bmi08x_g);
 
-        let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
-            dev_a: bmi08x_dev_a,
-            dev_g: bmi08x_dev_g,
-            drdy_a: drdy_bmi08x_a,
-            drdy_g: drdy_bmi08x_g,
-            range_a: peripherals::bmi08x::AccelRange::Bmi088(
-                peripherals::bmi08x::AccelRange088::Max24G,
-            ),
-            range_g: peripherals::bmi08x::GyroRange::Max500dps,
-            sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
-        };
+        // let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
+        //     dev_a: bmi08x_dev_a,
+        //     dev_g: bmi08x_dev_g,
+        //     drdy_a: drdy_bmi08x_a,
+        //     drdy_g: drdy_bmi08x_g,
+        //     range_a: peripherals::bmi08x::AccelRange::Bmi088(
+        //         peripherals::bmi08x::AccelRange088::Max24G,
+        //     ),
+        //     range_g: peripherals::bmi08x::GyroRange::Max500dps,
+        //     sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
+        // };
 
         // P2 Priority Task for Gyros
         interrupt::SAI2.set_priority(Priority::P2);
         let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
-        spawner2
-            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
-            .unwrap();
+        // spawner2
+        //     .spawn(peripherals::bmi08x::task(bmi08x_sensor))
+        //     .unwrap();
 
         // Detect GPIO input.
         let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None);
@@ -382,12 +389,12 @@ impl Board {
         spawner3
            .spawn(peripherals::dlhrl20g::task(dlhr_sensor))
            .unwrap();
-        spawner3
-            .spawn(peripherals::iis2mdc::task(iis_sensor))
-            .unwrap();
-        spawner3
-            .spawn(peripherals::dps310::task(dps_sensor))
-            .unwrap();
+        // spawner3
+        //     .spawn(peripherals::iis2mdc::task(iis_sensor))
+        //     .unwrap();
+        // spawner3
+        //     .spawn(peripherals::dps310::task(dps_sensor))
+        //     .unwrap();
         spawner3
             .spawn(peripherals::ublox::task(ublox_sensor))
             .unwrap();
