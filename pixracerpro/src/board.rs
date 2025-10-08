@@ -123,17 +123,17 @@ impl BoardTrait for Board {
 }
 
 impl Board {
-    // fn probe_hi(&mut self, id: usize) {
-    //     self.probe[id].set_high(); // so we can see something on the logic analyzer.
-    // }
+    fn probe_hi(&mut self, id: usize) {
+        self.probe[id].set_high(); // so we can see something on the logic analyzer.
+    }
 
-    // fn probe_lo(&mut self, id: usize) {
-    //     self.probe[id].set_high(); // so we can see something on the logic analyzer.
-    // }
+    fn probe_lo(&mut self, id: usize) {
+        self.probe[id].set_high(); // so we can see something on the logic analyzer.
+    }
 
-    // fn probe_tog(&mut self, id: usize) {
-    //     self.probe[id].toggle(); // so we can see something on the logic analyzer.
-    // }
+    fn probe_tog(&mut self, id: usize) {
+        self.probe[id].toggle(); // so we can see something on the logic analyzer.
+    }
 
     pub fn new() -> Board {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
