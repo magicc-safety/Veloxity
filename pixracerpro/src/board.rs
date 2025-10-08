@@ -85,6 +85,26 @@ impl BoardTrait for Board {
         sensors.1.1.1.0 = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
         sensors.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+
+        // Debug statements to check receiving sensor data
+        if sensors.0.is_some() {
+            defmt::info!("Sensor IMU data received!");
+        }
+        if sensors.1.0.is_some() {
+            defmt::info!("Sensor Magnetometer data received!");
+        }
+        if sensors.1.1.0.is_some() {
+            defmt::info!("Sensor Barometer data received!");
+        }
+        if sensors.1.1.1.0.is_some() {
+            defmt::info!("Sensor Pitot data received!");
+        }
+        if sensors.1.1.1.1.0.is_some() {
+            defmt::info!("Sensor GNSS data received!");
+        }
+        if sensors.1.1.1.1.1.0.is_some() {
+            defmt::info!("Sensor RC data received!");
+        }
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
