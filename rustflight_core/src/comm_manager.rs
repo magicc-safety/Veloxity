@@ -38,7 +38,7 @@ pub mod mavlink_parser;
 
 use crate::board;
 use crate::comm_messages::{self, messages::*, enums::*};
-use crate::params2::{ParamDefinition, ParamValue, PARAMS_COUNT};
+use crate::params2::{ParamDefinition, ParamValue, PARAMS_COUNT, ParamIter, Params, PARAM_DEFINITIONS};
 use core::marker::PhantomData;
 
 // used for converting names of ParamValues ("id" during creation in params.cpp) to null-terminated characters
@@ -95,6 +95,37 @@ where
     pub fn process_incoming_messages(&mut self, board: &mut B) {
         self.comm_link
             .handle_incoming_messages(board, &mut self.msgs);
+    }
+
+    pub fn act_on_messages(&mut self, params_iter: &mut Option<ParamIter>, params: &mut Params, board: &mut B) {
+
+        // first check the param_request_list
+        if self.msgs.param_request_list.take().is_some() {
+            if params_iter.is_none() {
+                *params_iter = Some(params.iter());
+            }
+        }
+
+        // If we're in the middle of sending the parameters up, we're still "handling" that message
+        if let Some(iterator) = params_iter {
+
+            // Safely get the next item. This `if let` replaces your `.unwrap()`.
+            if let Some((param_id, param_val)) = iterator.next() {
+                let def = &PARAM_DEFINITIONS[param_id as usize];
+        
+                // You now have everything you need to send the message:
+                // def.name    -> The parameter's string name (e.g., "SYS_ID")
+                // param_id    -> The enum ID (e.g., ParamId::PARAM_SYSTEM_ID)
+                // param_val   -> The current value (e.g., ParamValue::Int(1))
+                self.send_param_value(def, param_val, board);
+
+            } else {
+                // The iterator is finished, so set it back to None.
+                // This is crucial for preventing future panics and resetting the state.
+                *params_iter = None;
+            }
+        }
+
     }
 
     // SENDING PLACEHOLDER MESSAGES

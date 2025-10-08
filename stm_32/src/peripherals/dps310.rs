@@ -372,6 +372,7 @@ impl Dps310Sensor {
                     header,
                     pressure: pressure as f32,
                     temperature: temperature as f32,
+                    ..Default::default()
                 };
                 BARO_SIGNAL.signal(Ok(baro_packet)); // make data available for other tasks.
             } else {

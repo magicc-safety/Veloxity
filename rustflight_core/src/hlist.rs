@@ -67,7 +67,7 @@ impl<H, T: HList> HList for HCons<H, T> {}
 // standard `Fn` traits because we need an associated `Output` type.
 pub trait Func<Arg> {
     type Output;
-    fn call(&self, arg: Arg, flags: &mut CalibrationFlags, params: &mut Params) -> Self::Output;
+    fn call(&mut self, arg: Arg, flags: &mut CalibrationFlags, params: &mut Params) -> Self::Output;
 }
 
 // A marker trait for a "Polymorphic Function" (an HList of `Func`s).
@@ -135,7 +135,7 @@ where
 
     fn map(
         &'a mut self,
-        f: HCons<F, FTail>,
+        mut f: HCons<F, FTail>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
     ) -> Self::Output {

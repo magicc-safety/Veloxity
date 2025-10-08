@@ -110,8 +110,9 @@ impl DlhrL20GSensor {
                     };
                     let pitot_packet = packets::PitotPacket {
                         header,
-                        pressure: pressure as f32,
+                        differential_pressure: pressure as f32,
                         temperature: temperature as f32,
+                        ..Default::default()
                     };
                     PITOT_SIGNAL.signal(Ok(pitot_packet)); // make data available for other tasks.
                 }

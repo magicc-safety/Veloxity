@@ -38,17 +38,20 @@
 use crate::errors;
 use crate::hlist::*;
 use crate::packets::*;
-use crate::params2::Params;
+use crate::params2::{Params, ParamId, ParamValue};
 use bitflags::bitflags;
 //use defmt;
 
 bitflags! {
-    /// A bitflag for representing multiple, simultaneous calibration flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct CalibrationFlags: u16 {
-        const IMU = 1 << 0; // The 1st bit (value 1)
-        const BARO = 1 << 1; // The 2nd bit (value 2)
-        // Add other sensors here
+        const GYRO = 1 << 0;
+        const ACCEL = 1 << 1;
+        const BARO = 1 << 2;
+        const PITOT = 1 << 3;
+
+        // Create a convenient combination for a full IMU calibration
+        const IMU = Self::GYRO.bits() | Self::ACCEL.bits();
     }
 }
 
@@ -63,15 +66,13 @@ impl<'a> Func<&'a mut Option<Result<BatteryPacket, errors::SensorError>>>
 {
     type Output = Option<BatteryPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<BatteryPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
+        _flags: &mut CalibrationFlags,
+        _params: &mut Params,
     ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // println!("Got Battery");
-            // do something with the parameters access...
-            Some(_packet)
+        if let Some(Ok(packet)) = arg.take() {
+            Some(packet)
         } else {
             None
         }
@@ -87,7 +88,7 @@ pub struct PassthroughImuProcessor;
 impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for PassthroughImuProcessor {
     type Output = Option<ImuPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<ImuPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -97,6 +98,138 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for Passth
             //println!("Got IMU");
             //defmt::debug!("Got IMU");
             Some(_packet)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct ImuCalibrationState {
+    gyro_sum: [f64; 3],
+    gyro_calibration_count: u16,
+    accel_sum: [f64; 3],
+    accel_temp_sum: f64,
+    accel_calibration_count: u16,
+    max_accel: [f64; 3],
+    min_accel: [f64; 3],
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct ImuProcessor {
+    calibration_state: ImuCalibrationState,
+}
+
+impl ImuProcessor {
+    pub fn new() -> Self {
+        let mut new_self = Self::default();
+        new_self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
+        new_self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
+        new_self
+    }
+}
+
+impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuProcessor {
+    type Output = Option<ImuPacket>;
+
+    fn call(
+        &mut self,
+        arg: &'a mut Option<Result<ImuPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        if let Some(Ok(mut packet)) = arg.take() {
+            let is_calibrating = flags.intersects(CalibrationFlags::IMU);
+
+            if is_calibrating {
+                if flags.contains(CalibrationFlags::GYRO) {
+                    self.calibration_state.gyro_sum[0] += packet.gyro[0] as f64;
+                    self.calibration_state.gyro_sum[1] += packet.gyro[1] as f64;
+                    self.calibration_state.gyro_sum[2] += packet.gyro[2] as f64;
+                    self.calibration_state.gyro_calibration_count += 1;
+
+                    if self.calibration_state.gyro_calibration_count > 1000 {
+                        let count = self.calibration_state.gyro_calibration_count as f64;
+                        let bias_x = self.calibration_state.gyro_sum[0] / count;
+                        let bias_y = self.calibration_state.gyro_sum[1] / count;
+                        let bias_z = self.calibration_state.gyro_sum[2] / count;
+
+                        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(bias_x as f32));
+                        params.set_by_id(ParamId::PARAM_GYRO_Y_BIAS, ParamValue::Float(bias_y as f32));
+                        params.set_by_id(ParamId::PARAM_GYRO_Z_BIAS, ParamValue::Float(bias_z as f32));
+
+                        self.calibration_state.gyro_sum = [0.0; 3];
+                        self.calibration_state.gyro_calibration_count = 0;
+                        flags.remove(CalibrationFlags::GYRO);
+                    }
+                }
+
+                if flags.contains(CalibrationFlags::ACCEL) {
+                    const GRAVITY: f64 = 9.80665;
+                    self.calibration_state.accel_sum[0] += packet.accel[0] as f64;
+                    self.calibration_state.accel_sum[1] += packet.accel[1] as f64;
+                    self.calibration_state.accel_sum[2] += packet.accel[2] as f64 + GRAVITY;
+                    self.calibration_state.accel_temp_sum += packet.temperature as f64;
+                    self.calibration_state.accel_calibration_count += 1;
+
+                    self.calibration_state.max_accel[0] = self.calibration_state.max_accel[0].max(packet.accel[0] as f64);
+                    self.calibration_state.min_accel[0] = self.calibration_state.min_accel[0].min(packet.accel[0] as f64);
+                    self.calibration_state.max_accel[1] = self.calibration_state.max_accel[1].max(packet.accel[1] as f64);
+                    self.calibration_state.min_accel[1] = self.calibration_state.min_accel[1].min(packet.accel[1] as f64);
+                    self.calibration_state.max_accel[2] = self.calibration_state.max_accel[2].max(packet.accel[2] as f64);
+                    self.calibration_state.min_accel[2] = self.calibration_state.min_accel[2].min(packet.accel[2] as f64);
+
+                    if self.calibration_state.accel_calibration_count > 1000 {
+                        let max_delta = ((self.calibration_state.max_accel[0] - self.calibration_state.min_accel[0]).powi(2)
+                                       + (self.calibration_state.max_accel[1] - self.calibration_state.min_accel[1]).powi(2)
+                                       + (self.calibration_state.max_accel[2] - self.calibration_state.min_accel[2]).powi(2)).sqrt();
+                        
+                        if max_delta < 1.0 {
+                            let count = self.calibration_state.accel_calibration_count as f64;
+                            let temp_comp_x = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP) { v as f64 } else { 0.0 };
+                            let temp_comp_y = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP) { v as f64 } else { 0.0 };
+                            let temp_comp_z = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_Z_TEMP_COMP) { v as f64 } else { 0.0 };
+
+                            let bias_x = (self.calibration_state.accel_sum[0] - temp_comp_x * self.calibration_state.accel_temp_sum) / count;
+                            let bias_y = (self.calibration_state.accel_sum[1] - temp_comp_y * self.calibration_state.accel_temp_sum) / count;
+                            let bias_z = (self.calibration_state.accel_sum[2] - temp_comp_z * self.calibration_state.accel_temp_sum) / count;
+
+                            params.set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(bias_x as f32));
+                            params.set_by_id(ParamId::PARAM_ACC_Y_BIAS, ParamValue::Float(bias_y as f32));
+                            params.set_by_id(ParamId::PARAM_ACC_Z_BIAS, ParamValue::Float(bias_z as f32));
+                        } else {
+                            //defmt::warn!("Too much movement for IMU calibration.");
+                        }
+                        
+                        self.calibration_state.accel_sum = [0.0; 3];
+                        self.calibration_state.accel_calibration_count = 0;
+                        self.calibration_state.accel_temp_sum = 0.0;
+                        self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
+                        self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
+                        flags.remove(CalibrationFlags::ACCEL);
+                    }
+                }
+                
+                return None;
+            }
+
+            // --- Correction Logic (Not Calibrating) ---
+            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) { packet.gyro[0] -= bias as f64; }
+            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) { packet.gyro[1] -= bias as f64; }
+            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) { packet.gyro[2] -= bias as f64; }
+
+            let temp = packet.temperature as f64;
+            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (params.get_by_id(ParamId::PARAM_ACC_X_BIAS), params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP)) {
+                packet.accel[0] -= (comp as f64 * temp + bias as f64);
+            }
+            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (params.get_by_id(ParamId::PARAM_ACC_Y_BIAS), params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP)) {
+                packet.accel[1] -= (comp as f64 * temp + bias as f64);
+            }
+            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (params.get_by_id(ParamId::PARAM_ACC_Z_BIAS), params.get_by_id(ParamId::PARAM_ACC_Z_TEMP_COMP)) {
+                packet.accel[2] -= (comp as f64 * temp + bias as f64);
+            }
+
+            Some(packet)
         } else {
             None
         }
@@ -114,7 +247,7 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>>
 {
     type Output = Option<BaroPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<BaroPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -124,6 +257,87 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>>
             // println!("Got Baro");
             //defmt::debug!("Got Baro");
             Some(_packet)
+        } else {
+            None
+        }
+    }
+}
+
+const SENSOR_CAL_DELAY_CYCLES: u16 = 128;
+const SENSOR_CAL_CYCLES: u16 = 127;
+const BARO_MAX_CALIBRATION_VARIANCE: f64 = 25.0;
+
+#[derive(Default, Copy, Clone)]
+pub struct BaroCalibrationState {
+    mean: f64,
+    m2: f64, // Sum of squares of differences from the current mean
+    count: u16,
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct BaroProcessor {
+    calibration_state: BaroCalibrationState,
+}
+
+impl BaroProcessor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+fn pressure_to_altitude(pressure: f64) -> f64 {
+    44330.0 * (1.0 - (pressure / 101325.0).powf(0.190295))
+}
+
+impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroProcessor {
+    type Output = Option<BaroPacket>;
+
+    fn call(
+        &mut self,
+        arg: &'a mut Option<Result<BaroPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        if let Some(Ok(mut packet)) = arg.take() {
+            // If the BARO flag is set, we are calibrating.
+            if flags.contains(CalibrationFlags::BARO) {
+                self.calibration_state.count += 1;
+                let total_cycles = SENSOR_CAL_DELAY_CYCLES + SENSOR_CAL_CYCLES;
+
+                if self.calibration_state.count > total_cycles {
+                    // Finalize calibration
+                    let variance = self.calibration_state.m2 / (SENSOR_CAL_CYCLES - 1) as f64;
+                    if variance < BARO_MAX_CALIBRATION_VARIANCE {
+                        params.set_by_id(ParamId::PARAM_BARO_BIAS, ParamValue::Float(self.calibration_state.mean as f32));
+                        let ground_alt = pressure_to_altitude(self.calibration_state.mean);
+                        params.set_by_id(ParamId::PARAM_GROUND_LEVEL, ParamValue::Float(ground_alt as f32));
+                        //defmt::info!("Barometer calibration successful!");
+                    } else {
+                        //defmt::warn!("Too much movement for barometer calibration.");
+                    }
+                    
+                    // Reset state and remove the flag to end the calibration process.
+                    self.calibration_state = BaroCalibrationState::default();
+                    flags.remove(CalibrationFlags::BARO);
+                } else if self.calibration_state.count > SENSOR_CAL_DELAY_CYCLES {
+                    // Accumulate data
+                    let n = (self.calibration_state.count - SENSOR_CAL_DELAY_CYCLES) as f64;
+                    let delta = packet.pressure as f64 - self.calibration_state.mean;
+                    self.calibration_state.mean += delta / n;
+                    let delta2 = packet.pressure as f64 - self.calibration_state.mean;
+                    self.calibration_state.m2 += delta * delta2;
+                }
+                
+                // We are calibrating, so don't return a packet with a value.
+                None
+            } else {
+                // --- Correction Logic (Not Calibrating) ---
+                if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_BARO_BIAS) {
+                    packet.pressure -= bias;
+                }
+                packet.altitude = pressure_to_altitude(packet.pressure as f64) as f32;
+                Some(packet)
+            }
         } else {
             None
         }
@@ -141,7 +355,7 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>>
 {
     type Output = Option<PitotPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<PitotPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -157,6 +371,77 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>>
     }
 }
 
+const PITOT_MAX_CALIBRATION_VARIANCE: f64 = 100.0; 
+
+#[derive(Default, Copy, Clone)]
+pub struct PitotCalibrationState {
+    mean: f64,
+    m2: f64,
+    count: u16,
+    calibrated: bool,
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct PitotProcessor {
+    calibration_state: PitotCalibrationState,
+}
+
+impl PitotProcessor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for PitotProcessor {
+    type Output = Option<PitotPacket>;
+
+    fn call(
+        &mut self,
+        arg: &'a mut Option<Result<PitotPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        if let Some(Ok(mut packet)) = arg.take() {
+            if flags.contains(CalibrationFlags::PITOT) && !self.calibration_state.calibrated {
+                self.calibration_state.count += 1;
+                let total_cycles = SENSOR_CAL_DELAY_CYCLES + SENSOR_CAL_CYCLES;
+
+                if self.calibration_state.count > total_cycles {
+                    let variance = self.calibration_state.m2 / (SENSOR_CAL_CYCLES - 1) as f64;
+                    if variance < PITOT_MAX_CALIBRATION_VARIANCE {
+                        params.set_by_id(ParamId::PARAM_DIFF_PRESS_BIAS, ParamValue::Float(self.calibration_state.mean as f32));
+                        self.calibration_state.calibrated = true;
+                        println!("Airspeed calibration successful!");
+                    } else {
+                        println!("Too much movement for diff pressure calibration.");
+                    }
+                    
+                    self.calibration_state = PitotCalibrationState::default();
+                    flags.remove(CalibrationFlags::PITOT);
+                } else if self.calibration_state.count > SENSOR_CAL_DELAY_CYCLES {
+                    let n = (self.calibration_state.count - SENSOR_CAL_DELAY_CYCLES) as f64;
+                    let delta = packet.differential_pressure as f64 - self.calibration_state.mean;
+                    self.calibration_state.mean += delta / n;
+                    let delta2 = packet.differential_pressure as f64 - self.calibration_state.mean;
+                    self.calibration_state.m2 += delta * delta2;
+                }
+                None
+            } else {
+                if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_DIFF_PRESS_BIAS) {
+                    packet.differential_pressure -= bias;
+                }
+                
+                const RHO: f64 = 1.225;
+                let dp = packet.differential_pressure as f64;
+                packet.indicated_airspeed = (2.0 * dp.abs() / RHO).sqrt() as f32 * dp.signum() as f32;
+                
+                Some(packet)
+            }
+        } else {
+            None
+        }
+    }
+}
 // ------------------------------
 // Mag Packet
 // ------------------------------
@@ -166,7 +451,7 @@ pub struct PassthroughMagProcessor;
 impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for PassthroughMagProcessor {
     type Output = Option<MagPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<MagPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -182,6 +467,47 @@ impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for Passth
     }
 }
 
+#[derive(Default, Copy, Clone)]
+pub struct MagProcessor;
+
+impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for MagProcessor {
+    type Output = Option<MagPacket>;
+
+    fn call(
+        &mut self,
+        arg: &'a mut Option<Result<MagPacket, errors::SensorError>>,
+        _flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        if let Some(Ok(mut packet)) = arg.take() {
+            // Apply hard-iron biases from parameters
+            let mag_hard_x = packet.flux[0] - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_X_BIAS) { v } else { 0.0 };
+            let mag_hard_y = packet.flux[1] - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_Y_BIAS) { v } else { 0.0 };
+            let mag_hard_z = packet.flux[2] - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_Z_BIAS) { v } else { 0.0 };
+
+            // Get soft-iron correction matrix parameters
+            let a11 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A11_COMP) { v } else { 1.0 };
+            let a12 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A12_COMP) { v } else { 0.0 };
+            let a13 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A13_COMP) { v } else { 0.0 };
+            let a21 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A21_COMP) { v } else { 0.0 };
+            let a22 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A22_COMP) { v } else { 1.0 };
+            let a23 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A23_COMP) { v } else { 0.0 };
+            let a31 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A31_COMP) { v } else { 0.0 };
+            let a32 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A32_COMP) { v } else { 0.0 };
+            let a33 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A33_COMP) { v } else { 1.0 };
+
+            // Apply soft-iron corrections (matrix multiplication)
+            packet.flux[0] = a11 * mag_hard_x + a12 * mag_hard_y + a13 * mag_hard_z;
+            packet.flux[1] = a21 * mag_hard_x + a22 * mag_hard_y + a23 * mag_hard_z;
+            packet.flux[2] = a31 * mag_hard_x + a32 * mag_hard_y + a33 * mag_hard_z;
+            
+            Some(packet)
+        } else {
+            None
+        }
+    }
+}
+
 // ------------------------------
 // Rc Packet
 // ------------------------------
@@ -191,7 +517,7 @@ pub struct PassthroughRcProcessor;
 impl<'a> Func<&'a mut Option<Result<RcPacket, errors::SensorError>>> for PassthroughRcProcessor {
     type Output = Option<RcPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<RcPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -218,7 +544,7 @@ impl<'a> Func<&'a mut Option<Result<RangePacket, errors::SensorError>>>
 {
     type Output = Option<RangePacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<RangePacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -244,7 +570,7 @@ impl<'a> Func<&'a mut Option<Result<GNSSPacket, errors::SensorError>>>
 {
     type Output = Option<GNSSPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<GNSSPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -268,7 +594,7 @@ pub struct PassthroughPpsProcessor;
 impl<'a> Func<&'a mut Option<Result<PpsPacket, errors::SensorError>>> for PassthroughPpsProcessor {
     type Output = Option<PpsPacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<PpsPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
@@ -294,7 +620,7 @@ impl<'a> Func<&'a mut Option<Result<AttitudePacket, errors::SensorError>>>
 {
     type Output = Option<AttitudePacket>;
     fn call(
-        &self,
+        &mut self,
         arg: &'a mut Option<Result<AttitudePacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,

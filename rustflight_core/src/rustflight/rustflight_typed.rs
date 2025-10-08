@@ -53,8 +53,8 @@ use crate::{
     mixer::Mixer,
     params2::{self, ParamIter, PARAM_DEFINITIONS},
     packets,
-    rustflight::Configuration,
     sensorprocessors::CalibrationFlags,
+    rustflight::Configuration,
     state_machine::{Event, StateManager},
     rc::Rc,
     command_manager::{CommandManager, ControlType},
@@ -78,9 +78,9 @@ where
     controller: BT::Controller,
     mixer: BT::Mixer,
     rc_manager: Rc,
+    cal_flags: CalibrationFlags,
     command_manager: CommandManager,
     state_manager: StateManager,
-    cal_flags: CalibrationFlags,
 
     // necessary to tell the compiler these generics are in use.
     _body_type: PhantomData<BT>,
@@ -150,48 +150,46 @@ where
         let now_ms = self.board.clock_millis(); 
 
         self.comm_manager.process_incoming_messages(&mut self.board);
+        self.comm_manager.act_on_messages(&mut self.params_iter, &mut self.params, &mut self.board);
 
-        // if we haven't already initialized the parameter iteration process, go ahead and start it... otherwise we'll use the iterator we already have
-        if self.comm_manager.msgs.param_request_list.take().is_some() {
-            if self.params_iter.is_none() {
-                self.params_iter = Some(self.params.iter());
-            }
-        }
+        // // if we haven't already initialized the parameter iteration process, go ahead and start it... otherwise we'll use the iterator we already have
+        // if self.comm_manager.msgs.param_request_list.take().is_some() {
+        //     if self.params_iter.is_none() {
+        //         self.params_iter = Some(self.params.iter());
+        //     }
+        // }
 
-        // Parameter sending sequence        
-        if let Some(iterator) = &mut self.params_iter {
+        // // Parameter sending sequence        
+        // if let Some(iterator) = &mut self.params_iter {
 
-            // Safely get the next item. This `if let` replaces your `.unwrap()`.
-            if let Some((param_id, param_val)) = iterator.next() {
-                let def = &PARAM_DEFINITIONS[param_id as usize];
+        //     // Safely get the next item. This `if let` replaces your `.unwrap()`.
+        //     if let Some((param_id, param_val)) = iterator.next() {
+        //         let def = &PARAM_DEFINITIONS[param_id as usize];
         
-                // You now have everything you need to send the message:
-                // def.name    -> The parameter's string name (e.g., "SYS_ID")
-                // param_id    -> The enum ID (e.g., ParamId::PARAM_SYSTEM_ID)
-                // param_val   -> The current value (e.g., ParamValue::Int(1))
-                self.comm_manager.send_param_value(def, param_val, &mut self.board);
+        //         // You now have everything you need to send the message:
+        //         // def.name    -> The parameter's string name (e.g., "SYS_ID")
+        //         // param_id    -> The enum ID (e.g., ParamId::PARAM_SYSTEM_ID)
+        //         // param_val   -> The current value (e.g., ParamValue::Int(1))
+        //         self.comm_manager.send_param_value(def, param_val, &mut self.board);
 
-            } else {
-                // The iterator is finished, so set it back to None.
-                // This is crucial for preventing future panics and resetting the state.
-                self.params_iter = None;
-            }
-        }
+        //     } else {
+        //         // The iterator is finished, so set it back to None.
+        //         // This is crucial for preventing future panics and resetting the state.
+        //         self.params_iter = None;
+        //     }
+        // }
 
         // Data ingestion: let the board update the sensor data store
         self.board.update_sensors(&mut self.sensors);
-
-        self.state_manager.run(&self.params);
-
         // Data processing: run the map operation across HLists
         // This applies the 'ProcessorHList' to the 'RawSensorSet'
         // which consumes the raw data and produces the clean 'ProcessedSensorSet'
-        let processed_sensors =
-            self.sensors
-                .map(self.processorhlist, &mut self.cal_flags, &mut self.params);
+        let processed_sensors = self.sensors.map(self.processorhlist, &mut self.cal_flags, &mut self.params);
 
         let (required_sensors, _remainder) = processed_sensors.sculpt();
         let (rc_packet_option, estimator_sensors) = required_sensors.pluck();
+        
+        // now run the RC unit and the command manager unit
         if let Some(rc_packet) = rc_packet_option {
             self.rc_manager.receive(&rc_packet, &mut self.state_manager, &self.params);
         }
@@ -205,6 +203,9 @@ where
         let combined_command = self.command_manager.combined_control();
         let controls = self.controller.control(&state, &*combined_command);
         let actuator_commands = self.mixer.mix(&controls);
+
+        // let the state_manager process it's errors
+        self.state_manager.run(&self.params);
 
         true
     }
