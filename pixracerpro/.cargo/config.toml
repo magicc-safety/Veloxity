@@ -3,7 +3,7 @@ target = "thumbv7em-none-eabihf"
 
 # Now, add your target-specific settings
 [target.thumbv7em-none-eabihf]
-runner = "probe-rs run --chip STM32H743IIK6"
+runner = "probe-rs run --chip STM32H743IIKx"
 rustflags = [
   "-C",
   "linker=rust-lld",
