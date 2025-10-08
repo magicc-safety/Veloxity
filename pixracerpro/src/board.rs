@@ -377,10 +377,10 @@ impl Board {
         //     .unwrap();
 
         // Detect GPIO input.
-        let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None);
+        //let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None);
         let usd_card = peripherals::sd_card::SdCard {
             sdmmc: sdmmc1,
-            detect: usd_detect,
+            detect: None //usd_detect,
         };
 
         // P3 Priority Task for Polled Peripherals
