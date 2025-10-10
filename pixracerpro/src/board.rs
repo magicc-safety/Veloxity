@@ -38,6 +38,7 @@ use rustflight_core::board::BoardTrait;
 use rustflight_core::errors;
 use rustflight_core::hlist_type;
 use rustflight_core::packets;
+use rustflight_core::packets::BaroPacket;
 use rustflight_core::sensorprocessors;
 
 use stm_32::peripherals;
@@ -93,8 +94,10 @@ impl BoardTrait for Board {
         if sensors.1.0.is_some() {
             defmt::info!("Sensor Magnetometer data received!");
         }
-        if sensors.1.1.0.is_some() {
+        if let Some(baro_packet) = sensors.1.1.0 {
             defmt::info!("Sensor Barometer data received!");
+            defmt::info!("Baro pressure: {:?}", baro_packet.unwrap().pressure);
+            defmt::info!("Baro temp: {:?}", baro_packet.unwrap().temperature);
         }
         if sensors.1.1.1.0.is_some() {
             defmt::info!("Sensor Pitot data received!");
@@ -108,7 +111,7 @@ impl BoardTrait for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        match peripherals::telem::TELEM_RX.try_read(buf) {
+        match peripherals::vcp::VCP_RX.try_read(buf) {
             Ok(n) => return Some(Ok(n)),
             Err(_) => {
                 return Some(Err(errors::TelemError::GenericTelemError(
@@ -123,7 +126,7 @@ impl BoardTrait for Board {
         let len = bytes.len();
 
         loop {
-            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
+            match peripherals::vcp::VCP_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
                     if wrote == (len - n) {
                         break;
@@ -202,23 +205,37 @@ impl Board {
         //     three_wire: true,
         // }; // Todo implement new funciton
 
-        // // SPI2 - NOT USED Bus ///////////////////////////////////////////
-        // let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
-        // spi2_config.frequency = mhz(1);
-        // spi2_config.mode = spi::MODE_3;
-        // spi2_config.bit_order = spi::BitOrder::MsbFirst;
-        // spi2_config.miso_pull = embassy_stm32::gpio::Pull::Up;
-        // let spi2 = spi::Spi::new(
-        //     p.SPI2,
-        //     p.PB10,
-        //     p.PC3,
-        //     p.PC2,
-        //     p.DMA1_CH2,
-        //     p.DMA1_CH3,
-        //     spi2_config,
-        // );
-        // let spi2_bus = Mutex::new(spi2);
-        // let spi2_bus = SPI2_BUS.init(spi2_bus);
+        // SPI2 
+        // Necessary for internal DPS310
+        let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
+        spi2_config.frequency = mhz(1);
+        spi2_config.mode = spi::MODE_3;
+        spi2_config.bit_order = spi::BitOrder::MsbFirst;
+        spi2_config.miso_pull = embassy_stm32::gpio::Pull::Up;
+        let spi2 = spi::Spi::new(
+            // Pins taken from Rosflight pixracer_pro.ioc
+            p.SPI2,
+            p.PB10, // Sck
+            p.PB15, // Mosi
+            p.PB14, // Miso
+            p.DMA1_CH2,
+            p.DMA1_CH3,
+            spi2_config,
+        );
+        let spi2_bus = Mutex::new(spi2);
+        let spi2_bus = SPI2_BUS.init(spi2_bus);
+
+        // DPS310 Baro (Internal)
+        // PD7 taken from Rosflight pixracer_pro.ioc
+        let nss2 = Output::new(p.PD7, Level::High, Speed::Low);
+        // these pins taken from nucleo, may be wrong
+        let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down);
+        let dps_dev = SpiDevice::new(spi2_bus, nss2);
+        let dps_sensor = peripherals::dps310::Dps310Sensor {
+            dev: dps_dev,
+            drdy: drdy2,
+            three_wire: false,
+        };
 
         // I2C1 Bus  ///////////////////////////////////////////
         let mut i2c_config = i2c::Config::default();
@@ -398,10 +415,10 @@ impl Board {
 
         // Detect GPIO input.
         //let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None);
-        let usd_card = peripherals::sd_card::SdCard {
-            sdmmc: sdmmc1,
-            detect: None //usd_detect,
-        };
+        // let usd_card = peripherals::sd_card::SdCard {
+        //     sdmmc: sdmmc1,
+        //     detect: None //usd_detect,
+        // };
 
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);
@@ -412,9 +429,9 @@ impl Board {
         // spawner3
         //     .spawn(peripherals::iis2mdc::task(iis_sensor))
         //     .unwrap();
-        // spawner3
-        //     .spawn(peripherals::dps310::task(dps_sensor))
-        //     .unwrap();
+        spawner3
+            .spawn(peripherals::dps310::task(dps_sensor))
+            .unwrap();
         spawner3
             .spawn(peripherals::ublox::task(ublox_sensor))
             .unwrap();
@@ -427,9 +444,9 @@ impl Board {
         spawner4
             .spawn(peripherals::telem::task_tx(telem2_tx))
             .unwrap();
-        spawner4
-            .spawn(peripherals::sd_card::task(usd_card))
-            .unwrap();
+        // spawner4
+        //     .spawn(peripherals::sd_card::task(usd_card))
+        //     .unwrap();
 
         // SERVOS + TIMERS
         // TIM1
