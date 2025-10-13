@@ -254,13 +254,13 @@ impl Board {
         let i2c1_bus = Mutex::new(i2c1);
         let i2c1_bus = I2C1_BUS.init(i2c1_bus);
 
-        // DLHRL20G Pitot
-        let drdy0 = ExtiInput::new(p.PA15, p.EXTI15, Pull::Down);
-        let dlhr_dev = I2cDevice::new(i2c1_bus);
-        let dlhr_sensor = peripherals::dlhrl20g::DlhrL20GSensor {
-            dev: dlhr_dev,
-            drdy: drdy0,
-        };
+        // // DLHRL20G Pitot // NON-ESSENTIAL EXTERNAL SENSOR
+        // let drdy0 = ExtiInput::new(p.PA15, p.EXTI15, Pull::Down);
+        // let dlhr_dev = I2cDevice::new(i2c1_bus);
+        // let dlhr_sensor = peripherals::dlhrl20g::DlhrL20GSensor {
+        //     dev: dlhr_dev,
+        //     drdy: drdy0,
+        // };
 
         // Telemetry UART
         let mut uart2config = usart::Config::default();
@@ -311,25 +311,25 @@ impl Board {
             .unwrap();
 
         //GPS USART7
-        let mut uart7config = usart::Config::default();
-        uart7config.baudrate = 9600u32;
-        let mut uart7 = Uart::new(
-            p.UART7,
-            p.PE7,
-            p.PE8,
-            Uart7Irqs,
+        let mut uart4config = usart::Config::default();
+        uart4config.baudrate = 230400u32;
+        let mut uart4 = Uart::new(
+            p.UART4,
+            p.PA1,
+            p.PA0,
+            Uart4Irqs,
             p.DMA2_CH6,
             p.DMA2_CH7,
-            uart7config,
+            uart4config,
         )
         .unwrap();
         let ublox_sensor = peripherals::ublox::UbloxSensor {
-            uart: uart7,
+            uart: uart4,
             protocol: peripherals::ublox::Protocol::M8,
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PE0, p.EXTI0, Pull::Down); // Gyro
+        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI0, Pull::Down); // Gyro
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART1
