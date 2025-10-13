@@ -163,17 +163,17 @@ impl Board {
         //let t = TestBoard{p: embassy_stm32::init(clock_config())};
         // SPI1 Bus ///////////////////////////////////////////
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
-        spi1_config.frequency = mhz(1);
+        spi1_config.frequency = mhz(16);
         spi1_config.mode = spi::MODE_3;
         spi1_config.bit_order = spi::BitOrder::MsbFirst;
         spi1_config.miso_pull = embassy_stm32::gpio::Pull::Up;
         let spi1 = spi::Spi::new(
             p.SPI1,
-            p.PB3,
-            p.PB5,
-            p.PB4,
-            p.DMA1_CH0,
-            p.DMA1_CH1,
+            p.PA5,
+            p.PA7,
+            p.PA6,
+            p.DMA1_CH0, // in the ROSFlight Firmware, this is Dma.Request1 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to 
+            p.DMA1_CH1, // in the ROSFlight Firmware, this is Dma.Request2 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to 
             spi1_config,
         );
         let spi1_bus = Mutex::new(spi1);
@@ -182,9 +182,9 @@ impl Board {
         // THIS BLOCK WAS AI GENERATED, THEN CORRECTED. PINS MAY BE INCORRECT
         // Initialize the Onboard ICM-42688-P IMU // PRETTY SURE THIS ICM NUMBER IS WRONG
         // Chip Select for the IMU is on pin PA4
-        let nss_imu = Output::new(p.PA4, Level::High, Speed::VeryHigh);
-        // Data Ready interrupt is on pin PG4
-        let drdy_imu = ExtiInput::new(p.PG4, p.EXTI4, Pull::Up);
+        // let nss_imu = Output::new(p.PA4, Level::High, Speed::VeryHigh);
+        // // Data Ready interrupt is on pin PG4
+        // let drdy_imu = ExtiInput::new(p.PG4, p.EXTI4, Pull::Up);
 
         // // IIS2MDC Mag - NOT NEEDED - the PixRacer Pro has an internal mag
         // let nss1 = Output::new(p.PA4, Level::High, Speed::Low);
@@ -208,7 +208,7 @@ impl Board {
         // SPI2 
         // Necessary for internal DPS310
         let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
-        spi2_config.frequency = mhz(1);
+        spi2_config.frequency = mhz(16);
         spi2_config.mode = spi::MODE_3;
         spi2_config.bit_order = spi::BitOrder::MsbFirst;
         spi2_config.miso_pull = embassy_stm32::gpio::Pull::Up;
