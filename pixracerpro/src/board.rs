@@ -329,7 +329,7 @@ impl Board {
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI0, Pull::Down); // Gyro
+        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down); // Gyro
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART1
@@ -423,9 +423,9 @@ impl Board {
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);
         let spawner3 = P3_EXECUTOR.start(interrupt::SAI3);
-        spawner3
-           .spawn(peripherals::dlhrl20g::task(dlhr_sensor))
-           .unwrap();
+        // spawner3 // Pitot tube - temporarily commented out: non-essential
+        //    .spawn(peripherals::dlhrl20g::task(dlhr_sensor))
+        //    .unwrap();
         // spawner3
         //     .spawn(peripherals::iis2mdc::task(iis_sensor))
         //     .unwrap();
@@ -448,23 +448,25 @@ impl Board {
         //     .spawn(peripherals::sd_card::task(usd_card))
         //     .unwrap();
 
-        // SERVOS + TIMERS
+        // SERVOS + TIMERS // Are our servo rails defined with an offset? I am incrementing all of our channel #s
         // TIM1
         let ch0_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
         let ch1_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
         let ch2_pin = PwmPin::new_ch3(p.PE13, OutputType::PushPull);
         let ch3_pin = PwmPin::new_ch4(p.PE14, OutputType::PushPull);
         // TIM4
-        let ch4_pin = PwmPin::new_ch1(p.PD12, OutputType::PushPull);
+        // let ch4_pin = PwmPin::new_ch1(p.PD13, OutputType::PushPull);
         let ch5_pin = PwmPin::new_ch2(p.PD13, OutputType::PushPull);
         let ch6_pin = PwmPin::new_ch3(p.PD14, OutputType::PushPull);
-        let ch7_pin = PwmPin::new_ch4(p.PD15, OutputType::PushPull);
-        // TIM2
-        let ch8_pin = PwmPin::new_ch1(p.PA0, OutputType::PushPull);
-        let ch9_pin = PwmPin::new_ch4(p.PB11, OutputType::PushPull);
-        // TIM3
-        let ch10_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
-        let ch11_pin = PwmPin::new_ch4(p.PB1, OutputType::PushPull);
+        // Channels 7 and 8 should be on PI5 & PI6 according to our documentation, but the embassy-stm32 init() docs don't include those values
+        // let ch7_pin = PwmPin::new_ch3(p.PI5, OutputType::PushPull);
+        // let ch8_pin = PwmPin::new_ch4(p.PI6, OutputType::PushPull);
+        // TIM2 // There are only 8 Servo Channels on the PixRacer Pro
+        // let ch8_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
+        // let ch9_pin = PwmPin::new_ch4(p.PB11, OutputType::PushPull); 
+        // // TIM3
+        // let ch10_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
+        // let ch11_pin = PwmPin::new_ch4(p.PB1, OutputType::PushPull);
 
         let mut timer1 = SimplePwm::new(
             p.TIM1,
@@ -477,28 +479,28 @@ impl Board {
         );
         let mut timer4 = SimplePwm::new(
             p.TIM4,
-            Some(ch4_pin),
+            None, // Some(ch4_pin),
             Some(ch5_pin),
-            Some(ch6_pin),
-            Some(ch7_pin),
+            Some(ch6_pin), // Some(ch7_pin),
+            None, // Some(ch8_pin),
             Hertz::hz(50),
             Default::default(),
         );
         let mut timer2 = SimplePwm::new(
             p.TIM2,
-            Some(ch8_pin),
+            None, // Some(ch8_pin),
             None,
             None,
-            Some(ch9_pin),
+            None, // Some(ch9_pin),
             Hertz::hz(50),
             Default::default(),
         );
         let mut timer3 = SimplePwm::new(
             p.TIM3,
-            Some(ch10_pin),
+            None, // Some(ch10_pin),
             None,
             None,
-            Some(ch11_pin),
+            None, // Some(ch11_pin),
             Hertz::hz(50),
             Default::default(),
         );
