@@ -172,8 +172,8 @@ impl Board {
             p.PA5,
             p.PA7,
             p.PA6,
-            p.DMA1_CH0, // in the ROSFlight Firmware, this is Dma.Request1 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to 
-            p.DMA1_CH1, // in the ROSFlight Firmware, this is Dma.Request2 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to 
+            p.DMA1_CH0, // in the ROSFlight Firmware, this is Dma.Request1 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to
+            p.DMA1_CH1, // in the ROSFlight Firmware, this is Dma.Request2 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to
             spi1_config,
         );
         let spi1_bus = Mutex::new(spi1);
@@ -205,7 +205,7 @@ impl Board {
         //     three_wire: true,
         // }; // Todo implement new funciton
 
-        // SPI2 
+        // SPI2
         // Necessary for internal DPS310
         let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
         spi2_config.frequency = mhz(16);
@@ -289,12 +289,12 @@ impl Board {
         let mut config = embassy_stm32::usb::Config::default();
         config.vbus_detection = true;
         let driver = Driver::new_fs(
-            p.USB_OTG_FS, 
-            Irqs, 
-            p.PA12, 
-            p.PA11, 
-            EP_BUF_CELL.init([0u8; 256]), 
-            config
+            p.USB_OTG_FS,
+            Irqs,
+            p.PA12,
+            p.PA11,
+            EP_BUF_CELL.init([0u8; 256]),
+            config,
         );
         let vcp = peripherals::vcp::Vcp {
             driver,
@@ -306,9 +306,7 @@ impl Board {
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
         spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
         // TODO: What priority should VCP be?
-        spawner1
-            .spawn(peripherals::vcp::task(vcp))
-            .unwrap();
+        spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
         //GPS USART7
         let mut uart4config = usart::Config::default();
@@ -448,60 +446,64 @@ impl Board {
         //     .spawn(peripherals::sd_card::task(usd_card))
         //     .unwrap();
 
-        // SERVOS + TIMERS // Are our servo rails defined with an offset? I am incrementing all of our channel #s
+        // SERVOS + TIMERS
+        // There are only 8 Servo Channels on the PixRacer Pro
         // TIM1
-        let ch0_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
-        let ch1_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
-        let ch2_pin = PwmPin::new_ch3(p.PE13, OutputType::PushPull);
-        let ch3_pin = PwmPin::new_ch4(p.PE14, OutputType::PushPull);
+        let tim1_ch1_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
+        let tim1_ch2_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
+        let tim1_ch3_pin = PwmPin::new_ch3(p.PE13, OutputType::PushPull);
+        let tim1_ch4_pin = PwmPin::new_ch4(p.PE14, OutputType::PushPull);
+
         // TIM4
         // let ch4_pin = PwmPin::new_ch1(p.PD13, OutputType::PushPull);
-        let ch5_pin = PwmPin::new_ch2(p.PD13, OutputType::PushPull);
-        let ch6_pin = PwmPin::new_ch3(p.PD14, OutputType::PushPull);
-        // Channels 7 and 8 should be on PI5 & PI6 according to our documentation, but the embassy-stm32 init() docs don't include those values
+        let tim4_ch2_pin = PwmPin::new_ch2(p.PD13, OutputType::PushPull);
+        let tim4_ch3_pin = PwmPin::new_ch3(p.PD14, OutputType::PushPull);
         // let ch7_pin = PwmPin::new_ch3(p.PI5, OutputType::PushPull);
         // let ch8_pin = PwmPin::new_ch4(p.PI6, OutputType::PushPull);
-        // TIM2 // There are only 8 Servo Channels on the PixRacer Pro
-        // let ch8_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
-        // let ch9_pin = PwmPin::new_ch4(p.PB11, OutputType::PushPull); 
-        // // TIM3
+
+        // TIM2 
+        let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
+        // let ch9_pin = PwmPin::new_ch4(p.PB11, OutputType::PushPull);
+
+        // TIM3
         // let ch10_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
+        let tim3_ch3_pin = PwmPin::new_ch3(p.PB0, OutputType::PushPull);
         // let ch11_pin = PwmPin::new_ch4(p.PB1, OutputType::PushPull);
 
         let mut timer1 = SimplePwm::new(
             p.TIM1,
-            Some(ch0_pin),
-            Some(ch1_pin),
-            Some(ch2_pin),
-            Some(ch3_pin),
-            Hertz::hz(50),
+            Some(tim1_ch1_pin),
+            Some(tim1_ch2_pin),
+            Some(tim1_ch3_pin),
+            Some(tim1_ch4_pin),
+            Hertz::hz(100),
             Default::default(),
         );
         let mut timer4 = SimplePwm::new(
             p.TIM4,
             None, // Some(ch4_pin),
-            Some(ch5_pin),
-            Some(ch6_pin), // Some(ch7_pin),
-            None, // Some(ch8_pin),
-            Hertz::hz(50),
+            Some(tim4_ch2_pin),
+            Some(tim4_ch3_pin), // Some(ch7_pin),
+            None,               // Some(ch8_pin),
+            Hertz::hz(100),
             Default::default(),
         );
         let mut timer2 = SimplePwm::new(
             p.TIM2,
-            None, // Some(ch8_pin),
+            Some(tim2_ch1_pin),
             None,
             None,
             None, // Some(ch9_pin),
-            Hertz::hz(50),
+            Hertz::hz(100),
             Default::default(),
         );
         let mut timer3 = SimplePwm::new(
             p.TIM3,
             None, // Some(ch10_pin),
             None,
-            None,
+            Some(tim3_ch3_pin),
             None, // Some(ch11_pin),
-            Hertz::hz(50),
+            Hertz::hz(100),
             Default::default(),
         );
 
