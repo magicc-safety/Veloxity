@@ -51,6 +51,7 @@ pub struct Messages {
     pub cmd: Option<RosflightCmdMsg>,
     pub aux_cmd: Option<RosflightAuxCmdMsg>,
     pub external_attitude: Option<ExternalAttitudeMsg>,
+    pub rc_raw: Option<RcChannelsMsg>,
 }
 
 pub trait Store<T> {

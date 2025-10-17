@@ -204,6 +204,8 @@ where
         let controls = self.controller.control(&state, &*combined_command);
         let actuator_commands = self.mixer.mix(&controls);
 
+        // PWM command output
+
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);
 
