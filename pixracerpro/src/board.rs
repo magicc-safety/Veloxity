@@ -179,13 +179,6 @@ impl Board {
         let spi1_bus = Mutex::new(spi1);
         let spi1_bus = SPI1_BUS.init(spi1_bus);
 
-        // THIS BLOCK WAS AI GENERATED, THEN CORRECTED. PINS MAY BE INCORRECT
-        // Initialize the Onboard ICM-42688-P IMU // PRETTY SURE THIS ICM NUMBER IS WRONG
-        // Chip Select for the IMU is on pin PA4
-        // let nss_imu = Output::new(p.PA4, Level::High, Speed::VeryHigh);
-        // // Data Ready interrupt is on pin PG4
-        // let drdy_imu = ExtiInput::new(p.PG4, p.EXTI4, Pull::Up);
-
         // // IIS2MDC Mag - NOT NEEDED - the PixRacer Pro has an internal mag
         // let nss1 = Output::new(p.PA4, Level::High, Speed::Low);
         // let drdy1 = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down);
@@ -262,27 +255,27 @@ impl Board {
         //     drdy: drdy0,
         // };
 
-        // Telemetry UART
-        let mut uart2config = usart::Config::default();
-        uart2config.baudrate = 921600;
-        let mut usart2 = Uart::new(
-            p.USART2,
-            p.PD6,
-            p.PD5,
-            Usart2Irqs,
+        // Telemetry UART - The documentation asks us to switch to USART8
+        let mut uart8config = usart::Config::default();
+        uart8config.baudrate = 921600; //230400? This may very well need to be updated
+        let mut uart8 = Uart::new(
+            p.UART8,
+            p.PE0,
+            p.PE1,
+            Uart8Irqs,
             p.DMA2_CH4,
             p.DMA2_CH5,
-            uart2config,
+            uart8config,
         )
         .unwrap();
-        let (mut usart2_tx, mut usart2_rx) = usart2.split();
+        let (mut uart8_tx, mut uart8_rx) = uart8.split();
 
-        let telem2_rx = peripherals::telem::TelemRx {
-            uart_rx: usart2_rx,
+        let telem8_rx = peripherals::telem::TelemRx {
+            uart_rx: uart8_rx,
             byte_processor: stm_32::peripherals::telem::BasicProcessor {},
         };
 
-        let telem2_tx = peripherals::telem::TelemTx { uart_tx: usart2_tx };
+        let telem8_tx = peripherals::telem::TelemTx { uart_tx: uart8_tx };
 
         // VCP
         static EP_BUF_CELL: StaticCell<[u8; 256]> = StaticCell::new();
@@ -304,7 +297,7 @@ impl Board {
         // P1 Priority Task for Rx Tememetry
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
+        spawner1.spawn(peripherals::telem::task_rx(telem8_rx));
         // TODO: What priority should VCP be?
         spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
@@ -440,7 +433,7 @@ impl Board {
         interrupt::SAI4.set_priority(Priority::P4);
         let spawner4 = P4_EXECUTOR.start(interrupt::SAI4);
         spawner4
-            .spawn(peripherals::telem::task_tx(telem2_tx))
+            .spawn(peripherals::telem::task_tx(telem8_tx))
             .unwrap();
         // spawner4
         //     .spawn(peripherals::sd_card::task(usd_card))
