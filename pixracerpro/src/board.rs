@@ -359,57 +359,57 @@ impl Board {
             Default::default(),
         );
 
-        // // SPI4 - NOT NEEDED Bus ///////////////////////////////////////////
-        // let mut spi4_config: embassy_stm32::spi::Config = spi::Config::default();
-        // spi4_config.frequency = mhz(2);
-        // spi4_config.mode = spi::MODE_3;
-        // spi4_config.bit_order = spi::BitOrder::MsbFirst;
-        // spi4_config.miso_pull = embassy_stm32::gpio::Pull::Up;
-        // let spi4 = spi::Spi::new(
-        //     p.SPI4,
-        //     p.PE2,
-        //     p.PE6,
-        //     p.PE5,
-        //     p.DMA2_CH0,
-        //     p.DMA2_CH1,
-        //     spi4_config,
-        // );
-        // let spi4_ = Mutex::new(spi4);
-        // let spi4_bus = SPI4_BUS.init(spi4_);
+        // SPI5 - Bus ///////////////////////////////////////////
+        let mut spi5_config: embassy_stm32::spi::Config = spi::Config::default();
+        spi5_config.frequency = mhz(2);
+        spi5_config.mode = spi::MODE_3;
+        spi5_config.bit_order = spi::BitOrder::MsbFirst;
+        spi5_config.miso_pull = embassy_stm32::gpio::Pull::Up;
+        let spi5 = spi::Spi::new(
+            p.SPI5,
+            p.PF7, // sck
+            p.PF9, // mosi
+            p.PF8, // miso
+            p.DMA2_CH0,
+            p.DMA2_CH1,
+            spi5_config,
+        );
+        let spi5_ = Mutex::new(spi5);
+        let spi5_bus = SPI5_BUS.init(spi5_);
 
         // BMI08x - The PixRacerPro has an internal IMU
         let nss_bmi08x_a = Output::new(p.PF6, Level::High, Speed::Low); // Accel
         let drdy_bmi08x_a = ExtiInput::new(p.PF1, p.EXTI1, Pull::Down); // Accel
         let nss_bmi08x_g = Output::new(p.PF10, Level::High, Speed::Low); // Gyro
         let drdy_bmi08x_g = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down); // Gyro
-        // let bmi08x_dev_a = SpiDevice::new(spi4_bus, nss_bmi08x_a);
-        // let bmi08x_dev_g = SpiDevice::new(spi4_bus, nss_bmi08x_g);
+        let bmi08x_dev_a = SpiDevice::new(spi5_bus, nss_bmi08x_a);
+        let bmi08x_dev_g = SpiDevice::new(spi5_bus, nss_bmi08x_g);
 
-        // let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
-        //     dev_a: bmi08x_dev_a,
-        //     dev_g: bmi08x_dev_g,
-        //     drdy_a: drdy_bmi08x_a,
-        //     drdy_g: drdy_bmi08x_g,
-        //     range_a: peripherals::bmi08x::AccelRange::Bmi088(
-        //         peripherals::bmi08x::AccelRange088::Max24G,
-        //     ),
-        //     range_g: peripherals::bmi08x::GyroRange::Max500dps,
-        //     sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
-        // };
+        let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
+            dev_a: bmi08x_dev_a,
+            dev_g: bmi08x_dev_g,
+            drdy_a: drdy_bmi08x_a,
+            drdy_g: drdy_bmi08x_g,
+            range_a: peripherals::bmi08x::AccelRange::Bmi088(
+                peripherals::bmi08x::AccelRange088::Max24G,
+            ),
+            range_g: peripherals::bmi08x::GyroRange::Max500dps,
+            sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
+        };
 
         // P2 Priority Task for Gyros
         interrupt::SAI2.set_priority(Priority::P2);
         let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
-        // spawner2
-        //     .spawn(peripherals::bmi08x::task(bmi08x_sensor))
-        //     .unwrap();
+        spawner2
+            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
+            .unwrap();
 
         // Detect GPIO input.
-        //let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None);
-        // let usd_card = peripherals::sd_card::SdCard {
-        //     sdmmc: sdmmc1,
-        //     detect: None //usd_detect,
-        // };
+        let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None); // PG3 is not connected
+        let usd_card = peripherals::sd_card::SdCard {
+            sdmmc: sdmmc1,
+            detect: usd_detect,
+        };
 
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);
@@ -435,9 +435,9 @@ impl Board {
         spawner4
             .spawn(peripherals::telem::task_tx(telem8_tx))
             .unwrap();
-        // spawner4
-        //     .spawn(peripherals::sd_card::task(usd_card))
-        //     .unwrap();
+        spawner4
+            .spawn(peripherals::sd_card::task(usd_card))
+            .unwrap();
 
         // SERVOS + TIMERS
         // There are only 8 Servo Channels on the PixRacer Pro
