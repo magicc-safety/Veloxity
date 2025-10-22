@@ -377,11 +377,11 @@ impl Board {
         // let spi4_ = Mutex::new(spi4);
         // let spi4_bus = SPI4_BUS.init(spi4_);
 
-        // // BMI08x - NOT NEEDED The PixRacerPro has an internal IMU
-        // let nss_bmi08x_a = Output::new(p.PE3, Level::High, Speed::Low); // Accel
-        // let drdy_bmi08x_a = ExtiInput::new(p.PE4, p.EXTI4, Pull::Down); // Accel
-        // let nss_bmi08x_g = Output::new(p.PF8, Level::High, Speed::Low); // Gyro
-        // let drdy_bmi08x_g = ExtiInput::new(p.PF7, p.EXTI7, Pull::Down); // Gyro
+        // BMI08x - The PixRacerPro has an internal IMU
+        let nss_bmi08x_a = Output::new(p.PF6, Level::High, Speed::Low); // Accel
+        let drdy_bmi08x_a = ExtiInput::new(p.PF1, p.EXTI1, Pull::Down); // Accel
+        let nss_bmi08x_g = Output::new(p.PF10, Level::High, Speed::Low); // Gyro
+        let drdy_bmi08x_g = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down); // Gyro
         // let bmi08x_dev_a = SpiDevice::new(spi4_bus, nss_bmi08x_a);
         // let bmi08x_dev_g = SpiDevice::new(spi4_bus, nss_bmi08x_g);
 
@@ -454,7 +454,7 @@ impl Board {
         // let ch7_pin = PwmPin::new_ch3(p.PI5, OutputType::PushPull);
         // let ch8_pin = PwmPin::new_ch4(p.PI6, OutputType::PushPull);
 
-        // TIM2 
+        // TIM2
         let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
         // let ch9_pin = PwmPin::new_ch4(p.PB11, OutputType::PushPull);
 
@@ -478,7 +478,7 @@ impl Board {
             Some(tim4_ch2_pin),
             Some(tim4_ch3_pin), // Some(ch7_pin),
             None,               // Some(ch8_pin),
-            Hertz::hz(100), // Should this be 100_000?
+            Hertz::hz(100),     // Should this be 100_000?
             Default::default(),
         );
         let mut timer2 = SimplePwm::new(
@@ -486,7 +486,7 @@ impl Board {
             Some(tim2_ch1_pin),
             None,
             None,
-            None, // Some(ch9_pin),
+            None,           // Some(ch9_pin),
             Hertz::hz(100), // Should this be 100_000?
             Default::default(),
         );
@@ -495,7 +495,7 @@ impl Board {
             None, // Some(ch10_pin),
             None,
             Some(tim3_ch3_pin),
-            None, // Some(ch11_pin),
+            None,           // Some(ch11_pin),
             Hertz::hz(100), // Should this be 100_000?
             Default::default(),
         );
@@ -532,9 +532,9 @@ impl Board {
 
         // Setup Probe GPIO's
         let probe = [
-            Output::new(p.PC0, Level::Low, Speed::Low),
-            Output::new(p.PB2, Level::Low, Speed::Low),
-            Output::new(p.PF2, Level::Low, Speed::Low),
+            Output::new(p.PC0, Level::Low, Speed::Low), // PG13
+            Output::new(p.PB2, Level::Low, Speed::Low), // PG9
+            Output::new(p.PF2, Level::Low, Speed::Low), // PG14
             Output::new(p.PG0, Level::Low, Speed::Low),
         ];
         Board { probe, servos }
