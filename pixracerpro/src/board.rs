@@ -172,8 +172,8 @@ impl Board {
             p.PA5,
             p.PA7,
             p.PA6,
-            p.DMA1_CH0, // in the ROSFlight Firmware, this is Dma.Request1 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to
-            p.DMA1_CH1, // in the ROSFlight Firmware, this is Dma.Request2 in the pixracer_pro.ioc file - need to figure out which channel that should correspond to
+            p.DMA1_CH0, 
+            p.DMA1_CH1, 
             spi1_config,
         );
         let spi1_bus = Mutex::new(spi1);
