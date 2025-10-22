@@ -509,16 +509,16 @@ impl Board {
 
         let mut servos: peripherals::pwm::ServoMonstrosity = peripherals::pwm::ServoMonstrosity {
             timers,
-            chan_list: [
+            chan_list: [ // We don't have access to all of the channels, we will need to update this block.
                 (0, peripherals::pwm::TimerChannel::Ch1), //TIM1, channels 1-4
                 (0, peripherals::pwm::TimerChannel::Ch2), // -
                 (0, peripherals::pwm::TimerChannel::Ch3), // -
                 (0, peripherals::pwm::TimerChannel::Ch4), // -
-                (1, peripherals::pwm::TimerChannel::Ch1), //TIM2, channels 1, 4
+                (1, peripherals::pwm::TimerChannel::Ch1), //TIM2, channels 1, 4 !!! We only have access to channel 1
                 (1, peripherals::pwm::TimerChannel::Ch4), // -
-                (2, peripherals::pwm::TimerChannel::Ch1), //TIM3, channels 1, 4
+                (2, peripherals::pwm::TimerChannel::Ch1), //TIM3, channels 1, 4 !!! We only have access to channel 3
                 (2, peripherals::pwm::TimerChannel::Ch4), // -
-                (3, peripherals::pwm::TimerChannel::Ch1), //TIM4, channels 1-4
+                (3, peripherals::pwm::TimerChannel::Ch1), //TIM4, channels 1-4 !!! We only have access to channels 2 and 3
                 (3, peripherals::pwm::TimerChannel::Ch2), // -
                 (3, peripherals::pwm::TimerChannel::Ch3), // -
                 (3, peripherals::pwm::TimerChannel::Ch4), // -
