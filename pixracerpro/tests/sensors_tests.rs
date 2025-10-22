@@ -58,8 +58,8 @@ use stm_32::*;
 
 // define the wiring diagram
 #[derive(Default)]
-pub struct NucleoQuadConfig;
-impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {
+pub struct PixRacerProQuadConfig;
+impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     // needs IMU, Baro, Mag, GNSS
     type SculptIndices = hlist_type![Here, Here, Here, There<Here>];
 }
@@ -75,7 +75,7 @@ fn main() -> ! {
     let mixer = QuadMixer::default();
 
     // zero-sized configuration marker (necessary)
-    let config = NucleoQuadConfig::default();
+    let config = PixRacerProQuadConfig::default();
 
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
