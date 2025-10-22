@@ -221,8 +221,8 @@ impl Board {
         // DPS310 Baro (Internal)
         // PD7 taken from Rosflight pixracer_pro.ioc
         let nss2 = Output::new(p.PD7, Level::High, Speed::Low);
-        // these pins taken from nucleo, may be wrong
-        let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down);
+        // these pins are generalized for the IC
+        let drdy2 = ExtiInput::new(p.PD15, p.EXTI15, Pull::Down);
         let dps_dev = SpiDevice::new(spi2_bus, nss2);
         let dps_sensor = peripherals::dps310::Dps310Sensor {
             dev: dps_dev,
