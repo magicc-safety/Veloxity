@@ -52,6 +52,7 @@ use rustflight_core::{
     mixer::Mixer,
     rustflight::Configuration,
     rustflight::rustflight_typed::ROSFlight,
+    state_machine::StateManager,
 };
 use stm_32::*;
 
@@ -79,10 +80,12 @@ fn main() -> ! {
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, mavlink, estimator, controller, mixer, config);
+    let state_manager = StateManager::new();
+
+    let mut rosflight = ROSFlight::init(1000, board, mavlink, state_manager, estimator, controller, mixer, config);
 
     loop {
-        defmt::debug!("One Loop");
+        // defmt::debug!("One Loop");
         rosflight.run();
     }
 }

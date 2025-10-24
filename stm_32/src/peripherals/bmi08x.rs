@@ -48,7 +48,7 @@ use rustflight_core::errors;
 use rustflight_core::packets;
 
 use core::module_path;
-//use defmt::info;
+// use defmt::info;
 
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embedded_hal_async::spi::SpiDevice as _;
@@ -462,7 +462,7 @@ pub enum AccelRange088 {
 pub enum AccelRange085 {
     Max2g = 0,
     Max4g = 1,
-    Max5g = 2,
+    Max8g = 2,
     Max16g = 3,
 }
 
@@ -511,6 +511,7 @@ pub struct Bmi08xSensor {
 
     pub drdy_a: ExtiInput<'static>,
     pub drdy_g: ExtiInput<'static>,
+    pub jumper: Output<'static>,
 
     pub range_a: AccelRange,
     pub range_g: GyroRange,
@@ -556,22 +557,22 @@ impl Bmi08xSensor {
         let mut accel_range: f64 = 0f64;
 
         if accel_id == ACCEL_PROD_ID_088 {
-            //info!("PROD_ID = {:#04X} BMI088 OK", accel_id);
+            // info!("PROD_ID = {:#04X} BMI088 OK", accel_id);
 
             accel_range = match &self.range_a {
                 AccelRange::Bmi088(range) => {
                     3.0 * ((0x0001 << (*range as u32)) as f64) * 9.80665f64
                 }
                 AccelRange::Bmi085(range) => {
-                    //info!("PROD_ID does not match range type, adjusting to similar range");
+                    // info!("PROD_ID does not match range type, adjusting to similar range");
                     2.0 * ((0x0001 << (*range as u32)) as f64) * 9.80665f64 // return closest value
                 }
             };
         } else if accel_id == ACCEL_PROD_ID_085 {
-            //info!("ACCEL_PROD_ID = {:#02X} BMI085", accel_id as u8);
+            // info!("ACCEL_PROD_ID = {:#02X} BMI085", accel_id as u8);
             accel_range = match &self.range_a {
                 AccelRange::Bmi088(range) => {
-                    //info!("PROD_ID does not match range type, adjusting to similar range");
+                    // info!("PROD_ID does not match range type, adjusting to similar range");
                     3.0 * ((0x0001 << (*range as u32)) as f64) * 9.80665f64 // return closest value
                 }
                 AccelRange::Bmi085(range) => {
@@ -579,9 +580,9 @@ impl Bmi08xSensor {
                 }
             };
         } else {
-            //info!("ACCEL_PROD_ID = {:#02X} Failure", accel_id as u8);
+            // info!("ACCEL_PROD_ID = {:#02X} Failure", accel_id as u8);
         }
-        //info!("Accel Range = {} g", accel_range / 9.80665f64);
+        // info!("Accel Range = {} g", accel_range / 9.80665f64);
 
         const GYRO_PROD_ID_REG: u8 = 0x00; // BMI08_REG_GYRO_CHIP_ID
         const GYRO_PROD_ID: u8 = 0x0F;
@@ -591,7 +592,7 @@ impl Bmi08xSensor {
         let mut gyro_range: f64 = 0f64;
 
         if gyro_id == GYRO_PROD_ID {
-            //info!("GYRO_PROD_ID = {:#04X} BMI08x OK", gyro_id);
+            // info!("GYRO_PROD_ID = {:#04X} BMI08x OK", gyro_id);
             gyro_range = match &self.range_g {
                 GyroRange::Max125dps => 125.0f64,
                 GyroRange::Max250dps => 250.0f64,
@@ -600,13 +601,13 @@ impl Bmi08xSensor {
                 GyroRange::Max2000dps => 2000.0f64,
             } * 0.017453292519943295f64;
         } else {
-            //info!("GYRO_PROD_ID = {:#04X} Failure", gyro_id);
+            // info!("GYRO_PROD_ID = {:#04X} Failure", gyro_id);
         }
 
-        //info!(
+        // info!(
         //    "Gyro Range = {} deg/s",
         //    gyro_range / 0.017453292519943295f64
-        //);
+        // );
 
         // Accel Soft Reset (0x7E, 0xB6) //BMI08_REG_ACCEL_SOFTRESET
         self.write_register_a(0x7E, 0xB6).await;
@@ -700,6 +701,8 @@ impl Bmi08xSensor {
         self.write_register_a(0x54, 0x13).await; //Int2 as input, active high, reserved[0] = 1
         // BMI08_REG_ACCEL_INT1_MAP = 0x56
         self.write_register_a(0x56, 0x01).await; // undocumented
+        // BMI08_INT1_INT2_MAP_DATA = 0x58
+        self.write_register_a(0x58, 0x04).await; // !! change, map data ready interrupt to Int1
 
         // BMI08_REG_ACCEL_INT1_IO_CONF = 0x53 (0xD3)
         let _ = self.read_register_a(0x53).await;
@@ -735,24 +738,15 @@ impl Bmi08xSensor {
         let scale_factor_a = accel_range / 32767f64 / 4.0f64; // m/s^2
         let scale_factor_g = gyro_range / 32767f64; // to rad/s
 
-        //let mut loopback = &self.loopback;
-
         loop {
-            // if let Some(x) = self.loopback {
-            //     self.drdy_g.wait_for_rising_edge().await;
-            //     x.set_high();
-            // }
-            // self.drdy_g.wait_for_rising_edge().await;
-            // self.loopback.set_high();
-
+            self.drdy_g.wait_for_rising_edge().await;
+            
+            self.jumper.set_high();
             self.drdy_a.wait_for_rising_edge().await;
-
-            // if let Some(x) = self.loopback {
-            //     x.set_low();
-            // }
-            // self.loopback.set_low();
+            self.jumper.set_low();
 
             let timestamp = Instant::now();
+            // info!("IMU Data Ready at {} us", timestamp.as_micros());
 
             // read temperature, ax, and ay
             const BMI_ACCEL_CMD: u8 = 0x12;
@@ -813,13 +807,13 @@ impl Bmi08xSensor {
                 seq,
             };
             IMU_SIGNAL.signal(Ok(imu_packet));
-            //info!("IMU Signal Sent: {}, {}", accel[0], gyro[0]);
+            // info!("IMU Signal Sent: {}, {}", accel[0], gyro[0]);
         }
     }
 }
 
 #[embassy_executor::task]
 pub async fn task(mut bmi: Bmi08xSensor) {
-    //info!("Began IMU!!!");
+    // info!("Began IMU!!!");
     bmi.run().await;
 }

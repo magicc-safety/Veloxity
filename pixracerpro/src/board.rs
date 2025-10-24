@@ -88,16 +88,25 @@ impl BoardTrait for Board {
         sensors.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
 
         // Debug statements to check receiving sensor data
-        if sensors.0.is_some() {
-            defmt::info!("Sensor IMU data received!");
+        if let Some(imu_packet) = sensors.0 {
+            match imu_packet {
+                Ok(data) => defmt::info!("IMU data: accel {:?} | gyro {:?} | temp {:?}", data.accel, data.gyro, data.temperature),
+                Err(e) => defmt::error!("Error reading IMU data"),
+            }
+            // defmt::info!("Sensor IMU data received!");
         }
-        if sensors.1.0.is_some() {
+        if let Some(mag_packet) = sensors.1.0 {
+            match mag_packet {
+                Ok(data) => defmt::info!("Mag data: flux {:?} | temperature {:?}", data.flux, data.temperature),
+                Err(e) => defmt::error!("Error reading Mag data"),
+            }
             defmt::info!("Sensor Magnetometer data received!");
         }
         if let Some(baro_packet) = sensors.1.1.0 {
-            defmt::info!("Sensor Barometer data received!");
-            defmt::info!("Baro pressure: {:?}", baro_packet.unwrap().pressure);
-            defmt::info!("Baro temp: {:?}", baro_packet.unwrap().temperature);
+            match baro_packet {
+                Ok(data) => defmt::info!("Baro data: pressure {:?} | temperature {:?}", data.pressure, data.temperature),
+                Err(e) => defmt::error!("Error reading Barometer data"),
+            }
         }
         if sensors.1.1.1.0.is_some() {
             defmt::info!("Sensor Pitot data received!");
@@ -186,16 +195,6 @@ impl Board {
         // let iis_sensor = peripherals::iis2mdc::Iis2mdcSensor {
         //     dev: iis_dev,
         //     drdy: drdy1,
-        // }; // Todo implement new funciton
-
-        // // DPS210 Baro - NOT NEEDED - the PixRacerPro has an internal Baro
-        // let nss2 = Output::new(p.PC7, Level::High, Speed::Low);
-        // let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down);
-        // let dps_dev = SpiDevice::new(spi1_bus, nss2);
-        // let dps_sensor = peripherals::dps310::Dps310Sensor {
-        //     dev: dps_dev,
-        //     drdy: drdy2,
-        //     three_wire: true,
         // }; // Todo implement new funciton
 
         // SPI2
@@ -359,7 +358,8 @@ impl Board {
             Default::default(),
         );
 
-        // SPI5 - Bus ///////////////////////////////////////////
+        // SPI5 - NEEDED for internal BMI08x
+        // Pins taken from PixRacerPro info compared with STM32H743 datasheet
         let mut spi5_config: embassy_stm32::spi::Config = spi::Config::default();
         spi5_config.frequency = mhz(2);
         spi5_config.mode = spi::MODE_3;
@@ -370,28 +370,30 @@ impl Board {
             p.PF7, // sck
             p.PF9, // mosi
             p.PF8, // miso
-            p.DMA2_CH0,
-            p.DMA2_CH1,
+            p.DMA1_CH6, // tx_dma
+            p.DMA1_CH7, // rx_dma
             spi5_config,
         );
         let spi5_ = Mutex::new(spi5);
         let spi5_bus = SPI5_BUS.init(spi5_);
 
-        // BMI08x - The PixRacerPro has an internal IMU
+        // BMI08x - Internal
         let nss_bmi08x_a = Output::new(p.PF6, Level::High, Speed::Low); // Accel
         let drdy_bmi08x_a = ExtiInput::new(p.PF1, p.EXTI1, Pull::Down); // Accel
         let nss_bmi08x_g = Output::new(p.PF10, Level::High, Speed::Low); // Gyro
         let drdy_bmi08x_g = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down); // Gyro
         let bmi08x_dev_a = SpiDevice::new(spi5_bus, nss_bmi08x_a);
         let bmi08x_dev_g = SpiDevice::new(spi5_bus, nss_bmi08x_g);
+        let jumper: Output<'static> = Output::new(p.PF2, Level::High, Speed::Low); // Bridge pin
 
         let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
             dev_a: bmi08x_dev_a,
             dev_g: bmi08x_dev_g,
             drdy_a: drdy_bmi08x_a,
             drdy_g: drdy_bmi08x_g,
-            range_a: peripherals::bmi08x::AccelRange::Bmi088(
-                peripherals::bmi08x::AccelRange088::Max24G,
+            jumper: jumper,
+            range_a: peripherals::bmi08x::AccelRange::Bmi085(
+                peripherals::bmi08x::AccelRange085::Max16g,
             ),
             range_g: peripherals::bmi08x::GyroRange::Max500dps,
             sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
@@ -423,10 +425,10 @@ impl Board {
         spawner3
             .spawn(peripherals::dps310::task(dps_sensor))
             .unwrap();
-        spawner3
-            .spawn(peripherals::ublox::task(ublox_sensor))
-            .unwrap();
-        spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
+        // spawner3
+        //     .spawn(peripherals::ublox::task(ublox_sensor))
+        //     .unwrap();
+        // spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
 
         // P4 Priority for Tx Telemetry
@@ -532,10 +534,10 @@ impl Board {
 
         // Setup Probe GPIO's
         let probe = [
-            Output::new(p.PC0, Level::Low, Speed::Low), // PG13
-            Output::new(p.PB2, Level::Low, Speed::Low), // PG9
-            Output::new(p.PF2, Level::Low, Speed::Low), // PG14
-            Output::new(p.PG0, Level::Low, Speed::Low),
+            Output::new(p.PG13, Level::Low, Speed::Low),
+            Output::new(p.PG9, Level::Low, Speed::Low),
+            Output::new(p.PG14, Level::Low, Speed::Low),
+            Output::new(p.PG0, Level::Low, Speed::Low), // unknown
         ];
         Board { probe, servos }
     }

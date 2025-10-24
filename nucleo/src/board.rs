@@ -424,12 +424,14 @@ impl Board {
         let drdy_bmi08x_g = ExtiInput::new(p.PF7, p.EXTI7, Pull::Down); // Gyro
         let bmi08x_dev_a = SpiDevice::new(spi4_bus, nss_bmi08x_a);
         let bmi08x_dev_g = SpiDevice::new(spi4_bus, nss_bmi08x_g);
+        let jumper: Output<'static> = Output::new(p.PF15, Level::High, Speed::Low); // Bridge pin
 
         let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
             dev_a: bmi08x_dev_a,
             dev_g: bmi08x_dev_g,
             drdy_a: drdy_bmi08x_a,
             drdy_g: drdy_bmi08x_g,
+            jumper: jumper,
             range_a: peripherals::bmi08x::AccelRange::Bmi088(
                 peripherals::bmi08x::AccelRange088::Max24G,
             ),
