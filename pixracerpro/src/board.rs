@@ -169,7 +169,6 @@ impl Board {
 
     pub fn new() -> Board {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
-        //let t = TestBoard{p: embassy_stm32::init(clock_config())};
         // SPI1 Bus ///////////////////////////////////////////
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
         spi1_config.frequency = mhz(16);
@@ -319,7 +318,7 @@ impl Board {
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down); // Gyro
+        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down); // Gyro // If this is for the ublox, how does that relate to the gyro?
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART1
@@ -425,10 +424,10 @@ impl Board {
         spawner3
             .spawn(peripherals::dps310::task(dps_sensor))
             .unwrap();
-        // spawner3
-        //     .spawn(peripherals::ublox::task(ublox_sensor))
-        //     .unwrap();
-        // spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
+        spawner3
+            .spawn(peripherals::ublox::task(ublox_sensor))
+            .unwrap();
+        spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
 
         // P4 Priority for Tx Telemetry
@@ -462,7 +461,7 @@ impl Board {
 
         // TIM3
         // let ch10_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
-        let tim3_ch3_pin = PwmPin::new_ch3(p.PB0, OutputType::PushPull);
+        let tim3_ch3_pin = PwmPin::new_ch3(p.PB0, OutputType::PushPull); // We may need to reserve this pin for RC input
         // let ch11_pin = PwmPin::new_ch4(p.PB1, OutputType::PushPull);
 
         let mut timer1 = SimplePwm::new(
