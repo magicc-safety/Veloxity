@@ -1,6 +1,6 @@
-// /*
+// /**
 // ******************************************************************************
-// * File     : mixer.rs
+// * File     : pwm.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -32,13 +32,33 @@
 // * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // *
-// ******************************************************************************
-// **/
+// ********************************************************
 
-pub mod quad_mixer;
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PwmError {
+    ChannelOutOfRange,
+}
 
-pub trait Mixer {
-    type MixerInput;
-    type ActuatorCommands: AsRef<[f64]>;
-    fn mix(&mut self, controls: &Self::MixerInput) -> Self::ActuatorCommands;
+pub trait PwmDriver {
+    fn len(&self) -> usize;
+    fn enable(&mut self, channel: usize) -> Result<(), PwmError>;
+    fn disable(&mut self, channel: usize) -> Result<(), PwmError>;
+
+    /// Sets the duty cycle for a specific channel.
+    ///
+    /// # Arguments
+    /// * `channel` - The output channel index (0-based).
+    /// * `duty`    - The desired duty cycle, typically represented as a u16 value.
+    ///             The exact interpretation (e.g., 0-ARR, 0-u16::MAX) depends
+    ///             on the implementation. For simulation, we'll map 0-u16::MAX
+    ///             to the simulator's expected range (e.g., 1000-2000us).
+    fn set_duty_cycle(&mut self, channel: usize, duty: u16) -> Result<(), PwmError>;
+
+    /// Sends the current state of all PWM channels to the output/simulator.
+    /// This should be called once per control loop after all individual
+    /// `set_duty_cycle` calls for that loop iteration are complete.
+    ///
+    /// # Arguments
+    /// * `now_us` - The current flight controller time in microseconds for timestamping.
+    fn flush(&mut self, now_us: u64);
 }

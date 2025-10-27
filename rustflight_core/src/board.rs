@@ -48,5 +48,5 @@ pub trait BoardTrait {
 
     fn clock_millis(&self) -> u32;
     fn clock_micros(&self) -> u64;
-    fn clock_delay(&mut self, ms: u32);
+    //fn clock_delay(&mut self, ms: u32);
 }

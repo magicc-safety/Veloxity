@@ -109,9 +109,4 @@ impl BoardTrait for DummyBoard {
     fn clock_micros(&self) -> u64 {
         self.current_time_us
     }
-
-    /// Simulates a delay by advancing the dummy time.
-    fn clock_delay(&mut self, ms: u32) {
-        self.current_time_us += ms as u64 * 1000;
-    }
 }

@@ -13,6 +13,7 @@ use tokio::io::Empty;
 use tokio::sync::mpsc;
 use tokio::net::UdpSocket;
 use tokio::io::ErrorKind;
+use tokio::time::Instant;
 use zenoh::Config;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::handlers::FifoChannelHandler;
@@ -86,10 +87,11 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 }
 
 pub struct Board {
-    pub current_time_us: u64,
+    start_time: Instant,
+    //pub current_time_us: u64,
     mavlink_socket: UdpSocket, 
-    pub zenoh_connect_session: Session,
-    //pub zenoh_listen_session: Session,
+    //pub zenoh_connect_session: Session,
+    pub zenoh_listen_session: Session,
     //imu_temp_chan: mpsc::Receiver<ros_messages::Status>,
     imu_data_chan: mpsc::Receiver<ros_messages::ImuData>,
     //battery_chan: mpsc::Receiver<ros_messages::BatteryStatus>,
@@ -204,36 +206,39 @@ impl BoardTrait for Board {
     }
 
     fn clock_millis(&self) -> u32 {
-        (self.current_time_us / 1000) as u32
+        //(self.current_time_us / 1000) as u32
+        self.start_time.elapsed().as_millis() as u32
+
     }
 
     /// Returns the current dummy time in microseconds.
     fn clock_micros(&self) -> u64 {
-        self.current_time_us
-    }
-
-    /// Simulates a delay by advancing the dummy time.
-    fn clock_delay(&mut self, ms: u32) {
-        self.current_time_us += ms as u64 * 1000;
+        //self.current_time_us
+        self.start_time.elapsed().as_micros() as u64
     }
 }
 
 impl Board {
     pub async fn new() -> Board {
-        let mut zenoh_connect_config = Config::default();
-        zenoh_connect_config
-            .insert_json5("mode", "\"client\"")
-            .unwrap();
-        zenoh_connect_config
-            .insert_json5("connect/endpoints", "[\"tcp/127.0.0.1:7447\"]")
-            .unwrap();
+
+        // initialize the clock
+        let start_time = Instant::now();
+
+        // let mut zenoh_connect_config = Config::default();
+        // zenoh_connect_config
+        //     .insert_json5("mode", "\"client\"")
+        //     .unwrap();
+        // zenoh_connect_config
+        //     .insert_json5("connect/endpoints", "[\"tcp/127.0.0.1:7447\"]")
+        //     .unwrap();
 
         let mut zenoh_listen_config = Config::default();
+        zenoh_listen_config.insert_json5("mode", "\"client\"").unwrap();
         zenoh_listen_config
-            .insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
+            .insert_json5("connect/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
             .unwrap();
 
-        let zenoh_connect_session = zenoh::open(zenoh_connect_config).await.unwrap();
+        //let zenoh_connect_session = zenoh::open(zenoh_connect_config).await.unwrap();
         let zenoh_listen_session = zenoh::open(zenoh_listen_config).await.unwrap();
 
         println!("Zenoh sessions opened!");
@@ -255,7 +260,7 @@ impl Board {
         //    .await
         //    .unwrap();
         let sub_imu_data = zenoh_listen_session
-            .declare_subscriber("/rt/simulated_sensors/imu/data")
+            .declare_subscriber("simulated_sensors/imu/data")
             .await
             .unwrap();
         //let sub_battery = zenoh_listen_session
@@ -270,7 +275,7 @@ impl Board {
         //     .declare_subscriber("simulated_sensors/baro")
         //     .await
         //     .unwrap();
-        let sub_rc = zenoh_connect_session
+        let sub_rc = zenoh_listen_session
             .declare_subscriber("sim/RC")
             .await
             .unwrap();
@@ -289,18 +294,18 @@ impl Board {
 
         println!("Zenoh subscribers established");
 
-        // establish all channels for pub
-        let (chan_send_pwm, mut chan_recv_pwm) = mpsc::channel::<ros_messages::Status>(1);
+        // // establish all channels for pub
+        // let (chan_send_pwm, mut chan_recv_pwm) = mpsc::channel::<ros_messages::Status>(1);
 
-        // establish publisher
-        let pub_pwm_output = zenoh_connect_session
-            .declare_publisher("sim/pwm_output")
-            .encoding(Encoding::APPLICATION_OCTET_STREAM)
-            .await
-            .unwrap();
+        // // establish publisher
+        // let pub_pwm_output = zenoh_listen_session
+        //     .declare_publisher("sim/pwm_output")
+        //     .encoding(Encoding::APPLICATION_OCTET_STREAM)
+        //     .await
+        //     .unwrap();
 
 
-        println!("Zenoh publishers established");
+        // println!("Zenoh publishers established");
 
         // establish udp socket for mavlink
         let mavlink_socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
@@ -310,10 +315,10 @@ impl Board {
 
         // construct self for return
         let to_return = Self {
-            current_time_us: 0u64,
+            start_time,
             mavlink_socket,
-            zenoh_connect_session,
-            //zenoh_listen_session,
+            //zenoh_connect_session,
+            zenoh_listen_session,
             //gnss_chan: chan_recv_gnss,
             //baro_chan: chan_recv_baro,
             rc_chan: chan_recv_rc,
@@ -330,7 +335,7 @@ impl Board {
         //tokio::spawn(capture_mag());
         //tokio::spawn(capture_sonar());
         //tokio::spawn(capture:diff_pressure());
-        tokio::spawn(publish_pwm(pub_pwm_output, chan_recv_pwm));
+        //tokio::spawn(publish_pwm(pub_pwm_output, chan_recv_pwm));
 
         println!("Zenoh spawns finished");
 
@@ -429,11 +434,11 @@ async fn capture_rc(
 
 //async fn capture_diff_pressure(sub: Subscriber<FifoChannelHandler<Sample>>) {}
 
-async fn publish_pwm(publisher: Publisher<'_>, mut chan: mpsc::Receiver<ros_messages::Status>) {
-    if let Some(pwm) = chan.recv().await {
-        let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&pwm, Infinite).unwrap());
-        if publisher.put(zb).await.is_err() {
-            println!("Error sending zbytes: pwm");
-        }
-    }
-}
+// async fn publish_pwm(publisher: Publisher<'_>, mut chan: mpsc::Receiver<ros_messages::Status>) {
+//     if let Some(pwm) = chan.recv().await {
+//         let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&pwm, Infinite).unwrap());
+//         if publisher.put(zb).await.is_err() {
+//             println!("Error sending zbytes: pwm");
+//         }
+//     }
+// }

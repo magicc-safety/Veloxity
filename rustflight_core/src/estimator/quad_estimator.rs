@@ -106,7 +106,20 @@ impl Estimator for QuadEstimator {
             
             // normalize accelerometer measurement 
             let mut v_a = Vector::from_array(imu_packet.accel);
-            v_a.normalize_fill();
+
+        // FIX: Check for zero vector before normalizing
+            if v_a.norm_2() > 1e-9 { // Or some other small epsilon
+                v_a.normalize_fill();
+            } else {
+                // Handle the zero-vector case. Maybe skip this update?
+                // Or return the current state without updating.
+                // For now, let's just skip the update logic.
+                return AttitudeState {
+                    q_hat: self.q_hat,
+                    q_dot: self.q_dot,
+                    b_hat: self.b_hat,
+                };
+            }
             
             // predict gravity in body frame using our latest estimate of q_hat
             let g_intertial_q = Quaternion::from_array([0.0f64, 0.0f64, 0.0f64, 1.0f64]);

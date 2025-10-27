@@ -236,8 +236,9 @@ impl GNSS {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct OutputRaw {
     pub header: Header,
-    pub values: Vec<f32>,
+    pub values: [f32; 14]
 }
+
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RCRaw {

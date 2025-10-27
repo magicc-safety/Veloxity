@@ -16,6 +16,7 @@ use rustflight_core::{
     mixer::{Mixer, quad_mixer::{QuadMixer}},
     rustflight::{rustflight_typed::ROSFlight, Configuration},
 };
+use sim::pwm::SimPwmDriver;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 struct SimpleBoolResponse {
@@ -63,11 +64,12 @@ impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
 async fn main() {
     // board implementation
     let board = board::Board::new().await;
+    //let pwm_driver = SimPwmDriver::new(&board.zenoh_listen_session).await;
     let mut params = Params::new();
     
     // initialize the timing of the highest level loop through a tick callback 
     let tick_handler = board
-        .zenoh_connect_session
+        .zenoh_listen_session
         .declare_subscriber("rust/tick")
         .await
         .unwrap();
@@ -85,8 +87,9 @@ async fn main() {
 
     let state_manager = StateManager::new();
 
+    //let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config, pwm_driver);
     let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config);
-
+    
     while let Ok(_tick) = tick_handler.recv() {
         println!("-------------------tick--------------------!");
 
@@ -94,5 +97,6 @@ async fn main() {
 
         let response = SimpleBoolResponse { result: true };
         let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&response, Infinite).unwrap());
+
     }
 }

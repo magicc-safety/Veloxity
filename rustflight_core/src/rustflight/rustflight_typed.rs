@@ -42,30 +42,17 @@ use core::marker::PhantomData;
 use micro_algebra::stack::vector::Vector;
 
 use crate::{
-    board::BoardTrait,
-    bodytype::BodyType,
-    comm_manager::{self, comm_link_trait::CommInterface},
-    comm_messages,
-    controller::Controller,
-    errors,
-    estimator::{Estimator, quad_estimator::AttitudeState},
-    hlist::*,
-    mixer::Mixer,
-    params2::{self, ParamIter, PARAM_DEFINITIONS},
-    packets,
-    sensorprocessors::CalibrationFlags,
-    rustflight::Configuration,
-    state_machine::{Event, StateManager},
-    rc::Rc,
-    command_manager::{CommandManager, ControlType},
+    board::BoardTrait, bodytype::BodyType, comm_manager::{self, comm_link_trait::CommInterface}, comm_messages, command_manager::{CommandManager, ControlType}, controller::Controller, errors, estimator::{quad_estimator::AttitudeState, Estimator}, hlist::*, mixer::Mixer, packets, params2::{self, ParamIter, PARAM_DEFINITIONS}, pwm::{self, PwmDriver}, rc::Rc, rustflight::Configuration, sensorprocessors::CalibrationFlags, state_machine::{Event, StateManager}
 };
 
+//pub struct ROSFlight<B, BT, C, CI, PD>
 pub struct ROSFlight<B, BT, C, CI>
 where
     B: BoardTrait,
     BT: BodyType,
     C: Configuration<B, BT>, // The new "glue" constraint
     CI: CommInterface<B>,
+    //PD: PwmDriver,
 {
     loop_time_us: u32,
     pub board: B,
@@ -81,18 +68,21 @@ where
     cal_flags: CalibrationFlags,
     command_manager: CommandManager,
     state_manager: StateManager,
+    //pwm_driver: PD,
 
     // necessary to tell the compiler these generics are in use.
     _body_type: PhantomData<BT>,
     _configuration: PhantomData<C>,
 }
 
+//impl<B, BT, C, CI, PD> ROSFlight<B, BT, C, CI, PD>
 impl<B, BT, C, CI> ROSFlight<B, BT, C, CI>
 where
     B: BoardTrait,
     BT: BodyType,
     CI: CommInterface<B>,
     C: Configuration<B, BT>,
+    //PD: PwmDriver,
     for<'a> B::RawSensorSet: HMappable<'a, B::ProcessorHList, Output = B::ProcessedSensorSet>,
     B::ProcessedSensorSet: Sculptor<BT::RequiredSensors, C::SculptIndices>,
     BT::RequiredSensors: Plucker<Option<packets::RcPacket>, C::RcPacketIndex>,
@@ -112,6 +102,7 @@ where
         mut controller: BT::Controller,
         mut mixer: BT::Mixer,
         _config: C, // zero-cost marker for deduction during "init" creation
+        //mut pwm_driver: PD,
     ) -> Self { 
 
         // Initialize all parameters.
@@ -140,6 +131,7 @@ where
             command_manager,
             state_manager: StateManager::new(),
             cal_flags: CalibrationFlags::empty(),
+            //pwm_driver,
             _body_type: PhantomData,     // field initialization
             _configuration: PhantomData, // field initialization
         }
@@ -148,6 +140,7 @@ where
     pub fn run(&mut self) -> bool {
 
         let now_ms = self.board.clock_millis(); 
+        let now_us = self.board.clock_micros();
 
         self.comm_manager.process_incoming_messages(&mut self.board);
         self.comm_manager.act_on_messages(&mut self.params_iter, &mut self.params, &mut self.board);
@@ -190,21 +183,35 @@ where
         let (rc_packet_option, estimator_sensors) = required_sensors.pluck();
         
         // now run the RC unit and the command manager unit
-        if let Some(rc_packet) = rc_packet_option {
-            self.rc_manager.receive(&rc_packet, &mut self.state_manager, &self.params);
-        }
-        self.rc_manager.run(now_ms, &self.params, &mut self.state_manager);
-        self.command_manager.run(now_ms, &self.comm_manager, &self.params, &mut self.rc_manager, &self.state_manager);
+        //if let Some(rc_packet) = rc_packet_option {
+        //    self.rc_manager.receive(&rc_packet, &mut self.state_manager, &self.params);
+        //}
+        //self.rc_manager.run(now_ms, &self.params, &mut self.state_manager);
+        //self.command_manager.run(now_ms, &self.comm_manager, &self.params, &mut self.rc_manager, &self.state_manager);
 
         // Now run the estimator 
-        let state= self.estimator.estimate(&estimator_sensors);
+        //let state= self.estimator.estimate(&estimator_sensors);
 
         // Get the final command from the manager, and translate to what the Controller needs:
-        let combined_command = self.command_manager.combined_control();
-        let controls = self.controller.control(&state, &*combined_command);
-        let actuator_commands = self.mixer.mix(&controls);
+        //let combined_command = self.command_manager.combined_control();
+        //let controls = self.controller.control(&state, &*combined_command);
+        //let actuator_commands = self.mixer.mix(&controls);
 
         // PWM command output
+       // let commands_slice = actuator_commands.as_ref();
+        // let num_channels_to_write = commands_slice.len().min(self.pwm_driver.len()); // Don't write past driver's capacity
+        // for i in 0..num_channels_to_write {
+        //     // Convert mixer output (0.0 to 1.0) to u16 (0 to u16::MAX)
+        //     let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
+        //     // Set duty cycle for the current channel
+        //     if let Err(e) = self.pwm_driver.set_duty_cycle(i, duty_u16) {
+        //         // Handle potential error (e.g., channel out of range, though we checked)
+        //         println!("Error setting duty cycle for channel {}: {:?}", i, e);
+        //     }
+        // }
+
+        // // After setting all channels for this loop, flush/send the state
+        // self.pwm_driver.flush(now_us);
 
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);
