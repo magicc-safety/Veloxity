@@ -98,12 +98,16 @@ impl Rc {
             state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
         }
 
+        //print!("\x1B[2J\x1B[H");
+
         // 2. Copy the pre-scaled stick values.
         for (i, stick_config) in self.sticks.iter().enumerate() {
             if stick_config.channel < packet.n_chan as u8 {
                 self.stick_values[i] = packet.chan[stick_config.channel as usize];
+                println!("\tStick Value {}: {}", i, self.stick_values[i])
             }
         }
+        //println!();
 
         // 3. Process the switch values from the pre-scaled channels.
         for (i, switch_config) in self.switches.iter().enumerate() {

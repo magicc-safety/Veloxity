@@ -17,9 +17,11 @@ use tokio::time::Instant;
 use zenoh::Config;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::handlers::FifoChannelHandler;
+use zenoh::handlers::RingChannelHandler;
 use zenoh::pubsub::{Publisher, Subscriber};
 use zenoh::sample::Sample;
 use zenoh::session::Session;
+use zenoh::handlers::RingChannel;
 
 impl From<ros_messages::RCRaw> for packets::RcPacket {
     fn from(msg: ros_messages::RCRaw) -> Self {
@@ -88,18 +90,10 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 
 pub struct Board {
     start_time: Instant,
-    //pub current_time_us: u64,
     mavlink_socket: UdpSocket, 
-    //pub zenoh_connect_session: Session,
-    pub zenoh_listen_session: Session,
-    //imu_temp_chan: mpsc::Receiver<ros_messages::Status>,
+    pub zenoh_session: Session,
     imu_data_chan: mpsc::Receiver<ros_messages::ImuData>,
-    //battery_chan: mpsc::Receiver<ros_messages::BatteryStatus>,
-    //gnss_chan: mpsc::Receiver<ros_messages::GNSS>,
-    //baro_chan: mpsc::Receiver<ros_messages::Barometer>,
     rc_chan: mpsc::Receiver<ros_messages::RCRaw>,
-    //mag_chan: mpsc::Receiver<ros_messages::Status>,
-    //diffpress_chan: mpsc::Receiver<ros_messages::Status>,
 }
 
 impl BoardTrait for Board {
@@ -221,91 +215,34 @@ impl BoardTrait for Board {
 impl Board {
     pub async fn new() -> Board {
 
-        // initialize the clock
         let start_time = Instant::now();
 
-        // let mut zenoh_connect_config = Config::default();
-        // zenoh_connect_config
-        //     .insert_json5("mode", "\"client\"")
-        //     .unwrap();
-        // zenoh_connect_config
-        //     .insert_json5("connect/endpoints", "[\"tcp/127.0.0.1:7447\"]")
-        //     .unwrap();
-
-        let mut zenoh_listen_config = Config::default();
-        zenoh_listen_config.insert_json5("mode", "\"client\"").unwrap();
-        zenoh_listen_config
+        let mut zenoh_config = Config::default();
+        zenoh_config.insert_json5("mode", "\"client\"").unwrap();
+        zenoh_config
             .insert_json5("connect/endpoints", r#"["tcp/127.0.0.1:7447"]"#)
             .unwrap();
 
-        //let zenoh_connect_session = zenoh::open(zenoh_connect_config).await.unwrap();
-        let zenoh_listen_session = zenoh::open(zenoh_listen_config).await.unwrap();
+        let zenoh_session = zenoh::open(zenoh_config).await.unwrap();
 
         println!("Zenoh sessions opened!");
 
         // Establish all channels for sub
-        //let (chan_send_imu_temp, mut chan_recv_imu_temp) = mpsc::channel::<ros_messages::Status>(1);
         let (chan_send_imu_data, mut chan_recv_imu_data) = mpsc::channel::<ros_messages::ImuData>(1);
-        //let (chan_send_battery, mut chan_recv_battery) =
-        //    mpsc::channel::<ros_messages::BatteryStatus>(1);
-        // let (chan_send_gnss, mut chan_recv_gnss) = mpsc::channel::<ros_messages::GNSS>(1);
-        // let (chan_send_baro, mut chan_recv_baro) = mpsc::channel::<ros_messages::Barometer>(1);
         let (chan_send_rc, mut chan_recv_rc) = mpsc::channel::<ros_messages::RCRaw>(1);
-        //let (send_mag, mut recv_baro) = mpsc::channel::<ros_messages::Barometer>(1);
-        //let (send_diffpressure, mut recv_diffpressure) = mpsc::channel::<ros_messages::Barometer>(1);
 
-        // Establish all subscribers
-        //let sub_imu_temp = zenoh_listen_session
-        //    .declare_subscriber("/rt/simulated_sensors/imu/temperature")
-        //    .await
-        //    .unwrap();
-        let sub_imu_data = zenoh_listen_session
+        let sub_imu_data = zenoh_session
             .declare_subscriber("simulated_sensors/imu/data")
+            .with(zenoh::handlers::RingChannel::new(2))            
             .await
             .unwrap();
-        //let sub_battery = zenoh_listen_session
-        //    .declare_subscriber("/rt/simulated_sensors/battery")
-        //    .await
-        //    .unwrap();
-        // let sub_gnss = zenoh_connect_session
-        //     .declare_subscriber("simulated_sensors/gnss")
-        //     .await
-        //     .unwrap();
-        // let sub_baro = zenoh_connect_session
-        //     .declare_subscriber("simulated_sensors/baro")
-        //     .await
-        //     .unwrap();
-        let sub_rc = zenoh_listen_session
+        let sub_rc = zenoh_session
             .declare_subscriber("sim/RC")
+            .with(zenoh::handlers::RingChannel::new(2))            
             .await
             .unwrap();
-        //let sub_mag = zenoh_listen_session
-        //    .declare_subscriber("/rt/simulated_sensors/mag")
-        //    .await
-        //    .unwrap();
-        //let sub_sonar = zenoh_listen_session
-        //    .declare_subscriber("/rt/simulated_sensors/sonar")
-        //    .await
-        //    .unwrap();
-        //let sub_diff_pressure = zenoh_listen_session
-        //    .declare_subscriber("/rt/simulated_sensors/diff_pressure")
-        //    .await
-        //    .unwrap();
 
         println!("Zenoh subscribers established");
-
-        // // establish all channels for pub
-        // let (chan_send_pwm, mut chan_recv_pwm) = mpsc::channel::<ros_messages::Status>(1);
-
-        // // establish publisher
-        // let pub_pwm_output = zenoh_listen_session
-        //     .declare_publisher("sim/pwm_output")
-        //     .encoding(Encoding::APPLICATION_OCTET_STREAM)
-        //     .await
-        //     .unwrap();
-
-
-        // println!("Zenoh publishers established");
 
         // establish udp socket for mavlink
         let mavlink_socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
@@ -317,25 +254,15 @@ impl Board {
         let to_return = Self {
             start_time,
             mavlink_socket,
-            //zenoh_connect_session,
-            zenoh_listen_session,
-            //gnss_chan: chan_recv_gnss,
-            //baro_chan: chan_recv_baro,
+            zenoh_session,
             rc_chan: chan_recv_rc,
             imu_data_chan: chan_recv_imu_data,
         };
 
         // Spin up async functions for senders and receivers
-        //tokio::spawn(capture_imu_temp());
         tokio::spawn(capture_imu_data(sub_imu_data, chan_send_imu_data));
         tokio::spawn(capture_rc(sub_rc, chan_send_rc));
-        //tokio::spawn(capture_battery(sub_battery, chan_send_battery));
-        //tokio::spawn(capture_gnss(sub_gnss, chan_send_gnss));
-        //tokio::spawn(capture_baro(sub_baro, chan_send_baro));
-        //tokio::spawn(capture_mag());
-        //tokio::spawn(capture_sonar());
-        //tokio::spawn(capture:diff_pressure());
-        //tokio::spawn(publish_pwm(pub_pwm_output, chan_recv_pwm));
+
 
         println!("Zenoh spawns finished");
 
@@ -343,61 +270,8 @@ impl Board {
     }
 }
 
-//async fn capture_imu_temp(sub: Subscriber<FifoChannelHandler<Sample>>) {}
-
-//async fn capture_imu_data(sub: Subscriber<FifoChannelHandler<Sample>>) {}
-
-//async fn capture_battery(
-//    sub: Subscriber<FifoChannelHandler<Sample>>,
-//    chan: mpsc::Sender<ros_messages::BatteryStatus>,
-//) {
-//    while let Ok(sample) = sub.recv_async().await {
-//        match cdr::deserialize::<ros_messages::BatteryStatus>(&sample.payload().to_bytes()) {
-//            Ok(battery_status) => {
-//                if chan.send(battery_status).await.is_err() {
-//                    println!("Error putting battery status in channel!");
-//                }
-//            }
-//            Err(_) => {}
-//        }
-//    }
-//}
-
-// async fn capture_gnss(
-//     sub: Subscriber<FifoChannelHandler<Sample>>,
-//     chan: mpsc::Sender<ros_messages::GNSS>,
-// ) {
-//     while let Ok(sample) = sub.recv_async().await {
-//         match cdr::deserialize::<ros_messages::GNSS>(&sample.payload().to_bytes()) {
-//             Ok(gnss) => {
-//                 if chan.send(gnss).await.is_err() {
-//                     println!("Error putting gnss in channel!");
-//                 }
-//             }
-//             Err(_) => {}
-//         }
-//     }
-// }
-
-// async fn capture_baro(
-//     sub: Subscriber<FifoChannelHandler<Sample>>,
-//     chan: mpsc::Sender<ros_messages::Barometer>,
-// ) {
-//     while let Ok(sample) = sub.recv_async().await {
-//         match cdr::deserialize::<ros_messages::Barometer>(&sample.payload().to_bytes()) {
-//             Ok(barometer) => {
-//                 if chan.send(barometer).await.is_err() {
-//                     println!("Error putting barometer in channel!");
-//                 }
-//             }
-//             Err(_) => {}
-//         }
-//     }
-// }
-
-
 async fn capture_imu_data(
-    sub: Subscriber<FifoChannelHandler<Sample>>,
+    sub: Subscriber<RingChannelHandler<Sample>>,
     chan: mpsc::Sender<ros_messages::ImuData>,
 ) {
     while let Ok(sample) = sub.recv_async().await {
@@ -405,6 +279,8 @@ async fn capture_imu_data(
             Ok(data) => {
                 if chan.send(data).await.is_err() {
                     println!("Error putting gnss in channel!");
+                } else {
+                    //println!("\tgot imu data")
                 }
             }
             Err(_) => {}
@@ -413,32 +289,19 @@ async fn capture_imu_data(
 }
 
 async fn capture_rc(
-    sub: Subscriber<FifoChannelHandler<Sample>>,
+    sub: Subscriber<RingChannelHandler<Sample>>,
     chan: mpsc::Sender<ros_messages::RCRaw>,
 ) {
     while let Ok(sample) = sub.recv_async().await {
         match cdr::deserialize::<ros_messages::RCRaw>(&sample.payload().to_bytes()) {
             Ok(rc) => {
                 if chan.send(rc).await.is_err() {
-                    println!("Error putting barometer in channel!");
+                    println!("Error putting rc in channel!");
+                } else {
+                    //println!("\t\t\t\tgot rc data")
                 }
             }
             Err(_) => {}
         }
     }
 }
-
-//async fn capture_mag(sub: Subscriber<FifoChannelHandler<Sample>>) {}
-
-//async fn capture_sonar(sub: Subscriber<FifoChannelHandler<Sample>>) {}
-
-//async fn capture_diff_pressure(sub: Subscriber<FifoChannelHandler<Sample>>) {}
-
-// async fn publish_pwm(publisher: Publisher<'_>, mut chan: mpsc::Receiver<ros_messages::Status>) {
-//     if let Some(pwm) = chan.recv().await {
-//         let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&pwm, Infinite).unwrap());
-//         if publisher.put(zb).await.is_err() {
-//             println!("Error sending zbytes: pwm");
-//         }
-//     }
-// }
