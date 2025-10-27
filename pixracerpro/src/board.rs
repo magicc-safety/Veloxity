@@ -47,8 +47,8 @@ use stm_32::*;
 include!("../../stm_32/stm32h7x3_common.rs");
 
 pub struct Board {
-    probe: [Output<'static>; 4],
-    servos: peripherals::pwm::ServoMonstrosity,
+    probe: [Output<'static>; 3], // We only have 3 from ROSFlight
+    servos: peripherals::pwm::PixRacerProServoMonstrosity,
 }
 
 impl BoardTrait for Board {
@@ -93,7 +93,7 @@ impl BoardTrait for Board {
                 Ok(data) => defmt::info!("IMU data: accel {:?} | gyro {:?} | temp {:?}", data.accel, data.gyro, data.temperature),
                 Err(e) => defmt::error!("Error reading IMU data"),
             }
-            // defmt::info!("Sensor IMU data received!");
+            defmt::info!("Sensor IMU data received!");
         }
         if let Some(mag_packet) = sensors.1.0 {
             match mag_packet {
@@ -470,7 +470,7 @@ impl Board {
             Some(tim1_ch2_pin),
             Some(tim1_ch3_pin),
             Some(tim1_ch4_pin),
-            Hertz::hz(100), // Should this be 100_000?
+            Hertz::hz(400), // Should this be 100_000?
             Default::default(),
         );
         let mut timer4 = SimplePwm::new(
@@ -479,7 +479,7 @@ impl Board {
             Some(tim4_ch2_pin),
             Some(tim4_ch3_pin), // Some(ch7_pin),
             None,               // Some(ch8_pin),
-            Hertz::hz(100),     // Should this be 100_000?
+            Hertz::hz(400),     // Should this be 100_000?
             Default::default(),
         );
         let mut timer2 = SimplePwm::new(
@@ -488,7 +488,7 @@ impl Board {
             None,
             None,
             None,           // Some(ch9_pin),
-            Hertz::hz(100), // Should this be 100_000?
+            Hertz::hz(400), // Should this be 100_000?
             Default::default(),
         );
         let mut timer3 = SimplePwm::new(
@@ -497,7 +497,7 @@ impl Board {
             None,
             Some(tim3_ch3_pin),
             None,           // Some(ch11_pin),
-            Hertz::hz(100), // Should this be 100_000?
+            Hertz::hz(400), // Should this be 100_000?
             Default::default(),
         );
 
@@ -508,7 +508,7 @@ impl Board {
 
         let mut timers: [peripherals::pwm::TimerEnum; 4] = [timer1, timer2, timer3, timer4];
 
-        let mut servos: peripherals::pwm::ServoMonstrosity = peripherals::pwm::ServoMonstrosity {
+        let mut servos: peripherals::pwm::PixRacerProServoMonstrosity = peripherals::pwm::PixRacerProServoMonstrosity {
             timers,
             chan_list: [ // We don't have access to all of the channels, we will need to update this block.
                 (0, peripherals::pwm::TimerChannel::Ch1), //TIM1, channels 1-4
@@ -516,13 +516,13 @@ impl Board {
                 (0, peripherals::pwm::TimerChannel::Ch3), // -
                 (0, peripherals::pwm::TimerChannel::Ch4), // -
                 (1, peripherals::pwm::TimerChannel::Ch1), //TIM2, channels 1, 4 !!! We only have access to channel 1
-                (1, peripherals::pwm::TimerChannel::Ch4), // -
-                (2, peripherals::pwm::TimerChannel::Ch1), //TIM3, channels 1, 4 !!! We only have access to channel 3
-                (2, peripherals::pwm::TimerChannel::Ch4), // -
-                (3, peripherals::pwm::TimerChannel::Ch1), //TIM4, channels 1-4 !!! We only have access to channels 2 and 3
+                // (1, peripherals::pwm::TimerChannel::Ch4), // -
+                (2, peripherals::pwm::TimerChannel::Ch3), //TIM3, channels 1, 4 !!! We only have access to channel 3
+                // (2, peripherals::pwm::TimerChannel::Ch4), // -
+                // (3, peripherals::pwm::TimerChannel::Ch1), //TIM4, channels 1-4 !!! We only have access to channels 2 and 3
                 (3, peripherals::pwm::TimerChannel::Ch2), // -
                 (3, peripherals::pwm::TimerChannel::Ch3), // -
-                (3, peripherals::pwm::TimerChannel::Ch4), // -
+                // (3, peripherals::pwm::TimerChannel::Ch4), // -
             ],
         };
 
@@ -531,12 +531,34 @@ impl Board {
             servos.disable(i);
         }
 
+        // TESTING ONLY
+        // for i in 0..servos.len() {
+        //     match servos.enable(i) {
+        //         Ok(_) => defmt::info!("Channel {} enabled successfully", i),
+        //         Err(_) => defmt::error!("Failed to enable channel {}", i),
+        //     }
+        //     match servos.set_duty_cycle(i, 1500) {
+        //         Ok(_) => defmt::info!("Channel {} duty cycle set successfully", i),
+        //         Err(_) => defmt::error!("Failed to set duty cycle on channel {}", i),
+        //     }
+        // }
+
+        // match servos.enable(1) {
+        //     Ok(_) => defmt::info!("Channel {} enabled successfully", 1),
+        //     Err(_) => defmt::error!("Failed to enable channel {}", 1),
+        // }
+        // let tim1_duty_cycle = (1000 as u32 * 65536 as u32) / 2500;
+        // match servos.set_duty_cycle(1, tim1_duty_cycle as u16) {
+        //     Ok(_) => defmt::info!("Channel {} duty cycle set successfully", 1),
+        //     Err(_) => defmt::error!("Failed to set duty cycle on channel {}", 1),
+        // }
+
         // Setup Probe GPIO's
         let probe = [
             Output::new(p.PG13, Level::Low, Speed::Low),
             Output::new(p.PG9, Level::Low, Speed::Low),
             Output::new(p.PG14, Level::Low, Speed::Low),
-            Output::new(p.PG0, Level::Low, Speed::Low), // unknown
+            // Output::new(p.PG0, Level::Low, Speed::Low), // unknown
         ];
         Board { probe, servos }
     }

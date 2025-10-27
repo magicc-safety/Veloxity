@@ -69,6 +69,34 @@ impl ServoMonstrosity {
     }
 }
 
+pub struct PixRacerProServoMonstrosity {
+    pub timers: [TimerEnum; 4],
+    pub chan_list: [(usize, TimerChannel); 8],
+}
+
+impl PixRacerProServoMonstrosity {
+    pub fn len(&mut self) -> usize {
+        self.chan_list.len()
+    }
+    pub fn enable(&mut self, ch: usize) -> Result<(), TimerError> {
+        let (ix, chan) = self.chan_list[ch];
+        self.timers[ix].enable(chan)
+    }
+    pub fn disable(&mut self, ch: usize) -> Result<(), TimerError> {
+        let (ix, chan) = self.chan_list[ch];
+        //trace!(
+        //    "PWM: Accessing index {}, array len: {}",
+        //    ix,
+        //    self.chan_list.len()
+        //);
+        self.timers[ix].disable(chan)
+    }
+    pub fn set_duty_cycle(&mut self, ch: usize, duty: u16) -> Result<(), TimerError> {
+        let (ix, chan) = self.chan_list[ch];
+        self.timers[ix].set_duty_cycle(chan, duty)
+    }
+}
+
 pub enum TimerEnum {
     TIM1(SimplePwm<'static, TIM1>),
     TIM2(SimplePwm<'static, TIM2>),
