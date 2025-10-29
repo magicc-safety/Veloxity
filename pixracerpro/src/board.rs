@@ -253,27 +253,27 @@ impl Board {
         //     drdy: drdy0,
         // };
 
-        // Telemetry UART - The documentation asks us to switch to USART8
-        let mut uart8config = usart::Config::default();
-        uart8config.baudrate = 921600; //230400? This may very well need to be updated
-        let mut uart8 = Uart::new(
-            p.UART8,
-            p.PE0,
-            p.PE1,
-            Uart8Irqs,
+        // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
+        let mut uart2config = usart::Config::default();
+        uart2config.baudrate = 921600; //230400? This may very well need to be updated
+        let mut uart2 = Uart::new(
+            p.USART2,
+            p.PD6,
+            p.PD5,
+            Usart2Irqs,
             p.DMA2_CH4,
             p.DMA2_CH5,
-            uart8config,
+            uart2config,
         )
         .unwrap();
-        let (mut uart8_tx, mut uart8_rx) = uart8.split();
+        let (mut uart2_tx, mut uart2_rx) = uart2.split();
 
-        let telem8_rx = peripherals::telem::TelemRx {
-            uart_rx: uart8_rx,
+        let telem2_rx = peripherals::telem::TelemRx {
+            uart_rx: uart2_rx,
             byte_processor: stm_32::peripherals::telem::BasicProcessor {},
         };
 
-        let telem8_tx = peripherals::telem::TelemTx { uart_tx: uart8_tx };
+        let telem2_tx = peripherals::telem::TelemTx { uart_tx: uart2_tx };
 
         // VCP
         static EP_BUF_CELL: StaticCell<[u8; 256]> = StaticCell::new();
@@ -295,7 +295,7 @@ impl Board {
         // P1 Priority Task for Rx Tememetry
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        spawner1.spawn(peripherals::telem::task_rx(telem8_rx));
+        spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
         // TODO: What priority should VCP be?
         spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
@@ -434,7 +434,7 @@ impl Board {
         interrupt::SAI4.set_priority(Priority::P4);
         let spawner4 = P4_EXECUTOR.start(interrupt::SAI4);
         spawner4
-            .spawn(peripherals::telem::task_tx(telem8_tx))
+            .spawn(peripherals::telem::task_tx(telem2_tx))
             .unwrap();
         spawner4
             .spawn(peripherals::sd_card::task(usd_card))
