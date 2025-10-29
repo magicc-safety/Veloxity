@@ -510,7 +510,7 @@ impl Board {
 
         let mut servos: peripherals::pwm::PixRacerProServoMonstrosity = peripherals::pwm::PixRacerProServoMonstrosity {
             timers,
-            chan_list: [ // We don't have access to all of the channels, we will need to update this block.
+            chan_list: [
                 (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4
                 (0, peripherals::pwm::TimerChannel::Ch2), // -
                 (0, peripherals::pwm::TimerChannel::Ch3), // -
