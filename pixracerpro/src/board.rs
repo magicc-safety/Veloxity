@@ -321,7 +321,7 @@ impl Board {
         let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down); // Gyro // If this is for the ublox, how does that relate to the gyro?
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
-        // S.Bus usart6
+        // S.Bus USART6
         // Sbus only uses Rx.
         let mut uart6config = usart::Config::default();
         uart6config.baudrate = 100000u32;
@@ -515,14 +515,10 @@ impl Board {
                 (0, peripherals::pwm::TimerChannel::Ch2), // -
                 (0, peripherals::pwm::TimerChannel::Ch3), // -
                 (0, peripherals::pwm::TimerChannel::Ch4), // -
-                (1, peripherals::pwm::TimerChannel::Ch1), //TIM2, channels 1, 4 !!! We only have access to channel 1
-                // (1, peripherals::pwm::TimerChannel::Ch4), // -
-                (2, peripherals::pwm::TimerChannel::Ch3), //TIM3, channels 1, 4 !!! We only have access to channel 3
-                // (2, peripherals::pwm::TimerChannel::Ch4), // -
-                // (3, peripherals::pwm::TimerChannel::Ch1), //TIM4, channels 1-4 !!! We only have access to channels 2 and 3
-                (3, peripherals::pwm::TimerChannel::Ch2), // -
+                (1, peripherals::pwm::TimerChannel::Ch1), //TIM2, channel 1
+                (2, peripherals::pwm::TimerChannel::Ch3), //TIM3, channel 3
+                (3, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
                 (3, peripherals::pwm::TimerChannel::Ch3), // -
-                // (3, peripherals::pwm::TimerChannel::Ch4), // -
             ],
         };
 
