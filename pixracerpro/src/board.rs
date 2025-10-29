@@ -171,7 +171,7 @@ impl Board {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
         // SPI1 Bus ///////////////////////////////////////////
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
-        spi1_config.frequency = mhz(16);
+        spi1_config.frequency = mhz(16); // Phil recommends not running over 4 Mbps
         spi1_config.mode = spi::MODE_3;
         spi1_config.bit_order = spi::BitOrder::MsbFirst;
         spi1_config.miso_pull = embassy_stm32::gpio::Pull::Up;
@@ -199,7 +199,7 @@ impl Board {
         // SPI2
         // Necessary for internal DPS310
         let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
-        spi2_config.frequency = mhz(16);
+        spi2_config.frequency = mhz(16); // Phil recommends not running over 4 Mbps
         spi2_config.mode = spi::MODE_3;
         spi2_config.bit_order = spi::BitOrder::MsbFirst;
         spi2_config.miso_pull = embassy_stm32::gpio::Pull::Up;
@@ -321,28 +321,28 @@ impl Board {
         let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down); // Gyro // If this is for the ublox, how does that relate to the gyro?
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
-        // S.Bus USART1
+        // S.Bus usart6
         // Sbus only uses Rx.
-        let mut uart1config = usart::Config::default();
-        uart1config.baudrate = 100000u32;
-        uart1config.parity = usart::Parity::ParityEven;
-        uart1config.stop_bits = usart::StopBits::STOP2;
-        uart1config.invert_rx = true;
-        uart1config.invert_tx = true;
-        uart1config.data_bits = usart::DataBits::DataBits8;
+        let mut uart6config = usart::Config::default();
+        uart6config.baudrate = 100000u32;
+        uart6config.parity = usart::Parity::ParityEven;
+        uart6config.stop_bits = usart::StopBits::STOP2;
+        uart6config.invert_rx = true;
+        uart6config.invert_tx = true;
+        uart6config.data_bits = usart::DataBits::DataBits8;
 
-        let mut usart1 = Uart::new(
-            p.USART1,
-            p.PB7,
-            p.PB6,
-            Usart1Irqs,
+        let mut usart6 = Uart::new(
+            p.USART6,
+            p.PC7,
+            p.PC6,
+            Uart6Irqs,
             p.DMA1_CH4,
             p.DMA1_CH5,
-            uart1config,
+            uart6config,
         )
         .unwrap();
-        let (mut uart1_tx, mut uart1_rx) = usart1.split();
-        let sbus_rx = peripherals::sbus::SbusRC { uart: uart1_rx };
+        let (mut uart6_tx, mut uart6_rx) = usart6.split();
+        let sbus_rx = peripherals::sbus::SbusRC { uart: uart6_rx };
 
         // uSD SDMMC1
         let mut sdmmc1 = sdmmc::Sdmmc::new_4bit(
@@ -360,7 +360,7 @@ impl Board {
         // SPI5 - NEEDED for internal BMI08x
         // Pins taken from PixRacerPro info compared with STM32H743 datasheet
         let mut spi5_config: embassy_stm32::spi::Config = spi::Config::default();
-        spi5_config.frequency = mhz(2);
+        spi5_config.frequency = mhz(2); // Phil recommends not running over 4 Mbps
         spi5_config.mode = spi::MODE_3;
         spi5_config.bit_order = spi::BitOrder::MsbFirst;
         spi5_config.miso_pull = embassy_stm32::gpio::Pull::Up;
