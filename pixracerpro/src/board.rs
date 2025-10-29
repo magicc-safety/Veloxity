@@ -449,20 +449,14 @@ impl Board {
         let tim1_ch4_pin = PwmPin::new_ch4(p.PE14, OutputType::PushPull);
 
         // TIM4
-        // let ch4_pin = PwmPin::new_ch1(p.PD13, OutputType::PushPull);
         let tim4_ch2_pin = PwmPin::new_ch2(p.PD13, OutputType::PushPull);
         let tim4_ch3_pin = PwmPin::new_ch3(p.PD14, OutputType::PushPull);
-        // let ch7_pin = PwmPin::new_ch3(p.PI5, OutputType::PushPull);
-        // let ch8_pin = PwmPin::new_ch4(p.PI6, OutputType::PushPull);
 
         // TIM2
         let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
-        // let ch9_pin = PwmPin::new_ch4(p.PB11, OutputType::PushPull);
 
         // TIM3
-        // let ch10_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
         let tim3_ch3_pin = PwmPin::new_ch3(p.PB0, OutputType::PushPull); // We may need to reserve this pin for RC input
-        // let ch11_pin = PwmPin::new_ch4(p.PB1, OutputType::PushPull);
 
         let mut timer1 = SimplePwm::new(
             p.TIM1,
