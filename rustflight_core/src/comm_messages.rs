@@ -39,6 +39,7 @@ use core::marker::PhantomData;
 use bitflags::bitflags;
 use messages::*;
 use enums::*;
+use crate::state_machine::ErrorFlag;
 
 #[derive(Default)]
 pub struct Messages {
@@ -91,7 +92,7 @@ impl_store!(ExternalAttitudeMsg,     external_attitude,"external_attitude");
 
 pub mod messages {
     use super::enums::*;
-    use crate::params2::ParamValue;
+    use crate::{params2::ParamValue, state_machine::ErrorFlag};
     // Heartbeat
     // I don't think we need all these fields for the generic message but I'm leaving them for now
     #[derive(Debug, Clone, Copy)]
@@ -247,7 +248,7 @@ pub mod messages {
         pub failsafe: u8,
         pub rc_override: u8,
         pub offboard: u8,
-        pub error_code: RosflightErrorCode,
+        pub error_code: ErrorFlag,
         pub control_mode: OffboardControlMode,
         pub num_errors: i16,
         pub loop_time_us: i16,
@@ -337,18 +338,6 @@ pub mod enums {
     pub enum RosflightCmdResponse {
         RosflightCmdFailed,
         RosflightCmdSuccess,
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    pub enum RosflightErrorCode {
-        RosflightErrorNone,
-        RosflightErrorInvalidMixer,
-        RosflightErrorImuNotResponding,
-        RosflightErrorRcLost,
-        RosflightErrorUnhealthyEstimator,
-        RosflightErrorTimeGoingBackwards,
-        RosflightErrorUncalibratedImu,
-        RosflightErrorBufferOverrun,
     }
 
     #[repr(u8)]

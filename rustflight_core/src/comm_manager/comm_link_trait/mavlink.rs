@@ -246,41 +246,12 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
     fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: RosflightGnssMsg) {
         self.send_message(board, system_id, RosflightGnss::from(msg));
     }
-}
-
-// ENUM CONVERSION
-impl From<enums::RosflightCmd> for comm_enums::RosflightCmd {
-    fn from(val: enums::RosflightCmd) -> Self {
-        use enums::RosflightCmd as MavCmd;
-        use comm_enums::RosflightCmd as CommCmd;
-        match val {
-            MavCmd::RcCalibration => CommCmd::RcCalibration,
-            MavCmd::AccelCalibration => CommCmd::AccelCalibration,
-            MavCmd::GyroCalibration => CommCmd::GyroCalibration,
-            MavCmd::BaroCalibration => CommCmd::BaroCalibration,
-            MavCmd::AirspeedCalibration => CommCmd::AirspeedCalibration,
-            MavCmd::ReadParams => CommCmd::ReadParams,
-            MavCmd::WriteParams => CommCmd::WriteParams,
-            MavCmd::SetParamDefaults => CommCmd::SetParamDefaults,
-            MavCmd::Reboot => CommCmd::Reboot,
-            MavCmd::RebootToBootloader => CommCmd::RebootToBootloader,
-            MavCmd::SendVersion => CommCmd::SendVersion,
-            MavCmd::ResetOrigin => CommCmd::ResetOrigin,
-            MavCmd::SendAllConfigInfos => CommCmd::SendAllConfigInfos,
-        }
+    fn send_cmd_ack(&mut self, board: &mut B, system_id: u8, msg: RosflightCmdAckMsg) {
+        self.send_message(board, system_id, RosflightCmdAck::from(msg));
     }
 }
 
-impl From<enums::RosflightCmdResponse> for comm_enums::RosflightCmdResponse {
-    fn from(val: enums::RosflightCmdResponse) -> Self {
-        use enums::RosflightCmdResponse as MavResponse;
-        use comm_enums::RosflightCmdResponse as CommResponse;
-        match val {
-            MavResponse::RosflightCmdFailed => CommResponse::RosflightCmdFailed,
-            MavResponse::RosflightCmdSuccess => CommResponse::RosflightCmdSuccess
-        }
-    }
-}
+
 
 impl From<enums::RosflightAuxCmdType> for comm_enums::RosflightAuxCmdType {
     fn from(val: enums::RosflightAuxCmdType) -> Self {
@@ -454,27 +425,10 @@ impl From<RosflightStatusMsg> for messages::RosflightStatus {
             failsafe: msg.failsafe,
             rc_override: msg.rc_override,
             offboard: msg.offboard,
-            error_code: msg.error_code.into(),
+            error_code: msg.error_code.bits() as u8,
             control_mode: msg.control_mode.into(),
             num_errors: msg.num_errors,
             loop_time_us: msg.loop_time_us
-        }
-    }
-}
-
-impl From<comm_enums::RosflightErrorCode> for enums::RosflightErrorCode {
-    fn from(val: comm_enums::RosflightErrorCode) -> Self {
-        use comm_enums::RosflightErrorCode as CommCode;
-        use enums::RosflightErrorCode as MavCode;
-        match val {
-            CommCode::RosflightErrorBufferOverrun => MavCode::RosflightErrorBufferOverrun,
-            CommCode::RosflightErrorImuNotResponding => MavCode::RosflightErrorImuNotResponding,
-            CommCode::RosflightErrorInvalidMixer => MavCode::RosflightErrorInvalidMixer,
-            CommCode::RosflightErrorNone => MavCode::RosflightErrorNone,
-            CommCode::RosflightErrorRcLost => MavCode::RosflightErrorRcLost,
-            CommCode::RosflightErrorTimeGoingBackwards => MavCode::RosflightErrorTimeGoingBackwards,
-            CommCode::RosflightErrorUncalibratedImu => MavCode::RosflightErrorUncalibratedImu,
-            CommCode::RosflightErrorUnhealthyEstimator => MavCode::RosflightErrorUnhealthyEstimator,
         }
     }
 }
@@ -684,6 +638,84 @@ impl From<ParamValueMsg> for messages::ParamValue {
             param_type: value_type,
             param_count: msg.param_count,
             param_index: msg.param_index,
+        }
+    }
+}
+
+impl From<RosflightCmdAckMsg> for messages::RosflightCmdAck {
+    fn from(msg: RosflightCmdAckMsg) -> Self {
+        Self {
+            // Convert the nested enums using their respective From impls
+            command: msg.command.into(),
+            success: msg.success.into(),
+        }
+    }
+}
+
+impl From<comm_enums::RosflightCmd> for enums::RosflightCmd {
+    fn from(val: comm_enums::RosflightCmd) -> Self {
+        use enums::RosflightCmd as MavCmd;
+        use comm_enums::RosflightCmd as CommCmd;
+        match val {
+            CommCmd::RcCalibration => MavCmd::RcCalibration,
+            CommCmd::AccelCalibration => MavCmd::AccelCalibration,
+            CommCmd::GyroCalibration => MavCmd::GyroCalibration,
+            CommCmd::BaroCalibration => MavCmd::BaroCalibration,
+            CommCmd::AirspeedCalibration => MavCmd::AirspeedCalibration,
+            CommCmd::ReadParams => MavCmd::ReadParams,
+            CommCmd::WriteParams => MavCmd::WriteParams,
+            CommCmd::SetParamDefaults => MavCmd::SetParamDefaults,
+            CommCmd::Reboot => MavCmd::Reboot,
+            CommCmd::RebootToBootloader => MavCmd::RebootToBootloader,
+            CommCmd::SendVersion => MavCmd::SendVersion,
+            CommCmd::ResetOrigin => MavCmd::ResetOrigin,
+            CommCmd::SendAllConfigInfos => MavCmd::SendAllConfigInfos,
+        }
+    }
+}
+
+impl From<enums::RosflightCmd> for comm_enums::RosflightCmd {
+    fn from(val: enums::RosflightCmd) -> Self {
+        use enums::RosflightCmd as MavCmd;
+        use comm_enums::RosflightCmd as CommCmd;
+        match val {
+            MavCmd::RcCalibration => CommCmd::RcCalibration,
+            MavCmd::AccelCalibration => CommCmd::AccelCalibration,
+            MavCmd::GyroCalibration => CommCmd::GyroCalibration,
+            MavCmd::BaroCalibration => CommCmd::BaroCalibration,
+            MavCmd::AirspeedCalibration => CommCmd::AirspeedCalibration,
+            MavCmd::ReadParams => CommCmd::ReadParams,
+            MavCmd::WriteParams => CommCmd::WriteParams,
+            MavCmd::SetParamDefaults => CommCmd::SetParamDefaults,
+            MavCmd::Reboot => CommCmd::Reboot,
+            MavCmd::RebootToBootloader => CommCmd::RebootToBootloader,
+            MavCmd::SendVersion => CommCmd::SendVersion,
+            MavCmd::ResetOrigin => CommCmd::ResetOrigin,
+            MavCmd::SendAllConfigInfos => CommCmd::SendAllConfigInfos,
+        }
+    }
+}
+
+impl From<comm_enums::RosflightCmdResponse> for enums::RosflightCmdResponse {
+    fn from(val: comm_enums::RosflightCmdResponse) -> Self {
+        use enums::RosflightCmdResponse as MavCmd;
+        use comm_enums::RosflightCmdResponse as CommCmd;
+        match val {
+            CommCmd::RosflightCmdFailed => MavCmd::RosflightCmdFailed,
+            CommCmd::RosflightCmdSuccess => MavCmd::RosflightCmdSuccess,
+        }
+    }
+}
+
+
+
+impl From<enums::RosflightCmdResponse> for comm_enums::RosflightCmdResponse {
+    fn from(val: enums::RosflightCmdResponse) -> Self {
+        use enums::RosflightCmdResponse as MavResponse;
+        use comm_enums::RosflightCmdResponse as CommResponse;
+        match val {
+            MavResponse::RosflightCmdFailed => CommResponse::RosflightCmdFailed,
+            MavResponse::RosflightCmdSuccess => CommResponse::RosflightCmdSuccess
         }
     }
 }

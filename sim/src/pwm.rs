@@ -35,7 +35,10 @@
 // ******************************************************************************
 // **/
 
-use crate::ros_messages::{self, Header, Time, OutputRaw}; // Ensure OutputRaw is imported
+use std::time::Instant;
+
+use crate::ros_messages::{self, Header, Time, OutputRaw}; use rustflight_core::board::BoardTrait;
+// Ensure OutputRaw is imported
 use rustflight_core::errors; // Assuming errors is in core
 use rustflight_core::packets; // Assuming packets is in core
 use rustflight_core::pwm::{PwmDriver, PwmError}; // Import updated trait and error
@@ -115,7 +118,7 @@ impl SimPwmDriver {
 }
 
 // Implement the updated PwmDriver trait
-impl PwmDriver for SimPwmDriver {
+impl<B: BoardTrait> PwmDriver for SimPwmDriver {
     fn len(&self) -> usize {
         NUM_SIM_CHANNELS
     }
@@ -154,7 +157,8 @@ impl PwmDriver for SimPwmDriver {
         Ok(())
     }
 
-    fn flush(&mut self, now_us: u64) {
+    fn flush(&mut self, board: &B) {
+        let now_us = board.clock_micros();
         let now_sec = (now_us / 1_000_000) as i32;
         let now_nanosec = ((now_us % 1_000_000) * 1000) as u32;
 
@@ -180,6 +184,22 @@ impl PwmDriver for SimPwmDriver {
                 println!("Error: PWM output channel closed during flush!");
             }
         }
+    }
+
+    fn send_commands(&mut self, commands_slice: &[f64]) {
+        let num_channels_to_write = commands_slice.len().min(self.len()); // Don't write past driver's capacity
+        for i in 0..num_channels_to_write {
+            // Convert mixer output (0.0 to 1.0) to u16 (0 to u16::MAX)
+            let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
+            // Set duty cycle for the current channel
+            if let Err(e) = self.set_duty_cycle(i, duty_u16) {
+                // Handle potential error (e.g., channel out of range, though we checked)
+                println!("Error setting duty cycle for channel {}: {:?}", i, e);
+            }
+        }
+
+        // After setting all channels for this loop, flush/send the state
+        self.flush(now_us);
     }
 }
 

@@ -38,12 +38,16 @@
 //use crate::mavlink::dialects::rosflight::{self as rosflight_dialect};
 
 use core::marker::PhantomData;
-
 use micro_algebra::stack::vector::Vector;
-
 use crate::{
-    board::BoardTrait, bodytype::BodyType, comm_manager::{self, comm_link_trait::CommInterface}, comm_messages, command_manager::{CommandManager, ControlType}, controller::Controller, errors, estimator::{quad_estimator::AttitudeState, Estimator}, hlist::*, mixer::Mixer, packets, params2::{self, ParamIter, PARAM_DEFINITIONS}, pwm::{self, PwmDriver}, rc::Rc, rustflight::Configuration, sensorprocessors::CalibrationFlags, state_machine::{Event, StateManager}
+    board::BoardTrait, bodytype::BodyType, comm_manager::{self, comm_link_trait::CommInterface}, comm_messages::{self, messages::HeartbeatMsg}, command_manager::{CommandManager, ControlType}, controller::Controller, errors, estimator::{self, Estimator, quad_estimator::{AttitudeState, QuadEstimator}}, hlist::*, mixer::Mixer, packets, params2::{self, PARAM_DEFINITIONS, ParamIter}, pwm::{self, PwmDriver}, rc::Rc, rustflight::Configuration, sensorprocessors::CalibrationFlags, state_machine::{Event, StateManager, ErrorFlag}
 };
+
+const HEARTBEAT_INTERVAL_US: u64 = 1_000_000; // 1 second = 1,000,000 microseconds
+const STATUS_INTERVAL_US: u64 = 500_000;    // 2 Hz
+const ATTITUDE_INTERVAL_US: u64 = 10_000;   // 100 Hz
+const IMU_INTERVAL_US: u64 = 2500;          // 400 Hz
+const BARO_INTERVAL_US: u64 = 20_000;         // 50 Hz
 
 pub struct ROSFlight<B, BT, C, CI, PD>
 //pub struct ROSFlight<B, BT, C, CI>
@@ -52,9 +56,16 @@ where
     BT: BodyType,
     C: Configuration<B, BT>, // The new "glue" constraint
     CI: CommInterface<B>,
-    PD: PwmDriver,
+    PD: PwmDriver<B>,
 {
     loop_time_us: u32,
+
+    last_heartbeat_us: u64,
+    last_status_send_us: u64,
+    last_imu_send_us: u64,
+    last_attitude_send_us: u64,
+    last_baro_send_us: u64,
+
     pub board: B,
     params: params2::Params,
     params_iter: Option<ParamIter>,
@@ -82,7 +93,7 @@ where
     BT: BodyType,
     CI: CommInterface<B>,
     C: Configuration<B, BT>,
-    PD: PwmDriver,
+    PD: PwmDriver<B>,
     for<'a> B::RawSensorSet: HMappable<'a, B::ProcessorHList, Output = B::ProcessedSensorSet>,
     B::ProcessedSensorSet: Sculptor<BT::RequiredSensors, C::SculptIndices>,
     BT::RequiredSensors: Plucker<Option<packets::RcPacket>, C::RcPacketIndex>,
@@ -91,6 +102,17 @@ where
     >,
     BT::Controller: Controller<State = <BT::Estimator as Estimator>::State>,
     BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
+
+    // This tells Rust that the compiler *can* find a way to `get` these packet
+    // types using the indices from the `Configuration`.
+    B::ProcessedSensorSet: HListGet<Option<packets::ImuPacket>, C::ImuPacketIndex> +
+                           HListGet<Option<packets::MagPacket>, C::MagPacketIndex> +
+                           HListGet<Option<packets::BaroPacket>, C::BaroPacketIndex> +
+                           HListGet<Option<packets::PitotPacket>, C::PitotPacketIndex> +
+                           HListGet<Option<packets::RangePacket>, C::RangePacketIndex> +
+                           HListGet<Option<packets::GNSSPacket>, C::GNSSPacketIndex> +
+                           HListGet<Option<packets::BatteryPacket>, C::BatteryPacketIndex> +
+                           HListGet<Option<packets::AttitudePacket>, C::AttitudePacketIndex>
 {
     pub fn init(
         loop_time_us: u32,
@@ -105,19 +127,22 @@ where
         mut pwm_driver: PD,
     ) -> Self { 
 
-        // Initialize all parameters.
-        // send a heartbeat to initialize rosflight_io communicaiton 
-        // update state manager
-        // update rc manager
-        // create command_manager
-        comm_link.send_heartbeat(&mut board, 0, comm_messages::messages::HeartbeatMsg { type_: 0, autopilot: 0, base_mode: 0, custom_mode: 0, system_status: 0, mavlink_version: 0 });
         state_manager.update(Event::INITIALIZED, &params);
         let mut rc_manager = Rc::new();
         rc_manager.init(&params);
-        let command_manager = CommandManager::new();
+        let mut command_manager = CommandManager::new();
+
+        let now_us = board.clock_micros();
 
         Self {
             loop_time_us,
+
+            last_heartbeat_us: now_us,
+            last_status_send_us: now_us,
+            last_imu_send_us: now_us,
+            last_attitude_send_us: now_us,
+            last_baro_send_us: now_us,
+
             board,
             params,
             params_iter: None,
@@ -139,44 +164,50 @@ where
 
     pub fn run(&mut self) -> bool {
 
-        let now_ms = self.board.clock_millis(); 
+        let now_ms = self.board.clock_millis();
         let now_us = self.board.clock_micros();
 
+        // Handle Heartbeat Message
+        if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US {
+
+            let hb = HeartbeatMsg {
+                autopilot: 0,
+                base_mode: 0,
+                custom_mode: 0,
+                mavlink_version: 0,
+                system_status: 0,
+                type_: 0
+            };
+            self.comm_manager.send_heartbeat(&mut self.board, hb);
+            self.last_heartbeat_us = now_us;
+        }
+
+        // act on any received messages this loop
         self.comm_manager.process_incoming_messages(&mut self.board);
-        self.comm_manager.act_on_messages(&mut self.params_iter, &mut self.params, &mut self.board);
+        self.comm_manager.act_on_messages(&mut self.params_iter, &mut self.params, &mut self.cal_flags, &mut self.board);
 
-        // // if we haven't already initialized the parameter iteration process, go ahead and start it... otherwise we'll use the iterator we already have
-        // if self.comm_manager.msgs.param_request_list.take().is_some() {
-        //     if self.params_iter.is_none() {
-        //         self.params_iter = Some(self.params.iter());
-        //     }
-        // }
-
-        // // Parameter sending sequence        
-        // if let Some(iterator) = &mut self.params_iter {
-
-        //     // Safely get the next item. This `if let` replaces your `.unwrap()`.
-        //     if let Some((param_id, param_val)) = iterator.next() {
-        //         let def = &PARAM_DEFINITIONS[param_id as usize];
-        
-        //         // You now have everything you need to send the message:
-        //         // def.name    -> The parameter's string name (e.g., "SYS_ID")
-        //         // param_id    -> The enum ID (e.g., ParamId::PARAM_SYSTEM_ID)
-        //         // param_val   -> The current value (e.g., ParamValue::Int(1))
-        //         self.comm_manager.send_param_value(def, param_val, &mut self.board);
-
-        //     } else {
-        //         // The iterator is finished, so set it back to None.
-        //         // This is crucial for preventing future panics and resetting the state.
-        //         self.params_iter = None;
-        //     }
-        // }
+        // Handle Status Message
+        if now_us >= self.last_status_send_us + STATUS_INTERVAL_US {
+            let status_msg = comm_messages::messages::RosflightStatusMsg {
+                armed: self.state_manager.is_armed() as u8,
+                failsafe: self.state_manager.is_in_failsafe() as u8,
+                rc_override: 0, // Placeholder: self.command_manager.is_rc_override() as u8,
+                offboard: 0, // Placeholder: self.command_manager.is_offboard() as u8,
+                error_code: self.state_manager.get_errors(),
+                control_mode: self.command_manager.get_control_mode().into(),
+                num_errors: self.state_manager.get_errors().bits().count_ones() as i16,
+                loop_time_us: 0, // Placeholder
+            };
+            self.comm_manager.send_status(&mut self.board, status_msg);
+            self.last_status_send_us = now_us;
+        }
 
         // Data ingestion: let the board update the sensor data store
-        self.board.update_sensors(&mut self.sensors);
         // Data processing: run the map operation across HLists
         // This applies the 'ProcessorHList' to the 'RawSensorSet'
         // which consumes the raw data and produces the clean 'ProcessedSensorSet'
+        // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
+        self.board.update_sensors(&mut self.sensors);
         let processed_sensors = self.sensors.map(self.processorhlist, &mut self.cal_flags, &mut self.params);
 
         let (required_sensors, _remainder) = processed_sensors.sculpt();
@@ -189,29 +220,38 @@ where
         self.rc_manager.run(now_ms, &self.params, &mut self.state_manager);
         self.command_manager.run(now_ms, &self.comm_manager, &self.params, &mut self.rc_manager, &self.state_manager);
 
+        // Update the state manager...
+        self.state_manager.run(&self.params);
+
         // Now run the estimator 
         let state= self.estimator.estimate(&estimator_sensors);
+
+        // --- Send Attitude Telemetry (e.g., 100 Hz) ---
+        // This uses the *output* of the estimator
+        // if now_us >= self.last_attitude_send_us + ATTITUDE_INTERVAL_US {
+        //     // TODO: Update `AttitudeState` or `QuadEstimator` to also return angular rates
+        //     // The logic to convert q_dot to rates is complex.
+        //     let att_msg = comm_messages::messages::AttitudeQuaternionMsg {
+        //         time_boot_ms: (now_us / 1000) as u32,
+        //         q1: state.q_hat[0] as f32, // w
+        //         q2: state.q_hat[1] as f32, // x
+        //         q3: state.q_hat[2] as f32, // y
+        //         q4: state.q_hat[3] as f32, // z
+        //         rollspeed: 0.0,  // Placeholder - state.q_dot is NOT angular rate
+        //         pitchspeed: 0.0, // Placeholder
+        //         yawspeed: 0.0,   // Placeholder
+        //     };
+        //     self.comm_manager.comm_link.send_attitude(&mut self.board, sysid, att_msg);
+        //     self.last_attitude_send_us = now_us;
+        // }
 
         // Get the final command from the manager, and translate to what the Controller needs:
         let combined_command = self.command_manager.combined_control();
         let controls = self.controller.control(&state, &*combined_command);
         let actuator_commands = self.mixer.mix(&controls);
 
-        // PWM command output
-        let commands_slice = actuator_commands.as_ref();
-        let num_channels_to_write = commands_slice.len().min(self.pwm_driver.len()); // Don't write past driver's capacity
-        for i in 0..num_channels_to_write {
-            // Convert mixer output (0.0 to 1.0) to u16 (0 to u16::MAX)
-            let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
-            // Set duty cycle for the current channel
-            if let Err(e) = self.pwm_driver.set_duty_cycle(i, duty_u16) {
-                // Handle potential error (e.g., channel out of range, though we checked)
-                println!("Error setting duty cycle for channel {}: {:?}", i, e);
-            }
-        }
-
-        // After setting all channels for this loop, flush/send the state
-        self.pwm_driver.flush(now_us);
+        // // PWM command output
+        self.pwm_driver.send_commands(actuator_commands.as_ref());
 
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);

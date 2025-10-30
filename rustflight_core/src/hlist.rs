@@ -293,6 +293,28 @@ where
     }
 }
 
+/// Trait to get an immutable reference to an element by its index.
+pub trait HListGet<Target, Index> {
+    fn get(&self) -> &Target;
+}
+
+/// Base case: The target is at the Head (Here).
+impl<T, Tail: HList> HListGet<T, Here> for HCons<T, Tail> {
+    fn get(&self) -> &T {
+        &self.0 // Return a reference to the head
+    }
+}
+
+/// Recursive case: The target is in the Tail (There).
+impl<H, Tail, T, TailIdx> HListGet<T, There<TailIdx>> for HCons<H, Tail>
+where
+    Tail: HList + HListGet<T, TailIdx>, // We can `get` the target from the tail
+{
+    fn get(&self) -> &T {
+        self.1.get() // Recurse on the tail
+    }
+}
+
 /// It uses `$crate::packets` to ensure paths are always valid. Change this if the HList definition
 /// moves
 #[macro_export]

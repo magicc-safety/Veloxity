@@ -328,4 +328,36 @@ impl CommandManager {
     pub fn combined_control(&self) -> &Control {
         &self.combined_command
     }
+
+    pub fn get_control_mode(&self) -> ControlType {
+        // We assume the qx (roll) channel represents the
+        // primary attitude control mode.
+        self.combined_command.qx.control_type
+    }
+
+    pub fn rc_override_active(&self) -> bool {
+        self.rc_attitude_override || self.rc_throttle_override
+    }
+
+    pub fn is_offboard_active(&self) -> bool {
+        // "Offboard" means we are *not* in RC override AND
+        // at least one offboard channel is active.
+        !self.rc_override_active() &&
+        (self.offboard_command.qx.active ||
+         self.offboard_command.qy.active ||
+         self.offboard_command.qz.active ||
+         self.offboard_command.fx.active ||
+         self.offboard_command.fy.active ||
+         self.offboard_command.fz.active)
+    }
+}
+
+impl From<ControlType> for OffboardControlMode {
+    fn from(val: ControlType) -> Self {
+        match val {
+            ControlType::Rate => OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+            ControlType::Passthrough => OffboardControlMode::ModePassThrough,
+            // Add other mappings if you create more ControlTypes
+        }
+    }
 }

@@ -28,13 +28,23 @@ struct SimpleBoolResponse {
 pub struct SimQuadConfig;
 impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
     type SculptIndices = hlist_type![
-        Here,
-        Here, 
-        There<There<There<There<There<Here>>>>>
+        Here, // Imu for Estimator
+        Here,  // Mag for Estimator
+        There<There<There<There<There<Here>>>>> // RC Index
     ];
-    type RcPacketIndex = There<There<Here>>;
-}
 
+    type RcPacketIndex = There<There<Here>>; // RC Index from Sculpted Set
+
+    // --- IMPLEMENT TELEMETRY INDICES ---
+    type ImuPacketIndex       = Here;                                                         // index 0
+    type MagPacketIndex       = There<Here>;                                                  // index 1
+    type BaroPacketIndex      = There<There<Here>>;                                           // index 2
+    type PitotPacketIndex     = There<There<There<Here>>>;                                    // index 3
+    type RangePacketIndex     = There<There<There<There<Here>>>>;                             // index 4
+    type GNSSPacketIndex      = There<There<There<There<There<Here>>>>>;                      // index 5
+    type BatteryPacketIndex   = There<There<There<There<There<There<Here>>>>>>;               // index 6
+    type AttitudePacketIndex  = There<There<There<There<There<There<There<There<Here>>>>>>>>; // index 8
+}
 
 #[tokio::main]
 async fn main() {

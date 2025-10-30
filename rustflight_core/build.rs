@@ -71,6 +71,6 @@ fn main() {
             //);
         }
     }
-    //println!("cargo:warning=BUILD.RS SCRIPT FINISHED");
+    println!("cargo:warning=BUILD.RS SCRIPT FINISHED");
     //println!("cargo:warning=------------------------------------------------------------");
 }

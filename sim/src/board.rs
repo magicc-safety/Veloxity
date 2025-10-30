@@ -89,7 +89,7 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 }
 
 pub struct Board {
-    start_time: Instant,
+    pub start_time: Instant,
     mavlink_socket: UdpSocket, 
     pub zenoh_session: Session,
     imu_data_chan: mpsc::Receiver<ros_messages::ImuData>,
