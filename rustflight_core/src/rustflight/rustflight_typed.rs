@@ -56,7 +56,7 @@ where
     BT: BodyType,
     C: Configuration<B, BT>, // The new "glue" constraint
     CI: CommInterface<B>,
-    PD: PwmDriver<B>,
+    PD: PwmDriver,
 {
     loop_time_us: u32,
 
@@ -93,7 +93,7 @@ where
     BT: BodyType,
     CI: CommInterface<B>,
     C: Configuration<B, BT>,
-    PD: PwmDriver<B>,
+    PD: PwmDriver,
     for<'a> B::RawSensorSet: HMappable<'a, B::ProcessorHList, Output = B::ProcessedSensorSet>,
     B::ProcessedSensorSet: Sculptor<BT::RequiredSensors, C::SculptIndices>,
     BT::RequiredSensors: Plucker<Option<packets::RcPacket>, C::RcPacketIndex>,
@@ -251,7 +251,7 @@ where
         let actuator_commands = self.mixer.mix(&controls);
 
         // // PWM command output
-        self.pwm_driver.send_commands(actuator_commands.as_ref());
+        self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
 
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);

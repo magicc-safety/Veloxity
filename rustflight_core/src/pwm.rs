@@ -65,5 +65,5 @@ pub trait PwmDriver {
     fn flush<B: BoardTrait>(&mut self, board: &mut B);
 
     // actually loops over the channels (up to self.len()) and sends pwm commands via set_duty_cycle
-    fn send_commands(&mut self, commands: &[f64]);
+    fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands: &[f64]);
 }

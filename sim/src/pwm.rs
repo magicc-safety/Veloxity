@@ -118,7 +118,7 @@ impl SimPwmDriver {
 }
 
 // Implement the updated PwmDriver trait
-impl<B: BoardTrait> PwmDriver for SimPwmDriver {
+impl PwmDriver for SimPwmDriver {
     fn len(&self) -> usize {
         NUM_SIM_CHANNELS
     }
@@ -157,7 +157,7 @@ impl<B: BoardTrait> PwmDriver for SimPwmDriver {
         Ok(())
     }
 
-    fn flush(&mut self, board: &B) {
+    fn flush<B: BoardTrait>(&mut self, board: &mut B) {
         let now_us = board.clock_micros();
         let now_sec = (now_us / 1_000_000) as i32;
         let now_nanosec = ((now_us % 1_000_000) * 1000) as u32;
@@ -186,7 +186,7 @@ impl<B: BoardTrait> PwmDriver for SimPwmDriver {
         }
     }
 
-    fn send_commands(&mut self, commands_slice: &[f64]) {
+    fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands_slice: &[f64]) {
         let num_channels_to_write = commands_slice.len().min(self.len()); // Don't write past driver's capacity
         for i in 0..num_channels_to_write {
             // Convert mixer output (0.0 to 1.0) to u16 (0 to u16::MAX)
@@ -199,7 +199,7 @@ impl<B: BoardTrait> PwmDriver for SimPwmDriver {
         }
 
         // After setting all channels for this loop, flush/send the state
-        self.flush(now_us);
+        self.flush(board);
     }
 }
 
