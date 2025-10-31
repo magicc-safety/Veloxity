@@ -43,7 +43,7 @@ use rustflight_core::{
     board::BoardTrait,
     board::dummy::DummyBoard,
     bodytype::BodyType,
-    bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
+    bodytype::quadrotor::{Quadrotor}, // QuadController, QuadEstimator, QuadMixer, 
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
     estimator::Estimator,
@@ -54,7 +54,7 @@ use rustflight_core::{
     rustflight::rustflight_typed::ROSFlight,
     state_machine::StateManager,
 };
-use stm_32::*;
+use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
 // define the wiring diagram
 #[derive(Default)]
@@ -62,6 +62,16 @@ pub struct PixRacerProQuadConfig;
 impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     // needs IMU, Baro, Mag, GNSS
     type SculptIndices = hlist_type![Here, Here, Here, There<Here>];
+
+    type RcPacketIndex = There<There<Here>>;
+    type ImuPacketIndex = There<There<Here>>;
+    type MagPacketIndex = There<There<Here>>;
+    type BaroPacketIndex = There<There<Here>>;
+    type PitotPacketIndex = There<There<Here>>;
+    type RangePacketIndex = There<There<Here>>;
+    type GNSSPacketIndex = There<There<Here>>;
+    type BatteryPacketIndex = There<There<Here>>;
+    type AttitudePacketIndex = There<There<Here>>;
 }
 
 #[entry]
@@ -86,12 +96,14 @@ fn main() -> ! {
     let mut rosflight = ROSFlight::init(
         1000,
         board,
+        Params,
         mavlink,
         state_manager,
         estimator,
         controller,
         mixer,
         config,
+        PixRacerProServoMonstrosity,
     );
 
     loop {

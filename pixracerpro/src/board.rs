@@ -49,6 +49,7 @@ include!("../../stm_32/stm32h7x3_common.rs");
 pub struct Board {
     probe: [Output<'static>; 3], // We only have 3 from ROSFlight
     servos: peripherals::pwm::PixRacerProServoMonstrosity,
+    pub start_time: embassy_time::Instant,
 }
 
 impl BoardTrait for Board {
@@ -152,6 +153,14 @@ impl BoardTrait for Board {
         }
         Some(Ok(n))
     }
+
+    fn clock_millis(&self) -> u32 {
+        self.start_time.elapsed().as_millis() as u32
+    }
+
+    fn clock_micros(&self) -> u64 {
+        self.start_time.elapsed().as_micros() as u64
+    }
 }
 
 impl Board {
@@ -169,6 +178,9 @@ impl Board {
 
     pub fn new() -> Board {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
+
+        let start_time = embassy_time::Instant::now();
+
         // SPI1 Bus ///////////////////////////////////////////
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
         spi1_config.frequency = mhz(16); // Phil recommends not running over 4 Mbps
@@ -550,6 +562,6 @@ impl Board {
             Output::new(p.PG14, Level::Low, Speed::Low),
             // Output::new(p.PG0, Level::Low, Speed::Low), // unknown
         ];
-        Board { probe, servos }
+        Board { probe, servos, start_time }
     }
 }
