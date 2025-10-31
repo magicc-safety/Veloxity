@@ -2821,9 +2821,11 @@ dependencies = [
  "bitflags 2.10.0",
  "csv",
  "defmt 0.3.100",
+ "libm",
  "mavio",
  "mavspec",
  "micro_algebra",
+ "num-traits",
  "serde",
 ]
 

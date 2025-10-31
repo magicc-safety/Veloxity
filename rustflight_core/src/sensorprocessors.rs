@@ -41,6 +41,7 @@ use crate::packets::*;
 use crate::params2::{Params, ParamId, ParamValue};
 use bitflags::bitflags;
 //use defmt;
+use num_traits::Float;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
