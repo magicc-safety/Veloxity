@@ -104,7 +104,8 @@ impl Rc {
         for (i, stick_config) in self.sticks.iter().enumerate() {
             if stick_config.channel < packet.n_chan as u8 {
                 self.stick_values[i] = packet.chan[stick_config.channel as usize];
-                println!("\tStick Value {}: {}", i, self.stick_values[i])
+                defmt::info!("\tStick Value {}: {}", i, self.stick_values[i])
+                // println!("\tStick Value {}: {}", i, self.stick_values[i])
             }
         }
         //println!();

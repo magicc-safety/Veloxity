@@ -138,8 +138,10 @@ impl MavlinkInterface {
                 msgs.store(TimesyncMsg::from(ts))
             }
             Rosflight::RosflightCmd(cmd) => {
-                println!("Message: RosflightCmd");
-                println!("Rosflight command: {}", cmd.command as u8);
+                defmt::info!("Message: RosflightCmd");
+                defmt::info!("Rosflight command: {}", cmd.command as u8);
+                // println!("Message: RosflightCmd");
+                // println!("Rosflight command: {}", cmd.command as u8);
                 msgs.store(RosflightCmdMsg::from(cmd))
             }
             Rosflight::RosflightAuxCmd(aux_cmd) => {

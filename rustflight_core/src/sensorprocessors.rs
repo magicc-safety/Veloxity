@@ -411,9 +411,9 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for Pito
                     if variance < PITOT_MAX_CALIBRATION_VARIANCE {
                         params.set_by_id(ParamId::PARAM_DIFF_PRESS_BIAS, ParamValue::Float(self.calibration_state.mean as f32));
                         self.calibration_state.calibrated = true;
-                        println!("Airspeed calibration successful!");
+                        defmt::info!("Airspeed calibration successful!");
                     } else {
-                        println!("Too much movement for diff pressure calibration.");
+                        defmt::info!("Too much movement for diff pressure calibration.");
                     }
                     
                     self.calibration_state = PitotCalibrationState::default();
