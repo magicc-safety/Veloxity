@@ -50,6 +50,7 @@ const DT: f64 = 1.0/400.0f64;
 #[derive(Debug, Clone, Copy)]
 pub struct AttitudeState {
     pub q_hat: Quaternion<f64>,
+    pub q_dot: Quaternion<f64>,
     pub b_hat: Vector<f64, 3>,
 }
 
@@ -69,6 +70,7 @@ pub struct QuadEstimator {
      k_p: f64,
      k_i: f64,
      q_hat: Quaternion<f64>,
+     q_dot: Quaternion<f64>,
      b_hat: Vector<f64, 3>,
 }
 
@@ -78,6 +80,7 @@ impl QuadEstimator {
             k_p,
             k_i,
             q_hat: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
+            q_dot: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
             b_hat: Vector::from_array([0.0, 0.0, 0.0]),
         }
     }
@@ -103,7 +106,20 @@ impl Estimator for QuadEstimator {
             
             // normalize accelerometer measurement 
             let mut v_a = Vector::from_array(imu_packet.accel);
-            v_a.normalize_fill();
+
+        // FIX: Check for zero vector before normalizing
+            if v_a.norm_2() > 1e-9 { // Or some other small epsilon
+                v_a.normalize_fill();
+            } else {
+                // Handle the zero-vector case. Maybe skip this update?
+                // Or return the current state without updating.
+                // For now, let's just skip the update logic.
+                return AttitudeState {
+                    q_hat: self.q_hat,
+                    q_dot: self.q_dot,
+                    b_hat: self.b_hat,
+                };
+            }
             
             // predict gravity in body frame using our latest estimate of q_hat
             let g_intertial_q = Quaternion::from_array([0.0f64, 0.0f64, 0.0f64, 1.0f64]);
@@ -125,14 +141,15 @@ impl Estimator for QuadEstimator {
 
             // quaternion derivative
             let omega_q = Quaternion::from_array([0.0, omega_corr[0], omega_corr[1], omega_corr[2]]);
-            let q_dot = 0.5 * (self.q_hat * omega_q);
+            self.q_dot = 0.5 * (self.q_hat * omega_q);
 
-            self.q_hat = self.q_hat + q_dot * DT;
+            self.q_hat = self.q_hat + self.q_dot * DT;
             self.q_hat.normalize_fill();
         }
 
         AttitudeState {
             q_hat: self.q_hat,
+            q_dot: self.q_dot,
             b_hat: self.b_hat,
         }
     }

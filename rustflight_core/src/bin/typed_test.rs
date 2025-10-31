@@ -38,14 +38,16 @@ use std::time::Duration;
 // **/
 use rustflight_core::{
     board::{dummy::DummyBoard, BoardTrait},
-    bodytype::{quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor}, BodyType},
+    bodytype::{quadrotor::Quadrotor, BodyType},
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
-    controller::Controller,
-    estimator::Estimator,
+    controller::{Controller, quad_controller::QuadController},
+    estimator::{Estimator, quad_estimator::QuadEstimator},
+    params2::Params,
+    mixer::{Mixer, quad_mixer::{QuadMixer}},
     hlist::{Here, There},
     hlist_type,
-    mixer::Mixer,
     packets,
+    rc::Rc,
     rustflight::{rustflight_typed::ROSFlight, Configuration},
     state_machine::StateManager,
 };
@@ -54,17 +56,23 @@ use rustflight_core::{
 #[derive(Default)]
 pub struct DummyQuadConfig;
 impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
-    type SculptIndices = hlist_type![Here, Here, Here, There<There<Here>>];
+    type SculptIndices = hlist_type![
+        Here,
+        Here, 
+        There<There<There<There<There<Here>>>>>
+    ];
+    type RcPacketIndex = There<There<Here>>;
 }
 
 fn main() {
     // board implementation
     let board = DummyBoard::default();
+    let mut params = Params::new();
 
     // body type instantiations...
     let estimator = QuadEstimator::default();
     let controller = QuadController::default();
-    let mixer = QuadMixer::default();
+    let mixer = QuadMixer::new(&params);
 
     // zero-sized configuration marker (necessary)
     let config = DummyQuadConfig::default();
@@ -74,7 +82,7 @@ fn main() {
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, mavlink, state_manager, estimator, controller, mixer, config);
+    let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config);
 
     loop {
         println!("Highest Level Loop");

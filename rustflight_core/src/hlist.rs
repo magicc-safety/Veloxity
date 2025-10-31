@@ -67,7 +67,7 @@ impl<H, T: HList> HList for HCons<H, T> {}
 // standard `Fn` traits because we need an associated `Output` type.
 pub trait Func<Arg> {
     type Output;
-    fn call(&self, arg: Arg, flags: &mut CalibrationFlags, params: &mut Params) -> Self::Output;
+    fn call(&mut self, arg: Arg, flags: &mut CalibrationFlags, params: &mut Params) -> Self::Output;
 }
 
 // A marker trait for a "Polymorphic Function" (an HList of `Func`s).
@@ -135,7 +135,7 @@ where
 
     fn map(
         &'a mut self,
-        f: HCons<F, FTail>,
+        mut f: HCons<F, FTail>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
     ) -> Self::Output {
@@ -290,6 +290,28 @@ where
         // Finally, generates code to construct a new HCons cell from the head it got in step 1 and
         // the tail in step 2. Returned along with final reminder.
         (HCons(head, tail), rem2)
+    }
+}
+
+/// Trait to get an immutable reference to an element by its index.
+pub trait HListGet<Target, Index> {
+    fn get(&self) -> &Target;
+}
+
+/// Base case: The target is at the Head (Here).
+impl<T, Tail: HList> HListGet<T, Here> for HCons<T, Tail> {
+    fn get(&self) -> &T {
+        &self.0 // Return a reference to the head
+    }
+}
+
+/// Recursive case: The target is in the Tail (There).
+impl<H, Tail, T, TailIdx> HListGet<T, There<TailIdx>> for HCons<H, Tail>
+where
+    Tail: HList + HListGet<T, TailIdx>, // We can `get` the target from the tail
+{
+    fn get(&self) -> &T {
+        self.1.get() // Recurse on the tail
     }
 }
 

@@ -34,12 +34,20 @@
 // *
 // ******************************************************************************
 // **/
-//pub mod rustflight_sensors;
-//pub mod rustflight_sensors_comms;
 pub mod rustflight_typed;
 
 /// NEW: A "glue" trait that defines the "wiring diagram" (`SculptIndices`)
 /// for a specific combination of a Board and a BodyType.
 pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {
-    type SculptIndices: crate::hlist::HList;
+    // --- Existing Indices ---
+    type SculptIndices: crate::hlist::HList; // For estimator
+    type RcPacketIndex;
+    type ImuPacketIndex;
+    type MagPacketIndex;
+    type BaroPacketIndex;
+    type PitotPacketIndex;
+    type RangePacketIndex;
+    type GNSSPacketIndex;
+    type BatteryPacketIndex;
+    type AttitudePacketIndex;
 }

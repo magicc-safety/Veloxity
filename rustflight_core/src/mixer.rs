@@ -38,7 +38,7 @@
 pub mod quad_mixer;
 
 pub trait Mixer {
-    type ControlOutput;
-    type ActuatorCommands;
-    fn mix(&mut self, controls: &Self::ControlOutput) -> Self::ActuatorCommands;
+    type MixerInput;
+    type ActuatorCommands: AsRef<[f64]>;
+    fn mix(&mut self, controls: &Self::MixerInput) -> Self::ActuatorCommands;
 }

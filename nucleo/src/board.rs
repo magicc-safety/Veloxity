@@ -45,6 +45,9 @@ use stm_32::*;
 
 include!("../../stm_32/stm32h7x3_common.rs");
 
+// we need a way of passing RcPacket from it's ROS definition to a "packet" form that we can process
+
+
 pub struct Board {
     probe: [Output<'static>; 4],
     servos: peripherals::pwm::ServoMonstrosity,

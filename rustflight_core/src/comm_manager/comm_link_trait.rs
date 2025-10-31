@@ -56,6 +56,7 @@ pub trait CommInterface<B: board::BoardTrait> {
     fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: RosflightOutputRawMsg);
     fn send_range(&mut self, board: &mut B, system_id: u8, msg: SmallRangeMsg);
     fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: RosflightGnssMsg);
+    fn send_cmd_ack(&mut self, board: &mut B, system_id: u8, msg: RosflightCmdAckMsg);
 
     fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut comm_messages::Messages);
 }

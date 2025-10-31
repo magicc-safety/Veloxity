@@ -36,9 +36,10 @@
 // **/
 use crate::hlist::*;
 pub mod quad_controller;
+use crate::command_manager::Control;
 
 pub trait Controller {
     type State;
     type ControlOutput;
-    fn control(&mut self, state: &Self::State) -> Self::ControlOutput;
+    fn control(&mut self, state: &Self::State, command: &Control) -> Self::ControlOutput;
 }

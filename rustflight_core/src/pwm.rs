@@ -1,6 +1,6 @@
 // /**
 // ******************************************************************************
-// * File     : dummy.rs
+// * File     : pwm.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -32,28 +32,38 @@
 // * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // *
-// ******************************************************************************
-// **/
-use crate::bodytype::BodyType;
-use crate::controller;
-use crate::estimator;
-use crate::hlist_type;
-use crate::mixer;
-use crate::mixer::Mixer;
-use crate::packets;
-use crate::packets::*;
+// ********************************************************
 
-pub struct Quadrotor;
+use crate::board::BoardTrait;
 
-impl BodyType for Quadrotor {
-    // shopping list of required sensors...
-    type RequiredSensors = hlist_type![
-        Option<packets::ImuPacket>,
-        Option<packets::MagPacket>,
-        Option<packets::RcPacket>
-    ];
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PwmError {
+    ChannelOutOfRange,
+}
 
-    type Estimator = estimator::quad_estimator::QuadEstimator;
-    type Controller = controller::quad_controller::QuadController;
-    type Mixer = mixer::quad_mixer::QuadMixer;
+pub trait PwmDriver {
+    fn len(&self) -> usize;
+    fn enable(&mut self, channel: usize) -> Result<(), PwmError>;
+    fn disable(&mut self, channel: usize) -> Result<(), PwmError>;
+
+    /// Sets the duty cycle for a specific channel.
+    ///
+    /// # Arguments
+    /// * `channel` - The output channel index (0-based).
+    /// * `duty`    - The desired duty cycle, typically represented as a u16 value.
+    ///             The exact interpretation (e.g., 0-ARR, 0-u16::MAX) depends
+    ///             on the implementation. For simulation, we'll map 0-u16::MAX
+    ///             to the simulator's expected range (e.g., 1000-2000us).
+    fn set_duty_cycle(&mut self, channel: usize, duty: u16) -> Result<(), PwmError>;
+
+    /// Sends the current state of all PWM channels to the output/simulator.
+    /// This should be called once per control loop after all individual
+    /// `set_duty_cycle` calls for that loop iteration are complete.
+    ///
+    /// # Arguments
+    /// * `now_us` - The current flight controller time in microseconds for timestamping.
+    fn flush<B: BoardTrait>(&mut self, board: &mut B);
+
+    // actually loops over the channels (up to self.len()) and sends pwm commands via set_duty_cycle
+    fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands: &[f64]);
 }

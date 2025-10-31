@@ -38,6 +38,90 @@ pub struct Quaternion {
     pub w: f64,
 }
 
+
+// ============================ WORKING RosFlight Sensors =================================
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ImuData {
+    pub header: Header,
+    pub orientation: Quaternion,
+    pub orientation_covariance: [f64; 9],
+    pub angular_velocity: Vector3,
+    pub angular_velocity_covariance: [f64; 9],
+    pub linear_acceleration: Vector3,
+    pub linear_acceleration_covariance: [f64; 9],
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ============================ BIG WORK IN PROGRESS DONT USE ANYTHING BELOW HERE IT DOESNT WORK =================================
 // ============ ROSflight Messages ============
 
 // Airspeed.msg
@@ -152,14 +236,15 @@ impl GNSS {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct OutputRaw {
     pub header: Header,
-    pub values: Vec<f32>,
+    pub values: [f32; 14]
 }
 
-// RCRaw.msg
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RCRaw {
     pub header: Header,
-    pub values: Vec<u16>,
+    // Use a fixed-size array to match the ROS definition
+    pub values: [u16; 8],
 }
 
 // Status.msg

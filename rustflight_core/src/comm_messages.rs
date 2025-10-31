@@ -36,8 +36,10 @@
 // **/
 
 use core::marker::PhantomData;
+use bitflags::bitflags;
 use messages::*;
 use enums::*;
+use crate::state_machine::ErrorFlag;
 
 #[derive(Default)]
 pub struct Messages {
@@ -50,6 +52,7 @@ pub struct Messages {
     pub cmd: Option<RosflightCmdMsg>,
     pub aux_cmd: Option<RosflightAuxCmdMsg>,
     pub external_attitude: Option<ExternalAttitudeMsg>,
+    pub rc_raw: Option<RcChannelsMsg>,
 }
 
 pub trait Store<T> {
@@ -89,7 +92,7 @@ impl_store!(ExternalAttitudeMsg,     external_attitude,"external_attitude");
 
 pub mod messages {
     use super::enums::*;
-    use crate::params2::ParamValue;
+    use crate::{params2::ParamValue, state_machine::ErrorFlag};
     // Heartbeat
     // I don't think we need all these fields for the generic message but I'm leaving them for now
     #[derive(Debug, Clone, Copy)]
@@ -180,7 +183,7 @@ pub mod messages {
         pub fy: f32,
         pub fz: f32,
     }
-
+    
     #[derive(Debug, Clone, Copy)]
     pub struct SmallImuMsg {
         pub time_boot_us: u64,
@@ -245,7 +248,7 @@ pub mod messages {
         pub failsafe: u8,
         pub rc_override: u8,
         pub offboard: u8,
-        pub error_code: RosflightErrorCode,
+        pub error_code: ErrorFlag,
         pub control_mode: OffboardControlMode,
         pub num_errors: i16,
         pub loop_time_us: i16,
@@ -312,6 +315,8 @@ pub mod messages {
 // Enums
 
 pub mod enums {
+    use super::bitflags;
+
     #[derive(Debug, Clone, Copy)]
     pub enum RosflightCmd {
         RcCalibration,
@@ -335,26 +340,12 @@ pub mod enums {
         RosflightCmdSuccess,
     }
 
-    #[derive(Debug, Clone, Copy)]
-    pub enum RosflightErrorCode {
-        RosflightErrorNone,
-        RosflightErrorInvalidMixer,
-        RosflightErrorImuNotResponding,
-        RosflightErrorRcLost,
-        RosflightErrorUnhealthyEstimator,
-        RosflightErrorTimeGoingBackwards,
-        RosflightErrorUncalibratedImu,
-        RosflightErrorBufferOverrun,
-    }
-
-    #[derive(Debug, Clone, Copy)]
+    #[repr(u8)]
+    #[derive(Clone, Copy, Debug, PartialEq, Default)]
     pub enum OffboardControlMode {
-        ModePassThrough,
-        ModeRollratePitchrateYawrateThrottle,
-        ModeRollPitchYawrateThrottle,
-        ModeRollPitchYawrateAltitude,
-        ModeXvelYvelYawrateAltitude,
-        ModeXposYposYawAltitude,
+        #[default]
+        ModePassThrough = 0,
+        ModeRollratePitchrateYawrateThrottle = 1,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -376,16 +367,44 @@ pub mod enums {
         Debug,
     }
 
-    #[derive(Debug, Clone, Copy)]
-    pub enum OffboardControlIgnore {
-        IgnoreNone,
-        IgnoreValue1,
-        IgnoreValue2,
-        IgnoreValue3,
-        IgnoreValue4,
-        IgnoreValue5,
-        IgnoreValue6,
+    bitflags! {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+        pub struct OffboardControlIgnore: u8 {
+            const IGNORE_QX = 1 << 0;
+            const IGNORE_QY = 1 << 1;
+            const IGNORE_QZ = 1 << 2;
+            const IGNORE_FX = 1 << 3;
+            const IGNORE_FY = 1 << 4;
+            const IGNORE_FZ = 1 << 5;
+        }
     }
+    
+    impl OffboardControlIgnore {
+        pub fn is_ignoring_qx(&self) -> bool {
+            self.intersects(Self::IGNORE_QX)
+        }
+        
+        pub fn is_ignoring_qy(&self) -> bool {
+            self.intersects(Self::IGNORE_QY)
+        }
+
+        pub fn is_ignoring_qz(&self) -> bool {
+            self.intersects(Self::IGNORE_QZ)
+        }
+
+        pub fn is_ignoring_fx(&self) -> bool {
+            self.intersects(Self::IGNORE_FX)
+        }
+
+        pub fn is_ignoring_fy(&self) -> bool {
+            self.intersects(Self::IGNORE_FY)
+        }
+
+        pub fn is_ignoring_fz(&self) -> bool {
+            self.intersects(Self::IGNORE_FZ)
+        }
+    }
+
 
     #[derive(Debug, Clone, Copy)]
     pub enum GnssFixType {

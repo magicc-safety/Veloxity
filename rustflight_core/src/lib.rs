@@ -51,7 +51,12 @@ pub mod params2;
 pub mod rustflight;
 pub mod sensorprocessors;
 pub mod state_machine;
+pub mod command_manager;
+pub mod rc;
+pub mod pwm;
 //pub(crate) mod units;
+
+pub use micro_algebra;
 
 // MAVLINK Specific
 pub mod mavlink {

@@ -173,6 +173,7 @@ pub struct BaroPacket {
     pub header: RosflightPacketHeader,
     pub pressure: f32,
     pub temperature: f32,
+    pub altitude: f32,
 }
 
 // ------------------------------
@@ -182,8 +183,9 @@ pub struct BaroPacket {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PitotPacket {
     pub header: RosflightPacketHeader,
-    pub pressure: f32,
+    pub differential_pressure: f32,
     pub temperature: f32,
+    pub indicated_airspeed: f32,
 }
 
 // ------------------------------
