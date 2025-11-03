@@ -50,7 +50,13 @@ impl BodyType for Quadrotor {
     type RequiredSensors = hlist_type![
         Option<packets::ImuPacket>,
         Option<packets::MagPacket>,
-        Option<packets::RcPacket>
+        Option<packets::BaroPacket>,
+        Option<packets::PitotPacket>,
+        Option<packets::RangePacket>,
+        Option<packets::GNSSPacket>,
+        Option<packets::BatteryPacket>,
+        Option<packets::RcPacket>,
+        Option<packets::AttitudePacket>
     ];
 
     type Estimator = estimator::quad_estimator::QuadEstimator;

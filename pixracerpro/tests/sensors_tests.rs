@@ -59,22 +59,33 @@ use rustflight_core::{
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
+// Tiny aliases for readability
+pub type I0 = Here;
+pub type I1 = There<I0>;
+pub type I2 = There<I1>;
+pub type I3 = There<I2>;
+pub type I4 = There<I3>;
+pub type I5 = There<I4>;
+pub type I6 = There<I5>;
+pub type I7 = There<I6>;
+pub type I8 = There<I7>;
+
 // define the wiring diagram
 #[derive(Default)]
 pub struct PixRacerProQuadConfig;
 impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     // needs IMU, Baro, Mag, GNSS
-    type SculptIndices = hlist_type![Here, Here, Here, There<Here>];
+    type SculptIndices = hlist_type![I0, I1, I2, I3, I4, I5, I6, I7, I8];
 
-    type RcPacketIndex = There<There<Here>>;
-    type ImuPacketIndex = There<There<Here>>;
-    type MagPacketIndex = There<There<Here>>;
-    type BaroPacketIndex = There<There<Here>>;
-    type PitotPacketIndex = There<There<Here>>;
-    type RangePacketIndex = There<There<Here>>;
-    type GNSSPacketIndex = There<There<Here>>;
-    type BatteryPacketIndex = There<There<Here>>;
-    type AttitudePacketIndex = There<There<Here>>;
+    type ImuPacketIndex = I0;
+    type MagPacketIndex = I1;
+    type BaroPacketIndex = I2;
+    type PitotPacketIndex = I3;
+    type RangePacketIndex = I4;
+    type GNSSPacketIndex = I5;
+    type BatteryPacketIndex = I6;
+    type RcPacketIndex = I7;
+    type AttitudePacketIndex = I8;
 }
 
 #[entry]

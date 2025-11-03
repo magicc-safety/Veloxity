@@ -58,8 +58,11 @@ impl BoardTrait for Board {
         Option<Result<packets::MagPacket, errors::SensorError>>,
         Option<Result<packets::BaroPacket, errors::SensorError>>,
         Option<Result<packets::PitotPacket, errors::SensorError>>,
+        Option<Result<packets::RangePacket, errors::SensorError>>,
         Option<Result<packets::GNSSPacket, errors::SensorError>>,
-        Option<Result<packets::RcPacket, errors::SensorError>>
+        Option<Result<packets::BatteryPacket, errors::SensorError>>,
+        Option<Result<packets::RcPacket, errors::SensorError>>,
+        Option<Result<packets::AttitudePacket, errors::SensorError>>
     ];
 
     type ProcessedSensorSet = hlist_type![
@@ -67,8 +70,11 @@ impl BoardTrait for Board {
         Option<packets::MagPacket>,
         Option<packets::BaroPacket>,
         Option<packets::PitotPacket>,
+        Option<packets::RangePacket>,
         Option<packets::GNSSPacket>,
-        Option<packets::RcPacket>
+        Option<packets::BatteryPacket>,
+        Option<packets::RcPacket>,
+        Option<packets::AttitudePacket>
     ];
 
     type ProcessorHList = hlist_type![
@@ -76,8 +82,11 @@ impl BoardTrait for Board {
         sensorprocessors::PassthroughMagProcessor,
         sensorprocessors::PassthroughBaroProcessor,
         sensorprocessors::PassthroughPitotProcessor,
+        sensorprocessors::PassthroughRangeProcessor,
         sensorprocessors::PassthroughGNSSProcessor,
-        sensorprocessors::PassthroughRcProcessor
+        sensorprocessors::PassthroughBatteryProcessor,
+        sensorprocessors::PassthroughRcProcessor,
+        sensorprocessors::PassthroughAttitudeProcessor
     ];
 
     fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
@@ -85,8 +94,8 @@ impl BoardTrait for Board {
         sensors.1.0 = peripherals::iis2mdc::MAG_SIGNAL.try_take();
         sensors.1.1.0 = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.1.1.1.0 = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
-        sensors.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
-        sensors.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+        sensors.1.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
 
         // Debug statements to check receiving sensor data
         if let Some(imu_packet) = sensors.0 {
@@ -112,10 +121,10 @@ impl BoardTrait for Board {
         if sensors.1.1.1.0.is_some() {
             defmt::info!("Sensor Pitot data received!");
         }
-        if sensors.1.1.1.1.0.is_some() {
+        if sensors.1.1.1.1.1.0.is_some() {
             defmt::info!("Sensor GNSS data received!");
         }
-        if sensors.1.1.1.1.1.0.is_some() {
+        if sensors.1.1.1.1.1.1.1.0.is_some() {
             defmt::info!("Sensor RC data received!");
         }
     }
