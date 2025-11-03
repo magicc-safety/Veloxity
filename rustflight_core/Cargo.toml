@@ -42,7 +42,7 @@ edition = "2024"
 [dependencies]
 bitflags = "2.6.0"
 micro_algebra = { git = "ssh://git@github.com/Derekbenj/micro_algebra.git", branch = "turbomath_replace" }
-# For .sqrt() and .powi() traits for f64s
+# For .sqrt(), .powf() and .powi() traits for f64s
 num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 libm = "0.2"
 

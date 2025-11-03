@@ -39,11 +39,12 @@
 use cortex_m_rt::entry;
 // use defmt;
 use pixracerpro::*;
+use pixracerpro::pwm::BoardPwmDriver;
 use rustflight_core::{
     board::BoardTrait,
     board::dummy::DummyBoard,
     bodytype::BodyType,
-    bodytype::quadrotor::{Quadrotor}, // QuadController, QuadEstimator, QuadMixer, 
+    bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
     estimator::Estimator,
@@ -53,6 +54,8 @@ use rustflight_core::{
     rustflight::Configuration,
     rustflight::rustflight_typed::ROSFlight,
     state_machine::StateManager,
+    params2::Params,
+    pwm
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
@@ -80,9 +83,9 @@ fn main() -> ! {
     let mut board = board::Board::new();
 
     // body type instantiations
-    let estimator = QuadEstimator::default();
-    let controller = QuadController::default();
-    let mixer = QuadMixer::default();
+    let estimator = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
+    let controller = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
+    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&Params::default());
 
     // zero-sized configuration marker (necessary)
     let config = PixRacerProQuadConfig::default();
@@ -93,17 +96,19 @@ fn main() -> ! {
     // state_manager
     let state_manager = StateManager::new();
 
+    let pwm_driver = BoardPwmDriver::new(&mut board.servos);
+
     let mut rosflight = ROSFlight::init(
         1000,
         board,
-        Params,
+        Params::default(),
         mavlink,
         state_manager,
         estimator,
         controller,
         mixer,
         config,
-        PixRacerProServoMonstrosity,
+        pwm_driver,
     );
 
     loop {
