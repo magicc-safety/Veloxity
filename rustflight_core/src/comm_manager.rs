@@ -38,10 +38,29 @@ pub mod mavlink_parser;
 
 use crate::board;
 use crate::comm_messages::{self, messages::*, enums::*};
+use crate::state_machine::StateManager;
+use crate::command_manager::CommandManager;
+use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::mavlink::dialects::Rosflight;
+use crate::packets::{self, RC_PACKET_CHANNELS};
+use crate::hlist::*;
+use crate::bodytype::BodyType;
+use crate::rustflight::Configuration;
 use crate::params2::{ParamDefinition, ParamId, ParamValue, PARAMS_COUNT, ParamIter, Params, PARAM_DEFINITIONS};
 use crate::sensorprocessors::CalibrationFlags;
 use core::marker::PhantomData;
+
+const HEARTBEAT_INTERVAL_US: u64 = 1_000_000; // 1 second = 1,000,000 microseconds
+const STATUS_INTERVAL_US: u64 = 500_000;    // 2 Hz
+const ATTITUDE_INTERVAL_US: u64 = 10_000;   // 100 Hz
+const IMU_INTERVAL_US: u64 = 2500;          // 400 Hz
+const BARO_INTERVAL_US: u64 = 20_000;         // 50 Hz
+const MAG_INTERVAL_US: u64 = 50_000;          // 20 Hz
+const SONAR_INTERVAL_US: u64 = 100_000;       // 10 Hz
+const BATTERY_INTERVAL_US: u64 = 1_000_000;   // 1 Hz
+const GNSS_INTERVAL_US: u64 = 200_000;        // 5 Hz
+const RC_INTERVAL_US: u64 = 50_000;           // 20 Hz
+const OUTPUT_RAW_INTERVAL_US: u64 = 50_000;   // 20 Hz
 
 // used for converting names of ParamValues ("id" during creation in params.cpp) to null-terminated characters
 pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
@@ -74,6 +93,18 @@ where
     B: board::BoardTrait,
     T: comm_link_trait::CommInterface<B>,
 {
+    last_heartbeat_us: u64,
+    last_status_send_us: u64,
+    last_imu_send_us: u64,
+    last_attitude_send_us: u64,
+    last_baro_send_us: u64,
+    last_mag_send_us: u64,
+    last_sonar_send_us: u64,
+    last_battery_send_us: u64,
+    last_gnss_send_us: u64,
+    last_rc_send_us: u64,
+    last_output_raw_us: u64,
+
     pub sysid: u8,
     comm_link: T,
     pub msgs: comm_messages::Messages,
@@ -85,8 +116,21 @@ where
     B: board::BoardTrait,
     T: comm_link_trait::CommInterface<B>,
 {
-    pub fn new(comm_link: T) -> Self {
+    pub fn new(comm_link: T, now_us: u64) -> Self {
         CommManager {
+
+            last_heartbeat_us: now_us,
+            last_status_send_us: now_us,
+            last_imu_send_us: now_us,
+            last_attitude_send_us: now_us,
+            last_baro_send_us: now_us,
+            last_mag_send_us: now_us,
+            last_sonar_send_us: now_us,
+            last_battery_send_us: now_us,
+            last_gnss_send_us: now_us,
+            last_rc_send_us: now_us,
+            last_output_raw_us: now_us,
+
             sysid: 0,
             comm_link,
             msgs: comm_messages::Messages::default(),
@@ -94,12 +138,274 @@ where
         }
     }
 
+    pub fn send_telemetry_streams<BT, C, A>(
+        &mut self,
+        board: &mut B,
+        now_us: u64,
+        state_manager: &StateManager,
+        command_manager: &CommandManager,
+        params: &Params,
+        estimator_state: &<BT::Estimator as Estimator>::State,
+        processed_sensors: &B::ProcessedSensorSet,
+        actuator_commands: &A,
+    )
+    where
+        BT: BodyType,
+        A: AsRef<[f64]>,
+        C: Configuration<B, BT>,
+        BT::Estimator: Estimator,
+        <BT::Estimator as Estimator>::State: AttitudeStateTrait,
+        B::ProcessedSensorSet: HListGet<Option<packets::ImuPacket>, C::ImuPacketIndex> +
+            HListGet<Option<packets::MagPacket>, C::MagPacketIndex> +
+            HListGet<Option<packets::BaroPacket>, C::BaroPacketIndex> +
+            HListGet<Option<packets::PitotPacket>, C::PitotPacketIndex> +
+            HListGet<Option<packets::RangePacket>, C::RangePacketIndex> +
+            HListGet<Option<packets::GNSSPacket>, C::GNSSPacketIndex> +
+            HListGet<Option<packets::BatteryPacket>, C::BatteryPacketIndex> +
+            HListGet<Option<packets::AttitudePacket>, C::AttitudePacketIndex> +
+            HListGet<Option<packets::RcPacket>, C::RcPacketIndex>
+    {
+        let now_ms = (now_us / 1000) as u32;
+
+        // Handle Heartbeat Message
+        if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US {
+
+            let hb = HeartbeatMsg {
+                autopilot: 0,
+                base_mode: 0,
+                custom_mode: 0,
+                mavlink_version: 0,
+                system_status: 0,
+                type_: 0
+            };
+            self.send_rosflight_heartbeat(board, hb);
+            self.last_heartbeat_us = now_us;
+        }
+
+        // Handle Status Message
+        if now_us >= self.last_status_send_us + STATUS_INTERVAL_US {
+            let status_msg = comm_messages::messages::RosflightStatusMsg {
+                armed: state_manager.is_armed() as u8,
+                failsafe: state_manager.is_in_failsafe() as u8,
+                rc_override: 0, // Placeholder: self.command_manager.is_rc_override() as u8,
+                offboard: 0, // Placeholder: self.command_manager.is_offboard() as u8,
+                error_code: state_manager.get_errors(),
+                control_mode: command_manager.get_control_mode().into(),
+                num_errors: state_manager.get_errors().bits().count_ones() as i16,
+                loop_time_us: 0, // Placeholder
+            };
+            self.send_rosflight_status(board, status_msg);
+            self.last_status_send_us = now_us;
+        }
+
+        // --- Send IMU Telemetry ---
+        if now_us >= self.last_imu_send_us + IMU_INTERVAL_US {
+            let imu_packet_option: &Option<packets::ImuPacket> = 
+                processed_sensors.get();
+
+            if let Some(imu_packet) = imu_packet_option {
+                let imu_msg = comm_messages::messages::SmallImuMsg {
+                    temperature: 0.0f32,
+                    time_boot_us: imu_packet.header.timestamp,
+                    xacc: imu_packet.accel[0] as f32,
+                    yacc: imu_packet.accel[1] as f32,
+                    zacc: imu_packet.accel[2] as f32,
+                    xgyro: imu_packet.gyro[0] as f32,
+                    ygyro: imu_packet.gyro[1] as f32,
+                    zgyro: imu_packet.gyro[2] as f32,
+                };
+                self.send_rosflight_small_imu(board, imu_msg);
+            }
+            self.last_imu_send_us = now_us;
+        }
+
+        if now_us >= self.last_attitude_send_us + ATTITUDE_INTERVAL_US {
+    
+            // 1. Get attitude and its derivative from the estimator state
+            let q = estimator_state.q();    // [w, x, y, z]
+            let qd = estimator_state.q_dot(); // [w_dot, x_dot, y_dot, z_dot]
+
+            let w = q[0]; let x = q[1]; let y = q[2]; let z = q[3];
+            let wd = qd[0]; let xd = qd[1]; let yd = qd[2]; let zd = qd[3];
+
+            // 2. Calculate angular rates (omega) from q and q_dot
+            //    omega_vec = 2 * conjugate(q) * q_dot
+            let rollspeed  = 2.0 * (w*xd - x*wd - y*zd + z*yd);
+            let pitchspeed = 2.0 * (w*yd - x*zd - y*wd + z*xd);
+            let yawspeed   = 2.0 * (w*zd - x*yd - y*xd + z*wd);
+    
+            let msg = comm_messages::messages::AttitudeQuaternionMsg {
+                time_boot_ms: (now_us / 1000) as u32,
+                q1: w,
+                q2: x,
+                q3: y,
+                q4: z,
+                rollspeed: rollspeed,
+                pitchspeed: pitchspeed,
+                yawspeed: yawspeed,
+            };
+            self.send_rosflight_attitude_quaternion(board, msg);
+
+            self.last_attitude_send_us = now_us;
+        }
+
+        // --- Send Baro Telemetry ---
+        if now_us >= self.last_baro_send_us + BARO_INTERVAL_US {
+            let baro_packet_option: &Option<packets::BaroPacket> = 
+                processed_sensors.get();
+
+            if let Some(baro_packet) = baro_packet_option {
+                let baro_msg = comm_messages::messages::SmallBaroMsg {
+                    altitude: 0.0f32,
+                    pressure: baro_packet.pressure,
+                    temperature: baro_packet.temperature,
+                };
+                self.send_rosflight_small_baro(board, baro_msg);
+            }
+            self.last_baro_send_us = now_us;
+        }
+
+        // --- Send Mag Telemetry ---
+        if now_us >= self.last_mag_send_us + MAG_INTERVAL_US {
+            let mag_packet_option: &Option<packets::MagPacket> = processed_sensors.get();
+            if let Some(packet) = *mag_packet_option {
+                let msg = comm_messages::messages::SmallMagMsg {
+                    xmag: packet.flux[0],
+                    ymag: packet.flux[1],
+                    zmag: packet.flux[2],
+                };
+                self.send_rosflight_small_mag(board, msg);
+            }
+            self.last_mag_send_us = now_us;
+        }
+
+        if now_us >= self.last_sonar_send_us + SONAR_INTERVAL_US {
+            let range_packet_option: &Option<packets::RangePacket> = processed_sensors.get();
+            if let Some(packet) = *range_packet_option {
+                let msg = comm_messages::messages::SmallRangeMsg {
+                    type_: comm_messages::enums::RosflightRangeType::RosflightRangeSonar,
+                    range: packet.range,
+                    // TODO: These values aren't in the generic RangePacket.
+                    // You may need to add them or send 0.
+                    max_range: 0.0, 
+                    min_range: 0.0,
+                };
+                self.send_rosflight_small_range(board, msg);
+            }
+            self.last_sonar_send_us = now_us;
+        }
+
+        if now_us >= self.last_battery_send_us + BATTERY_INTERVAL_US {
+            let battery_packet_option: &Option<packets::BatteryPacket> = processed_sensors.get();
+            if let Some(packet) = *battery_packet_option {
+                let msg = comm_messages::messages::BatteryStatusMsg {
+                    battery_voltage: packet.voltage,
+                    battery_current: packet.current,
+                };
+                self.send_rosflight_battery_status(board, msg);
+            }
+            self.last_battery_send_us = now_us;
+        }
+
+        if now_us >= self.last_gnss_send_us + GNSS_INTERVAL_US {
+            let gnss_packet_option: &Option<packets::GNSSPacket> = processed_sensors.get();
+            if let Some(packet) = *gnss_packet_option {
+                let msg = comm_messages::messages::RosflightGnssMsg {
+                    rosflight_timestamp: packet.header.timestamp,
+                    seconds: packet.sec as u64,
+                    nanos: packet.nano as u32,
+                    // TODO: This message is complex. You will need to map
+                    // fields from your GNSSPacket to this message.
+                    // This is just a placeholder structure.
+                    fix_type: packet.fix_type,
+                    num_sat: packet.num_sats,
+                    lat: packet.lat,
+                    lon: packet.lon,
+                    height: packet.height,
+                    vel_n: packet.vel_n,
+                    vel_e: packet.vel_e,
+                    vel_d: packet.vel_d,
+                    s_acc: packet.s_acc,
+                    h_acc: packet.h_acc,
+                    v_acc: packet.v_acc,
+                    // ... fill other fields as available ...
+                };
+                self.send_rosflight_gnss(board, msg);
+            }
+            self.last_gnss_send_us = now_us;
+        }
+
+        if now_us >= self.last_rc_send_us + RC_INTERVAL_US {
+            // Get the raw f32 packet
+            let rc_packet_option: &Option<packets::RcPacket> = processed_sensors.get();
+            if let Some(packet) = *rc_packet_option {
+                
+                // Create the destination array for u16 channels
+                let mut scaled_channels: [u16; RC_PACKET_CHANNELS] = [0; RC_PACKET_CHANNELS];
+                let num_channels_to_scale = (packet.n_chan as usize).min(16); // Param arrays are size 16
+
+                // Scale each channel that we have params for
+                for i in 0..num_channels_to_scale {
+                    // Scale f32 from [-1, 1] to [1000, 2000] (as f32)
+                    let scaled_f32 = packet.chan[i] * 1000.0 + 1000.0;
+                    // Cast to u16
+                    scaled_channels[i] = scaled_f32 as u16;
+                }
+                
+                // Copy any remaining channels (16-17) as-is (though they are likely 0)
+                if packet.n_chan as usize > 16 {
+                    for i in 16..packet.n_chan as usize {
+                         if i < RC_PACKET_CHANNELS {
+                            // We don't have scaling params, just cast the raw value
+                            // This will likely just be 0
+                            scaled_channels[i] = packet.chan[i] as u16;
+                         }
+                    }
+                }
+
+                let msg = comm_messages::messages::RcChannelsMsg {
+                    time_boot_ms: (packet.header.timestamp / 1000) as u32,
+                    chancount: packet.n_chan as u8,
+                    channels: scaled_channels, // The new [u16; N] array
+                    // TODO: The RcPacket does not contain RSSI. 
+                    // You may need to add this from another source if available.
+                    rssi: 255, // 255 = Invalid
+                };
+                self.send_rosflight_rc_channels(board, msg);
+            }
+            self.last_rc_send_us = now_us;
+        }
+
+        if now_us >= self.last_output_raw_us + OUTPUT_RAW_INTERVAL_US {
+            let outputs: &[f64] = actuator_commands.as_ref();
+            
+            // 1. Create the destination array with the new size
+            let mut values: [f32; 14] = [0.0; 14];
+            
+            // 2. Copy up to 14 channels
+            let count = outputs.len().min(14);
+            //values[..count].copy_from_slice(&outputs[..count]);
+            let count = outputs.len().min(14);
+            for i in 0..count {
+                values[i] = outputs[i] as f32;
+            }
+
+            let msg = comm_messages::messages::RosflightOutputRawMsg {
+                stamp: now_us, // 3. Use the u64 timestamp
+                values,        // 4. Pass the [f32; 14] array
+            };
+            self.send_rosflight_output_raw(board, msg);
+            self.last_output_raw_us = now_us;
+        }
+
+    }
+
     pub fn process_incoming_messages(&mut self, board: &mut B) {
         self.comm_link
             .handle_incoming_messages(board, &mut self.msgs);
     }
 
-    pub fn act_on_messages(&mut self, params_iter: &mut Option<ParamIter>, params: &mut Params, cal_flags: &mut CalibrationFlags, board: &mut B) {
+    pub fn act_on_messages(&mut self, params_iter: &mut Option<ParamIter>, params: &mut Params, cal_flags: &mut CalibrationFlags, board: &mut B) -> Option<ParamId> {
 
         // first check the param_request_list
         if self.msgs.param_request_list.take().is_some() {
@@ -136,13 +442,6 @@ where
             self.send_timesync(board, msg);
         }
 
-        // now check for parameter set requests
-        // let msg_opt = self.msgs.param_set.take();
-        // if let Some(mut msg) = msg_opt {
-        //     // TODO will have to add checking on target system and component system before matching here...
-        //     params.set_by_name(msg.param_id, msg.param_value);
-        // }
-
         let msg_opt = self.msgs.param_set.take();
         if let Some(msg) = msg_opt { // No need for `mut` if you only read from msg
 
@@ -164,12 +463,18 @@ where
                     if params.set_by_name(param_name_str, msg.param_value) {
                         println!("Set parameter '{}' successfully.", param_name_str);
 
-                        // if the param was the system id, update the comm_manager's systemid
-
-
                         // MAVLink spec requires acknowledging the change by sending PARAM_VALUE
                         // Find the ParamDefinition to get the ID and count
                         if let Some(def) = PARAM_DEFINITIONS.iter().find(|d| d.name == param_name_str) {
+                            
+                            if def.id == ParamId::PARAM_SYSTEM_ID {
+                                // ...update our internal sysid
+                                if let ParamValue::Int(new_sysid) = msg.param_value {
+                                    self.sysid = new_sysid as u8;
+                                    println!("CommManager sysid updated to {}", self.sysid);
+                                }
+                            }
+
                             let value_msg = ParamValueMsg {
                                 param_id: msg.param_id, // Use the received ID bytes
                                 param_value: msg.param_value, // Use the value that was set
@@ -179,6 +484,7 @@ where
                             // Assuming 'self.comm_link' and 'board' are accessible
                             // Need system ID - retrieve from params or store in CommManager
                             self.comm_link.send_named_value(board, self.sysid, value_msg);
+                            return Some(def.id)
                         } else {
                             println!("Error: Could not find definition for '{}' after setting.", param_name_str);
                         }
@@ -302,30 +608,9 @@ where
             self.comm_link.send_cmd_ack(board, self.sysid, ack_msg);
             println!("Sent ACK for command {:?} with status {:?}", ack_msg.command, ack_msg.success);
         } // end if let Some(msg)
-    }
 
-    // SENDING PLACEHOLDER MESSAGES
-    pub fn send_heartbeat(&mut self, board: &mut B, hb: HeartbeatMsg) {
-        self.comm_link.send_heartbeat(board, self.sysid, hb);
+        None
     }
-
-    pub fn send_timesync(&mut self, board: &mut B, ts: TimesyncMsg) {
-        self.comm_link.send_timesync(board, self.sysid, ts);
-    }
-
-    pub fn send_status(&mut self, board: &mut B, sm: RosflightStatusMsg) {
-        self.comm_link.send_status(board, self.sysid, sm);
-    }
-
-    // pub fn send_named_value(&mut self, board: &mut B) {
-    //     let msg = ParamValueMsg {
-    //         param_id: *b"TEST_PARAM_ID___",
-    //         param_value: ParamValue::Float(123.45),
-    //         param_count: 1,
-    //         param_index: 0,
-    //     };
-    //     self.comm_link.send_named_value(board, self.sysid, msg);
-    // }
 
     pub fn send_param_value(&mut self, def: &ParamDefinition, val: ParamValue, board: &mut B) {
         let msg = ParamValueMsg {
@@ -337,111 +622,51 @@ where
         self.comm_link.send_named_value(board, self.sysid, msg);
     }
 
-    pub fn send_version(&mut self, board: &mut B) {
-        let msg = RosflightVersionMsg {
-            version: [42; 50], // Fill with arbitrary byte value
-        };
-        self.comm_link.send_version(board, self.sysid, msg);
+    pub fn send_timesync(&mut self, board: &mut B, msg: TimesyncMsg) {
+        self.comm_link.send_timesync(board, self.sysid, msg);
     }
 
-    pub fn send_output_raw(&mut self, board: &mut B) {
-        let msg = RosflightOutputRawMsg {
-            stamp: 123456789,
-            values: [0.5; 14],
-        };
-        self.comm_link.send_output_raw(board, self.sysid, msg);
+    pub fn send_rosflight_heartbeat(&mut self, board: &mut B, msg: HeartbeatMsg) {
+        self.comm_link.send_heartbeat(board, self.sysid, msg);
     }
 
-    pub fn send_attitude(&mut self, board: &mut B) {
-        let msg = AttitudeQuaternionMsg {
-            time_boot_ms: 1000,
-            q1: 1.0, // w
-            q2: 0.0, // x
-            q3: 0.0, // y
-            q4: 0.0, // z
-            rollspeed: 0.1,
-            pitchspeed: 0.2,
-            yawspeed: 0.3,
-        };
+    pub fn send_rosflight_status(&mut self, board: &mut B, msg: RosflightStatusMsg) {
+        self.comm_link.send_status(board, self.sysid, msg);
+    }
+
+    pub fn send_rosflight_attitude_quaternion(&mut self, board: &mut B, msg: AttitudeQuaternionMsg) {
         self.comm_link.send_attitude(board, self.sysid, msg);
     }
 
-    pub fn send_baro(&mut self, board: &mut B) {
-        let msg = SmallBaroMsg {
-            altitude: 123.4,
-            pressure: 101.325,
-            temperature: 25.0,
-        };
-        self.comm_link.send_baro(board, self.sysid, msg);
-    }
-
-    pub fn send_diff_pressure(&mut self, board: &mut B) {
-        let msg = DiffPressureMsg {
-            velocity: 15.5,
-            diff_pressure: 50.2,
-            temperature: 26.0,
-        };
-        self.comm_link.send_diff_pressure(board, self.sysid, msg);
-    }
-
-    pub fn send_imu(&mut self, board: &mut B) {
-        let msg = SmallImuMsg {
-            time_boot_us: 50000,
-            xacc: 0.01,
-            yacc: 0.02,
-            zacc: 9.8,
-            xgyro: 0.001,
-            ygyro: 0.002,
-            zgyro: 0.003,
-            temperature: 45.5,
-        };
+    pub fn send_rosflight_small_imu(&mut self, board: &mut B, msg: SmallImuMsg) {
         self.comm_link.send_imu(board, self.sysid, msg);
     }
 
-    pub fn send_mag(&mut self, board: &mut B) {
-        let msg = SmallMagMsg {
-            xmag: 0.1,
-            ymag: 0.2,
-            zmag: 0.3,
-        };
+    pub fn send_rosflight_small_baro(&mut self, board: &mut B, msg: SmallBaroMsg) {
+        self.comm_link.send_baro(board, self.sysid, msg);
+    }
+
+    pub fn send_rosflight_small_mag(&mut self, board: &mut B, msg: SmallMagMsg) {
         self.comm_link.send_mag(board, self.sysid, msg);
     }
 
-    pub fn send_rc_raw(&mut self, board: &mut B) {
-        let msg = RosflightOutputRawMsg {
-            stamp: 987654321,
-            values: [0.7; 14],
-        };
-        self.comm_link.send_rc_raw(board, self.sysid, msg);
-    }
-
-    pub fn send_range(&mut self, board: &mut B) {
-        let msg = SmallRangeMsg {
-            type_: RosflightRangeType::RosflightRangeLidar,
-            range: 5.5,
-            max_range: 40.0,
-            min_range: 0.1,
-        };
+    pub fn send_rosflight_small_range(&mut self, board: &mut B, msg: SmallRangeMsg) {
         self.comm_link.send_range(board, self.sysid, msg);
     }
 
-    pub fn send_gnss(&mut self, board: &mut B) {
-        let msg = RosflightGnssMsg {
-            seconds: 12345,
-            nanos: 0,
-            fix_type: GnssFixType::GnssFix3dFix,
-            num_sat: 12,
-            lat: 40.2338,
-            lon: -111.6585,
-            height: 1400.0,
-            vel_n: 0.1,
-            vel_e: -0.1,
-            vel_d: 0.0,
-            h_acc: 1.5,
-            v_acc: 2.5,
-            s_acc: 0.5,
-            rosflight_timestamp: 1,
-        };
+    pub fn send_rosflight_battery_status(&mut self, board: &mut B, msg: BatteryStatusMsg) {
+        self.comm_link.send_battery_status(board, self.sysid, msg);
+    }
+
+    pub fn send_rosflight_gnss(&mut self, board: &mut B, msg: RosflightGnssMsg) {
         self.comm_link.send_gnss(board, self.sysid, msg);
+    }
+    
+    pub fn send_rosflight_rc_channels(&mut self, board: &mut B, msg: RcChannelsMsg) {
+       self.comm_link.send_rc_channels(board, self.sysid, msg);
+    }
+
+    pub fn send_rosflight_output_raw(&mut self, board: &mut B, msg: RosflightOutputRawMsg) {
+        self.comm_link.send_output_raw(board, self.sysid, msg);
     }
 }

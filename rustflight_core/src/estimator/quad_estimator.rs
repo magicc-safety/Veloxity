@@ -39,6 +39,7 @@ use crate::hlist::*;
 use crate::hlist_type;
 use crate::packets;
 use super::Estimator;
+use super::AttitudeStateTrait;
 
 use micro_algebra::stack::{
     quaternion::Quaternion,
@@ -52,6 +53,26 @@ pub struct AttitudeState {
     pub q_hat: Quaternion<f64>,
     pub q_dot: Quaternion<f64>,
     pub b_hat: Vector<f64, 3>,
+}
+
+impl AttitudeStateTrait for AttitudeState {
+    fn q(&self) -> [f32; 4] {
+        [
+            self.q_hat.get_w() as f32,
+            self.q_hat.get_x() as f32,
+            self.q_hat.get_y() as f32,
+            self.q_hat.get_z() as f32,
+        ]
+    }
+    
+    fn q_dot(&self) -> [f32; 4] {
+        [
+            self.q_dot.get_w() as f32,
+            self.q_dot.get_x() as f32,
+            self.q_dot.get_y() as f32,
+            self.q_dot.get_z() as f32,
+        ]
+    }
 }
 
 impl From<AttitudeState> for Vector<f64, 3> {

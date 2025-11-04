@@ -92,7 +92,7 @@ impl_store!(ExternalAttitudeMsg,     external_attitude,"external_attitude");
 
 pub mod messages {
     use super::enums::*;
-    use crate::{params2::ParamValue, state_machine::ErrorFlag};
+    use crate::{packets::GNSSFixType, params2::ParamValue, state_machine::ErrorFlag};
     // Heartbeat
     // I don't think we need all these fields for the generic message but I'm leaving them for now
     #[derive(Debug, Clone, Copy)]
@@ -285,7 +285,7 @@ pub mod messages {
     pub struct RosflightGnssMsg {
         pub seconds: u64,
         pub nanos: u32,
-        pub fix_type: GnssFixType,
+        pub fix_type: GNSSFixType,
         pub num_sat: u8,
         pub lat: f64, // deg DDS format
         pub lon: f64, // deg DDS format
@@ -300,7 +300,7 @@ pub mod messages {
     }
 
     #[derive(Debug, Clone, Copy)]
-    pub struct RosflightBatteryStatusMsg {
+    pub struct BatteryStatusMsg {
         pub battery_voltage: f32,
         pub battery_current: f32,
     }
