@@ -74,8 +74,8 @@ pub type I8 = There<I7>;
 #[derive(Default)]
 pub struct PixRacerProQuadConfig;
 impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
-    // needs IMU, Baro, Mag, GNSS
-    type SculptIndices = hlist_type![I0, I0, I4]; //I0, I0, I0, I0, I0, I0, I0];
+    // IMU, Mag, RC
+    type SculptIndices = hlist_type![I0, I0, I4]; 
 
     type ImuPacketIndex = I0;
     type MagPacketIndex = I1;
