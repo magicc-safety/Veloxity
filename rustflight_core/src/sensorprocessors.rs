@@ -83,6 +83,8 @@ impl<'a> Func<&'a mut Option<Result<BatteryPacket, errors::SensorError>>>
 // IMU Packet
 // ------------------------------
 
+const GYRO_MAX_CALIBRATION_DELTA: f64 = 0.1; // (rad/s) Threshold for movement... we won't calibrate if it's above this...
+
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughImuProcessor;
 impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for PassthroughImuProcessor {
@@ -113,6 +115,8 @@ pub struct ImuCalibrationState {
     accel_calibration_count: u16,
     max_accel: [f64; 3],
     min_accel: [f64; 3],
+    max_gyro: [f64; 3],
+    min_gyro: [f64; 3],
 }
 
 #[derive(Default, Copy, Clone)]

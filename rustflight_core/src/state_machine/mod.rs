@@ -267,6 +267,10 @@ impl StateManager {
         StateManager { machine: StateMachine::new(), }
     }
 
+    pub fn is_calibrating(&self) -> bool {
+        matches!(self.machine, StateMachine::Calibrating(_))
+    }
+
     // The main update loop. Takes an event and applies it to the internal state machine.
     pub fn update(&mut self, event: Event, params: &Params) {
         let start_state = self.machine;

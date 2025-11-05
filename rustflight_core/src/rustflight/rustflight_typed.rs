@@ -132,6 +132,11 @@ where
 
         let now_us = board.clock_micros();
 
+        rc_manager.init(&mut board, &params);
+
+        let mut comm_manager = comm_manager::CommManager::new(comm_link, now_us);
+        command_manager.init(&params, &mut state_manager);
+
         Self {
             loop_time_us,
 
@@ -144,7 +149,7 @@ where
             board,
             params,
             params_iter: None,
-            comm_manager: comm_manager::CommManager::new(comm_link, now_us),
+            comm_manager,
             sensors: B::RawSensorSet::default(),
             processorhlist: B::ProcessorHList::default(),
             estimator,
@@ -162,6 +167,38 @@ where
 
     pub fn run(&mut self) -> bool {
 
+
+
+
+
+
+
+
+
+
+
+        // TODO change me!!!! Add in the run function stuff from Gemini
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         let now_ms = self.board.clock_millis();
         let now_us = self.board.clock_micros();
 
@@ -174,6 +211,11 @@ where
             &mut self.board
         );
 
+        // start the gyro calibration
+        if self.state_manager.is_calibrating() {
+            self.cal_flags.insert(CalibrationFlags::GYRO);
+        }
+
         // Data ingestion: let the board update the sensor data store
         // Data processing: run the map operation across HLists
         // This applies the 'ProcessorHList' to the 'RawSensorSet'
@@ -181,6 +223,13 @@ where
         // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
         self.board.update_sensors(&mut self.sensors);
         let processed_sensors = self.sensors.map(self.processorhlist, &mut self.cal_flags, &mut self.params);
+
+        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
+        {
+            // The processor has finished! (It removed the flag)
+            // We can now send the event to complete the transition.
+            self.state_manager.update(Event::CALIBRATION_COMPLETE, &self.params);
+        }
 
         let (required_sensors, _remainder) = processed_sensors.clone().sculpt();
         let (rc_packet_option, estimator_sensors) = required_sensors.pluck();

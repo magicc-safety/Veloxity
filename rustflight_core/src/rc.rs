@@ -414,7 +414,9 @@ impl Rc {
                 }
             }
         } else { // Switch arming
-            if self.switch_on(Switch::Arm) {
+
+            let f_stick = self.stick(Stick::F);
+            if self.switch_on(Switch::Arm) && f_stick < arm_threshold {
                 if !is_armed {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
