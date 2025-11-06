@@ -144,6 +144,13 @@ macro_rules! declare_params {
                     _ => panic!("Param type mismatch: expected Float"),
                 }
             }
+
+            pub fn get_param_bool(&self, id: ParamId) -> bool {
+                match self.get_by_id(id) {
+                    ParamValue::Bool(val) => val,
+                    _ => panic!("Param type mismatch: expected Bool"),
+                }
+            }
         }
 
         impl Default for Params {

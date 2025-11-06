@@ -118,7 +118,7 @@ impl CommandManager {
 
     pub fn init(&mut self, params: &Params, state_manager: &mut StateManager) {
         let failsafe_throttle = params.get_param_float(ParamId::PARAM_FAILSAFE_THROTTLE);
-        let is_fixed_wing = params.get_param_int(ParamId::PARAM_FIXED_WING) > 0;
+        let is_fixed_wing = params.get_param_bool(ParamId::PARAM_FIXED_WING);
 
         // C++ logic from lines 74-79
         if !is_fixed_wing && (failsafe_throttle < 0.0 || failsafe_throttle > 1.0) {
