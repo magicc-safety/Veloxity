@@ -42,7 +42,7 @@ mod tests;
 
 use bitflags::bitflags;
 use crate::{board::BoardTrait, comm_manager::CommManager, params2::{ParamValue, Params, ParamId}};
-use core::mem::take;
+use core::{error, mem::take};
 use std::default;
 
 // Events that trigger state transitions
@@ -194,9 +194,27 @@ impl Preflight {
             Event::REQUEST_ARM => {
                 //if let ParamValue::Bool(true) = Params::get_calibrate_gyro_on_arm(params) {
                 if let ParamValue::Bool(true) = params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM) {
-                    StateMachine::Calibrating(State { state: Calibrating, error_flags: sm.error_flags })
+                    let mut error_flags = sm.error_flags;
+                    error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
+                    StateMachine::Calibrating(State { state: Calibrating, error_flags: error_flags })
                 } else {
-                    StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags })
+                    let is_calibrated = 
+                        params.get_param_float(ParamId::PARAM_GYRO_X_BIAS) != 0.0 ||
+                        params.get_param_float(ParamId::PARAM_GYRO_Y_BIAS) != 0.0 ||
+                        params.get_param_float(ParamId::PARAM_GYRO_Z_BIAS) != 0.0;
+
+                    if is_calibrated {
+                        // We are calibrated! Go to Armed.
+                        StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags })
+                    } else {
+                        // We are not calibrated, and we are not set to calibrate.
+                        // This is an error. Set the flag. The `state_manager.run()`
+                        // function will see this flag and move to ErrorPresent.
+                        let mut error_flags = sm.error_flags;
+                        error_flags.insert(ErrorFlag::UNCALIBRATED_IMU);
+                        StateMachine::Preflight(State { state: Preflight, error_flags: error_flags })
+                    }
+                    
                 }
             },
             Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
@@ -208,7 +226,11 @@ impl Preflight {
 impl Calibrating {
     fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
         match event {
-            Event::CALIBRATION_COMPLETE => StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags }),
+            Event::CALIBRATION_COMPLETE => {
+                let mut error_flags = sm.error_flags;
+                error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
+                StateMachine::Armed(State { state: Armed, error_flags: error_flags })
+            },
             Event::CALIBRATION_FAILED => StateMachine::Preflight(State { state: Preflight, error_flags: sm.error_flags }),
             Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
             _ => StateMachine::Calibrating(sm),

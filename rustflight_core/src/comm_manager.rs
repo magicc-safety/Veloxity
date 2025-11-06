@@ -405,7 +405,7 @@ where
             .handle_incoming_messages(board, &mut self.msgs);
     }
 
-    pub fn act_on_messages(&mut self, params_iter: &mut Option<ParamIter>, params: &mut Params, cal_flags: &mut CalibrationFlags, board: &mut B) -> Option<ParamId> {
+    pub fn act_on_messages(&mut self, params_iter: &mut Option<ParamIter>, params: &mut Params, cal_flags: &mut CalibrationFlags, board: &mut B, command_manager: &mut CommandManager) -> Option<ParamId> {
 
         // first check the param_request_list
         if self.msgs.param_request_list.take().is_some() {
@@ -440,6 +440,12 @@ where
             // fill ts1 (which is currently set to 0) and pass back to the companion computer immediately
             msg.ts1 = (board.clock_micros() * 1000) as i64;
             self.send_timesync(board, msg);
+        }
+
+        // offboard control message received... pass to the command_manager 
+        if let Some(msg) = self.msgs.offboard_control.take() {
+            let now_us = board.clock_micros();
+            command_manager.set_new_offboard_command(now_us, &msg);
         }
 
         let msg_opt = self.msgs.param_set.take();

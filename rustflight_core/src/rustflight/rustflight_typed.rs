@@ -40,10 +40,26 @@
 use core::marker::PhantomData;
 use micro_algebra::stack::vector::Vector;
 use crate::{
-    board::BoardTrait, bodytype::BodyType, comm_manager::{self, comm_link_trait::CommInterface}, comm_messages::{self, messages::HeartbeatMsg}, command_manager::{CommandManager, ControlType}, controller::Controller, errors, estimator::{self, Estimator, quad_estimator::{AttitudeState, QuadEstimator}}, hlist::*, mixer::Mixer, packets, params2::{self, PARAM_DEFINITIONS, ParamIter}, pwm::{self, PwmDriver}, rc::Rc, rustflight::Configuration, sensorprocessors::CalibrationFlags, state_machine::{Event, StateManager, ErrorFlag}
+    board::BoardTrait, 
+    bodytype::BodyType,
+    comm_manager::{self, comm_link_trait::CommInterface}, 
+    comm_messages::{self, messages::HeartbeatMsg}, 
+    command_manager::{CommandManager, ControlType}, 
+    controller::Controller, 
+    errors, 
+    estimator::{self, AttitudeStateTrait, Estimator, quad_estimator::{AttitudeState, QuadEstimator}}, 
+    hlist::*, 
+    mixer::Mixer, 
+    packets, 
+    params2::{self, PARAM_DEFINITIONS, ParamId, ParamIter}, 
+    pwm::{self, PwmDriver}, 
+    rc::Rc, 
+    rustflight::Configuration, 
+    sensorprocessors::CalibrationFlags, 
+    state_machine::{ErrorFlag, Event, StateManager}
 };
 
-
+const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
 
 pub struct ROSFlight<B, BT, C, CI, PD>
 //pub struct ROSFlight<B, BT, C, CI>
@@ -55,13 +71,8 @@ where
     PD: PwmDriver,
 {
     loop_time_us: u32,
-
-    last_heartbeat_us: u64,
-    last_status_send_us: u64,
-    last_imu_send_us: u64,
-    last_attitude_send_us: u64,
-    last_baro_send_us: u64,
-
+    last_imu_seen: u64,
+    
     pub board: B,
     params: params2::Params,
     params_iter: Option<ParamIter>,
@@ -95,6 +106,7 @@ where
     BT::Estimator: Estimator<
         Inputs = <BT::RequiredSensors as Plucker<Option<packets::RcPacket>, C::RcPacketSculptedIndex>>::Remainder,
     >,
+    <BT::Estimator as Estimator>::State: AttitudeStateTrait,
     BT::Controller: Controller<State = <BT::Estimator as Estimator>::State>,
     BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
     <<BT as BodyType>::Mixer as Mixer>::ActuatorCommands: AsRef<[f64]>,
@@ -139,12 +151,7 @@ where
 
         Self {
             loop_time_us,
-
-            last_heartbeat_us: now_us,
-            last_status_send_us: now_us,
-            last_imu_send_us: now_us,
-            last_attitude_send_us: now_us,
-            last_baro_send_us: now_us,
+            last_imu_seen: now_us,
 
             board,
             params,
@@ -167,38 +174,6 @@ where
 
     pub fn run(&mut self) -> bool {
 
-
-
-
-
-
-
-
-
-
-
-        // TODO change me!!!! Add in the run function stuff from Gemini
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         let now_ms = self.board.clock_millis();
         let now_us = self.board.clock_micros();
 
@@ -208,7 +183,8 @@ where
             &mut self.params_iter, 
             &mut self.params, 
             &mut self.cal_flags, 
-            &mut self.board
+            &mut self.board,
+            &mut self.command_manager,
         );
 
         // start the gyro calibration
@@ -223,6 +199,20 @@ where
         // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
         self.board.update_sensors(&mut self.sensors);
         let processed_sensors = self.sensors.map(self.processorhlist, &mut self.cal_flags, &mut self.params);
+
+       // also check for imu: if it's been too long, add a flag for imu not responding...
+        let imu_packet_option: &Option<packets::ImuPacket> = processed_sensors.get();
+        if imu_packet_option.is_some() {
+            // We got data! Reset the timer and clear the error.
+            self.last_imu_seen = now_us;
+            self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING), &self.params);
+        } else {
+            // No data this cycle. Check if the timer has expired.
+            if now_us > self.last_imu_seen + IMU_TIMEOUT_US {
+                self.state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING), &self.params);
+            }
+        }
+
 
         if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
         {
@@ -245,7 +235,6 @@ where
         self.rc_manager.run(now_ms, &self.params, &mut self.state_manager);
         self.command_manager.run(
             now_ms,
-            &self.comm_manager,
             &self.params, 
             &mut self.rc_manager, 
             &mut self.state_manager);
@@ -255,6 +244,12 @@ where
 
         // Now run the estimator 
         let state= self.estimator.estimate(&estimator_sensors);
+
+        if state.is_healthy() {
+            self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
+        } else {
+            self.state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
+        }
 
         // Get the final command from the manager, and translate to what the Controller needs:
         let combined_command = self.command_manager.combined_control();

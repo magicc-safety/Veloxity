@@ -47,4 +47,5 @@ pub trait Estimator {
 pub trait AttitudeStateTrait {
     fn q(&self) -> [f32; 4];
     fn q_dot(&self) -> [f32; 4];
+    fn is_healthy(&self) -> bool;
 }

@@ -39,7 +39,7 @@ use super::Controller;
 use crate::estimator::quad_estimator::AttitudeState;
 use micro_algebra::stack::vector::Vector;
 use micro_algebra::stack::quaternion::Quaternion;
-use crate::command_manager::{Control, ControlType};
+use crate::command_manager::{CombinedControl, ControlType};
 
 // The system's fixed time step, as defined in the estimator.
 const DT: f64 = 1.0 / 400.0;
@@ -120,7 +120,7 @@ impl Controller for QuadController {
     type State = AttitudeState;
     type ControlOutput = MixerInput;
 
-    fn control(&mut self, state: &Self::State, command: &Control) -> Self::ControlOutput {
+    fn control(&mut self, state: &Self::State, command: &CombinedControl) -> Self::ControlOutput {
 
         if command.qx.control_type == ControlType::Passthrough {
             MixerInput {
