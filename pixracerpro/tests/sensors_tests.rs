@@ -37,6 +37,7 @@
 // ******************************************************************************
 // **/
 use cortex_m_rt::entry;
+use cortex_m;
 // use defmt;
 use pixracerpro::*;
 use pixracerpro::pwm::BoardPwmDriver;
@@ -58,11 +59,6 @@ use rustflight_core::{
     pwm
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
-
-// Fix for linker error: "undefined symbol: __errno"
-// Provides a dummy C `errno` variable for C math functions (like sqrt)
-#[unsafe(no_mangle)]
-static mut __errno: i32 = 0;
 
 // Tiny aliases for readability
 pub type I0 = Here;
@@ -95,6 +91,13 @@ impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
 
 #[entry]
 fn main() -> ! {
+    // Enable the FPU for hard-float operations
+    unsafe {
+        let mut p = cortex_m::Peripherals::steal();
+        // Read the current CPACR value, set the FPU bits, and write it back
+        p.SCB.cpacr.write(p.SCB.cpacr.read() | 0x00F0_0000);
+    }
+
     // board implementation
     let (mut board, mut servos) = board::Board::new();
 

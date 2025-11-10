@@ -1836,11 +1836,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mathlib"
-version = "0.1.0"
-source = "git+ssh://git@github.com/magicc-safety/Rust_Experiments.git#07e604334344eaa91adf5e6041cb05ca8b501bcb"
-
-[[package]]
 name = "mavinspect"
 version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1969,10 +1964,11 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 [[package]]
 name = "micro_algebra"
 version = "0.1.0"
-source = "git+ssh://git@github.com/Derekbenj/micro_algebra.git?branch=turbomath_replace#d57a60e519d14db2691c321d635658ec25390c8c"
+source = "git+ssh://git@github.com/Derekbenj/micro_algebra.git?branch=libmTest#6abbdeda8d837c2eabaf66a4b107f25dd359bed9"
 dependencies = [
- "mathlib",
+ "libm",
  "num",
+ "num-traits",
 ]
 
 [[package]]
