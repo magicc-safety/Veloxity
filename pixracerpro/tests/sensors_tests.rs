@@ -59,6 +59,11 @@ use rustflight_core::{
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
+// Fix for linker error: "undefined symbol: __errno"
+// Provides a dummy C `errno` variable for C math functions (like sqrt)
+#[unsafe(no_mangle)]
+static mut __errno: i32 = 0;
+
 // Tiny aliases for readability
 pub type I0 = Here;
 pub type I1 = There<I0>;
@@ -75,23 +80,23 @@ pub type I8 = There<I7>;
 pub struct PixRacerProQuadConfig;
 impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     // IMU, Mag, RC
-    type SculptIndices = hlist_type![I0, I0, I4]; 
+    type SculptIndices = hlist_type![I0, I0, I5]; 
 
     type ImuPacketIndex = I0;
     type MagPacketIndex = I1;
-    type BaroPacketIndex = I2;
+    type BaroPacketIndex = I2; // Will this need to be updated?
     type PitotPacketIndex = I3;
     type RangePacketIndex = I4;
     type GNSSPacketIndex = I5;
     type BatteryPacketIndex = I6;
-    type RcPacketIndex = I7;
+    type RcPacketIndex = I2; // I thought this was going to have to be I7, but it seems to be the index of the quadrotor definition
     type AttitudePacketIndex = I8;
 }
 
 #[entry]
 fn main() -> ! {
     // board implementation
-    let mut board = board::Board::new();
+    let (mut board, mut servos) = board::Board::new();
 
     // body type instantiations
     let estimator = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
@@ -107,7 +112,7 @@ fn main() -> ! {
     // state_manager
     let state_manager = StateManager::new();
 
-    let pwm_driver = BoardPwmDriver::new(&mut board.servos);
+    // let pwm_driver = BoardPwmDriver::new(&mut board.servos);
 
     let mut rosflight = ROSFlight::init(
         1000,
@@ -119,7 +124,7 @@ fn main() -> ! {
         controller,
         mixer,
         config,
-        pwm_driver,
+        BoardPwmDriver::new(&mut servos),
     );
 
     loop {

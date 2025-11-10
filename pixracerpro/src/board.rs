@@ -42,13 +42,14 @@ use rustflight_core::packets::BaroPacket;
 use rustflight_core::sensorprocessors;
 
 use stm_32::peripherals;
+use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 use stm_32::*;
 
 include!("../../stm_32/stm32h7x3_common.rs");
 
 pub struct Board {
     probe: [Output<'static>; 3], // We only have 3 from ROSFlight
-    pub servos: peripherals::pwm::PixRacerProServoMonstrosity,
+    // pub servos: peripherals::pwm::PixRacerProServoMonstrosity,
     pub start_time: embassy_time::Instant,
 }
 
@@ -185,7 +186,7 @@ impl Board {
         self.probe[id].toggle(); // so we can see something on the logic analyzer.
     }
 
-    pub fn new() -> Board {
+    pub fn new() -> (Board, PixRacerProServoMonstrosity) {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
 
         let start_time = embassy_time::Instant::now();
@@ -571,6 +572,6 @@ impl Board {
             Output::new(p.PG14, Level::Low, Speed::Low),
             // Output::new(p.PG0, Level::Low, Speed::Low), // unknown
         ];
-        Board { probe, servos, start_time }
+        (Board { probe, start_time }, servos)
     }
 }
