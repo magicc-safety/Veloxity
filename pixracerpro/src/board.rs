@@ -104,14 +104,21 @@ impl BoardTrait for Board {
                 Ok(data) => defmt::info!("IMU data: accel {:?} | gyro {:?} | temp {:?}", data.accel, data.gyro, data.temperature),
                 Err(e) => defmt::error!("Error reading IMU data"),
             }
-            defmt::info!("Sensor IMU data received!");
+            // defmt::info!("Sensor IMU data received!");
+        }
+        if let Some(gnss_packet) = sensors.1.1.1.1.0 {
+            match gnss_packet {
+                Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
+                Err(e) => defmt::error!("Error reading IMU data"),
+            }
+            // defmt::info!("GPS data received!");
         }
         if let Some(mag_packet) = sensors.1.0 {
             match mag_packet {
                 Ok(data) => defmt::info!("Mag data: flux {:?} | temperature {:?}", data.flux, data.temperature),
                 Err(e) => defmt::error!("Error reading Mag data"),
             }
-            defmt::info!("Sensor Magnetometer data received!");
+            // defmt::info!("Sensor Magnetometer data received!");
         }
         if let Some(baro_packet) = sensors.1.1.0 {
             match baro_packet {
@@ -323,7 +330,8 @@ impl Board {
 
         //GPS USART4
         let mut uart4config = usart::Config::default();
-        uart4config.baudrate = 230400u32;
+        uart4config.baudrate = 9600u32;
+        uart4config.rx_pull = Pull::Up;
         let mut uart4 = Uart::new(
             p.UART4,
             p.PA1,
@@ -340,7 +348,7 @@ impl Board {
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down); // Gyro // If this is for the ublox, how does that relate to the gyro?
+        let drdy_pps = ExtiInput::new(p.PD12, p.EXTI12, Pull::Down);
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART6
@@ -446,6 +454,10 @@ impl Board {
         spawner3
             .spawn(peripherals::dps310::task(dps_sensor))
             .unwrap();
+        spawner3
+            .spawn(peripherals::ublox::task(ublox_sensor))
+            .unwrap();
+        spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3
             .spawn(peripherals::ublox::task(ublox_sensor))
             .unwrap();
