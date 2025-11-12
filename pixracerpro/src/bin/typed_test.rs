@@ -2,7 +2,7 @@
 #![no_main]
 // /**
 // ******************************************************************************
-// * File     : estimator_test.rs
+// * File     : typed_test.rs
 // * Date     : October 8, 2025
 // ******************************************************************************
 // *
@@ -62,14 +62,14 @@ use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
 // Tiny aliases for readability
 pub type I0 = Here;
-pub type I1 = There<I0>;
-pub type I2 = There<I1>;
-pub type I3 = There<I2>;
-pub type I4 = There<I3>;
-pub type I5 = There<I4>;
-pub type I6 = There<I5>;
-pub type I7 = There<I6>;
-pub type I8 = There<I7>;
+pub type I1 = There<I0>; // There<Here>
+pub type I2 = There<I1>; // There<There<Here>>
+pub type I3 = There<I2>; // There<There<There<Here>>>
+pub type I4 = There<I3>; // There<There<There<There<Here>>>>
+pub type I5 = There<I4>; // There<There<There<There<There<Here>>>>>
+pub type I6 = There<I5>; // There<There<There<There<There<There<Here>>>>>>
+pub type I7 = There<I6>; // There<There<There<There<There<There<There<Here>>>>>>>
+pub type I8 = There<I7>; // There<There<There<There<There<There<There<There<Here>>>>>>>>
 
 // define the wiring diagram
 #[derive(Default)]
@@ -94,7 +94,7 @@ impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
 
 #[entry]
 fn main() -> ! {
-    // board implementation
+    // board implementation & servos object
     let (mut board, mut servos) = board::Board::new();
 
     // body type instantiations
@@ -115,7 +115,7 @@ fn main() -> ! {
     // state_manager
     let state_manager = StateManager::new();
 
-    // PWM Driver
+    // PWM Driver from servos object
     let pwm_driver = BoardPwmDriver::new(&mut servos);
 
     let mut rosflight = ROSFlight::init(
