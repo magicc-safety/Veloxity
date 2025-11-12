@@ -102,7 +102,7 @@ impl CommandManager {
                 qx: ControlChannel { active: true, control_type: ControlType::Rate, value: 0.0 },
                 qy: ControlChannel { active: true, control_type: ControlType::Rate, value: 0.0 },
                 qz: ControlChannel { active: true, control_type: ControlType::Rate, value: 0.0 },
-                fz: ControlChannel { active: true, control_type: ControlType::Passthrough, value: 0.3 },
+                fz: ControlChannel { active: true, control_type: ControlType::Passthrough, value: 0.0 },
                 ..Default::default()
             },
             fixedwing_failsafe_command: CombinedControl {
@@ -117,28 +117,54 @@ impl CommandManager {
     }
 
     pub fn init(&mut self, params: &Params, state_manager: &mut StateManager) {
-        let failsafe_throttle = params.get_param_float(ParamId::PARAM_FAILSAFE_THROTTLE);
-        let is_fixed_wing = params.get_param_bool(ParamId::PARAM_FIXED_WING);
+        self.update_failsafe_config(params, state_manager);
+    }
 
-        // C++ logic from lines 74-79
+    pub fn update_failsafe_config(&mut self, params: &Params, state_manager: &mut StateManager) {
+    
+        let mut failsafe_throttle = match params.get_by_id(ParamId::PARAM_FAILSAFE_THROTTLE) {
+            ParamValue::Float(val) => val,
+            other => {
+                println!("Error: PARAM_FAILSAFE_THROTTLE is not a Float, but {:?}! Defaulting to 0.0.", other);
+                0.0f32
+            }
+        };
+
+        let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
+            ParamValue::Bool(val) => val,
+            other => {
+                println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false.", other);
+                false
+            }
+        };
+
         if !is_fixed_wing && (failsafe_throttle < 0.0 || failsafe_throttle > 1.0) {
-            // Failsafe throttle is invalid, set an error
             state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_FAILSAFE), params);
+            failsafe_throttle = 0.0f32;
         } else {
-            // Failsafe throttle is valid
             state_manager.update(Event::ERROR_CLEARED(ErrorFlag::INVALID_FAILSAFE), params);
         }
 
-        // C++ logic from lines 81-93
-        // Update the internal failsafe command value based on F-axis
-        match params.get_param_int(ParamId::PARAM_RC_F_AXIS) {
-            0 => self.multirotor_failsafe_command.fx.value = failsafe_throttle as f64,
-            1 => self.multirotor_failsafe_command.fy.value = failsafe_throttle as f64,
-            _ => self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64,
+        match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
+            // The "happy path": it's an Int, as expected
+            ParamValue::Int(axis) => {
+                match axis { // Note: `axis` is an i32, not `&i32`, so no deref `*` needed
+                    0 => self.multirotor_failsafe_command.fx.value = failsafe_throttle as f64,
+                    1 => self.multirotor_failsafe_command.fy.value = failsafe_throttle as f64,
+                    _ => self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64,
+                }
+            },
+            // Error case: it's the wrong type.
+            // We log the error and apply a safe default (Fz).
+            other_type => {
+                println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64;
+            }
         }
+        
+        // This line is fine as-is
         self.fixedwing_failsafe_command.fx.value = failsafe_throttle as f64;
     }
-
 
     pub fn run(
         &mut self,
@@ -153,8 +179,17 @@ impl CommandManager {
         // --- 1. Failsafe Action (C++ lines 240-243) ---
         // This is the highest priority. If in failsafe, override all commands.
         if state_manager.is_in_failsafe() {
-            let is_fixed_wing = params.get_param_int(ParamId::PARAM_FIXED_WING) > 0;
+            println!("Command_Manager: We're in failsafe!!!");
+
+            let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
+                ParamValue::Bool(val) => val,
+                other => {
+                    println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
+                    false 
+                }
+            };
             self.combined_command = if is_fixed_wing {
+                println!("Command_Manager: failsafe is fixedwing failsafe");
                 self.fixedwing_failsafe_command
             } else {
                 self.multirotor_failsafe_command
@@ -170,18 +205,35 @@ impl CommandManager {
 
             // --- 3. Offboard Timeout "Fail-over" (C++ lines 246-252) ---
             if self.is_offboard_active() {
-                let timeout_ms = params.get_param_int(ParamId::PARAM_OFFBOARD_TIMEOUT) as u32;
+                let timeout_ms = match params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) {
+                    ParamValue::Int(val) => val as u32,
+                    other => {
+                        println!("Error: PARAM_OFFBOARD_TIMEOUT is not an Int, but {:?}! Defaulting to 100ms.", other);
+                        100 // Use the C++ default as a safe fallback
+                    }
+                };
 
                 // Use the microsecond timer for more precision
                 if now_us > self.last_offboard_command_us + (timeout_ms as u64 * 1000) {
                     // Timeout occurred! Deactivate offboard control.
                     // This will cause the muxer to "fail-over" to RC.
                     self.offboard_command.qx.active = false;
+                    self.offboard_command.qx.value = 0.0;
+
                     self.offboard_command.qy.active = false;
+                    self.offboard_command.qy.value = 0.0;
+                    
                     self.offboard_command.qz.active = false;
+                    self.offboard_command.qz.value = 0.0;
+                    
                     self.offboard_command.fx.active = false;
+                    self.offboard_command.fx.value = 0.0;
+                    
                     self.offboard_command.fy.active = false;
+                    self.offboard_command.fy.value = 0.0;
+                    
                     self.offboard_command.fz.active = false;
+                    self.offboard_command.fz.value = 0.0;
                 }
             }
             
@@ -194,7 +246,7 @@ impl CommandManager {
 
     /// Receives a new offboard control command.
     /// This should be called from CommManager::act_on_messages
-    pub fn set_new_offboard_command(&mut self, now_us: u64, msg: &OffboardControlMsg) {
+    pub fn set_new_offboard_command(&mut self, now_us: u64, msg: &OffboardControlMsg, params: &Params) {
         // We got a new command, so update the timestamp
         self.last_offboard_command_us = now_us;
         self.offboard_command.stamp_ms = (now_us / 1000) as u32;
@@ -210,36 +262,103 @@ impl CommandManager {
                 self.offboard_command.fz.control_type = ControlType::Passthrough;
             },
             OffboardControlMode::ModeRollratePitchrateYawrateThrottle => {
+                // 1. Set attitude types
                 self.offboard_command.qx.control_type = ControlType::Rate;
                 self.offboard_command.qy.control_type = ControlType::Rate;
                 self.offboard_command.qz.control_type = ControlType::Rate;
-                self.offboard_command.fz.control_type = ControlType::Passthrough; // This is throttle
-                
-                // Set others to inactive by default in this mode
+
+                // 2. Deactivate all force axes by default
                 self.offboard_command.fx.active = false;
                 self.offboard_command.fy.active = false;
+                self.offboard_command.fz.active = false;
+                self.offboard_command.fx.value = 0.0f64;
+                self.offboard_command.fy.value = 0.0f64;
+                self.offboard_command.fz.value = 0.0f64;
+
+                // 3. Get the single throttle value from the message
+                //    (the MAVLink message spec puts it in the 'fz' field for this mode)
+                let throttle_value = msg.fz as f64;
+                
+                // 4. Check the ignore flag *for that throttle value*
+                let throttle_is_active = !msg.ignore.is_ignoring_fz();
+
+                // 5. Correctly map throttle based on aircraft type
+                match params.get_by_id(ParamId::PARAM_FIXED_WING) {
+                    ParamValue::Bool(true) => {
+                        // --- FIXED WING ---
+                        // Throttle goes to Fx
+                        self.offboard_command.fx.control_type = ControlType::Passthrough;
+                        self.offboard_command.fx.value = throttle_value;
+                        self.offboard_command.fx.active = throttle_is_active;
+                    },
+                    ParamValue::Bool(false) => {
+                        // --- MULTIROTOR ---
+                        // Check F-axis parameter
+                        match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
+                            ParamValue::Int(axis) => {
+                                match axis {
+                                    0 => { // X_AXIS
+                                        self.offboard_command.fx.control_type = ControlType::Passthrough;
+                                        self.offboard_command.fx.value = throttle_value;
+                                        self.offboard_command.fx.active = throttle_is_active;
+                                    },
+                                    1 => { // Y_AXIS
+                                        self.offboard_command.fy.control_type = ControlType::Passthrough;
+                                        self.offboard_command.fy.value = throttle_value;
+                                        self.offboard_command.fy.active = throttle_is_active;
+                                    },
+                                    _ => { // Z_AXIS (default)
+                                        self.offboard_command.fz.control_type = ControlType::Passthrough;
+                                        self.offboard_command.fz.value = throttle_value;
+                                        self.offboard_command.fz.active = throttle_is_active;
+                                    }
+                                }
+                            },
+                            other_type => {
+                                // Error case: F_AXIS is wrong type! Default to Fz.
+                                println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                                self.offboard_command.fz.control_type = ControlType::Passthrough;
+                                self.offboard_command.fz.value = throttle_value;
+                                self.offboard_command.fz.active = throttle_is_active;
+                            }
+                        }
+                    },
+                    other_type => {
+                        // Error case: FIXED_WING is wrong type! Default to multirotor + Fz.
+                        println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to multirotor.", other_type);
+                        self.offboard_command.fz.control_type = ControlType::Passthrough;
+                        self.offboard_command.fz.value = throttle_value;
+                        self.offboard_command.fz.active = throttle_is_active;
+                    }
+                } 
             }
-            // ... (Add other modes as you need them) ...
         }
+        
+        // You must now *remove* the final fz assignment, as it's handled above.
+        // The other assignments (qx, qy, qz, fx, fy) are still needed.
 
         // Apply values and ignore flags
-        self.offboard_command.qx.value = msg.qx as f64; // <-- Cast to f64
+        self.offboard_command.qx.value = msg.qx as f64;
         self.offboard_command.qx.active = !msg.ignore.is_ignoring_qx();
 
-        self.offboard_command.qy.value = msg.qy as f64; // <-- Cast to f64
+        self.offboard_command.qy.value = msg.qy as f64;
         self.offboard_command.qy.active = !msg.ignore.is_ignoring_qy();
 
-        self.offboard_command.qz.value = msg.qz as f64; // <-- Cast to f64
+        self.offboard_command.qz.value = msg.qz as f64;
         self.offboard_command.qz.active = !msg.ignore.is_ignoring_qz();
 
-        self.offboard_command.fx.value = msg.fx as f64; // <-- Cast to f64
-        self.offboard_command.fx.active = !msg.ignore.is_ignoring_fx();
+        // If Mode was RPYT, fx and fy are already set.
+        // If Mode was PassThrough, these lines are correct.
+        if msg.mode != OffboardControlMode::ModeRollratePitchrateYawrateThrottle {
+            self.offboard_command.fx.value = msg.fx as f64;
+            self.offboard_command.fx.active = !msg.ignore.is_ignoring_fx();
 
-        self.offboard_command.fy.value = msg.fy as f64; // <-- Cast to f64
-        self.offboard_command.fy.active = !msg.ignore.is_ignoring_fy();
-        
-        self.offboard_command.fz.value = msg.fz as f64; // <-- Cast to f64
-        self.offboard_command.fz.active = !msg.ignore.is_ignoring_fz();
+            self.offboard_command.fy.value = msg.fy as f64;
+            self.offboard_command.fy.active = !msg.ignore.is_ignoring_fy();
+            
+            self.offboard_command.fz.value = msg.fz as f64;
+            self.offboard_command.fz.active = !msg.ignore.is_ignoring_fz();
+        }
     }
 
     /// Port of C++ `interpret_rc` (command_manager.cpp:101)
@@ -248,23 +367,37 @@ impl CommandManager {
         self.rc_command.qx.value = rc.stick(Stick::X) as f64;
         self.rc_command.qy.value = rc.stick(Stick::Y) as f64;
         self.rc_command.qz.value = rc.stick(Stick::Z) as f64;
-        
-        // C++: line 109, logic for F-axis
-        match params.get_param_int(ParamId::PARAM_RC_F_AXIS) {
-            0 => { // X_AXIS
-                self.rc_command.fx.value = rc.stick(Stick::F) as f64;
-                self.rc_command.fy.value = 0.0;
-                self.rc_command.fz.value = 0.0;
+        let f_stick_value = rc.stick(Stick::F) as f64;
+
+        // C++: line 109, logic for F-axis (type-safe)
+        match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
+            // "Happy path": it's an Int as expected
+            ParamValue::Int(axis) => {
+                match axis {
+                    0 => { // X_AXIS
+                        self.rc_command.fx.value = f_stick_value;
+                        self.rc_command.fy.value = 0.0;
+                        self.rc_command.fz.value = 0.0;
+                    },
+                    1 => { // Y_AXIS
+                        self.rc_command.fx.value = 0.0;
+                        self.rc_command.fy.value = f_stick_value;
+                        self.rc_command.fz.value = 0.0;
+                    },
+                    _ => { // Z_AXIS (default)
+                        self.rc_command.fx.value = 0.0;
+                        self.rc_command.fy.value = 0.0;
+                        self.rc_command.fz.value = f_stick_value;
+                    }
+                }
             },
-            1 => { // Y_AXIS
-                self.rc_command.fx.value = 0.0;
-                self.rc_command.fy.value = rc.stick(Stick::F) as f64;
-                self.rc_command.fz.value = 0.0;
-            },
-            _ => { // Z_AXIS (default)
+            // Error case: param is wrong type!
+            other_type => {
+                println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                // Default to Z_AXIS for safety
                 self.rc_command.fx.value = 0.0;
                 self.rc_command.fy.value = 0.0;
-                self.rc_command.fz.value = rc.stick(Stick::F) as f64;
+                self.rc_command.fz.value = f_stick_value;
             }
         }
 
@@ -277,7 +410,15 @@ impl CommandManager {
         self.rc_command.fz.active = true;
 
         // C++: lines 130-153
-        let is_fixed_wing = params.get_param_int(ParamId::PARAM_FIXED_WING) > 0;
+        let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
+            ParamValue::Bool(val) => val,
+            other => {
+                // This is a param definition error. Default to the safer
+                // (non-fixed-wing) case.
+                println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
+                false
+            }
+        };
         if is_fixed_wing {
             self.rc_command.qx.control_type = ControlType::Passthrough;
             self.rc_command.qy.control_type = ControlType::Passthrough;
@@ -335,9 +476,24 @@ impl CommandManager {
         }
         
         // C++: `stick_deviated` logic (lines 160-179)
-        let deviation_param = params.get_param_float(ParamId::PARAM_RC_OVERRIDE_DEVIATION) as f64;
-        let lag_time_ms = params.get_param_int(ParamId::PARAM_OVERRIDE_LAG_TIME) as u32;
+        
+       let deviation_param = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
+            ParamValue::Float(val) => val as f64, // Convert f32 to f64
+            other => {
+                println!("Error: PARAM_RC_OVERRIDE_DEVIATION is not a Float, but {:?}! Defaulting to 0.1.", other);
+                0.1 // Default value from C++ params
+            }
+        };
 
+        // --- REFACTORED: PARAM_OVERRIDE_LAG_TIME ---
+        let lag_time_ms = match params.get_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME) {
+            ParamValue::Int(val) => val as u32,
+            other => {
+                println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
+                200 // Default value from C++ params
+            }
+        }; 
+        
         // Check sticks [X, Y, Z]
         let sticks = [Stick::X, Stick::Y, Stick::Z];
         let mut stick_deviated = false;
@@ -380,30 +536,41 @@ impl CommandManager {
             || self.offboard_command.fz.active;
 
         if offboard_force_active {
-            // 2. Check "take minimum throttle" parameter (C++ line 217)
-            let take_min_throttle = params.get_param_int(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE) > 0;
+            // 2. Check "take minimum throttle" parameter (type-safe)
+            let take_min_throttle = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE) {
+                // This param is an Int, but we use it as a Bool
+                ParamValue::Bool(val) => val,
+                other => {
+                    println!("Error: PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE is not an Int, but {:?}! Defaulting to false.", other);
+                    false // Default to false (C++ default is 0)
+                }
+            };
             
             if take_min_throttle {
-                // *** This is a FIX: We must compare the correct F-axis ***
-                // (C++ lines 220-228)
-                let rc_throttle = match params.get_param_int(ParamId::PARAM_RC_F_AXIS) {
-                    0 => self.rc_command.fx.value,
-                    1 => self.rc_command.fy.value,
-                    _ => self.rc_command.fz.value,
-                };
-                let offboard_throttle = match params.get_param_int(ParamId::PARAM_RC_F_AXIS) {
-                    0 => self.offboard_command.fx.value,
-                    1 => self.offboard_command.fy.value,
-                    _ => self.offboard_command.fz.value,
-                };
-                
-                return rc_throttle < offboard_throttle;
+                // 3. Compare the correct F-axis (type-safe)
+                match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
+                    ParamValue::Int(axis) => {
+                        let (rc_throttle, offboard_throttle) = match axis {
+                            0 => (self.rc_command.fx.value, self.offboard_command.fx.value),
+                            1 => (self.rc_command.fy.value, self.offboard_command.fy.value),
+                            _ => (self.rc_command.fz.value, self.offboard_command.fz.value),
+                        };
+                        return rc_throttle < offboard_throttle;
+                    },
+                    other_type => {
+                        // Error case: param is wrong type! Default to Fz.
+                        println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                        let rc_throttle = self.rc_command.fz.value;
+                        let offboard_throttle = self.offboard_command.fz.value;
+                        return rc_throttle < offboard_throttle;
+                    }
+                }
             } else {
                 // If not taking min, offboard has control
                 return false;
             }
         } else {
-            // 3. If offboard is inactive, RC takes over
+            // 4. If offboard is inactive, RC takes over
             return true;
         }
     }

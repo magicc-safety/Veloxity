@@ -35,7 +35,7 @@
 // **/
 
 use crate::board::BoardTrait;
-use crate::params2::{ParamId, Params};
+use crate::params2::{ParamId, Params, ParamValue};
 use crate::comm_manager::{CommManager, comm_link_trait::CommInterface};
 use crate::state_machine::{Event, StateManager, ErrorFlag};
 use crate::packets::RcPacket;
@@ -148,29 +148,82 @@ impl Rc {
         self.update_switch_mappings(params);
     }
 
-    /// Maps stick parameters to internal config
+    // Maps stick parameters to internal config
     fn init_sticks(&mut self, params: &Params) {
+        
+        // --- REFACTORED: Stick::X ---
         self.sticks[Stick::X as usize] = StickConfig {
-            channel: params.get_param_int(ParamId::PARAM_RC_X_CHANNEL),
+            channel: match params.get_by_id(ParamId::PARAM_RC_X_CHANNEL) {
+                ParamValue::Int(val) => {
+                    println!("RC channel {} for stick X", val);
+                    val
+                }
+                other => {
+                    println!("Error: PARAM_RC_X_CHANNEL is not an Int, but {:?}! Defaulting to 0.", other);
+                    0 // Default C++ value
+                }
+            },
             one_sided: false,
         };
+
+        // --- REFACTORED: Stick::Y ---
         self.sticks[Stick::Y as usize] = StickConfig {
-            channel: params.get_param_int(ParamId::PARAM_RC_Y_CHANNEL),
+            channel: match params.get_by_id(ParamId::PARAM_RC_Y_CHANNEL) {
+                ParamValue::Int(val) => {
+                    println!("RC channel {} for stick Y", val);
+                    val
+                }
+                other => {
+                    println!("Error: PARAM_RC_Y_CHANNEL is not an Int, but {:?}! Defaulting to 1.", other);
+                    1 // Default C++ value
+                }
+            },
             one_sided: false,
         };
+
+        // --- REFACTORED: Stick::Z ---
         self.sticks[Stick::Z as usize] = StickConfig {
-            channel: params.get_param_int(ParamId::PARAM_RC_Z_CHANNEL),
+            channel: match params.get_by_id(ParamId::PARAM_RC_Z_CHANNEL) {
+                ParamValue::Int(val) => {
+                    println!("RC channel {} for stick Z", val);
+                    val
+                }
+                other => {
+                    println!("Error: PARAM_RC_Z_CHANNEL is not an Int, but {:?}! Defaulting to 3.", other);
+                    3 // Default C++ value
+                }
+            },
             one_sided: false,
         };
+
+        // --- REFACTORED: Stick::F ---
         self.sticks[Stick::F as usize] = StickConfig {
-            channel: params.get_param_int(ParamId::PARAM_RC_F_CHANNEL),
+            channel: match params.get_by_id(ParamId::PARAM_RC_F_CHANNEL) {
+                ParamValue::Int(val) => {
+                    println!("RC channel {} for stick F", val);
+                    val
+                }
+                other => {
+                    println!("Error: PARAM_RC_F_CHANNEL is not an Int, but {:?}! Defaulting to 2.", other);
+                    2 // Default C++ value
+                }
+            },
             one_sided: true,
         };
     }
 
     fn update_switch_mappings(&mut self, params: &Params) {
-        let rc_num_channels = params.get_param_int(ParamId::PARAM_RC_NUM_CHANNELS);
+        
+        // --- REFACTORED: PARAM_RC_NUM_CHANNELS ---
+        let rc_num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
+            ParamValue::Int(val) => val,
+            other => {
+                println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
+                6 // Default C++ value
+            }
+        };
 
+        // must loop over the 4 logical functions we have defined
         for i in 0..SWITCHES_COUNT {
             // Using Option<ParamId> to handle the "INVALID" case safely
             let (channel_name, channel_param_id) = match i {
@@ -187,13 +240,24 @@ impl Rc {
                 _ => ("INVALID", None),
             };
 
+            // --- REFACTORED: channel_num retrieval ---
             let channel_num = if let Some(id) = channel_param_id {
-                params.get_param_int(id)
+                match params.get_by_id(id) {
+                    ParamValue::Int(val) => val,
+                    other => {
+                        println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 255.", id, other);
+                        255 // Default for "INVALID"
+                    }
+                }
             } else {
                 255 // C++ default for "INVALID"
             };
 
             self.switches[i].channel = channel_num;
+            println!("Setting switch \"{}\" to {}", channel_name, channel_num);
+            if channel_num > 3 && channel_num < rc_num_channels {
+                println!("Switch \"{}\" will not be mapped...", channel_name);
+            }
             self.switches[i].mapped = channel_num > 3 && channel_num < rc_num_channels;
 
             let direction_param_id = match channel_num {
@@ -204,13 +268,18 @@ impl Rc {
                 _ => None, // No param
             };
 
+            // --- REFACTORED: direction retrieval ---
             self.switches[i].direction = if let Some(id) = direction_param_id {
-                params.get_param_int(id)
+                match params.get_by_id(id) {
+                    ParamValue::Int(val) => val,
+                    other => {
+                        println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 1.", id, other);
+                        1 // C++ default
+                    }
+                }
             } else {
                 1 // C++ default
             };
-        
-            // --- LOGGING IS REMOVED FROM THIS FUNCTION ---
         }
     }
 
@@ -295,7 +364,6 @@ impl Rc {
         let len = (packet.n_chan as usize).min(self.rc.chan.len());
         self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
 
-        // --- NEW CODE (goes in the same spot) ---
         self.rc.header.timestamp = packet.header.timestamp;
         self.rc.header.status = packet.header.status;
 
@@ -308,8 +376,8 @@ impl Rc {
         self.rc.failsafe_activated = (status & 2) != 0;
         self.rc.num_channels = len;
 
-        // 2. Check for RC lost (moved from old `run`)
         if self.check_rc_lost(params, state_manager) {
+            println!("RC is Lost!!!");
             // If RC is lost, we're done. Don't process sticks/switches.
             return;
         }
@@ -328,6 +396,8 @@ impl Rc {
                 // Converts [0.0, 1.0] to [-1.0, 1.0]
                 self.stick_values[channel] = 2.0 * (pwm - 0.5);
             }
+
+            //println!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
         // 4. Process switch values (moved from old `run`)
@@ -349,6 +419,8 @@ impl Rc {
             } else {
                 self.switch_values[channel] = false;
             }
+
+            //println!("Switch {}: {}",channel, self.switch_values[channel]);
         }
 
         // 5. Signal to the mux (moved from old `run`)
@@ -375,7 +447,13 @@ impl Rc {
         let dt = now_ms.saturating_sub(self.prev_time_ms);
         self.prev_time_ms = now_ms;
 
-        let arm_threshold = params.get_param_float(ParamId::PARAM_ARM_THRESHOLD);
+        let arm_threshold = match params.get_by_id(ParamId::PARAM_ARM_THRESHOLD) {
+            ParamValue::Float(val) => val,
+            other => {
+                println!("Error: PARAM_ARM_THRESHOLD is not a Float, but {:?}! Defaulting to 0.15.", other);
+                0.15 // Default value from C++ param definitions
+            }
+        };
     
         // Use the correct public method from StateManager
         let is_armed = state_manager.is_armed();
@@ -438,7 +516,15 @@ impl Rc {
         if self.rc.frame_lost || self.rc.failsafe_activated {
             failsafe = true;
         } else {
-            let num_channels = params.get_param_int(ParamId::PARAM_RC_NUM_CHANNELS) as usize;
+            
+            let num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
+                ParamValue::Int(val) => val as usize,
+                other => {
+                    println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
+                    6 // Default C++ value
+                }
+            };
+
             // Clamp to the actual number of channels received
             let channels_to_check = num_channels.min(self.rc.num_channels);
 
@@ -452,7 +538,6 @@ impl Rc {
             }
         }
 
-        // --- THIS IS THE FIX ---
         if failsafe {
             // Use update() with params and the correct ErrorFlag
             state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
@@ -460,11 +545,9 @@ impl Rc {
             // Use update() with params and the correct ErrorFlag
             state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
         }
-        // --- END OF FIX ---
-
         failsafe
     }
-
+    
     // -----------------------------------------------------------------
     // Public Getters
     // -----------------------------------------------------------------

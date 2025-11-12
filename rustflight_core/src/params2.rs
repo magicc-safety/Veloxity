@@ -126,31 +126,6 @@ macro_rules! declare_params {
                     index: 0,
                 }
             }
-
-            pub fn get_param_int(&self, id: ParamId) -> i32 {
-                match self.get_by_id(id) {
-                    ParamValue::Int(val) => val,
-                    // If this happens, it's a code bug (asking for the wrong type)
-                    // We panic to find these bugs quickly.
-                    _ => panic!("Param type mismatch: expected Int"),
-                }
-            }
-    
-            /// Helper to get a Float value.
-            /// Panics if the stored type is not Float.
-            pub fn get_param_float(&self, id: ParamId) -> f32 {
-                match self.get_by_id(id) {
-                    ParamValue::Float(val) => val,
-                    _ => panic!("Param type mismatch: expected Float"),
-                }
-            }
-
-            pub fn get_param_bool(&self, id: ParamId) -> bool {
-                match self.get_by_id(id) {
-                    ParamValue::Bool(val) => val,
-                    _ => panic!("Param type mismatch: expected Bool"),
-                }
-            }
         }
 
         impl Default for Params {

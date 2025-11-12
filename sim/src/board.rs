@@ -28,13 +28,15 @@ impl From<ros_messages::RCRaw> for packets::RcPacket {
 
         // Now iterate over the fixed-size array `msg.values`
         for (i, &value) in msg.values.iter().enumerate() {
-            // Ensure we don't write past the end of the `channels` buffer
-            if i < RC_PACKET_CHANNELS {
-                 channels[i] = (value as f32 - 1500.0) / 500.0;
-            } else {
-                 break; // Stop if the source array is somehow larger (shouldn't happen here)
+                // Ensure we don't write past the end of the `channels` buffer
+                if i < RC_PACKET_CHANNELS {
+                    // FIX: Normalize 1000-2000us to 0.0-1.0
+                    let normalized = (value as f32 - 1000.0) / 1000.0;
+                    channels[i] = normalized.clamp(0.0, 1.0);
+                } else {
+                     break;
+                }
             }
-        }
 
         // --- Rest of the implementation remains the same ---
         Self {
@@ -449,7 +451,7 @@ async fn capture_imu_data(
         match cdr::deserialize::<ros_messages::ImuData>(&sample.payload().to_bytes()) {
             Ok(data) => {
                 if chan.send(data).await.is_err() {
-                    println!("Error putting gnss in channel!");
+                    println!("Error putting imu in channel!");
                 } else {
                     //println!("\tgot imu data")
                 }
@@ -467,7 +469,7 @@ async fn capture_mag(
         match cdr::deserialize::<ros_messages::MagneticField>(&sample.payload().to_bytes()) {
             Ok(mag) => {
                 if chan.send(mag).await.is_err() {
-                    println!("Error putting rc in channel!");
+                    println!("Error putting mag in channel!");
                 } else {
                     //println!("\t\t\t\tgot mag data")
                 }
@@ -486,7 +488,7 @@ async fn capture_baro(
         match cdr::deserialize::<ros_messages::Barometer>(&sample.payload().to_bytes()) {
             Ok(baro) => {
                 if chan.send(baro).await.is_err() {
-                    println!("Error putting rc in channel!");
+                    println!("Error putting baro in channel!");
                 } else {
                     //println!("\t\t\t\tgot mag data")
                 }
@@ -504,7 +506,7 @@ async fn capture_gnss(
         match cdr::deserialize::<ros_messages::GNSS>(&sample.payload().to_bytes()) {
             Ok(gnss) => {
                 if chan.send(gnss).await.is_err() {
-                    println!("Error putting rc in channel!");
+                    println!("Error putting gnss in channel!");
                 } else {
                     //println!("\t\t\t\tgot mag data")
                 }
@@ -522,7 +524,7 @@ async fn capture_rc(
         match cdr::deserialize::<ros_messages::RCRaw>(&sample.payload().to_bytes()) {
             Ok(rc) => {
                 if chan.send(rc).await.is_err() {
-                    println!("Error putting rc in channel!");
+                    println!("Error putting rc_raw in channel!");
                 } else {
                     //println!("\t\t\t\tgot rc data")
                 }

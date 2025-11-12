@@ -56,7 +56,7 @@ use crate::{
     rc::Rc, 
     rustflight::Configuration, 
     sensorprocessors::CalibrationFlags, 
-    state_machine::{ErrorFlag, Event, StateManager}
+    state_machine::{self, ErrorFlag, Event, StateManager}
 };
 
 const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
@@ -141,13 +141,9 @@ where
         let mut rc_manager = Rc::new();
         rc_manager.init(&mut board, &params);
         let mut command_manager = CommandManager::new();
-
-        let now_us = board.clock_micros();
-
-        rc_manager.init(&mut board, &params);
-
-        let mut comm_manager = comm_manager::CommManager::new(comm_link, now_us);
         command_manager.init(&params, &mut state_manager);
+        let now_us = board.clock_micros();
+        let mut comm_manager = comm_manager::CommManager::new(comm_link, now_us);
 
         Self {
             loop_time_us,
@@ -187,8 +183,9 @@ where
             &mut self.command_manager,
         );
 
-        // start the gyro calibration
-        if self.state_manager.is_calibrating() {
+        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
+        {
+            // this must mean that rc asked for arm, but calibration hadn't happened and needed to... go ahead and raise the calibration flag
             self.cal_flags.insert(CalibrationFlags::GYRO);
         }
 
@@ -213,8 +210,7 @@ where
             }
         }
 
-
-        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
+        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO)
         {
             // The processor has finished! (It removed the flag)
             // We can now send the event to complete the transition.
@@ -223,15 +219,19 @@ where
 
         let (required_sensors, _remainder) = processed_sensors.clone().sculpt();
         let (rc_packet_option, estimator_sensors) = required_sensors.pluck();
+
+        //print!("\x1B[2J\x1B[H"); 
         
         // now run the RC unit and the command manager unit
         if let Some(rc_packet) = rc_packet_option {
+            //println!("RC Packet Received:");
             self.rc_manager.receive(
                 &rc_packet, 
                 &self.params,
                 &mut self.state_manager
             );
         }
+
         self.rc_manager.run(now_ms, &self.params, &mut self.state_manager);
         self.command_manager.run(
             now_ms,
@@ -243,7 +243,7 @@ where
         self.state_manager.run(&self.params);
 
         // Now run the estimator 
-        let state= self.estimator.estimate(&estimator_sensors);
+        let state = self.estimator.estimate(&estimator_sensors);
 
         if state.is_healthy() {
             self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
@@ -253,13 +253,11 @@ where
 
         // Get the final command from the manager, and translate to what the Controller needs:
         let combined_command = self.command_manager.combined_control();
-        let controls = self.controller.control(&state, &*combined_command);
+        let controls = self.controller.control(&state, &mut self.state_manager, &*combined_command, );
         let actuator_commands = self.mixer.mix(&controls);
 
         // // PWM command output
-        self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
-
-
+        //self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
 
         self.comm_manager.send_telemetry_streams::<BT, C, _>(
             &mut self.board,
@@ -280,6 +278,18 @@ where
                 &self.params, 
                 &mut self.comm_manager
             );
+
+            match param_id {
+                ParamId::PARAM_FAILSAFE_THROTTLE | ParamId::PARAM_FIXED_WING => {
+                    self.command_manager.update_failsafe_config(
+                        &self.params, 
+                        &mut self.state_manager
+                    );
+                }
+                _ => {
+                    // This param change doesn't affect the command manager
+                }
+            }
             
             // TODO: Add callbacks for other modules here if needed
             // self.controller.param_change_callback(param_id, &self.params);

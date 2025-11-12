@@ -157,7 +157,7 @@ impl MavlinkInterface {
                 msgs.store(comm_messages::ParamRequestReadMsg::from(pr))
             }
             Rosflight::ParamSet(ps) => {
-                println!("Message: ParamSet");
+                println!("Message: ParamSet: param_value: {:?}", ps.param_value);
                 msgs.store(comm_messages::ParamSetMsg::from(ps))
             }
             Rosflight::ParamRequestList(pl) => {
@@ -403,8 +403,8 @@ impl From<mav_messages::ParamSet> for comm_messages::ParamSetMsg {
             target_component: msg.target_component,
             param_id: msg.param_id,
             param_value: match msg.param_type {
-                Uint8 | Uint16 | Uint32 | Uint64 => ParamValue::Uint(msg.param_value as u32),
-                Int8 | Int16 | Int32 | Int64 => ParamValue::Int(msg.param_value as i32),
+                Uint8 | Uint16 | Uint32 | Uint64 => ParamValue::Uint(f32::to_bits(msg.param_value) as u32),
+                Int8 | Int16 | Int32 | Int64 => ParamValue::Int(f32::to_bits(msg.param_value) as i32),
                 Real32 | Real64 => ParamValue::Float(msg.param_value)
             }
         }

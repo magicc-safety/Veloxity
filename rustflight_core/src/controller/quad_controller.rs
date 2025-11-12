@@ -40,6 +40,7 @@ use crate::estimator::quad_estimator::AttitudeState;
 use micro_algebra::stack::vector::Vector;
 use micro_algebra::stack::quaternion::Quaternion;
 use crate::command_manager::{CombinedControl, ControlType};
+use crate::state_machine::StateManager;
 
 // The system's fixed time step, as defined in the estimator.
 const DT: f64 = 1.0 / 400.0;
@@ -120,46 +121,56 @@ impl Controller for QuadController {
     type State = AttitudeState;
     type ControlOutput = MixerInput;
 
-    fn control(&mut self, state: &Self::State, command: &CombinedControl) -> Self::ControlOutput {
+    fn control(&mut self, state: &Self::State, state_manager: &mut StateManager, command: &CombinedControl) -> Self::ControlOutput {
 
-        if command.qx.control_type == ControlType::Passthrough {
+        // if !state_manager.is_armed() {
             MixerInput {
                 torques: Vector::from_array([
-                    command.qx.value as f64, 
-                    command.qy.value as f64, 
-                    command.qy.value as f64]),
-                thrust: command.fz.value as f64,
+                    0.0f64, 
+                    0.0f64, 
+                    0.0f64]),
+                thrust: 0.0f64,
             }
-        } else {
-            // --- Step 1: Extract the necessary quaternions from the input state ---
-            let q_hat = state.q_hat;
-            let q_dot = state.q_dot;
-        
-            // --- Step 2: Calculate angular velocity using the kinematic equation ---
-            let q_conj = q_hat.conjugate();
-            let omega_q = 2.0 * q_conj * q_dot;
-        
-            // The vector part of omega_q is our current angular rate [p, q, r]
-            let current_rates = Vector::from_array([
-                omega_q.get_x(),
-                omega_q.get_y(),
-                omega_q.get_z(),
-            ]);
+        // } else {
+        //     if command.qx.control_type == ControlType::Passthrough {
+        //         MixerInput {
+        //             torques: Vector::from_array([
+        //                 command.qx.value as f64, 
+        //                 command.qy.value as f64, 
+        //                 command.qy.value as f64]),
+        //             thrust: command.fz.value as f64,
+        //         }
+        //     } else {
+        //         // --- Step 1: Extract the necessary quaternions from the input state ---
+        //         let q_hat = state.q_hat;
+        //         let q_dot = state.q_dot;
+            
+        //         // --- Step 2: Calculate angular velocity using the kinematic equation ---
+        //         let q_conj = q_hat.conjugate();
+        //         let omega_q = 2.0 * q_conj * q_dot;
+            
+        //         // The vector part of omega_q is our current angular rate [p, q, r]
+        //         let current_rates = Vector::from_array([
+        //             omega_q.get_x(),
+        //             omega_q.get_y(),
+        //             omega_q.get_z(),
+        //         ]);
 
-            // --- Step 3: Get Commanded Rates from the Input State ---
-            //let commanded_rates = command.commanded_rates;
+        //         // --- Step 3: Get Commanded Rates from the Input State ---
+        //         //let commanded_rates = command.commanded_rates;
 
-            // --- Step 4: Run PID Rate Controllers with the clean rate signal ---
-            const DT: f64 = 1.0 / 400.0; // DT is still needed for the PID's discrete I and D terms
-            let torque_x = self.roll_rate_pid.run(current_rates[0], command.qx.value as f64, DT);
-            let torque_y = self.pitch_rate_pid.run(current_rates[1], command.qy.value as f64, DT);
-            let torque_z = self.yaw_rate_pid.run(current_rates[2], command.qz.value as f64, DT);
-        
-            // --- Step 5: Assemble and return the final output ---
-            MixerInput {
-                torques: Vector::from_array([torque_x, torque_y, torque_z]),
-                thrust: command.fz.value as f64,
-            }
-        }
+        //         // --- Step 4: Run PID Rate Controllers with the clean rate signal ---
+        //         const DT: f64 = 1.0 / 400.0; // DT is still needed for the PID's discrete I and D terms
+        //         let torque_x = self.roll_rate_pid.run(current_rates[0], command.qx.value as f64, DT);
+        //         let torque_y = self.pitch_rate_pid.run(current_rates[1], command.qy.value as f64, DT);
+        //         let torque_z = self.yaw_rate_pid.run(current_rates[2], command.qz.value as f64, DT);
+            
+        //         // --- Step 5: Assemble and return the final output ---
+        //         MixerInput {
+        //             torques: Vector::from_array([torque_x, torque_y, torque_z]),
+        //             thrust: command.fz.value as f64,
+        //         }
+        //     }
+        // }
     }
 }
