@@ -52,19 +52,37 @@ pub struct ImuData {
     pub linear_acceleration_covariance: [f64; 9],
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct MagneticField {
+    pub header: Header,
+    pub magnetic_field: Vector3,
+    pub magnetic_field_covariance: [f64; 9],
+}
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Barometer {
+    pub header: Header,
+    pub altitude: f32,
+    pub pressure: f32,
+    pub temperature: f32,
+}
 
-
-
-
-
-
-
-
-
-
-
-
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct GNSS {
+    pub header: Header,
+    pub fix_type: u8, 
+    pub num_sat: u8,
+    pub lat: f64,
+    pub lon: f64,
+    pub alt: f32,
+    pub horizontal_accuracy: f32,
+    pub vertical_accuracy: f32,
+    pub vel_n: f32,
+    pub vel_e: f32,
+    pub vel_d: f32,
+    pub speed_accuracy: f32,
+    pub rosflight_timestamp: f64,
+}
 
 
 
@@ -155,14 +173,6 @@ impl AuxCommand {
     pub const NUM_AUX_CHANNELS: u8 = 14;
 }
 
-// Barometer.msg
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Barometer {
-    pub header: Header,
-    pub pressure: f64,
-    pub temperature: f64,
-}
-
 // BatteryStatus.msg
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct BatteryStatus {
@@ -203,33 +213,6 @@ pub struct Error {
     pub error_message: String,
     pub on_error: bool,
     pub rearm: bool,
-}
-
-// GNSS.msg
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct GNSS {
-    pub header: Header,
-    pub fix_type: u8,
-    pub num_sat: u8,
-    pub lat: f64,
-    pub lon: f64,
-    pub alt: f64,
-    pub height_msl: i32,
-    pub h_acc: u32,
-    pub v_acc: u32,
-    pub vel_n: i32,
-    pub vel_e: i32,
-    pub vel_d: i32,
-    pub speed_accuracy: u32,
-}
-
-impl GNSS {
-    pub const GNSS_FIX_TYPE_NO_FIX: u8 = 0;
-    pub const GNSS_FIX_TYPE_DEAD_RECKONING: u8 = 1;
-    pub const GNSS_FIX_TYPE_2D_FIX: u8 = 2;
-    pub const GNSS_FIX_TYPE_3D_FIX: u8 = 3;
-    pub const GNSS_FIX_TYPE_GPS_DEAD_RECKONING: u8 = 4;
-    pub const GNSS_FIX_TYPE_TIME_ONLY: u8 = 5;
 }
 
 // OutputRaw.msg

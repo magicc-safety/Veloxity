@@ -40,6 +40,12 @@ pub mod quad_estimator;
 
 pub trait Estimator {
     type Inputs: HList;
-    type State;
+    type State: AttitudeStateTrait;
     fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State;
+}
+
+pub trait AttitudeStateTrait {
+    fn q(&self) -> [f32; 4];
+    fn q_dot(&self) -> [f32; 4];
+    fn is_healthy(&self) -> bool;
 }

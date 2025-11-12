@@ -62,6 +62,7 @@ impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
         There<There<There<There<There<Here>>>>>
     ];
     type RcPacketIndex = There<There<Here>>;
+    type RcPacketSculptedIndex = There<There<There<There<There<There<Here>>>>>>;
 }
 
 fn main() {

@@ -10,6 +10,7 @@ use rustflight_core::{
     controller::{Controller, quad_controller::QuadController},
     estimator::{Estimator, quad_estimator::QuadEstimator},
     params2::Params,
+    pwm::PwmDriver,
     state_machine::StateManager,
     hlist::{Here, There},
     hlist_type,
@@ -33,7 +34,7 @@ impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
         There<There<There<There<There<Here>>>>> // RC Index
     ];
 
-    type RcPacketIndex = There<There<Here>>; // RC Index from Sculpted Set
+    type RcPacketSculptedIndex = There<There<Here>>; // RC Index from Sculpted Set
 
     // --- IMPLEMENT TELEMETRY INDICES ---
     type ImuPacketIndex       = Here;                                                         // index 0
@@ -43,6 +44,7 @@ impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
     type RangePacketIndex     = There<There<There<There<Here>>>>;                             // index 4
     type GNSSPacketIndex      = There<There<There<There<There<Here>>>>>;                      // index 5
     type BatteryPacketIndex   = There<There<There<There<There<There<Here>>>>>>;               // index 6
+    type RcPacketIndex        = There<There<There<There<There<There<There<Here>>>>>>>;        // index 7
     type AttitudePacketIndex  = There<There<There<There<There<There<There<There<Here>>>>>>>>; // index 8
 }
 
@@ -50,7 +52,13 @@ impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
 async fn main() {
     // board implementation
     let board = board::Board::new().await;
-    let pwm_driver = SimPwmDriver::new(&board.zenoh_session).await;
+    let mut pwm_driver = SimPwmDriver::new(&board.zenoh_session).await;
+
+    // Immediately disable ALL channels
+    for channel in 0..pwm_driver.len() {
+        pwm_driver.disable(channel);
+    }
+
     let mut params = Params::new();
     
     // initialize the timing of the highest level loop through a tick callback 
@@ -74,7 +82,6 @@ async fn main() {
     let state_manager = StateManager::new();
 
     let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config, pwm_driver);
-    //let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config);
 
     //let mut x: u64 = 0;
 

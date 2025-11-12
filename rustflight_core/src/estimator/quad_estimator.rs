@@ -39,6 +39,7 @@ use crate::hlist::*;
 use crate::hlist_type;
 use crate::packets;
 use super::Estimator;
+use super::AttitudeStateTrait;
 
 use micro_algebra::stack::{
     quaternion::Quaternion,
@@ -52,6 +53,31 @@ pub struct AttitudeState {
     pub q_hat: Quaternion<f64>,
     pub q_dot: Quaternion<f64>,
     pub b_hat: Vector<f64, 3>,
+    is_healthy: bool,
+}
+
+impl AttitudeStateTrait for AttitudeState {
+    fn q(&self) -> [f32; 4] {
+        [
+            self.q_hat.get_w() as f32,
+            self.q_hat.get_x() as f32,
+            self.q_hat.get_y() as f32,
+            self.q_hat.get_z() as f32,
+        ]
+    }
+    
+    fn q_dot(&self) -> [f32; 4] {
+        [
+            self.q_dot.get_w() as f32,
+            self.q_dot.get_x() as f32,
+            self.q_dot.get_y() as f32,
+            self.q_dot.get_z() as f32,
+        ]
+    }
+
+    fn is_healthy(&self) -> bool {
+        self.is_healthy
+    }
 }
 
 impl From<AttitudeState> for Vector<f64, 3> {
@@ -107,7 +133,7 @@ impl Estimator for QuadEstimator {
             // normalize accelerometer measurement 
             let mut v_a = Vector::from_array(imu_packet.accel);
 
-        // FIX: Check for zero vector before normalizing
+            // FIX: Check for zero vector before normalizing
             if v_a.norm_2() > 1e-9 { // Or some other small epsilon
                 v_a.normalize_fill();
             } else {
@@ -118,6 +144,7 @@ impl Estimator for QuadEstimator {
                     q_hat: self.q_hat,
                     q_dot: self.q_dot,
                     b_hat: self.b_hat,
+                    is_healthy: true,
                 };
             }
             
@@ -147,10 +174,18 @@ impl Estimator for QuadEstimator {
             self.q_hat.normalize_fill();
         }
 
+        let q = self.q_hat;
+        let is_healthy = 
+            !(q.get_w().is_nan() || q.get_w().is_infinite() ||
+              q.get_x().is_nan() || q.get_x().is_infinite() ||
+              q.get_y().is_nan() || q.get_y().is_infinite() ||
+              q.get_z().is_nan() || q.get_z().is_infinite());
+
         AttitudeState {
             q_hat: self.q_hat,
             q_dot: self.q_dot,
             b_hat: self.b_hat,
+            is_healthy: is_healthy
         }
     }
 }
