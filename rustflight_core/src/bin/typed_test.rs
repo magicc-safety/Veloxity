@@ -61,8 +61,18 @@ impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
         Here, 
         There<There<There<There<There<Here>>>>>
     ];
-    type RcPacketIndex = There<There<Here>>;
-    type RcPacketSculptedIndex = There<There<There<There<There<There<Here>>>>>>;
+
+    type RcPacketSculptedIndex = There<There<Here>>;
+
+    type ImuPacketIndex = Here;
+    type MagPacketIndex = There<Here>;
+    type BaroPacketIndex = There<There<Here>>;
+    type PitotPacketIndex = There<There<There<Here>>>;
+    type RangePacketIndex = There<There<There<There<Here>>>>;
+    type GNSSPacketIndex = There<There<There<There<There<Here>>>>>;
+    type BatteryPacketIndex = There<There<There<There<There<There<Here>>>>>>;
+    type RcPacketIndex = There<There<There<There<There<There<There<Here>>>>>>>;
+    type AttitudePacketIndex = There<There<There<There<There<There<There<There<Here>>>>>>>>;
 }
 
 fn main() {

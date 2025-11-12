@@ -82,24 +82,17 @@ impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
 
     type ImuPacketIndex = I0;
     type MagPacketIndex = I1;
-    type BaroPacketIndex = I2; // Will this need to be updated?
+    type BaroPacketIndex = I2;
     type PitotPacketIndex = I3;
     type RangePacketIndex = I4;
     type GNSSPacketIndex = I5;
     type BatteryPacketIndex = I6;
-    type RcPacketIndex = I7; // I thought this was going to have to be I7, but it seems to be the index of the quadrotor definition
+    type RcPacketIndex = I7;
     type AttitudePacketIndex = I8;
 }
 
 #[entry]
 fn main() -> ! {
-    // Enable the FPU for hard-float operations
-    unsafe {
-        let mut p = cortex_m::Peripherals::steal();
-        // Read the current CPACR value, set the FPU bits, and write it back
-        p.SCB.cpacr.write(p.SCB.cpacr.read() | 0x00F0_0000);
-    }
-
     // board implementation
     let (mut board, mut servos) = board::Board::new();
 
