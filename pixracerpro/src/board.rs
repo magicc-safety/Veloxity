@@ -106,7 +106,7 @@ impl BoardTrait for Board {
             }
             // defmt::info!("Sensor IMU data received!");
         }
-        if let Some(gnss_packet) = sensors.1.1.1.1.0 {
+        if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
             match gnss_packet {
                 Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
                 Err(e) => defmt::error!("Error reading IMU data"),
@@ -454,10 +454,6 @@ impl Board {
         spawner3
             .spawn(peripherals::dps310::task(dps_sensor))
             .unwrap();
-        spawner3
-            .spawn(peripherals::ublox::task(ublox_sensor))
-            .unwrap();
-        spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3
             .spawn(peripherals::ublox::task(ublox_sensor))
             .unwrap();
