@@ -220,7 +220,7 @@ where
         let (required_sensors, _remainder) = processed_sensors.clone().sculpt();
         let (rc_packet_option, estimator_sensors) = required_sensors.pluck();
 
-        //print!("\x1B[2J\x1B[H"); 
+        print!("\x1B[2J\x1B[H"); 
         
         // now run the RC unit and the command manager unit
         if let Some(rc_packet) = rc_packet_option {

@@ -254,11 +254,14 @@ impl Rc {
             };
 
             self.switches[i].channel = channel_num;
-            println!("Setting switch \"{}\" to {}", channel_name, channel_num);
-            if channel_num > 3 && channel_num < rc_num_channels {
-                println!("Switch \"{}\" will not be mapped...", channel_name);
-            }
             self.switches[i].mapped = channel_num > 3 && channel_num < rc_num_channels;
+
+            // debugging code to see if we mapped it or not...
+            if self.switches[i].mapped {
+                println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
+            } else {
+                println!("Switch \"{}\" will not be mapped.", channel_name);
+            }
 
             let direction_param_id = match channel_num {
                 4 => Some(ParamId::PARAM_RC_SWITCH_5_DIRECTION),
@@ -397,7 +400,7 @@ impl Rc {
                 self.stick_values[channel] = 2.0 * (pwm - 0.5);
             }
 
-            //println!("Stick {}: {}",channel, self.stick_values[channel]);
+            println!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
         // 4. Process switch values (moved from old `run`)
@@ -420,7 +423,7 @@ impl Rc {
                 self.switch_values[channel] = false;
             }
 
-            //println!("Switch {}: {}",channel, self.switch_values[channel]);
+            println!("Switch {}: {}",channel, self.switch_values[channel]);
         }
 
         // 5. Signal to the mux (moved from old `run`)

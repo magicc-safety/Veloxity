@@ -450,7 +450,7 @@ where
             command_manager.set_new_offboard_command(now_us, &msg, &params);
         }
 
-        let msg_opt = self.msgs.param_set.take();
+        let msg_opt: Option<ParamSetMsg> = self.msgs.param_set.take();
         if let Some(msg) = msg_opt { // No need for `mut` if you only read from msg
 
             // TODO: Add checking on target system and component ID here if needed
