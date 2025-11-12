@@ -129,7 +129,7 @@ impl MavlinkInterface {
         match (message) {
             Rosflight::ExternalAttitude(es) => {
                 // defmt::debug!("External attitude: qw={}, qx={}, qy={}, qz={}", es.qw, es.qx, es.qy, es.qz);
-                println!("Message: ExternalAttitude");
+                // println!("Message: ExternalAttitude");
                 msgs.store(comm_messages::ExternalAttitudeMsg::from(es))
             }
             Rosflight::Timesync(ts) => {
@@ -138,8 +138,8 @@ impl MavlinkInterface {
                 msgs.store(comm_messages::TimesyncMsg::from(ts))
             }
             Rosflight::RosflightCmd(cmd) => {
-                println!("Message: RosflightCmd");
-                println!("Rosflight command: {}", cmd.command as u8);
+                // println!("Message: RosflightCmd");
+                // println!("Rosflight command: {}", cmd.command as u8);
                 msgs.store(comm_messages::RosflightCmdMsg::from(cmd))
             }
             Rosflight::RosflightAuxCmd(aux_cmd) => {
@@ -153,15 +153,15 @@ impl MavlinkInterface {
                 msgs.store(comm_messages::OffboardControlMsg::from(oc))
             }
             Rosflight::ParamRequestRead(pr) => {
-                println!("Message: ParamRequestRead");
+                // println!("Message: ParamRequestRead");
                 msgs.store(comm_messages::ParamRequestReadMsg::from(pr))
             }
             Rosflight::ParamSet(ps) => {
-                println!("Message: ParamSet: param_value: {:?}", ps.param_value);
+                // println!("Message: ParamSet: param_value: {:?}", ps.param_value);
                 msgs.store(comm_messages::ParamSetMsg::from(ps))
             }
             Rosflight::ParamRequestList(pl) => {
-                println!("Message: ParamRequestList");
+                // println!("Message: ParamRequestList");
                 msgs.store(comm_messages::ParamRequestListMsg::from(pl))
             }
             Rosflight::Heartbeat(hb) => {
@@ -172,7 +172,7 @@ impl MavlinkInterface {
                 //     hb.system_status,
                 //     hb.custom_mode,
                 // );
-                println!("Message: Heartbeat");
+                // println!("Message: Heartbeat");
                 msgs.store(comm_messages::HeartbeatMsg::from(hb))
             }
             _ => {

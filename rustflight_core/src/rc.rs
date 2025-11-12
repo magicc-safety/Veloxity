@@ -155,11 +155,11 @@ impl Rc {
         self.sticks[Stick::X as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_X_CHANNEL) {
                 ParamValue::Int(val) => {
-                    println!("RC channel {} for stick X", val);
+                    // println!("RC channel {} for stick X", val);
                     val
                 }
                 other => {
-                    println!("Error: PARAM_RC_X_CHANNEL is not an Int, but {:?}! Defaulting to 0.", other);
+                    // println!("Error: PARAM_RC_X_CHANNEL is not an Int, but {:?}! Defaulting to 0.", other);
                     0 // Default C++ value
                 }
             },
@@ -170,11 +170,11 @@ impl Rc {
         self.sticks[Stick::Y as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Y_CHANNEL) {
                 ParamValue::Int(val) => {
-                    println!("RC channel {} for stick Y", val);
+                    // println!("RC channel {} for stick Y", val);
                     val
                 }
                 other => {
-                    println!("Error: PARAM_RC_Y_CHANNEL is not an Int, but {:?}! Defaulting to 1.", other);
+                    // println!("Error: PARAM_RC_Y_CHANNEL is not an Int, but {:?}! Defaulting to 1.", other);
                     1 // Default C++ value
                 }
             },
@@ -185,11 +185,11 @@ impl Rc {
         self.sticks[Stick::Z as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Z_CHANNEL) {
                 ParamValue::Int(val) => {
-                    println!("RC channel {} for stick Z", val);
+                    // println!("RC channel {} for stick Z", val);
                     val
                 }
                 other => {
-                    println!("Error: PARAM_RC_Z_CHANNEL is not an Int, but {:?}! Defaulting to 3.", other);
+                    // println!("Error: PARAM_RC_Z_CHANNEL is not an Int, but {:?}! Defaulting to 3.", other);
                     3 // Default C++ value
                 }
             },
@@ -200,11 +200,11 @@ impl Rc {
         self.sticks[Stick::F as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_F_CHANNEL) {
                 ParamValue::Int(val) => {
-                    println!("RC channel {} for stick F", val);
+                    // println!("RC channel {} for stick F", val);
                     val
                 }
                 other => {
-                    println!("Error: PARAM_RC_F_CHANNEL is not an Int, but {:?}! Defaulting to 2.", other);
+                    // println!("Error: PARAM_RC_F_CHANNEL is not an Int, but {:?}! Defaulting to 2.", other);
                     2 // Default C++ value
                 }
             },
@@ -218,7 +218,7 @@ impl Rc {
         let rc_num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
             ParamValue::Int(val) => val,
             other => {
-                println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
+                // println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
                 6 // Default C++ value
             }
         };
@@ -245,7 +245,7 @@ impl Rc {
                 match params.get_by_id(id) {
                     ParamValue::Int(val) => val,
                     other => {
-                        println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 255.", id, other);
+                        // println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 255.", id, other);
                         255 // Default for "INVALID"
                     }
                 }
@@ -258,9 +258,9 @@ impl Rc {
 
             // debugging code to see if we mapped it or not...
             if self.switches[i].mapped {
-                println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
+                // println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
             } else {
-                println!("Switch \"{}\" will not be mapped.", channel_name);
+                // println!("Switch \"{}\" will not be mapped.", channel_name);
             }
 
             let direction_param_id = match channel_num {
@@ -276,7 +276,7 @@ impl Rc {
                 match params.get_by_id(id) {
                     ParamValue::Int(val) => val,
                     other => {
-                        println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 1.", id, other);
+                        // println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 1.", id, other);
                         1 // C++ default
                     }
                 }
@@ -380,7 +380,7 @@ impl Rc {
         self.rc.num_channels = len;
 
         if self.check_rc_lost(params, state_manager) {
-            println!("RC is Lost!!!");
+            // println!("RC is Lost!!!");
             // If RC is lost, we're done. Don't process sticks/switches.
             return;
         }
@@ -400,7 +400,7 @@ impl Rc {
                 self.stick_values[channel] = 2.0 * (pwm - 0.5);
             }
 
-            println!("Stick {}: {}",channel, self.stick_values[channel]);
+            // println!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
         // 4. Process switch values (moved from old `run`)
@@ -423,7 +423,7 @@ impl Rc {
                 self.switch_values[channel] = false;
             }
 
-            println!("Switch {}: {}",channel, self.switch_values[channel]);
+            // println!("Switch {}: {}",channel, self.switch_values[channel]);
         }
 
         // 5. Signal to the mux (moved from old `run`)
@@ -453,7 +453,7 @@ impl Rc {
         let arm_threshold = match params.get_by_id(ParamId::PARAM_ARM_THRESHOLD) {
             ParamValue::Float(val) => val,
             other => {
-                println!("Error: PARAM_ARM_THRESHOLD is not a Float, but {:?}! Defaulting to 0.15.", other);
+                // println!("Error: PARAM_ARM_THRESHOLD is not a Float, but {:?}! Defaulting to 0.15.", other);
                 0.15 // Default value from C++ param definitions
             }
         };
@@ -523,7 +523,7 @@ impl Rc {
             let num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
                 ParamValue::Int(val) => val as usize,
                 other => {
-                    println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
+                    // println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
                     6 // Default C++ value
                 }
             };

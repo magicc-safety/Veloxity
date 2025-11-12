@@ -78,6 +78,8 @@ impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     // IMU, Mag, RC
     type SculptIndices = hlist_type![I0, I0, I5]; 
 
+    type RcPacketSculptedIndex = I2;
+
     type ImuPacketIndex = I0;
     type MagPacketIndex = I1;
     type BaroPacketIndex = I2; // Will this need to be updated?
@@ -85,7 +87,7 @@ impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     type RangePacketIndex = I4;
     type GNSSPacketIndex = I5;
     type BatteryPacketIndex = I6;
-    type RcPacketIndex = I2; // I thought this was going to have to be I7, but it seems to be the index of the quadrotor definition
+    type RcPacketIndex = I7; // I thought this was going to have to be I7, but it seems to be the index of the quadrotor definition
     type AttitudePacketIndex = I8;
 }
 
