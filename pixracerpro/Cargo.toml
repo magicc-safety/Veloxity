@@ -14,8 +14,3 @@ workspace = true
 name = "typed_test"
 test = false
 bench = false
-
-[[bin]]
-name = "sensors_tests"
-path = "tests/sensors_tests.rs"
-test = true
