@@ -183,6 +183,9 @@ where
             &mut self.command_manager,
         );
 
+
+        //println!("Did we make it 2?");
+
         if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
         {
             // this must mean that rc asked for arm, but calibration hadn't happened and needed to... go ahead and raise the calibration flag
@@ -220,11 +223,8 @@ where
         let (required_sensors, _remainder) = processed_sensors.clone().sculpt();
         let (rc_packet_option, estimator_sensors) = required_sensors.pluck();
 
-        print!("\x1B[2J\x1B[H"); 
-        
         // now run the RC unit and the command manager unit
         if let Some(rc_packet) = rc_packet_option {
-            //println!("RC Packet Received:");
             self.rc_manager.receive(
                 &rc_packet, 
                 &self.params,
@@ -298,6 +298,8 @@ where
 
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);
+
+        //println!("Did we make it?");
 
         true
     }
