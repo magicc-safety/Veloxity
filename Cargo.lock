@@ -1966,7 +1966,7 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 [[package]]
 name = "micro_algebra"
 version = "0.1.0"
-source = "git+ssh://git@github.com/Derekbenj/micro_algebra.git?branch=libmTest#6abbdeda8d837c2eabaf66a4b107f25dd359bed9"
+source = "git+ssh://git@github.com/magicc-safety/micro_algebra.git?branch=main#33b4ac6f45cfc3d0657f37c62f5a634422973940"
 dependencies = [
  "libm",
  "num",
