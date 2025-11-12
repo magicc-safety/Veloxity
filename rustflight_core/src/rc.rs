@@ -474,13 +474,13 @@ impl Rc {
                 if f_stick < arm_threshold && z_stick > (1.0 - arm_threshold) {
                     self.time_sticks_have_been_in_arming_position_ms = 
                         self.time_sticks_have_been_in_arming_position_ms.saturating_add(dt);
-                    println!("Starting Arming Process");
+                    // println!("Starting Arming Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
                 }
 
                 if self.time_sticks_have_been_in_arming_position_ms > 1000 {
-                    println!("Requesting Arm!");
+                    // println!("Requesting Arm!");
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
@@ -489,7 +489,7 @@ impl Rc {
                 if f_stick < arm_threshold && z_stick < -(1.0 - arm_threshold) {
                     self.time_sticks_have_been_in_arming_position_ms = 
                         self.time_sticks_have_been_in_arming_position_ms.saturating_add(dt);
-                        println!("Starting Disarm Process");
+                        // println!("Starting Disarm Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
                 }
@@ -498,7 +498,7 @@ impl Rc {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_DISARM, params);
                     self.time_sticks_have_been_in_arming_position_ms = 0;
-                    println!("Requesting Disarm!");
+                    // println!("Requesting Disarm!");
                 }
             }
         } else { // Switch arming

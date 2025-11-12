@@ -2,8 +2,8 @@
 #![no_main]
 // /**
 // ******************************************************************************
-// * File     : typed_test.rs
-// * Date     : May 8, 2025
+// * File     : estimator_test.rs
+// * Date     : October 8, 2025
 // ******************************************************************************
 // *
 // * Copyright (c) 2023, AeroVironment, Inc.
@@ -37,13 +37,15 @@
 // ******************************************************************************
 // **/
 use cortex_m_rt::entry;
+use cortex_m;
 // use defmt;
 use pixracerpro::*;
+use pixracerpro::pwm::BoardPwmDriver;
 use rustflight_core::{
     board::BoardTrait,
     board::dummy::DummyBoard,
     bodytype::BodyType,
-    bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
+    bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
     estimator::Estimator,
@@ -53,29 +55,61 @@ use rustflight_core::{
     rustflight::Configuration,
     rustflight::rustflight_typed::ROSFlight,
     state_machine::StateManager,
+    params2::Params,
+    pwm
 };
-use stm_32::*;
+use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
+
+// Tiny aliases for readability
+pub type I0 = Here;
+pub type I1 = There<I0>;
+pub type I2 = There<I1>;
+pub type I3 = There<I2>;
+pub type I4 = There<I3>;
+pub type I5 = There<I4>;
+pub type I6 = There<I5>;
+pub type I7 = There<I6>;
+pub type I8 = There<I7>;
 
 // define the wiring diagram
 #[derive(Default)]
-pub struct NucleoQuadConfig;
-impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {
-    // needs IMU, Baro, Mag, GNSS
-    type SculptIndices = hlist_type![Here, Here, Here, There<Here>];
+pub struct PixRacerProQuadConfig;
+impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
+    // IMU, Mag, RC
+    type SculptIndices = hlist_type![I0, I0, I5]; 
+
+    type RcPacketSculptedIndex = I2;
+
+    type ImuPacketIndex = I0;
+    type MagPacketIndex = I1;
+    type BaroPacketIndex = I2; // Will this need to be updated?
+    type PitotPacketIndex = I3;
+    type RangePacketIndex = I4;
+    type GNSSPacketIndex = I5;
+    type BatteryPacketIndex = I6;
+    type RcPacketIndex = I7; // I thought this was going to have to be I7, but it seems to be the index of the quadrotor definition
+    type AttitudePacketIndex = I8;
 }
 
 #[entry]
 fn main() -> ! {
+    // Enable the FPU for hard-float operations
+    unsafe {
+        let mut p = cortex_m::Peripherals::steal();
+        // Read the current CPACR value, set the FPU bits, and write it back
+        p.SCB.cpacr.write(p.SCB.cpacr.read() | 0x00F0_0000);
+    }
+
     // board implementation
-    let mut board = board::Board::new();
+    let (mut board, mut servos) = board::Board::new();
 
     // body type instantiations
-    let estimator = QuadEstimator::default();
-    let controller = QuadController::default();
-    let mixer = QuadMixer::default();
+    let estimator = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
+    let controller = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
+    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&Params::default());
 
     // zero-sized configuration marker (necessary)
-    let config = NucleoQuadConfig::default();
+    let config = PixRacerProQuadConfig::default();
 
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
@@ -83,19 +117,23 @@ fn main() -> ! {
     // state_manager
     let state_manager = StateManager::new();
 
+    // let pwm_driver = BoardPwmDriver::new(&mut board.servos);
+
     let mut rosflight = ROSFlight::init(
         1000,
         board,
+        Params::default(),
         mavlink,
         state_manager,
         estimator,
         controller,
         mixer,
         config,
+        BoardPwmDriver::new(&mut servos),
     );
 
     loop {
-        defmt::debug!("One Loop");
+        // defmt::info!("Hello World!");
         rosflight.run();
     }
 }

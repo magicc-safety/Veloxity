@@ -15,7 +15,7 @@ use micro_algebra::stack::{
     quaternion::Quaternion,
     vector::Vector,
 };
-use micro_algebra::mathlib::{
+use micro_algebra::libm::{
     sin,
     cos,
 };
