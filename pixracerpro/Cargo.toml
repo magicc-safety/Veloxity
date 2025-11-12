@@ -1,0 +1,16 @@
+[package]
+name = "pixracerpro"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+stm_32 = { workspace = true }
+rustflight_core = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "typed_test"
+test = false
+bench = false

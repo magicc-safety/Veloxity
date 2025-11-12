@@ -43,7 +43,7 @@ mod tests;
 use bitflags::bitflags;
 use crate::{board::BoardTrait, comm_manager::CommManager, params2::{ParamValue, Params, ParamId}};
 use core::{error, mem::take};
-use std::default;
+// use std::default;
 
 // Events that trigger state transitions
 #[derive(Debug, Clone, Copy)]
@@ -207,21 +207,21 @@ impl Preflight {
                         let x_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                println!("Error: PARAM_GYRO_X_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // println!("Error: PARAM_GYRO_X_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
                         let y_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                println!("Error: PARAM_GYRO_Y_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // println!("Error: PARAM_GYRO_Y_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
                         let z_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                println!("Error: PARAM_GYRO_Z_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // println!("Error: PARAM_GYRO_Z_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
@@ -324,7 +324,7 @@ impl StateManager {
         let start_state = self.machine;
         self.machine.update(event, params);
         if start_state != self.machine {
-            println!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
+            // println!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
         }
     }
 

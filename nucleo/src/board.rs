@@ -88,6 +88,14 @@ impl BoardTrait for Board {
         sensors.1.1.1.0 = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
         sensors.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+
+        // if let Some(gnss_packet) = sensors.1.1.1.1.0 {
+        //     match gnss_packet {
+        //         Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
+        //         Err(e) => defmt::error!("Error reading IMU data"),
+        //     }
+        //     // defmt::info!("GPS data received!");
+        // }
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -427,12 +435,14 @@ impl Board {
         let drdy_bmi08x_g = ExtiInput::new(p.PF7, p.EXTI7, Pull::Down); // Gyro
         let bmi08x_dev_a = SpiDevice::new(spi4_bus, nss_bmi08x_a);
         let bmi08x_dev_g = SpiDevice::new(spi4_bus, nss_bmi08x_g);
+        let jumper: Output<'static> = Output::new(p.PF15, Level::High, Speed::Low); // Bridge pin
 
         let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
             dev_a: bmi08x_dev_a,
             dev_g: bmi08x_dev_g,
             drdy_a: drdy_bmi08x_a,
             drdy_g: drdy_bmi08x_g,
+            jumper: jumper,
             range_a: peripherals::bmi08x::AccelRange::Bmi088(
                 peripherals::bmi08x::AccelRange088::Max24G,
             ),

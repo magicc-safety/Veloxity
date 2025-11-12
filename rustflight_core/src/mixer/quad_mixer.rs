@@ -42,6 +42,8 @@ use crate::params2::{ParamId, ParamValue, Params};
 use micro_algebra::stack::matrix::Matrix;
 use micro_algebra::stack::vector::Vector;
 
+use num_traits::Float;
+
 #[derive(Debug, Clone, Copy)]
 pub struct MixerParams {
     // Motor physics parameters

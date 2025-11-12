@@ -47,6 +47,7 @@ use super::pps;
 use rustflight_core::errors;
 use rustflight_core::packets;
 
+// use defmt::info;
 //use defmt::trace;
 
 const BUFFER_LEN: usize = 512;
@@ -206,10 +207,12 @@ impl UbloxSensor {
         if make_packet(class, id, payload, &mut buffer) {
             // Make the expected ack packet
             let mut ack: [u8; 10] = [0u8; 10];
-            let result = make_packet(class, id, &[class, id], &mut ack);
+            let result = make_packet(0x05, 0x01, &[class, id], &mut ack); // ack packet is class=0x05 id=0x01
+            // info!("Made ack packet: {:x} ", ack);
 
             // send packet
             let result = self.uart.write(&buffer[0..payload.len() + 8]).await;
+            // info!("Sent ubx packet class: {:#02X} id: {:#02X} result: {:?}", class, id, result);
             if let Ok((size)) = result {
                 // check it it was successful
                 let result = self.look_for_ack(&ack).await;
@@ -323,16 +326,25 @@ impl UbloxSensor {
     async fn look_for_ack(&mut self, ack: &[u8]) -> bool {
         let mut buffer = [0u8; 256];
 
+        // Expected ack packet [0xB5u8, 0x62u8, 0x05u8, 0x01u8, 0x02u8, 0x00u8, 0x06u8, 0x00u8, 0x0Eu8, 0x37u8,]
         // Read data block with 2 second timeout
-        if let Ok(result) = with_timeout(Duration::from_secs(2), self.uart.read(&mut buffer)).await
-        {
-            if let Ok(size) = result {
-                for (i, subarray) in buffer.windows(ack.len()).enumerate() {
+        match with_timeout(Duration::from_secs(2), self.uart.read_until_idle(&mut buffer)).await {
+            Ok(Ok(size)) => {
+                // info!("Looking for ACK, received {} bytes: {:x}", size, buffer[0..size]);
+                for subarray in buffer.windows(ack.len()) {
                     if ack == subarray {
-                        //                        info!("buffer {}\n ack: {:#02X}\nsubarray: {:#02X}", size, ack, subarray);
+                        // info!("buffer {}\n ack: {:#02X}\nsubarray: {:#02X}", size, ack, subarray);
                         return true;
                     }
                 }
+            }
+            Ok(Err(read_err)) => {
+                // underlying UART/read error from self.uart.read(...)
+                // info!("UART read error while looking for ACK: {:?}", read_err);
+            }
+            Err(timeout_err) => {
+                // with_timeout timed out
+                // info!("Timed out waiting for UART read while looking for ACK: {:?}", timeout_err);
             }
         }
         false
@@ -351,27 +363,25 @@ impl UbloxSensor {
         for retries in 0..30 {
             for baud in bauds {
                 // try baud rate
-                //info!("Try {} baud", baud);
+                // info!("Try {} baud", baud);
                 // set stm32 baud rate
                 let result: Result<(), usart::ConfigError> = self.uart.set_baudrate(baud);
+                // info!("Set baud result: {:?}", result);
 
                 // set ublox the desired baud rate
                 let result = self.cfg_prt(self.baudrate as u32).await;
+                // info!("Cfg prt result: {:?}", result);
 
-                // look for ack
-                if self
-                    .look_for_ack(&[
-                        0xB5u8, 0x62u8, 0x05u8, 0x01u8, 0x02u8, 0x00u8, 0x06u8, 0x00u8, 0x0Eu8,
-                        0x37u8,
-                    ])
-                    .await
-                {
+                if result {
+                    // info!("Synced baudrate to {}", baud);
                     let result: Result<(), usart::ConfigError> =
                         self.uart.set_baudrate(self.baudrate as u32);
                     return true;
                 }
+                // info!("{:?} baud not configured", baud);
             }
         }
+        // info!("Failed to sync baudrate after all attempts");
         false
     }
 

@@ -125,7 +125,7 @@ impl CommandManager {
         let mut failsafe_throttle = match params.get_by_id(ParamId::PARAM_FAILSAFE_THROTTLE) {
             ParamValue::Float(val) => val,
             other => {
-                println!("Error: PARAM_FAILSAFE_THROTTLE is not a Float, but {:?}! Defaulting to 0.0.", other);
+                // println!("Error: PARAM_FAILSAFE_THROTTLE is not a Float, but {:?}! Defaulting to 0.0.", other);
                 0.0f32
             }
         };
@@ -133,7 +133,7 @@ impl CommandManager {
         let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
             ParamValue::Bool(val) => val,
             other => {
-                println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false.", other);
+                // println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false.", other);
                 false
             }
         };
@@ -157,7 +157,7 @@ impl CommandManager {
             // Error case: it's the wrong type.
             // We log the error and apply a safe default (Fz).
             other_type => {
-                println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                // println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
                 self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64;
             }
         }
@@ -179,17 +179,17 @@ impl CommandManager {
         // --- 1. Failsafe Action (C++ lines 240-243) ---
         // This is the highest priority. If in failsafe, override all commands.
         if state_manager.is_in_failsafe() {
-            println!("Command_Manager: We're in failsafe!!!");
+            // println!("Command_Manager: We're in failsafe!!!");
 
             let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
                 ParamValue::Bool(val) => val,
                 other => {
-                    println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
+                    // println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
                     false 
                 }
             };
             self.combined_command = if is_fixed_wing {
-                println!("Command_Manager: failsafe is fixedwing failsafe");
+                // println!("Command_Manager: failsafe is fixedwing failsafe");
                 self.fixedwing_failsafe_command
             } else {
                 self.multirotor_failsafe_command
@@ -208,7 +208,7 @@ impl CommandManager {
                 let timeout_ms = match params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) {
                     ParamValue::Int(val) => val as u32,
                     other => {
-                        println!("Error: PARAM_OFFBOARD_TIMEOUT is not an Int, but {:?}! Defaulting to 100ms.", other);
+                        // println!("Error: PARAM_OFFBOARD_TIMEOUT is not an Int, but {:?}! Defaulting to 100ms.", other);
                         100 // Use the C++ default as a safe fallback
                     }
                 };
@@ -316,7 +316,7 @@ impl CommandManager {
                             },
                             other_type => {
                                 // Error case: F_AXIS is wrong type! Default to Fz.
-                                println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                                // println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
                                 self.offboard_command.fz.control_type = ControlType::Passthrough;
                                 self.offboard_command.fz.value = throttle_value;
                                 self.offboard_command.fz.active = throttle_is_active;
@@ -325,7 +325,7 @@ impl CommandManager {
                     },
                     other_type => {
                         // Error case: FIXED_WING is wrong type! Default to multirotor + Fz.
-                        println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to multirotor.", other_type);
+                        // println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to multirotor.", other_type);
                         self.offboard_command.fz.control_type = ControlType::Passthrough;
                         self.offboard_command.fz.value = throttle_value;
                         self.offboard_command.fz.active = throttle_is_active;
@@ -393,7 +393,7 @@ impl CommandManager {
             },
             // Error case: param is wrong type!
             other_type => {
-                println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                // println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
                 // Default to Z_AXIS for safety
                 self.rc_command.fx.value = 0.0;
                 self.rc_command.fy.value = 0.0;
@@ -415,7 +415,7 @@ impl CommandManager {
             other => {
                 // This is a param definition error. Default to the safer
                 // (non-fixed-wing) case.
-                println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
+                // println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
                 false
             }
         };
@@ -480,7 +480,7 @@ impl CommandManager {
        let deviation_param = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
             ParamValue::Float(val) => val as f64, // Convert f32 to f64
             other => {
-                println!("Error: PARAM_RC_OVERRIDE_DEVIATION is not a Float, but {:?}! Defaulting to 0.1.", other);
+                // println!("Error: PARAM_RC_OVERRIDE_DEVIATION is not a Float, but {:?}! Defaulting to 0.1.", other);
                 0.1 // Default value from C++ params
             }
         };
@@ -489,7 +489,7 @@ impl CommandManager {
         let lag_time_ms = match params.get_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME) {
             ParamValue::Int(val) => val as u32,
             other => {
-                println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
+                // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
                 200 // Default value from C++ params
             }
         }; 
@@ -541,7 +541,7 @@ impl CommandManager {
                 // This param is an Int, but we use it as a Bool
                 ParamValue::Bool(val) => val,
                 other => {
-                    println!("Error: PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE is not an Int, but {:?}! Defaulting to false.", other);
+                    // println!("Error: PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE is not an Int, but {:?}! Defaulting to false.", other);
                     false // Default to false (C++ default is 0)
                 }
             };
@@ -559,7 +559,7 @@ impl CommandManager {
                     },
                     other_type => {
                         // Error case: param is wrong type! Default to Fz.
-                        println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
+                        // println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
                         let rc_throttle = self.rc_command.fz.value;
                         let offboard_throttle = self.offboard_command.fz.value;
                         return rc_throttle < offboard_throttle;

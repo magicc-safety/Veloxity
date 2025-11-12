@@ -50,6 +50,7 @@ use rustflight_core::{
     rc::Rc,
     rustflight::{rustflight_typed::ROSFlight, Configuration},
     state_machine::StateManager,
+    pwm::PwmDriver // We need to switch this out for the PwmDriver written for this test.
 };
 
 // define the wiring diagram
@@ -61,13 +62,23 @@ impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
         Here, 
         There<There<There<There<There<Here>>>>>
     ];
-    type RcPacketIndex = There<There<Here>>;
-    type RcPacketSculptedIndex = There<There<There<There<There<There<Here>>>>>>;
+
+    type RcPacketSculptedIndex = There<There<Here>>;
+
+    type ImuPacketIndex = Here;
+    type MagPacketIndex = There<Here>;
+    type BaroPacketIndex = There<There<Here>>;
+    type PitotPacketIndex = There<There<There<Here>>>;
+    type RangePacketIndex = There<There<There<There<Here>>>>;
+    type GNSSPacketIndex = There<There<There<There<There<Here>>>>>;
+    type BatteryPacketIndex = There<There<There<There<There<There<Here>>>>>>;
+    type RcPacketIndex = There<There<There<There<There<There<There<Here>>>>>>>;
+    type AttitudePacketIndex = There<There<There<There<There<There<There<There<Here>>>>>>>>;
 }
 
 fn main() {
     // board implementation
-    let board = DummyBoard::default();
+    let (board, servos) = DummyBoard::default(); // We need to update the Default to return the (board, servos) tuple
     let mut params = Params::new();
 
     // body type instantiations...
@@ -83,7 +94,7 @@ fn main() {
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config);
+    let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config, PwmDriver::new(&mut servos),); // we need to create a PwmDriver for this test
 
     loop {
         println!("Highest Level Loop");

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["nucleo", "rustflight_core", "sim", "stm_32"]
+members = ["nucleo", "pixracerpro", "rustflight_core", "sim", "stm_32"]
 
 # Define your core library as a shared dependency
 [workspace.dependencies]

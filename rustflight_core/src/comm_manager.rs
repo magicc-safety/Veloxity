@@ -469,7 +469,7 @@ where
                 Ok(param_name_str) => {
                     // Successfully converted, now set the parameter
                     if params.set_by_name(param_name_str, msg.param_value) {
-                        println!("Set parameter '{}' successfully to {:?}.", param_name_str, msg.param_value);
+                        // println!("Set parameter '{}' successfully to {:?}.", param_name_str, msg.param_value);
 
                         // MAVLink spec requires acknowledging the change by sending PARAM_VALUE
                         // Find the ParamDefinition to get the ID and count
@@ -479,7 +479,7 @@ where
                                 // ...update our internal sysid
                                 if let ParamValue::Int(new_sysid) = msg.param_value {
                                     self.sysid = new_sysid as u8;
-                                    println!("CommManager sysid updated to {}", self.sysid);
+                                    // println!("CommManager sysid updated to {}", self.sysid);
                                 }
                             }
 
@@ -494,17 +494,17 @@ where
                             self.comm_link.send_named_value(board, self.sysid, value_msg);
                             return Some(def.id)
                         } else {
-                            println!("Error: Could not find definition for '{}' after setting.", param_name_str);
+                            defmt::info!("Error: Could not find definition for '{}' after setting.", param_name_str);
                         }
 
                     } else {
-                        println!("Failed to set parameter: Name '{}' not found.", param_name_str);
+                        defmt::info!("Failed to set parameter: Name '{}' not found.", param_name_str);
                         // Optionally send a NACK or STATUSTEXT message here
                     }
                 }
                 Err(e) => {
                     // The received param_id was not valid UTF-8
-                    println!("Received PARAM_SET with invalid UTF-8 name: {:?}", name_slice);
+                    defmt::info!("Received PARAM_SET with invalid UTF-8 name: {:?}", name_slice);
                 }
             }
         }
@@ -513,7 +513,8 @@ where
 
         let cmd_msg_opt = self.msgs.cmd.take();
         if let Some(msg) = cmd_msg_opt {
-            println!("Processing ROSflight command: {:?}", msg.command);
+            // println!("Processing ROSflight command: {:?}", msg.command);
+            defmt::info!("Processing ROSflight command.");
 
             // Assume failure unless explicitly set to success
             let mut success = RosflightCmdResponse::RosflightCmdFailed;
@@ -524,67 +525,67 @@ where
                     // This often involves reading min/max/trim values from the RC
                     // receiver over a period and storing them. This is complex
                     // and might need interaction with an `Rc` struct/module.
-                    println!("Warning: RC Calibration not implemented.");
+                    defmt::info!("Warning: RC Calibration not implemented.");
                     // success = RosflightCmdResponse::RosflightCmdSuccess; // Mark success if implemented
                 }
                 RosflightCmd::AccelCalibration => {
-                    println!("Starting Accelerometer Calibration.");
+                    defmt::info!("Starting Accelerometer Calibration.");
                     cal_flags.insert(CalibrationFlags::ACCEL); // Set the flag
                     // The actual calibration happens over time in ImuProcessor
                     success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
                 }
                 RosflightCmd::GyroCalibration => {
-                    println!("Starting Gyro Calibration.");
+                    defmt::info!("Starting Gyro Calibration.");
                     cal_flags.insert(CalibrationFlags::GYRO); // Set the flag
                     // The actual calibration happens over time in ImuProcessor
                     success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
                 }
                 RosflightCmd::BaroCalibration => {
-                    println!("Starting Baro Calibration.");
+                    defmt::info!("Starting Baro Calibration.");
                     cal_flags.insert(CalibrationFlags::BARO); // Set the flag
                     // The actual calibration happens over time in BaroProcessor
                     success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
                 }
                 RosflightCmd::AirspeedCalibration => {
-                    println!("Starting Airspeed Calibration.");
+                    defmt::info!("Starting Airspeed Calibration.");
                     cal_flags.insert(CalibrationFlags::PITOT); // Set the flag
                     // The actual calibration happens over time in PitotProcessor
                     success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
                 }
                 RosflightCmd::ReadParams => {
                     // Placeholder: Need BoardTrait method for reading from non-volatile memory
-                    println!("Warning: ReadParams (from non-volatile) not implemented.");
+                    defmt::info!("Warning: ReadParams (from non-volatile) not implemented.");
                     // if board.read_params_from_memory(params) {
                     //     success = RosflightCmdResponse::RosflightCmdSuccess;
                     // }
                 }
                 RosflightCmd::WriteParams => {
                     // Placeholder: Need BoardTrait method for writing to non-volatile memory
-                    println!("Warning: WriteParams (to non-volatile) not implemented.");
+                    defmt::info!("Warning: WriteParams (to non-volatile) not implemented.");
                     // if board.write_params_to_memory(params) {
                     //     success = RosflightCmdResponse::RosflightCmdSuccess;
                     // }
                 }
                 RosflightCmd::SetParamDefaults => {
-                    println!("Setting parameters to defaults.");
+                    defmt::info!("Setting parameters to defaults.");
                     params.set_defaults();
                     success = RosflightCmdResponse::RosflightCmdSuccess;
                 }
                 RosflightCmd::Reboot => {
                     // Placeholder: Need BoardTrait method for reboot
-                    println!("Warning: Reboot command not implemented.");
+                    defmt::info!("Warning: Reboot command not implemented.");
                     // board.reboot();
                     // success = RosflightCmdResponse::RosflightCmdSuccess; // Won't actually send if reboot works!
                 }
                 RosflightCmd::RebootToBootloader => {
                     // Placeholder: Need BoardTrait method for rebooting to bootloader
-                    println!("Warning: RebootToBootloader command not implemented.");
+                    defmt::info!("Warning: RebootToBootloader command not implemented.");
                     // board.reboot_to_bootloader();
                     // success = RosflightCmdResponse::RosflightCmdSuccess; // Won't actually send if reboot works!
                 }
                 RosflightCmd::SendVersion => {
                     // Placeholder: Define version somewhere (e.g., compile-time const)
-                    println!("Sending Version Info (Not fully implemented)");
+                    defmt::info!("Sending Version Info (Not fully implemented)");
                     let version_str = "RustFlight Alpha 0.1"; // Example version string
                     let mut version_bytes = [0u8; 50];
                     let len = version_str.len().min(version_bytes.len());
@@ -596,12 +597,12 @@ where
                 }
                 RosflightCmd::ResetOrigin => {
                     // Placeholder: Logic depends on your estimator implementation
-                    println!("Warning: ResetOrigin command not implemented.");
+                    defmt::info!("Warning: ResetOrigin command not implemented.");
                     // Call relevant function on your estimator instance if applicable
                     // success = RosflightCmdResponse::RosflightCmdSuccess;
                 }
                 RosflightCmd::SendAllConfigInfos => {
-                    println!("Warning: SendAllConfigInfos command not implemented.");
+                    defmt::info!("Warning: SendAllConfigInfos command not implemented.");
                     // This is less common, might involve sending detailed setup info.
                     // success = RosflightCmdResponse::RosflightCmdSuccess;
                 }
@@ -614,7 +615,8 @@ where
             };
             // Need to add send_cmd_ack to CommInterface and MavlinkInterface
             self.comm_link.send_cmd_ack(board, self.sysid, ack_msg);
-            println!("Sent ACK for command {:?} with status {:?}", ack_msg.command, ack_msg.success);
+            // println!("Sent ACK for command {:?} with status {:?}", ack_msg.command, ack_msg.success);
+            defmt::info!("Sent ACK")
         } // end if let Some(msg)
 
         None
