@@ -46,3 +46,5 @@ pub mod telem;
 pub mod ublox;
 pub mod adis16500;
 pub mod vcp;
+pub mod ms4525;
+pub mod ist8308;
