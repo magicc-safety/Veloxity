@@ -267,7 +267,7 @@ impl Dps310Sensor {
         // wait for data ready...
         // Use DRDY signal if available, otherwise let it timeout
         let drdy_result = with_timeout(
-            Duration::from_micros(20_000),
+            Duration::from_micros(3_000),
             self.drdy.wait_for_rising_edge(),
         )
         .await

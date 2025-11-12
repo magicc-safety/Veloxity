@@ -92,9 +92,9 @@ impl BoardTrait for Board {
 
     fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
         sensors.0 = peripherals::bmi08x::IMU_SIGNAL.try_take();
-        sensors.1.0 = peripherals::iis2mdc::MAG_SIGNAL.try_take();
+        sensors.1.0 = peripherals::ist8308::MAG_SIGNAL.try_take();
         sensors.1.1.0 = peripherals::dps310::BARO_SIGNAL.try_take();
-        sensors.1.1.1.0 = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
+        sensors.1.1.1.0 = peripherals::ms4525::PITOT_SIGNAL.try_take();
         sensors.1.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
 
@@ -138,12 +138,17 @@ impl BoardTrait for Board {
                 ),
                 Err(e) => defmt::error!("Error reading Barometer data"),
             }
+            // defmt::info!("Sensor Baro data received!");
         }
-        if sensors.1.1.1.0.is_some() {
-            defmt::info!("Sensor Pitot data received!");
-        }
-        if sensors.1.1.1.1.1.0.is_some() {
-            defmt::info!("Sensor GNSS data received!");
+        if let Some(pitot_packet) = sensors.1.1.1.0 {
+            match pitot_packet {
+                Ok(data) => defmt::info!(
+                    "Pitot data: diff_pressure {:?}",
+                    data.differential_pressure,
+                ),
+                Err(e) => defmt::error!("Error reading Pitot data"),
+            }
+            // defmt::info!("Sensor Pitot data received!");
         }
         if sensors.1.1.1.1.1.1.1.0.is_some() {
             defmt::info!("Sensor RC data received!");
@@ -211,7 +216,7 @@ impl Board {
 
         let start_time = embassy_time::Instant::now();
 
-        // SPI1 Bus ///////////////////////////////////////////
+        // SPI1 (ROSflight uses for internal ICM, unused here)
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
         spi1_config.frequency = mhz(16); // Phil recommends not running over 4 Mbps
         spi1_config.mode = spi::MODE_3;
@@ -229,24 +234,13 @@ impl Board {
         let spi1_bus = Mutex::new(spi1);
         let spi1_bus = SPI1_BUS.init(spi1_bus);
 
-        // // IIS2MDC Mag - NOT NEEDED - the PixRacer Pro has an internal mag
-        // let nss1 = Output::new(p.PA4, Level::High, Speed::Low);
-        // let drdy1 = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down);
-        // let iis_dev = SpiDevice::new(spi1_bus, nss1); // Todo implement new funciton
-        // let iis_sensor = peripherals::iis2mdc::Iis2mdcSensor {
-        //     dev: iis_dev,
-        //     drdy: drdy1,
-        // }; // Todo implement new funciton
-
-        // SPI2
-        // Necessary for internal DPS310
+        // SPI2 (internal DPS310)
         let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
         spi2_config.frequency = mhz(16); // Phil recommends not running over 4 Mbps
         spi2_config.mode = spi::MODE_3;
         spi2_config.bit_order = spi::BitOrder::MsbFirst;
         spi2_config.miso_pull = embassy_stm32::gpio::Pull::Up;
         let spi2 = spi::Spi::new(
-            // Pins taken from Rosflight pixracer_pro.ioc
             p.SPI2,
             p.PB10, // Sck
             p.PB15, // Mosi
@@ -259,7 +253,6 @@ impl Board {
         let spi2_bus = SPI2_BUS.init(spi2_bus);
 
         // DPS310 Baro (Internal)
-        // PD7 taken from Rosflight pixracer_pro.ioc
         let nss2 = Output::new(p.PD7, Level::High, Speed::Low);
         // these pins are generalized for the IC
         let drdy2 = ExtiInput::new(p.PD15, p.EXTI15, Pull::Down);
@@ -270,7 +263,7 @@ impl Board {
             three_wire: false,
         };
 
-        // I2C1 Bus  ///////////////////////////////////////////
+        // I2C1 Bus (ist8308 Mag and MS4525 Pitot on external)
         let mut i2c_config = i2c::Config::default();
         i2c_config.scl_pullup = true;
         i2c_config.sda_pullup = true;
@@ -281,19 +274,21 @@ impl Board {
             IrqsI2c1,
             p.DMA2_CH2,
             p.DMA2_CH3,
-            Hertz(100_000),
+            Hertz(400_000),
             i2c_config,
         );
         let i2c1_bus = Mutex::new(i2c1);
         let i2c1_bus = I2C1_BUS.init(i2c1_bus);
 
-        // // DLHRL20G Pitot // NON-ESSENTIAL EXTERNAL SENSOR
-        // let drdy0 = ExtiInput::new(p.PA15, p.EXTI15, Pull::Down);
-        // let dlhr_dev = I2cDevice::new(i2c1_bus);
-        // let dlhr_sensor = peripherals::dlhrl20g::DlhrL20GSensor {
-        //     dev: dlhr_dev,
-        //     drdy: drdy0,
-        // };
+        // IST8308 Magnetometer (External)
+        let mut ist8303_sensor = peripherals::ist8308::Ist8308Sensor {
+            dev: I2cDevice::new(i2c1_bus),
+        };
+
+        // MS4525 Pitot (External)
+        let mut ms4525_sensor = peripherals::ms4525::Ms4525Sensor {
+            dev: I2cDevice::new(i2c1_bus),
+        };
 
         // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
         let mut uart2config = usart::Config::default();
@@ -338,10 +333,9 @@ impl Board {
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
         spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
-        // TODO: What priority should VCP be?
         spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
-        //GPS USART4
+        // USART4 (external GPS)
         let mut uart4config = usart::Config::default();
         uart4config.baudrate = 9600u32;
         uart4config.rx_pull = Pull::Up;
@@ -355,6 +349,8 @@ impl Board {
             uart4config,
         )
         .unwrap();
+
+        // UBlox NEO-M9N GNSS (External)
         let ublox_sensor = peripherals::ublox::UbloxSensor {
             uart: uart4,
             protocol: peripherals::ublox::Protocol::M8,
@@ -400,8 +396,7 @@ impl Board {
             Default::default(),
         );
 
-        // SPI5 - NEEDED for internal BMI08x
-        // Pins taken from PixRacerPro info compared with STM32H743 datasheet
+        // SPI5 (Internal BMI085)
         let mut spi5_config: embassy_stm32::spi::Config = spi::Config::default();
         spi5_config.frequency = mhz(2); // Phil recommends not running over 4 Mbps
         spi5_config.mode = spi::MODE_3;
@@ -419,7 +414,7 @@ impl Board {
         let spi5_ = Mutex::new(spi5);
         let spi5_bus = SPI5_BUS.init(spi5_);
 
-        // BMI08x - Internal
+        // BMI085 (Internal)
         let nss_bmi08x_a = Output::new(p.PF6, Level::High, Speed::Low); // Accel
         let drdy_bmi08x_a = ExtiInput::new(p.PF1, p.EXTI1, Pull::Down); // Accel
         let nss_bmi08x_g = Output::new(p.PF10, Level::High, Speed::Low); // Gyro
@@ -427,7 +422,6 @@ impl Board {
         let bmi08x_dev_a = SpiDevice::new(spi5_bus, nss_bmi08x_a);
         let bmi08x_dev_g = SpiDevice::new(spi5_bus, nss_bmi08x_g);
         let jumper: Output<'static> = Output::new(p.PF2, Level::High, Speed::Low); // Bridge pin
-
         let bmi08x_sensor = peripherals::bmi08x::Bmi08xSensor {
             dev_a: bmi08x_dev_a,
             dev_g: bmi08x_dev_g,
@@ -458,12 +452,12 @@ impl Board {
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);
         let spawner3 = P3_EXECUTOR.start(interrupt::SAI3);
-        // spawner3 // Pitot tube - temporarily commented out: non-essential
-        //    .spawn(peripherals::dlhrl20g::task(dlhr_sensor))
-        //    .unwrap();
-        // spawner3
-        //     .spawn(peripherals::iis2mdc::task(iis_sensor))
-        //     .unwrap();
+        spawner3
+            .spawn(peripherals::ist8308::task(ist8303_sensor))
+            .unwrap();
+        spawner3
+            .spawn(peripherals::ms4525::task(ms4525_sensor))
+            .unwrap();
         spawner3
             .spawn(peripherals::dps310::task(dps_sensor))
             .unwrap();
