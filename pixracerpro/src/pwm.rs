@@ -36,8 +36,8 @@
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::pwm::{PwmDriver, PwmError};
 use rustflight_core::board::BoardTrait;
+use rustflight_core::pwm::{PwmDriver, PwmError};
 // use crate::ros_messages::{OutputRaw, Header, Time};
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 
@@ -71,14 +71,18 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         if channel >= NUM_HW_CHANNELS {
             return Err(PwmError::ChannelOutOfRange);
         }
-        self.servos.enable(channel).map_err(|_| PwmError::GenericError)
+        self.servos
+            .enable(channel)
+            .map_err(|_| PwmError::GenericError)
     }
 
     fn disable(&mut self, channel: usize) -> Result<(), PwmError> {
         if channel >= NUM_HW_CHANNELS {
             return Err(PwmError::ChannelOutOfRange);
         }
-        self.servos.disable(channel).map_err(|_| PwmError::GenericError)
+        self.servos
+            .disable(channel)
+            .map_err(|_| PwmError::GenericError)
     }
 
     fn set_duty_cycle(&mut self, channel: usize, duty: u16) -> Result<(), PwmError> {
@@ -87,7 +91,8 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
         self.current_values[channel] = pwm_us;
-        self.servos.set_duty_cycle(channel, pwm_us as u16)
+        self.servos
+            .set_duty_cycle(channel, pwm_us as u16)
             .map_err(|_| PwmError::GenericError)
     }
 

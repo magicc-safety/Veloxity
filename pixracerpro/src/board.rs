@@ -101,7 +101,12 @@ impl BoardTrait for Board {
         // Debug statements to check receiving sensor data
         if let Some(imu_packet) = sensors.0 {
             match imu_packet {
-                Ok(data) => defmt::info!("IMU data: accel {:?} | gyro {:?} | temp {:?}", data.accel, data.gyro, data.temperature),
+                Ok(data) => defmt::info!(
+                    "IMU data: accel {:?} | gyro {:?} | temp {:?}",
+                    data.accel,
+                    data.gyro,
+                    data.temperature
+                ),
                 Err(e) => defmt::error!("Error reading IMU data"),
             }
             // defmt::info!("Sensor IMU data received!");
@@ -115,14 +120,22 @@ impl BoardTrait for Board {
         }
         if let Some(mag_packet) = sensors.1.0 {
             match mag_packet {
-                Ok(data) => defmt::info!("Mag data: flux {:?} | temperature {:?}", data.flux, data.temperature),
+                Ok(data) => defmt::info!(
+                    "Mag data: flux {:?} | temperature {:?}",
+                    data.flux,
+                    data.temperature
+                ),
                 Err(e) => defmt::error!("Error reading Mag data"),
             }
             // defmt::info!("Sensor Magnetometer data received!");
         }
         if let Some(baro_packet) = sensors.1.1.0 {
             match baro_packet {
-                Ok(data) => defmt::info!("Baro data: pressure {:?} | temperature {:?}", data.pressure, data.temperature),
+                Ok(data) => defmt::info!(
+                    "Baro data: pressure {:?} | temperature {:?}",
+                    data.pressure,
+                    data.temperature
+                ),
                 Err(e) => defmt::error!("Error reading Barometer data"),
             }
         }
@@ -209,8 +222,8 @@ impl Board {
             p.PA5,
             p.PA7,
             p.PA6,
-            p.DMA1_CH0, 
-            p.DMA1_CH1, 
+            p.DMA1_CH0,
+            p.DMA1_CH1,
             spi1_config,
         );
         let spi1_bus = Mutex::new(spi1);
@@ -396,9 +409,9 @@ impl Board {
         spi5_config.miso_pull = embassy_stm32::gpio::Pull::Up;
         let spi5 = spi::Spi::new(
             p.SPI5,
-            p.PF7, // sck
-            p.PF9, // mosi
-            p.PF8, // miso
+            p.PF7,      // sck
+            p.PF9,      // mosi
+            p.PF8,      // miso
             p.DMA1_CH6, // tx_dma
             p.DMA1_CH7, // rx_dma
             spi5_config,
@@ -532,46 +545,25 @@ impl Board {
 
         let mut timers: [peripherals::pwm::TimerEnum; 4] = [timer1, timer2, timer3, timer4];
 
-        let mut servos: peripherals::pwm::PixRacerProServoMonstrosity = peripherals::pwm::PixRacerProServoMonstrosity {
-            timers,
-            chan_list: [
-                (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4
-                (0, peripherals::pwm::TimerChannel::Ch2), // -
-                (0, peripherals::pwm::TimerChannel::Ch3), // -
-                (0, peripherals::pwm::TimerChannel::Ch4), // -
-                (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
-                (2, peripherals::pwm::TimerChannel::Ch3), // TIM3, channel 3
-                (3, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
-                (3, peripherals::pwm::TimerChannel::Ch3), // -
-            ],
-        };
+        let mut servos: peripherals::pwm::PixRacerProServoMonstrosity =
+            peripherals::pwm::PixRacerProServoMonstrosity {
+                timers,
+                chan_list: [
+                    (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4
+                    (0, peripherals::pwm::TimerChannel::Ch2), // -
+                    (0, peripherals::pwm::TimerChannel::Ch3), // -
+                    (0, peripherals::pwm::TimerChannel::Ch4), // -
+                    (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
+                    (2, peripherals::pwm::TimerChannel::Ch3), // TIM3, channel 3
+                    (3, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
+                    (3, peripherals::pwm::TimerChannel::Ch3), // -
+                ],
+            };
 
         // disable all channels at start
         for i in 0..servos.len() {
             servos.disable(i);
         }
-
-        // TESTING ONLY
-        // for i in 0..servos.len() {
-        //     match servos.enable(i) {
-        //         Ok(_) => defmt::info!("Channel {} enabled successfully", i),
-        //         Err(_) => defmt::error!("Failed to enable channel {}", i),
-        //     }
-        //     match servos.set_duty_cycle(i, 1500) {
-        //         Ok(_) => defmt::info!("Channel {} duty cycle set successfully", i),
-        //         Err(_) => defmt::error!("Failed to set duty cycle on channel {}", i),
-        //     }
-        // }
-
-        // match servos.enable(1) {
-        //     Ok(_) => defmt::info!("Channel {} enabled successfully", 1),
-        //     Err(_) => defmt::error!("Failed to enable channel {}", 1),
-        // }
-        // let tim1_duty_cycle = (1000 as u32 * 65536 as u32) / 2500;
-        // match servos.set_duty_cycle(1, tim1_duty_cycle as u16) {
-        //     Ok(_) => defmt::info!("Channel {} duty cycle set successfully", 1),
-        //     Err(_) => defmt::error!("Failed to set duty cycle on channel {}", 1),
-        // }
 
         // Setup Probe GPIO's
         let probe = [

@@ -36,11 +36,11 @@
 // *
 // ******************************************************************************
 // **/
-use cortex_m_rt::entry;
 use cortex_m;
+use cortex_m_rt::entry;
 // use defmt;
-use pixracerpro::*;
 use pixracerpro::pwm::BoardPwmDriver;
+use pixracerpro::*;
 use rustflight_core::{
     board::BoardTrait,
     board::dummy::DummyBoard,
@@ -52,11 +52,11 @@ use rustflight_core::{
     hlist::{Here, There},
     hlist_type,
     mixer::Mixer,
+    params2::Params,
+    pwm,
     rustflight::Configuration,
     rustflight::rustflight_typed::ROSFlight,
     state_machine::StateManager,
-    params2::Params,
-    pwm
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
@@ -76,7 +76,7 @@ pub type I8 = There<I7>;
 pub struct PixRacerProQuadConfig;
 impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     // IMU, Mag, RC
-    type SculptIndices = hlist_type![I0, I0, I5]; 
+    type SculptIndices = hlist_type![I0, I0, I5];
 
     type RcPacketSculptedIndex = I2;
 
@@ -97,9 +97,13 @@ fn main() -> ! {
     let (mut board, mut servos) = board::Board::new();
 
     // body type instantiations
-    let estimator = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
-    let controller = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
-    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&Params::default());
+    let estimator =
+        <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
+    let controller =
+        <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
+    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(
+        &Params::default(),
+    );
 
     // zero-sized configuration marker (necessary)
     let config = PixRacerProQuadConfig::default();
