@@ -129,39 +129,39 @@ impl MavlinkInterface {
         match (message) {
             Rosflight::ExternalAttitude(es) => {
                 // defmt::debug!("External attitude: qw={}, qx={}, qy={}, qz={}", es.qw, es.qx, es.qy, es.qz);
-                // println!("Message: ExternalAttitude");
+                //println!("Message: ExternalAttitude");
                 msgs.store(comm_messages::ExternalAttitudeMsg::from(es))
             }
             Rosflight::Timesync(ts) => {
-                // println!("Message: Timesync");
+                //println!("Message: Timesync");
                 // defmt::debug!("Timesync: tc1={} ts1={} ", ts.tc1, ts.ts1);
                 msgs.store(comm_messages::TimesyncMsg::from(ts))
             }
             Rosflight::RosflightCmd(cmd) => {
-                // println!("Message: RosflightCmd");
-                // println!("Rosflight command: {}", cmd.command as u8);
+                //println!("Message: RosflightCmd");
+                //println!("Rosflight command: {}", cmd.command as u8);
                 msgs.store(comm_messages::RosflightCmdMsg::from(cmd))
             }
             Rosflight::RosflightAuxCmd(aux_cmd) => {
-                // println!("Message: RosflightAuxCmd");
+                //println!("Message: RosflightAuxCmd");
                 // defmt::debug!("Rosflight aux command: type={}, aux_cmd={}", aux_cmd.type_array.map(|t| t as u8), aux_cmd.aux_cmd_array);
                 msgs.store(comm_messages::RosflightAuxCmdMsg::from(aux_cmd))
             }
             Rosflight::OffboardControl(oc) => {
-                // println!("Message: OffboardControl");
+                //println!("Message: OffboardControl");
                 // defmt::debug!("Offboard control: mode={}, ignore={}, qx={}, qy={}, qz={}", oc.mode as u8, oc.ignore as u8, oc.qx, oc.qy, oc.qz);
                 msgs.store(comm_messages::OffboardControlMsg::from(oc))
             }
             Rosflight::ParamRequestRead(pr) => {
-                // println!("Message: ParamRequestRead");
+                //println!("Message: ParamRequestRead");
                 msgs.store(comm_messages::ParamRequestReadMsg::from(pr))
             }
             Rosflight::ParamSet(ps) => {
-                // println!("Message: ParamSet: param_value: {:?}", ps.param_value);
+                //println!("Message: ParamSet: param_value: {:?}", ps.param_value);
                 msgs.store(comm_messages::ParamSetMsg::from(ps))
             }
             Rosflight::ParamRequestList(pl) => {
-                // println!("Message: ParamRequestList");
+                //println!("Message: ParamRequestList");
                 msgs.store(comm_messages::ParamRequestListMsg::from(pl))
             }
             Rosflight::Heartbeat(hb) => {
@@ -172,7 +172,7 @@ impl MavlinkInterface {
                 //     hb.system_status,
                 //     hb.custom_mode,
                 // );
-                // println!("Message: Heartbeat");
+                //println!("Message: Heartbeat");
                 msgs.store(comm_messages::HeartbeatMsg::from(hb))
             }
             _ => {

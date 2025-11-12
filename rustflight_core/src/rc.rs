@@ -155,7 +155,7 @@ impl Rc {
         self.sticks[Stick::X as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_X_CHANNEL) {
                 ParamValue::Int(val) => {
-                    // println!("RC channel {} for stick X", val);
+                    // println!("Init RC channel {} for stick X", val);
                     val
                 }
                 other => {
@@ -170,7 +170,7 @@ impl Rc {
         self.sticks[Stick::Y as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Y_CHANNEL) {
                 ParamValue::Int(val) => {
-                    // println!("RC channel {} for stick Y", val);
+                    // println!("Init RC channel {} for stick Y", val);
                     val
                 }
                 other => {
@@ -185,7 +185,7 @@ impl Rc {
         self.sticks[Stick::Z as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Z_CHANNEL) {
                 ParamValue::Int(val) => {
-                    // println!("RC channel {} for stick Z", val);
+                    // println!("Init RC channel {} for stick Z", val);
                     val
                 }
                 other => {
@@ -200,7 +200,7 @@ impl Rc {
         self.sticks[Stick::F as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_F_CHANNEL) {
                 ParamValue::Int(val) => {
-                    // println!("RC channel {} for stick F", val);
+                    // println!("Init RC channel {} for stick F", val);
                     val
                 }
                 other => {
@@ -400,7 +400,7 @@ impl Rc {
                 self.stick_values[channel] = 2.0 * (pwm - 0.5);
             }
 
-            // println!("Stick {}: {}",channel, self.stick_values[channel]);
+            //println!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
         // 4. Process switch values (moved from old `run`)
@@ -423,7 +423,7 @@ impl Rc {
                 self.switch_values[channel] = false;
             }
 
-            // println!("Switch {}: {}",channel, self.switch_values[channel]);
+            //println!("Switch {}: {}",channel, self.switch_values[channel]);
         }
 
         // 5. Signal to the mux (moved from old `run`)
@@ -457,11 +457,14 @@ impl Rc {
                 0.15 // Default value from C++ param definitions
             }
         };
+
+        //println!("Arm Threshold is: {}", arm_threshold);
     
         // Use the correct public method from StateManager
         let is_armed = state_manager.is_armed();
 
         if !self.switch_mapped(Switch::Arm) {
+            //println!("The arm switch is not mapped!");
             // Stick arming
             let f_stick = self.stick(Stick::F);
             let z_stick = self.stick(Stick::Z);
@@ -471,11 +474,13 @@ impl Rc {
                 if f_stick < arm_threshold && z_stick > (1.0 - arm_threshold) {
                     self.time_sticks_have_been_in_arming_position_ms = 
                         self.time_sticks_have_been_in_arming_position_ms.saturating_add(dt);
+                    println!("Starting Arming Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
                 }
 
                 if self.time_sticks_have_been_in_arming_position_ms > 1000 {
+                    println!("Requesting Arm!");
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
@@ -484,6 +489,7 @@ impl Rc {
                 if f_stick < arm_threshold && z_stick < -(1.0 - arm_threshold) {
                     self.time_sticks_have_been_in_arming_position_ms = 
                         self.time_sticks_have_been_in_arming_position_ms.saturating_add(dt);
+                        println!("Starting Disarm Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
                 }
@@ -492,13 +498,14 @@ impl Rc {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_DISARM, params);
                     self.time_sticks_have_been_in_arming_position_ms = 0;
+                    println!("Requesting Disarm!");
                 }
             }
         } else { // Switch arming
-
+            //println!("The arm switch is mapped!!!");
             let f_stick = self.stick(Stick::F);
-            if self.switch_on(Switch::Arm) && f_stick < arm_threshold {
-                if !is_armed {
+            if self.switch_on(Switch::Arm) {
+                if !is_armed && (f_stick < arm_threshold) {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
