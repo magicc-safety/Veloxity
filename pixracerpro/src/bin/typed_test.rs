@@ -78,6 +78,7 @@ impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {
     // IMU, Mag, RC
     type SculptIndices = hlist_type![I0, I0, I5];
 
+    // RC is at There<There<Here>> in the Quadrotor Bodytype
     type RcPacketSculptedIndex = I2;
 
     type ImuPacketIndex = I0;
@@ -114,7 +115,8 @@ fn main() -> ! {
     // state_manager
     let state_manager = StateManager::new();
 
-    // let pwm_driver = BoardPwmDriver::new(&mut board.servos);
+    // PWM Driver
+    let pwm_driver = BoardPwmDriver::new(&mut servos);
 
     let mut rosflight = ROSFlight::init(
         1000,
@@ -126,7 +128,7 @@ fn main() -> ! {
         controller,
         mixer,
         config,
-        BoardPwmDriver::new(&mut servos),
+        pwm_driver,
     );
 
     loop {
