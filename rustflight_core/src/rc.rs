@@ -363,7 +363,7 @@ impl Rc {
         for i in 0..length {
             // FIX: Normalize 1000-2000us to 0.0-1.0
             let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
-            self.rc.chan[i] = normalized.clamp(0.0, 1.0);
+            self.rc.chan[i] = normalized.clamp(-1.0, 1.0);
         }
         defmt::info!("Normalized RC input: {}", self.rc.chan[0..length].as_ref());
     }
