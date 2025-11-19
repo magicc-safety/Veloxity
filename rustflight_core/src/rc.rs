@@ -362,8 +362,8 @@ impl Rc {
         params: &Params,
         state_manager: &mut StateManager,
     ) {
-        // 1. Copy data from the packet into the internal rc_struct
-        // (Assuming RcPacket has normalized f32 channels 0.0-1.0)
+        // 1. Normalize and Copy data from the packet into the internal rc_struct
+        // Get the number of channels
         let len = (packet.n_chan as usize).min(self.rc.chan.len());
         self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
 
