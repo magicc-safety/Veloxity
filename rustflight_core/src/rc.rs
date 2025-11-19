@@ -358,6 +358,15 @@ impl Rc {
         }
     }
 
+    fn normalize_rc_input(&mut self, mut packet: RcPacket, length: usize){
+        // Now iterate over the fixed-size array `msg.values`
+        for i in 0..length {
+                // FIX: Normalize 1000-2000us to 0.0-1.0
+                let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
+                packet.chan[i] = normalized.clamp(0.0, 1.0);
+        }
+    }
+
     pub fn receive(
         &mut self,
         packet: &RcPacket, // <-- Takes the packet
@@ -367,7 +376,10 @@ impl Rc {
         // 1. Copy data from the packet into the internal rc_struct
         // (Assuming RcPacket has normalized f32 channels 0.0-1.0)
         let len = (packet.n_chan as usize).min(self.rc.chan.len());
-        self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
+        
+        self.normalize_rc_input(*packet, len);
+
+        // self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
 
         self.rc.header.timestamp = packet.header.timestamp;
         self.rc.header.status = packet.header.status;
