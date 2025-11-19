@@ -365,6 +365,7 @@ impl Rc {
             let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
             self.rc.chan[i] = normalized.clamp(0.0, 1.0);
         }
+        defmt::info!("Normalized RC input: {}", self.rc.chan[0..length].as_ref());
     }
 
     pub fn receive(
@@ -394,6 +395,9 @@ impl Rc {
     }
 
     fn process_sticks_and_switches(&mut self) {
+
+        // TODO add back in check for rc lost... no need to process switches if rc lost...
+
         // STICKS
         for channel in 0..STICKS_COUNT {
             let config = &self.sticks[channel];
