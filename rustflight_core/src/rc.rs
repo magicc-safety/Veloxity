@@ -375,6 +375,7 @@ impl Rc {
         // 1. Normalize and Copy data from the packet into the internal rc_struct
         // Get the number of channels
         let len = (packet.n_chan as usize).min(self.rc.chan.len());
+        // self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
 
         self.normalize_rc_input(packet, len);
 
