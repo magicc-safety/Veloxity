@@ -359,12 +359,12 @@ impl Rc {
     fn normalize_rc_input(&mut self, packet: &RcPacket){
         // Get the number of channels
         let length = (packet.n_chan as usize).min(self.rc.chan.len());
-        
+
         // Now iterate over the channels
         for i in 0..length {
             // FIX: Normalize 1000-2000us to 0.0-1.0
             let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
-            self.rc.chan[i] = normalized.clamp(-1.0, 1.0);
+            self.rc.chan[i] = normalized.clamp(-0.25, 1.25);
         }
     }
 
