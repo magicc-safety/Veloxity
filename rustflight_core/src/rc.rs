@@ -363,6 +363,7 @@ impl Rc {
             let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
             self.rc.chan[i] = normalized.clamp(0.0, 1.0);
         }
+        defmt::info!("Normalized RC input: {}", self.rc.chan[0..length].as_ref());
     }
 
     pub fn receive(
@@ -392,7 +393,7 @@ impl Rc {
         self.rc.num_channels = len;
 
         if self.check_rc_lost(params, state_manager) {
-            // println!("RC is Lost!!!");
+            defmt::info!("RC is Lost!!!");
             // If RC is lost, we're done. Don't process sticks/switches.
             return;
         }

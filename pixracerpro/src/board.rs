@@ -153,9 +153,13 @@ impl BoardTrait for Board {
             match rc_packet_result {
                 Ok(data) => {
                     // This confirms the SBUS driver is working
+                    // defmt::info!(
+                    //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
+                    //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
+                    // );
                     defmt::info!(
-                        "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
-                        data.chan[0], data.chan[1], data.chan[2], data.chan[3]
+                        "BOARD: RC Packet Received! Channels {}",
+                        data.chan[..data.n_chan as usize]
                     );
                 },
                 Err(_) => {
