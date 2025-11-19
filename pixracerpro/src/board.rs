@@ -157,10 +157,11 @@ impl BoardTrait for Board {
                     //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
                     //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
                     // );
-                    defmt::info!(
-                        "BOARD: RC Packet Received! Channels {}",
-                        data.chan[..data.n_chan as usize]
-                    );
+                    // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
+                    // defmt::info!(
+                    //     "BOARD: RC Packet Received! Channels {}",
+                    //     data.chan[..data.n_chan as usize]
+                    // );
                 },
                 Err(_) => {
                     defmt::error!("BOARD: Error reading RC data");
