@@ -359,9 +359,9 @@ impl Rc {
     fn normalize_rc_input(&mut self, mut packet: RcPacket, length: usize){
         // Now iterate over the fixed-size array `msg.values`
         for i in 0..length {
-                // FIX: Normalize 1000-2000us to 0.0-1.0
-                let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
-                packet.chan[i] = normalized.clamp(0.0, 1.0);
+            // FIX: Normalize 1000-2000us to 0.0-1.0
+            let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
+            packet.chan[i] = normalized.clamp(0.0, 1.0);
         }
     }
 
