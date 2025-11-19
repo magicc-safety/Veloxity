@@ -358,9 +358,7 @@ impl Rc {
         }
     }
 
-    fn normalize_rc_input(&mut self, packet: &RcPacket){
-        // Get the number of channels
-        let length = (packet.n_chan as usize).min(self.rc.chan.len());
+    fn normalize_rc_input(&mut self, packet: &RcPacket, length: usize){
 
         // Now iterate over the channels
         for i in 0..length {
@@ -377,7 +375,10 @@ impl Rc {
         state_manager: &mut StateManager,
     ) {
         // 1. Normalize and Copy data from the packet into the internal rc_struct
-        self.normalize_rc_input(packet);
+        // Get the number of channels
+        let len = (packet.n_chan as usize).min(self.rc.chan.len());
+
+        self.normalize_rc_input(packet, len);
 
         self.rc.header.timestamp = packet.header.timestamp;
         self.rc.header.status = packet.header.status;
