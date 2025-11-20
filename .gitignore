@@ -1,4 +1,4 @@
 /target/
 .gitconfig
 .vscode/
-*/Cargo.lock
+Cargo.lock
