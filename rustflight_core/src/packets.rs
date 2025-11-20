@@ -37,6 +37,8 @@
 //use crate::errors;
 //use crate::params::Params;
 
+use defmt::Format;
+
 //pub static PAYLOAD_SIZE: usize = 448;
 pub static PARAM_PACKET_SIZE: usize = 2048;
 //pub static LOG_MESSAGE_SIZE: usize = 64;
@@ -69,7 +71,7 @@ pub static PARAM_PACKET_SIZE: usize = 2048;
 pub const ADC_MAX_CHANNELS: usize = 21;
 pub const RC_PACKET_CHANNELS: usize = 24;
 
-//#[derive(Debug, Clone, Copy, Default)]
+//#[derive(Debug, Clone, Copy, Default, Format)]
 //pub enum Qos {
 //    #[default]
 //    High,
@@ -77,14 +79,14 @@ pub const RC_PACKET_CHANNELS: usize = 24;
 //    Low,
 //}
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub enum RangeType {
     #[default]
     Sonar,
     Lidar,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub enum GNSSFixType {
     #[default]
     NoFix,
@@ -110,7 +112,7 @@ impl GNSSFixType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct RosflightPacketHeader {
     // pub timestamp: crate::sensors::Instant, TODO removed this because it's hard to serailize...
     // the packets shouldn't have embassy specific types in them. Make this known in the next
@@ -119,7 +121,7 @@ pub struct RosflightPacketHeader {
     pub status: u16,
 }
 
-//#[derive(Debug, Clone, Copy, Default)]
+//#[derive(Debug, Clone, Copy, Default, Format)]
 //pub struct SerialTxPacket {
 //    pub header: RosflightPacketHeader,
 //    pub qos: Qos,
@@ -131,7 +133,7 @@ pub struct RosflightPacketHeader {
 // ADC Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct AdcPacket {
     pub header: RosflightPacketHeader,
     pub temperature: f32,
@@ -144,7 +146,7 @@ pub struct AdcPacket {
 // Battery Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct BatteryPacket {
     pub header: RosflightPacketHeader,
     pub voltage: f32,
@@ -155,7 +157,7 @@ pub struct BatteryPacket {
 // IMU Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct ImuPacket {
     pub header: RosflightPacketHeader,
     pub accel: [f64; 3],
@@ -168,7 +170,7 @@ pub struct ImuPacket {
 // Baro Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct BaroPacket {
     pub header: RosflightPacketHeader,
     pub pressure: f32,
@@ -180,7 +182,7 @@ pub struct BaroPacket {
 // Pitot Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct PitotPacket {
     pub header: RosflightPacketHeader,
     pub differential_pressure: f32,
@@ -192,7 +194,7 @@ pub struct PitotPacket {
 // Mag Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct MagPacket {
     pub header: RosflightPacketHeader,
     pub flux: [f32; 3],
@@ -203,7 +205,7 @@ pub struct MagPacket {
 // Rc Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct RcPacket {
     pub header: RosflightPacketHeader,
     pub n_chan: u32,
@@ -215,7 +217,7 @@ pub struct RcPacket {
 // Range Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct RangePacket {
     pub header: RosflightPacketHeader,
     pub range: f32,
@@ -228,7 +230,7 @@ pub struct RangePacket {
 // GNSS Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct GNSSPacket {
     pub header: RosflightPacketHeader, // timestamp and device specific status
     pub lat: f64,                      // radians
@@ -257,7 +259,7 @@ pub struct GNSSPacket {
 // PPS Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct PpsPacket {
     pub header: RosflightPacketHeader,
 }
@@ -266,7 +268,7 @@ pub struct PpsPacket {
 // Attitude Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Format)]
 pub struct AttitudePacket {
     pub header: RosflightPacketHeader,
     pub q: [f32; 4],
@@ -277,7 +279,7 @@ pub struct AttitudePacket {
 // Serial Packet
 // ------------------------------
 
-//#[derive(Debug, Clone, Copy, Default)]
+//#[derive(Debug, Clone, Copy, Default, Format)]
 //pub struct SerialRxPacket {
 //    pub header: RosflightPacketHeader,
 //    pub qos: Qos,
@@ -289,7 +291,7 @@ pub struct AttitudePacket {
 // Param Packet
 // ------------------------------
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Format)]
 pub struct ParamPacket {
     pub header: RosflightPacketHeader,
     pub values: [u8; PARAM_PACKET_SIZE],

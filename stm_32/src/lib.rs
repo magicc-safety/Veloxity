@@ -46,16 +46,6 @@ pub fn synch_at(slot_rate: Duration) -> Instant {
     Instant::from_micros((now / dt + 1u64) * dt)
 }
 
-pub fn synch_at_slot(slot_rate: Duration) -> Instant {
-    let dt = slot_rate.as_micros();
-    let now = Instant::now().as_micros();
-    Instant::from_micros((now / dt + 1u64) * dt)
-}
-
-pub fn current_slot(timestamp: Instant, sample_period: Duration, slot_period: Duration) -> u64 {
-    (timestamp.as_micros() % sample_period.as_micros()) / slot_period.as_micros()
-}
-
 //------------ Re-Exports ------------
 pub use cortex_m;
 pub use cortex_m_rt;

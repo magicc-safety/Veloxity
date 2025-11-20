@@ -95,63 +95,74 @@ impl BoardTrait for Board {
         sensors.1.0 = peripherals::ist8308::MAG_SIGNAL.try_take();
         sensors.1.1.0 = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.1.1.1.0 = peripherals::ms4525::PITOT_SIGNAL.try_take();
+        sensors.1.1.1.1.0 = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.1.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
 
         // Debug statements to check receiving sensor data
         if let Some(imu_packet) = sensors.0 {
-            match imu_packet {
-                Ok(data) => defmt::info!(
-                    "IMU data: accel {:?} | gyro {:?} | temp {:?}",
-                    data.accel,
-                    data.gyro,
-                    data.temperature
-                ),
-                Err(e) => defmt::error!("Error reading IMU data"),
-            }
+            // match imu_packet {
+            //     Ok(data) => defmt::info!(
+            //         "IMU data: accel {:?} | gyro {:?} | temp {:?}",
+            //         data.accel,
+            //         data.gyro,
+            //         data.temperature
+            //     ),
+            //     Err(e) => defmt::error!("Error reading IMU data"),
+            // }
             // defmt::info!("Sensor IMU data received!");
         }
         if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
-            match gnss_packet {
-                Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
-                Err(e) => defmt::error!("Error reading IMU data"),
-            }
+            // match gnss_packet {
+            //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
+            //     Err(e) => defmt::error!("Error reading IMU data"),
+            // }
             // defmt::info!("GPS data received!");
         }
         if let Some(mag_packet) = sensors.1.0 {
-            match mag_packet {
-                Ok(data) => defmt::info!(
-                    "Mag data: flux {:?} | temperature {:?}",
-                    data.flux,
-                    data.temperature
-                ),
-                Err(e) => defmt::error!("Error reading Mag data"),
-            }
+            // match mag_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Mag data: flux {:?} | temperature {:?}",
+            //         data.flux,
+            //         data.temperature
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Mag data"),
+            // }
             // defmt::info!("Sensor Magnetometer data received!");
         }
         if let Some(baro_packet) = sensors.1.1.0 {
-            match baro_packet {
-                Ok(data) => defmt::info!(
-                    "Baro data: pressure {:?} | temperature {:?}",
-                    data.pressure,
-                    data.temperature
-                ),
-                Err(e) => defmt::error!("Error reading Barometer data"),
-            }
+            // match baro_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Baro data: pressure {:?} | temperature {:?}",
+            //         data.pressure,
+            //         data.temperature
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Barometer data"),
+            // }
             // defmt::info!("Sensor Baro data received!");
         }
         if let Some(pitot_packet) = sensors.1.1.1.0 {
-            match pitot_packet {
-                Ok(data) => defmt::info!(
-                    "Pitot data: diff_pressure {:?}",
-                    data.differential_pressure,
-                ),
-                Err(e) => defmt::error!("Error reading Pitot data"),
-            }
+            // match pitot_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Pitot data: diff_pressure {:?}",
+            //         data.differential_pressure,
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Pitot data"),
+            // }
             // defmt::info!("Sensor Pitot data received!");
         }
+        if let Some(range_packet) = sensors.1.1.1.1.0 {
+            // match pitot_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Pitot data: diff_pressure {:?}",
+            //         data.differential_pressure,
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Pitot data"),
+            // }
+            //defmt::info!("Sensor Range data received!");
+        }
         if sensors.1.1.1.1.1.1.1.0.is_some() {
-            defmt::info!("Sensor RC data received!");
+            // defmt::info!("Sensor RC data received!");
         }
     }
 
@@ -274,7 +285,7 @@ impl Board {
             IrqsI2c1,
             p.DMA2_CH2,
             p.DMA2_CH3,
-            Hertz(400_000),
+            Hertz(100_000),
             i2c_config,
         );
         let i2c1_bus = Mutex::new(i2c1);
@@ -287,6 +298,10 @@ impl Board {
 
         // MS4525 Pitot (External)
         let mut ms4525_sensor = peripherals::ms4525::Ms4525Sensor {
+            dev: I2cDevice::new(i2c1_bus),
+        };
+
+        let mut llv3hp_sensor = peripherals::llv3hp::Llv3hpSensor {
             dev: I2cDevice::new(i2c1_bus),
         };
 
@@ -466,6 +481,7 @@ impl Board {
             .unwrap();
         spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
+        spawner3.spawn(peripherals::llv3hp::task(llv3hp_sensor)).unwrap();
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);
