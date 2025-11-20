@@ -156,7 +156,7 @@ impl Ist8308Sensor {
         let loop_period = Duration::from_hz(100);
         // let mut previous_timestamp_us: u64 = 0u64;
         loop {
-          let timestamp = synch_at(loop_period+Duration::from_micros(1_000));
+          let timestamp = synch_at(loop_period) + Duration::from_micros(900);
           Timer::at(timestamp).await; 
 
             // Read Data
