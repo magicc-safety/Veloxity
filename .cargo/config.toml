@@ -61,3 +61,17 @@ incremental = false
 lto = 'fat'
 opt-level = 3
 overflow-checks = false
+
+# Now, add your target-specific settings
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip STM32H743IIKx"
+rustflags = [
+  "-C",
+  "linker=rust-lld",
+  "-C",
+  "link-arg=--nmagic",
+  "-C",
+  "link-arg=-Tlink.x",
+  "-C",
+  "link-arg=-Tdefmt.x",
+]
