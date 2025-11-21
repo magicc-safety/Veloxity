@@ -411,8 +411,7 @@ impl Rc {
                 // Converts [0.0, 1.0] to [-1.0, 1.0]
                 self.stick_values[channel] = 2.0 * (pwm - 0.5);
             }
-
-            defmt::info!("Stick {}: {}",channel, self.stick_values[channel]);
+            // defmt::info!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
         // SWITCHES
@@ -436,7 +435,7 @@ impl Rc {
                 self.switch_values[channel] = false;
             }
 
-            defmt::info!("Switch {}: {}",channel, self.switch_values[channel]);
+            // defmt::info!("Switch {}: {}",channel, self.switch_values[channel]);
         }
     }
 
@@ -525,7 +524,7 @@ impl Rc {
                 }
 
                 if self.time_sticks_have_been_in_arming_position_ms > 1000 {
-                    defmt::info!("Requesting Arm!");
+                    // defmt::info!("Requesting Arm!");
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
@@ -543,7 +542,7 @@ impl Rc {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_DISARM, params);
                     self.time_sticks_have_been_in_arming_position_ms = 0;
-                    defmt::info!("Requesting Disarm!");
+                    // defmt::info!("Requesting Disarm!")
                 }
             }
         } else { // Switch arming
