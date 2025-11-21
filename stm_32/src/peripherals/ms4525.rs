@@ -74,11 +74,22 @@ impl Ms4525Sensor {
         const ADDRESS: u8 = 0x28;
         const NO_ERROR:u8 = 0x00;
 
+        // Start a read
         let mut data = [0u8; 2];
         if self.dev.read(ADDRESS, &mut data).await.is_err() {
             PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("MS4525 Pitot failed: reading data")));
             return;           
         }
+
+        Timer::after(Duration::from_micros(2000)).await;
+
+        // Check if read OK.
+        let mut data = [0u8; 2];
+        if self.dev.read(ADDRESS, &mut data).await.is_err() {
+            PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("MS4525 Pitot failed: reading data")));
+            return;           
+        }
+
         let status = (data[0]>>6) & 0x03;
         if status != NO_ERROR {
             PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("MS4525 Pitot failed: bad status")));
