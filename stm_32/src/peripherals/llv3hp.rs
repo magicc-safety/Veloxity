@@ -105,15 +105,14 @@ impl Llv3hpSensor {
             Ok(_) => {}
         }
 
-        Timer::after(Duration::from_micros(10)).await;
+        Timer::after(Duration::from_micros(0)).await;
 
         // Read register
         match self.dev.read(address, data).await {
             Err(e) => return Err(()),
             Ok(_) => {}           
         }
-        Timer::after(Duration::from_micros(10)).await;
-
+     
         Ok(())
     }
 

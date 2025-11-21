@@ -76,14 +76,14 @@ impl Ist8308Sensor {
             Ok(_) => {}
         }
 
-        Timer::after(Duration::from_micros(10)).await;
+        Timer::after(Duration::from_micros(0)).await;
 
         // Read register
         match self.dev.read(address, data).await {
             Err(e) => return Err(()),
             Ok(_) => {}           
         }
-        Timer::after(Duration::from_micros(10)).await;
+ 
 
         Ok(())
     }
@@ -143,7 +143,7 @@ impl Ist8308Sensor {
             MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: writing CNTL4_REG")));
             return;
         }
-        
+
 
         const OSRCNTL_REG: u8 = 0x41;
         const OSRCNTL_VAL_Y_16: u8 = 4<<3;
