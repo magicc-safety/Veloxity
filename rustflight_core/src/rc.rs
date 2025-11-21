@@ -380,12 +380,13 @@ impl Rc {
         self.rc.num_channels = len;
 
         if self.check_rc_lost(params, state_manager) {
-            defmt::info!("RC is Lost!!!");
+            // defmt::info!("RC is Lost!!!");
             // If RC is lost, we're done. Don't process sticks/switches.
             return;
         }
 
         // 3. Process stick values (moved from old `run`)
+        // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
         for channel in 0..STICKS_COUNT {
             let config = &self.sticks[channel];
             if config.channel < 0 || (config.channel as usize) >= self.rc.num_channels {
@@ -399,8 +400,7 @@ impl Rc {
                 // Converts [0.0, 1.0] to [-1.0, 1.0]
                 self.stick_values[channel] = 2.0 * (pwm - 0.5);
             }
-
-            defmt::info!("Stick {}: {}",channel, self.stick_values[channel]);
+            // defmt::info!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
         // 4. Process switch values (moved from old `run`)
@@ -423,7 +423,7 @@ impl Rc {
                 self.switch_values[channel] = false;
             }
 
-            defmt::info!("Switch {}: {}",channel, self.switch_values[channel]);
+            // defmt::info!("Switch {}: {}",channel, self.switch_values[channel]);
         }
 
         // 5. Signal to the mux (moved from old `run`)
@@ -480,7 +480,7 @@ impl Rc {
                 }
 
                 if self.time_sticks_have_been_in_arming_position_ms > 1000 {
-                    defmt::info!("Requesting Arm!");
+                    // defmt::info!("Requesting Arm!");
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
@@ -498,7 +498,7 @@ impl Rc {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_DISARM, params);
                     self.time_sticks_have_been_in_arming_position_ms = 0;
-                    defmt::info!("Requesting Disarm!");
+                    // defmt::info!("Requesting Disarm!")
                 }
             }
         } else { // Switch arming
