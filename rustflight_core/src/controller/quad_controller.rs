@@ -146,11 +146,11 @@ pub struct MixerInput {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct QuadController {
-    roll_rate_pid: Pid,
-    pitch_rate_pid: Pid,
-    yaw_rate_pid: Pid,
-    roll_angle_pid: Pid,
-    pitch_angle_pid: Pid,
+    pub roll_rate_pid: Pid,
+    pub pitch_rate_pid: Pid,
+    pub yaw_rate_pid: Pid,
+    pub roll_angle_pid: Pid,
+    pub pitch_angle_pid: Pid,
 }
 
 impl QuadController {
