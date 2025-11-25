@@ -184,8 +184,6 @@ where
         );
 
 
-        //println!("Did we make it 2?");
-
         if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
         {
             // this must mean that rc asked for arm, but calibration hadn't happened and needed to... go ahead and raise the calibration flag
@@ -253,7 +251,7 @@ where
 
         // Get the final command from the manager, and translate to what the Controller needs:
         let combined_command = self.command_manager.combined_control();
-        let controls = self.controller.control(&state, &mut self.state_manager, &*combined_command, );
+        let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params);
         let actuator_commands = self.mixer.mix(&controls);
 
         // // PWM command output
@@ -299,7 +297,6 @@ where
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);
 
-        //println!("Did we make it?");
 
         true
     }

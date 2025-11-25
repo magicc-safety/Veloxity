@@ -444,6 +444,7 @@ impl From<comm_enums::OffboardControlMode> for mav_enums::OffboardControlMode {
         match val {
             CommMode::ModePassThrough => MavMode::ModePassThrough,
             CommMode::ModeRollratePitchrateYawrateThrottle => MavMode::ModeRollratePitchrateYawrateThrottle,
+            CommMode::ModeRollPitchYawrateThrottle => MavMode::ModeRollPitchYawrateThrottle,
         }
     }
 }
