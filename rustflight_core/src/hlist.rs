@@ -80,9 +80,9 @@ pub trait Func<Arg> {
 // 3) have consistent structure (ending in HNil)
 // ---------------------------------------------
 // copy trait included here so we can copy a full pipeline of functions if desired
-pub trait PolyFunc: Copy + Default {}
+pub trait PolyFunc: Default {}
 impl PolyFunc for HNil {}
-impl<F: Copy + Default, T: PolyFunc> PolyFunc for HCons<F, T> {}
+impl<F: Default, T: PolyFunc> PolyFunc for HCons<F, T> {}
 
 // ============================================================================================
 // HList Mapping Functionality - connecting HList (the mapped) to funciton HList (the mapper)
@@ -98,7 +98,7 @@ pub trait HMappable<'a, Mapper: PolyFunc> {
     type Output: HList;
     fn map(
         &'a mut self,
-        f: Mapper,
+        f: &mut Mapper, // changed
         flags: &mut CalibrationFlags,
         params: &mut Params,
     ) -> Self::Output;
@@ -109,7 +109,7 @@ impl<'a, Mapper: PolyFunc> HMappable<'a, Mapper> for HNil {
     type Output = HNil;
     fn map(
         &'a mut self,
-        _f: Mapper,
+        _f: &mut Mapper,
         _flags: &mut CalibrationFlags,
         _params: &mut Params,
     ) -> Self::Output {
@@ -122,7 +122,7 @@ impl<'a, Mapper: PolyFunc> HMappable<'a, Mapper> for HNil {
 // note how HCons is the Mapper
 impl<'a, F, FTail, D, DTail> HMappable<'a, HCons<F, FTail>> for HCons<D, DTail>
 where
-    F: Func<&'a mut D> + Copy + Default, // function is operable with data type D as it's Arg
+    F: Func<&'a mut D> + Default, // function is operable with data type D as it's Arg
     FTail: PolyFunc,                     // recursive definition
     D: 'a,                               // obviously
     DTail: HList + HMappable<'a, FTail> + 'a, // DTail should be a HList for recursion, and it needs the
@@ -135,7 +135,7 @@ where
 
     fn map(
         &'a mut self,
-        mut f: HCons<F, FTail>,
+        f: &mut HCons<F, FTail>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
     ) -> Self::Output {
@@ -144,7 +144,7 @@ where
         //    and combine results into a new HCons
         HCons(
             f.0.call(&mut self.0, flags, params),
-            self.1.map(f.1, flags, params),
+            self.1.map(&mut f.1, flags, params),
         )
     }
 }

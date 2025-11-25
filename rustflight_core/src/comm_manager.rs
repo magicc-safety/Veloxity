@@ -194,6 +194,8 @@ where
                 num_errors: state_manager.get_errors().bits().count_ones() as i16,
                 loop_time_us: 0, // Placeholder
             };
+            defmt::info!("Sending Status: armed={}, failsafe={}, errors=0x{:b}", 
+                status_msg.armed, status_msg.failsafe, status_msg.error_code.bits());
             self.send_rosflight_status(board, status_msg);
             self.last_status_send_us = now_us;
         }

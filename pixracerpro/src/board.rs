@@ -78,7 +78,7 @@ impl BoardTrait for Board {
     ];
 
     type ProcessorHList = hlist_type![
-        sensorprocessors::PassthroughImuProcessor,
+        sensorprocessors::ImuProcessor,
         sensorprocessors::PassthroughMagProcessor,
         sensorprocessors::PassthroughBaroProcessor,
         sensorprocessors::PassthroughPitotProcessor,
@@ -100,6 +100,7 @@ impl BoardTrait for Board {
         // Debug statements to check receiving sensor data
         // if let Some(imu_packet) = sensors.0 {
         //     match imu_packet {
+                
         //         Ok(data) => defmt::info!(
         //             "IMU data: accel {:?} | gyro {:?} | temp {:?}",
         //             data.accel,

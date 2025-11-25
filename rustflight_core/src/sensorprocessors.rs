@@ -40,7 +40,6 @@ use crate::hlist::*;
 use crate::packets::*;
 use crate::params2::{Params, ParamId, ParamValue};
 use bitflags::bitflags;
-//use defmt;
 use num_traits::Float;
 
 bitflags! {
@@ -147,12 +146,15 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
             let is_calibrating = flags.intersects(CalibrationFlags::IMU);
 
             if is_calibrating {
+                // defmt::info!("Gyro Cal Count at beginning: {}", self.calibration_state.gyro_calibration_count);
                 if flags.contains(CalibrationFlags::GYRO) {
+                    // defmt::info!("Calibrating Gyro...");
                     self.calibration_state.gyro_sum[0] += packet.gyro[0] as f64;
                     self.calibration_state.gyro_sum[1] += packet.gyro[1] as f64;
                     self.calibration_state.gyro_sum[2] += packet.gyro[2] as f64;
                     self.calibration_state.gyro_calibration_count += 1;
 
+                    // defmt::info!("Gyro Cal Count: {}", self.calibration_state.gyro_calibration_count);
                     if self.calibration_state.gyro_calibration_count > 1000 {
                         let count = self.calibration_state.gyro_calibration_count as f64;
                         let bias_x = self.calibration_state.gyro_sum[0] / count;
@@ -166,10 +168,12 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                         self.calibration_state.gyro_sum = [0.0; 3];
                         self.calibration_state.gyro_calibration_count = 0;
                         flags.remove(CalibrationFlags::GYRO);
+                        defmt::info!("Gyro calibration complete.")
                     }
                 }
 
                 if flags.contains(CalibrationFlags::ACCEL) {
+                    // defmt::info!("Calibrating Accel...");
                     const GRAVITY: f64 = 9.80665;
                     self.calibration_state.accel_sum[0] += packet.accel[0] as f64;
                     self.calibration_state.accel_sum[1] += packet.accel[1] as f64;
@@ -184,6 +188,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                     self.calibration_state.max_accel[2] = self.calibration_state.max_accel[2].max(packet.accel[2] as f64);
                     self.calibration_state.min_accel[2] = self.calibration_state.min_accel[2].min(packet.accel[2] as f64);
 
+                    // defmt::info!("Accel Cal Count: {}", self.calibration_state.accel_calibration_count);
                     if self.calibration_state.accel_calibration_count > 1000 {
                         let max_delta = ((self.calibration_state.max_accel[0] - self.calibration_state.min_accel[0]).powi(2)
                                        + (self.calibration_state.max_accel[1] - self.calibration_state.min_accel[1]).powi(2)
@@ -203,7 +208,8 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                             params.set_by_id(ParamId::PARAM_ACC_Y_BIAS, ParamValue::Float(bias_y as f32));
                             params.set_by_id(ParamId::PARAM_ACC_Z_BIAS, ParamValue::Float(bias_z as f32));
                         } else {
-                            //defmt::warn!("Too much movement for IMU calibration.");
+                            defmt::warn!("Too much movement for IMU calibration.");
+                            // defmt::info!("Max Accel Delta: {}", max_delta);
                         }
                         
                         self.calibration_state.accel_sum = [0.0; 3];
@@ -212,12 +218,14 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                         self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
                         self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
                         flags.remove(CalibrationFlags::ACCEL);
+                        defmt::info!("IMU calibration complete.")
                     }
                 }
-                
-                return None;
+                // defmt::info!("Gyro Cal Count at end of cal: {}", self.calibration_state.gyro_calibration_count);
+                // defmt::info!("IMU data used for calibration.");
+                // return None; // Removed this so we don't get IMU errors while calibrating
             }
-
+            // defmt::info!("Did I make it to here?");
             // --- Correction Logic (Not Calibrating) ---
             if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) { packet.gyro[0] -= bias as f64; }
             if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) { packet.gyro[1] -= bias as f64; }
@@ -234,8 +242,10 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                 packet.accel[2] -= (comp as f64 * temp + bias as f64);
             }
 
+            // defmt::info!("IMU data processed");
             Some(packet)
         } else {
+            // defmt::info!("No IMU data this cycle.");
             None
         }
     }

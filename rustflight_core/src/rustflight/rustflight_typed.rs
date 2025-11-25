@@ -198,7 +198,7 @@ where
         // which consumes the raw data and produces the clean 'ProcessedSensorSet'
         // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
         self.board.update_sensors(&mut self.sensors);
-        let processed_sensors = self.sensors.map(self.processorhlist, &mut self.cal_flags, &mut self.params);
+        let processed_sensors = self.sensors.map(&mut self.processorhlist, &mut self.cal_flags, &mut self.params);
 
        // also check for imu: if it's been too long, add a flag for imu not responding...
         let imu_packet_option: &Option<packets::ImuPacket> = processed_sensors.get();
@@ -217,6 +217,11 @@ where
         {
             // The processor has finished! (It removed the flag)
             // We can now send the event to complete the transition.
+            // defmt::info!("New Gyro parameters: {}, {}, {}", 
+            //     self.params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
+            //     self.params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS),
+            //     self.params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS)
+            // );
             self.state_manager.update(Event::CALIBRATION_COMPLETE, &self.params);
         }
 
@@ -272,6 +277,7 @@ where
 
         // (We do this *after* telemetry, so telemetry can log if needed)
         if let Some(param_id) = changed_param_id {
+            // defmt::info!("Parameter change callback for {:?}", param_id);
             self.rc_manager.param_change_callback(
                 param_id, 
                 &mut self.board, 

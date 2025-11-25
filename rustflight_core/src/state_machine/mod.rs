@@ -202,26 +202,25 @@ impl Preflight {
                     error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
                     StateMachine::Calibrating(State { state: Calibrating, error_flags: error_flags })
                 } else {
-
                     let is_calibrated = {
                         let x_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                // println!("Error: PARAM_GYRO_X_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // defmt::info!("Error: PARAM_GYRO_X_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
                         let y_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                // println!("Error: PARAM_GYRO_Y_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // defmt::info!("Error: PARAM_GYRO_Y_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
                         let z_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                // println!("Error: PARAM_GYRO_Z_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // defmt::info!("Error: PARAM_GYRO_Z_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
