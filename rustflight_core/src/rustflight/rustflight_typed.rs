@@ -252,10 +252,10 @@ where
         // Get the final command from the manager, and translate to what the Controller needs:
         let combined_command = self.command_manager.combined_control();
         let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params);
-        let actuator_commands = self.mixer.mix(&controls);
+        let actuator_commands = self.mixer.mix(&controls, &mut self.state_manager);
 
         // // PWM command output
-        //self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
+        self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
 
         self.comm_manager.send_telemetry_streams::<BT, C, _>(
             &mut self.board,

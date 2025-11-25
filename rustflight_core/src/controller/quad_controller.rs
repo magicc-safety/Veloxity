@@ -41,7 +41,7 @@ use micro_algebra::stack::vector::Vector;
 use micro_algebra::stack::quaternion::Quaternion;
 use crate::command_manager::{CombinedControl, ControlType};
 use crate::state_machine::StateManager;
-use crate::params2::Params;
+use crate::params2::{Params, ParamId, ParamValue};
 use libm::{sin, cos, atan2};
 
 // The system's fixed time step, as defined in the estimator.
@@ -175,7 +175,142 @@ impl Controller for QuadController {
     type State = AttitudeState;
     type ControlOutput = MixerInput;
 
+    fn update_gains(&mut self, params: &Params) {
+        
+        // Roll Rate
+        self.roll_rate_pid.p = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_P) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.roll_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_I) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.roll_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_D) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.roll_rate_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+
+        // Pitch Rate
+        self.pitch_rate_pid.p = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_P) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.pitch_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_I) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.pitch_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_D) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.pitch_rate_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+
+        // Yaw Rate
+        self.yaw_rate_pid.p = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_P) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.yaw_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_I) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.yaw_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_D) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.yaw_rate_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+
+        // Roll Angle
+        self.roll_angle_pid.p = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_P) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.roll_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_I) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.roll_angle_pid.d = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_D) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.roll_angle_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        
+        // Pitch Angle
+        self.pitch_angle_pid.p = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_P) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.pitch_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_I) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.pitch_angle_pid.d = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_D) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+        self.pitch_angle_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
+            ParamValue::Float(val) => val as f64,
+            other => {
+                0.0
+            }
+        };
+    }
+
     fn control(&mut self, state: &Self::State, state_manager: &mut StateManager, command: &CombinedControl, params: &Params) -> Self::ControlOutput {
+
+        self.update_gains(params);
 
         if !state_manager.is_armed() {
             self.roll_rate_pid.reset();

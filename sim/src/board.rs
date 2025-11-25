@@ -93,29 +93,50 @@ impl From<ros_messages::MagneticField> for packets::MagPacket {
     fn from(msg: ros_messages::MagneticField) -> Self {
         Self {
             header: packets::RosflightPacketHeader {
-                // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
                     + (msg.header.stamp.nanosec as u64 / 1000),
-
-                // The status field is not present in the ROS MagneticField message, so we default to 0.
                 status: 0,
             },
 
-            // Map the magnetic_field vector (f64) to the flux array (f32).
-            // 'magnetic_field' (Tesla) and 'flux' (magnetic flux density, Tesla)
-            // represent the same physical quantity here.
+            // FIX: Convert ENU (ROS) to NED (RustFlight)
             flux: [
                 msg.magnetic_field.x as f32,
-                msg.magnetic_field.y as f32,
-                msg.magnetic_field.z as f32,
+                -msg.magnetic_field.y as f32, // <--- Invert Y
+                -msg.magnetic_field.z as f32, // <--- Invert Z
             ],
 
-            // NOTE: The standard ROS sensor_msgs/MagneticField does not contain a temperature field.
-            // We are setting a default value (e.g., 25.0 C), just like in the ImuPacket.
             temperature: 25.0,
         }
     }
 }
+
+// impl From<ros_messages::MagneticField> for packets::MagPacket {
+//     fn from(msg: ros_messages::MagneticField) -> Self {
+//         Self {
+//             header: packets::RosflightPacketHeader {
+//                 // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
+//                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
+//                     + (msg.header.stamp.nanosec as u64 / 1000),
+
+//                 // The status field is not present in the ROS MagneticField message, so we default to 0.
+//                 status: 0,
+//             },
+
+//             // Map the magnetic_field vector (f64) to the flux array (f32).
+//             // 'magnetic_field' (Tesla) and 'flux' (magnetic flux density, Tesla)
+//             // represent the same physical quantity here.
+//             flux: [
+//                 msg.magnetic_field.x as f32,
+//                 msg.magnetic_field.y as f32,
+//                 msg.magnetic_field.z as f32,
+//             ],
+
+//             // NOTE: The standard ROS sensor_msgs/MagneticField does not contain a temperature field.
+//             // We are setting a default value (e.g., 25.0 C), just like in the ImuPacket.
+//             temperature: 25.0,
+//         }
+//     }
+// }
 
 impl From<ros_messages::Barometer> for packets::BaroPacket {
     fn from(msg: ros_messages::Barometer) -> Self {
@@ -214,38 +235,69 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
     fn from(msg: ros_messages::ImuData) -> Self {
         Self {
             header: packets::RosflightPacketHeader {
-                // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
                     + (msg.header.stamp.nanosec as u64 / 1000),
-                
-                // The status field is not present in the ROS Imu message, so we default to 0.
                 status: 0,
             },
             
-            // Map the linear_acceleration vector to the accel array.
+            // FIX: Convert ENU (ROS) to NED (RustFlight)
+            // X -> X
+            // Y -> -Y
+            // Z -> -Z
             accel: [
                 msg.linear_acceleration.x,
-                msg.linear_acceleration.y,
-                msg.linear_acceleration.z,
+                -msg.linear_acceleration.y, // <--- Invert Y
+                -msg.linear_acceleration.z, // <--- Invert Z
             ],
             
-            // Map the angular_velocity vector to the gyro array.
             gyro: [
                 msg.angular_velocity.x,
-                msg.angular_velocity.y,
-                msg.angular_velocity.z,
+                -msg.angular_velocity.y,    // <--- Invert Y
+                -msg.angular_velocity.z,    // <--- Invert Z
             ],
 
-            // NOTE: The standard ROS sensor_msgs/Imu does not contain a temperature field.
-            // We are setting a default value of 25.0 C.
             temperature: 25.0,
-
-            // NOTE: The ROS 2 std_msgs/Header does not have a sequence number ('seq').
-            // We are setting a default value of 0.
             seq: 0,
         }
     }
 }
+
+// impl From<ros_messages::ImuData> for packets::ImuPacket {
+//     fn from(msg: ros_messages::ImuData) -> Self {
+//         Self {
+//             header: packets::RosflightPacketHeader {
+//                 // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
+//                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
+//                     + (msg.header.stamp.nanosec as u64 / 1000),
+                
+//                 // The status field is not present in the ROS Imu message, so we default to 0.
+//                 status: 0,
+//             },
+            
+//             // Map the linear_acceleration vector to the accel array.
+//             accel: [
+//                 msg.linear_acceleration.x,
+//                 msg.linear_acceleration.y,
+//                 msg.linear_acceleration.z,
+//             ],
+            
+//             // Map the angular_velocity vector to the gyro array.
+//             gyro: [
+//                 msg.angular_velocity.x,
+//                 msg.angular_velocity.y,
+//                 msg.angular_velocity.z,
+//             ],
+
+//             // NOTE: The standard ROS sensor_msgs/Imu does not contain a temperature field.
+//             // We are setting a default value of 25.0 C.
+//             temperature: 25.0,
+
+//             // NOTE: The ROS 2 std_msgs/Header does not have a sequence number ('seq').
+//             // We are setting a default value of 0.
+//             seq: 0,
+//         }
+//     }
+// }
 
 pub struct Board {
     pub start_time: Instant,

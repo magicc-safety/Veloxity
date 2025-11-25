@@ -45,6 +45,8 @@ pub const STICKS_COUNT: usize = 4;
 pub const SWITCHES_COUNT: usize = 4;
 pub const RC_STRUCT_CHANNELS: usize = 16; // A common max channel count
 
+const RC_TIMEOUT_US: u64 = 500_000;
+
 // --- Enums ---
 
 #[repr(usize)]
@@ -369,23 +371,18 @@ impl Rc {
 
         self.rc.header.timestamp = packet.header.timestamp;
         self.rc.header.status = packet.header.status;
+        self.rc.num_channels = len;
 
-        // Unpack frame_lost and failsafe from the status bitfield.
-        // We'll assume the standard convention:
-        // Bit 0 (value 1) = Frame Lost
-        // Bit 1 (value 2) = Failsafe Activated
         let status = packet.header.status;
         self.rc.frame_lost = (status & 1) != 0;
         self.rc.failsafe_activated = (status & 2) != 0;
-        self.rc.num_channels = len;
 
-        if self.check_rc_lost(params, state_manager) {
-            // println!("RC is Lost!!!");
-            // If RC is lost, we're done. Don't process sticks/switches.
-            return;
-        }
+        self.process_sticks_and_switches();
+        self.new_command = true;
+    }
 
-        // 3. Process stick values (moved from old `run`)
+    fn process_sticks_and_switches(&mut self) {
+        // STICKS
         for channel in 0..STICKS_COUNT {
             let config = &self.sticks[channel];
             if config.channel < 0 || (config.channel as usize) >= self.rc.num_channels {
@@ -403,7 +400,8 @@ impl Rc {
             //println!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
-        // 4. Process switch values (moved from old `run`)
+        // SWITCHES
+
         for channel in 0..SWITCHES_COUNT {
             let config = &self.switches[channel];
             if config.mapped {
@@ -425,9 +423,30 @@ impl Rc {
 
             //println!("Switch {}: {}",channel, self.switch_values[channel]);
         }
+    }
 
-        // 5. Signal to the mux (moved from old `run`)
-        self.new_command = true;
+    pub fn check_rc_health(&self, now_us: u64, params: &Params) -> bool {
+        if now_us > self.rc.header.timestamp + RC_TIMEOUT_US {
+            return false
+        }
+
+        if self.rc.frame_lost || self.rc.failsafe_activated {
+            return false;
+        }
+
+        let num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
+            ParamValue::Int(val) => val as usize,
+            _ => 6
+        };
+        let channels_to_check = num_channels.min(self.rc.num_channels);
+
+        for i in 0..channels_to_check {
+            let val = self.rc.chan[i];
+            if val < -0.25 || val > 1.25 {
+                return false
+            }
+        }
+        return true
     }
 
     pub fn run(
@@ -436,8 +455,19 @@ impl Rc {
         params: &Params,
         state_manager: &mut StateManager, // Use the concrete StateManager
     ) {
-        // This function now just calls the arming logic check
-        self.look_for_arm_disarm_signal(now_ms, params, state_manager);
+
+        let now_us = (now_ms as u64) * 1000;
+
+        if self.check_rc_health(now_us, params) {
+            state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
+            //println!("RC is Healthy!");
+
+            // only run arming logic if rc is healthy
+            self.look_for_arm_disarm_signal(now_ms, params, state_manager);
+        } else {
+            //println!("RC is Lost!");
+            state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
+        }
     }
 
     /// Checks for stick or switch arming/disarming
@@ -514,48 +544,6 @@ impl Rc {
                 state_manager.update(Event::REQUEST_DISARM, params);
             }
         }
-    }
-
-    fn check_rc_lost(
-        &self,
-        params: &Params,
-        state_manager: &mut StateManager, // <-- Use the concrete StateManager
-    ) -> bool {
-        let mut failsafe = false;
-
-        if self.rc.frame_lost || self.rc.failsafe_activated {
-            failsafe = true;
-        } else {
-            
-            let num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
-                ParamValue::Int(val) => val as usize,
-                other => {
-                    // println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
-                    6 // Default C++ value
-                }
-            };
-
-            // Clamp to the actual number of channels received
-            let channels_to_check = num_channels.min(self.rc.num_channels);
-
-            for i in 0..channels_to_check {
-                let pwm = self.rc.chan[i];
-                // Check if C++ logic for "invalid" RC command is needed
-                if pwm < -0.25 || pwm > 1.25 { 
-                    failsafe = true;
-                    break;
-                }
-            }
-        }
-
-        if failsafe {
-            // Use update() with params and the correct ErrorFlag
-            state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
-        } else {
-            // Use update() with params and the correct ErrorFlag
-            state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
-        }
-        failsafe
     }
     
     // -----------------------------------------------------------------

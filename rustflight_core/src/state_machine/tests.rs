@@ -42,12 +42,16 @@ use crate::params2::{ParamValue, Params, ParamId};
 
 fn setup_sm() -> (StateMachine, Params) {
     let params = Params::new();
-    (StateMachine::new(), params)
+    let mut sm = StateMachine::new();
+    sm.update(Event::INITIALIZED, &params);
+    (sm, params)
 }
 
 fn setup_state_manager() -> (StateManager, Params) {
     let params = Params::new();
-    (StateManager::new(), params)
+    let mut sm = StateManager::new();
+    sm.update(Event::INITIALIZED, &params);
+    (sm, params)
 }
 
 // --------------------- Error Tests ---------------------

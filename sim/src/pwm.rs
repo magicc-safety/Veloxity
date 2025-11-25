@@ -102,18 +102,17 @@ impl SimPwmDriver {
         Self {
              sender,
              // Initialize all channels to the minimum value (disarmed/disabled state)
-             current_values: [1000.0f32; NUM_SIM_CHANNELS],
+             current_values: [0.0f32; NUM_SIM_CHANNELS],
              // enabled_mask: 0, // Initialize if using mask
         }
     }
 
     /// Helper to convert u16 duty (0-u16::MAX) to simulator PWM (1000-2000 us).
-    fn duty_u16_to_pwm_us(duty: u16) -> f32 {
+    fn duty_u16_to_normalized(duty: u16) -> f32 {
         // Map u16 range linearly to 1000-2000 us range
         let normalized_duty = duty as f32 / u16::MAX as f32;
         // Clamp normalized duty before scaling
-        let clamped_normalized = normalized_duty.clamp(0.0, 1.0);
-        (clamped_normalized * 1000.0) + 1000.0
+        normalized_duty.clamp(0.0, 1.0)
     }
 }
 
@@ -140,7 +139,7 @@ impl PwmDriver for SimPwmDriver {
             return Err(PwmError::ChannelOutOfRange);
         }
         // Set the channel to its minimum value (1000 us) to simulate disabling it
-        self.current_values[channel] = 1000.0;
+        self.current_values[channel] = 0.0;
         println!("SimPwmDriver: Disabled channel {} (set to 1000us)", channel);
         Ok(())
     }
@@ -151,7 +150,7 @@ impl PwmDriver for SimPwmDriver {
             return Err(PwmError::ChannelOutOfRange);
         }
         // Convert u16 duty to 1000-2000 us range and store it internally
-        self.current_values[channel] = Self::duty_u16_to_pwm_us(duty);
+        self.current_values[channel] = Self::duty_u16_to_normalized(duty);
         // Optional debug print:
         // println!("Set channel {} duty {} -> stored {}us", channel, duty, self.current_values[channel]);
         Ok(())

@@ -44,4 +44,5 @@ pub trait Controller {
     type State;
     type ControlOutput;
     fn control(&mut self, state: &Self::State, state_manager: &mut StateManager, command: &CombinedControl, params: &Params) -> Self::ControlOutput;
+    fn update_gains(&mut self, params: &Params);
 }

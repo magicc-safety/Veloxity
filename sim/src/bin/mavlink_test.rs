@@ -123,7 +123,7 @@ async fn main() {
     //let mut x: u64 = 0;
 
     while let Ok(_tick) = tick_handler.recv_async().await {
-        //println!("tick: {}", x);
+        //println!("tick {}", x);
         //x += 1;
 
         rosflight.run();
