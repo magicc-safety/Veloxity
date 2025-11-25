@@ -286,35 +286,18 @@
 // }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use std::error::Error;
 use csv::WriterBuilder;
 use serde::Serialize;
 
-// --- Import your actual library components ---
-// Adjust 'rosflight_firmware' to match your actual crate name if different
+// Import your library components
+// Ensure these paths match your lib.rs exports
 use rustflight_core::{
-    controller::{Controller, quad_controller::QuadController, quad_controller::Pid, quad_controller::MixerInput},
+    controller::{Controller, quad_controller::{QuadController, Pid, MixerInput}},
     estimator::quad_estimator::AttitudeState,
-    command_manager::{CombinedControl, ControlType, ControlChannel}, // Assuming these are public
-    state_machine::StateManager,
-    params2::Params,
-    // If you need to import ParamId/ParamValue for mocking, add them here
+    command_manager::{CombinedControl, ControlType, ControlChannel},
+    state_machine::{StateManager, Event},
+    params2::{Params, ParamId, ParamValue},
 };
 
 use micro_algebra::stack::{
@@ -322,7 +305,6 @@ use micro_algebra::stack::{
     vector::Vector,
 };
 
-// Use libm for math functions to match firmware constraints
 use libm::{sin, cos, pow, fabs};
 
 const PI: f64 = 3.14159265359;
@@ -365,6 +347,7 @@ impl QuadcopterDynamics {
 
     fn update(&mut self, torques: &Vector<f64, 3>, dt: f64) {
         // Euler's Equations of Motion for a rigid body
+        // Assumes torques are [x, y, z]
         let p_dot = ((self.iyy - self.izz) * self.q * self.r / self.ixx) + (torques[0] / self.ixx);
         let q_dot_kin = ((self.izz - self.ixx) * self.r * self.p / self.iyy) + (torques[1] / self.iyy);
         let r_dot = ((self.ixx - self.iyy) * self.p * self.q / self.izz) + (torques[2] / self.izz);
@@ -374,11 +357,11 @@ impl QuadcopterDynamics {
         self.r += r_dot * dt;
 
         // Quaternion Kinematics: q_dot = 0.5 * q * omega
-        // Note: Assuming your Quaternion * Vector multiplication handles this, 
-        // or constructing a pure quaternion from rates:
         let omega_q = Quaternion::from_array([0.0, self.p, self.q, self.r]);
         
         // q_new = q + 0.5 * q * omega * dt
+        // Note: Ensure quaternion multiplication order matches your library (Local vs Global)
+        // Standard is usually q_dot = 0.5 * q * omega_local
         let q_dot = (self.orientation * omega_q) * 0.5; 
         self.orientation = self.orientation + q_dot * dt;
         
@@ -393,9 +376,9 @@ fn get_rate_commands(t: f64) -> Vector<f64, 3> {
     const PITCH_AMP_DEG: f64 = 20.0;
     const YAW_AMP_DEG: f64 = 15.0;
 
-    const ROLL_FREQ_HZ: f64 = 0.2;  
-    const PITCH_FREQ_HZ: f64 = 0.3; 
-    const YAW_FREQ_HZ: f64 = 0.1;   
+    const ROLL_FREQ_HZ: f64 = 0.2;   
+    const PITCH_FREQ_HZ: f64 = 0.3;  
+    const YAW_FREQ_HZ: f64 = 0.1;    
 
     // Convert to radians
     let roll_amp_rad = ROLL_AMP_DEG * PI / 180.0;
@@ -428,30 +411,32 @@ fn run_simulation_with_q_dot() -> Result<(), Box<dyn Error>> {
     const SIMULATION_TIME: f64 = 10.0;
     const DT: f64 = 0.01; // Simulation step size (100Hz)
 
-    // Initialize Controller with PIDs
-    // Note: We are setting PIDs directly here. In your actual firmware, 
-    // these might be loaded from Params, but for the test, we construct the struct.
+    // 1. Initialize Params and State Manager
+    // We must arm the state manager, otherwise the controller will output zeros.
+    let mut params = Params::new();
     
-    let mut controller = QuadController {
-        roll_rate_pid: Pid::new(4.5, 3.5, 0.15, 5.0, 0.05),
-        pitch_rate_pid: Pid::new(4.5, 3.5, 0.15, 5.0, 0.05),
-        yaw_rate_pid: Pid::new(3.0, 2.0, 0.05, 5.0, 0.05),
-        // Angle PIDs (even if we test Rate mode, they need to be initialized)
-        roll_angle_pid: Pid::new(6.0, 0.0, 0.0, 0.0, 0.0),
-        pitch_angle_pid: Pid::new(6.0, 0.0, 0.0, 0.0, 0.0),
-        yaw_angle_pid: Pid::new(6.0, 0.0, 0.0, 0.0, 0.0),
-    };
+    // Cheat: Set a non-zero gyro bias so the state machine thinks the IMU is calibrated.
+    // This allows us to transition from Preflight -> Armed.
+    params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.001));
+
+    let mut state_manager = StateManager::new();
+    state_manager.update(Event::INITIALIZED, &params);
+    state_manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(state_manager.is_armed(), "State manager failed to arm! Controller will not run.");
+
+    // 2. Initialize Controller with PIDs
+    // Uses the constructor added to QuadController
+    let mut controller = QuadController::new(
+        Pid::new(4.5, 3.5, 0.15, 5.0, 0.05), // roll_rate
+        Pid::new(4.5, 3.5, 0.15, 5.0, 0.05), // pitch_rate
+        Pid::new(3.0, 2.0, 0.05, 5.0, 0.05), // yaw_rate
+        Pid::new(6.0, 0.0, 0.0, 0.0, 0.0),   // roll_angle
+        Pid::new(6.0, 0.0, 0.0, 0.0, 0.0)    // pitch_angle
+    );
 
     let mut dynamics = QuadcopterDynamics::new(0.1, 0.1, 0.2);
     
-    // Mocks for StateManager and Params
-    // We assume StateManager has a way to be set to "Armed" for this test
-    let mut state_manager = StateManager::default(); // You might need a mock/test constructor here
-    // Forcing armed state if your StateManager allows it, otherwise you might need to simulate arming
-    // state_manager.set_armed(true); // Conceptual
-    
-    let params = Params::default(); // Mock params
-
     let output_path = "tests/rust_controller_results.csv";
     let mut wtr = WriterBuilder::new().from_path(output_path)?;
     println!("\nRunning q_dot simulation and writing to '{}'...", output_path);
@@ -461,13 +446,13 @@ fn run_simulation_with_q_dot() -> Result<(), Box<dyn Error>> {
     for i in 0..num_steps {
         let t = i as f64 * DT;
         
-        // 1. Generate Commands (Rate Mode for this test)
+        // 3. Generate Commands (Rate Mode for this test)
         let commanded_rates = get_rate_commands(t);
         
         let mut command = create_mock_command();
-        command.qx.value = commanded_rates[0] as f32;
-        command.qy.value = commanded_rates[1] as f32;
-        command.qz.value = commanded_rates[2] as f32;
+        command.qx.value = commanded_rates[0]; // No need to cast, value is f64
+        command.qy.value = commanded_rates[1];
+        command.qz.value = commanded_rates[2];
         command.fz.value = 0.5; // Constant thrust
         
         // Ensure we are in RATE mode
@@ -475,11 +460,11 @@ fn run_simulation_with_q_dot() -> Result<(), Box<dyn Error>> {
         command.qy.control_type = ControlType::Rate;
         command.qz.control_type = ControlType::Rate;
 
-        // 2. Update Dynamics State (Calculate q_dot for the estimator)
+        // 4. Update Dynamics State (Calculate q_dot for the estimator)
         let omega_q = Quaternion::from_array([0.0, dynamics.p, dynamics.q, dynamics.r]);
         let q_dot = (dynamics.orientation * omega_q) * 0.5;
 
-        // 3. Create AttitudeState (Input to Controller)
+        // 5. Create AttitudeState (Input to Controller)
         let state = AttitudeState { 
             q_hat: dynamics.orientation, 
             q_dot: q_dot, 
@@ -487,16 +472,13 @@ fn run_simulation_with_q_dot() -> Result<(), Box<dyn Error>> {
             is_healthy: true,
         };
 
-        // 4. Run Controller
-        // Note: In a real test, you might need to mock `state_manager.is_armed()` to return true
-        // If you can't easily mock StateManager, you might need to modify your Controller trait 
-        // to take a simple bool for armed status during tests.
+        // 6. Run Controller
         let mixer_input = controller.control(&state, &mut state_manager, &command, &params);
         
-        // 5. Update Dynamics
+        // 7. Update Dynamics
         dynamics.update(&mixer_input.torques, DT);
         
-        // 6. Log Data
+        // 8. Log Data
         wtr.serialize(SimulationRecord {
             time_s: t,
             cmd_roll_rad_s: commanded_rates[0],

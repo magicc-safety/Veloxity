@@ -53,7 +53,7 @@ pub struct AttitudeState {
     pub q_hat: Quaternion<f64>,
     pub q_dot: Quaternion<f64>,
     pub b_hat: Vector<f64, 3>,
-    is_healthy: bool,
+    pub is_healthy: bool,
 }
 
 impl AttitudeStateTrait for AttitudeState {

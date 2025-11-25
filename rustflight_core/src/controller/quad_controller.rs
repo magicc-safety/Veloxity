@@ -70,10 +70,12 @@ impl Pid {
     pub fn new(p: f64, i: f64, d: f64, max_i: f64, tau: f64) -> Self {
         Self { p, i, d, max_i, tau, integrator: 0.0, differentiator: 0.0, prev_x: 0.0, prev_t: -1.0 }
     }
-    pub fn run(&mut self, x: f64, x_c: f64, dt: f64) -> f64 {
+    pub fn run(&mut self, x: f64, x_c: f64, dt: f64, enable_integrator: bool) -> f64 {
         let error = x_c - x;
         let p_term = self.p * error;
-        self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
+        if enable_integrator {
+            self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
+        }
         let i_term = self.i * self.integrator;
         let d_term = if self.prev_t < 0.0 {
             self.prev_x = x;
@@ -151,6 +153,24 @@ pub struct QuadController {
     pitch_angle_pid: Pid,
 }
 
+impl QuadController {
+    pub fn new(
+        roll_rate_pid: Pid,
+        pitch_rate_pid: Pid,
+        yaw_rate_pid: Pid,
+        roll_angle_pid: Pid,
+        pitch_angle_pid: Pid
+    ) -> Self {
+        Self {
+            roll_rate_pid,
+            pitch_rate_pid,
+            yaw_rate_pid,
+            roll_angle_pid,
+            pitch_angle_pid,
+        }
+    }
+}
+
 impl Controller for QuadController {
     type State = AttitudeState;
     type ControlOutput = MixerInput;
@@ -183,7 +203,7 @@ impl Controller for QuadController {
             } else {
 
                 // prevent ourselves from running the integrator while we're on the ground...
-                let run_integrator = command.fz.value > 0.1;
+                let enable_integrator = command.fz.value > 0.1;
 
                 // --- Step 1: Extract the necessary quaternions from the input state ---
                 let q_hat = state.q_hat;
@@ -218,8 +238,8 @@ impl Controller for QuadController {
                         q_err = q_err * -1.0;
                     }
 
-                    rate_setpoints[0] = self.roll_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_x(), current_rates[0], DT, run_integrator);
-                    rate_setpoints[1] = self.pitch_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_y(), current_rates[1], DT, run_integrator)
+                    rate_setpoints[0] = self.roll_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_x(), current_rates[0], DT, enable_integrator);
+                    rate_setpoints[1] = self.pitch_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_y(), current_rates[1], DT, enable_integrator)
                 } else {
                     // Mode: RollratePitchrateYawrateThrottle (Acro)
                     rate_setpoints[0] = command.qx.value as f64;
@@ -228,9 +248,9 @@ impl Controller for QuadController {
 
                 rate_setpoints[2] = command.qz.value as f64;
 
-                let torque_x = self.roll_rate_pid.run(current_rates[0], rate_setpoints[0], DT);
-                let torque_y = self.pitch_rate_pid.run(current_rates[1], rate_setpoints[1], DT);
-                let torque_z = self.yaw_rate_pid.run(current_rates[2], rate_setpoints[2], DT);
+                let torque_x = self.roll_rate_pid.run(current_rates[0], rate_setpoints[0], DT, enable_integrator);
+                let torque_y = self.pitch_rate_pid.run(current_rates[1], rate_setpoints[1], DT, enable_integrator);
+                let torque_z = self.yaw_rate_pid.run(current_rates[2], rate_setpoints[2], DT, enable_integrator);
             
                 // --- Step 5: Assemble and return the final output ---
                 MixerInput {
