@@ -52,6 +52,7 @@ const DT: f64 = 1.0/400.0f64;
 pub struct AttitudeState {
     pub q_hat: Quaternion<f64>,
     pub q_dot: Quaternion<f64>,
+    pub body_rate: Vector<f64, 3>,
     pub b_hat: Vector<f64, 3>,
     pub is_healthy: bool,
 }
@@ -97,6 +98,7 @@ pub struct QuadEstimator {
      k_i: f64,
      q_hat: Quaternion<f64>,
      q_dot: Quaternion<f64>,
+     body_rate: Vector<f64, 3>,
      b_hat: Vector<f64, 3>,
 }
 
@@ -107,6 +109,7 @@ impl QuadEstimator {
             k_i,
             q_hat: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
             q_dot: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
+            body_rate: Vector::from_array([0.0, 0.0, 0.0]),
             b_hat: Vector::from_array([0.0, 0.0, 0.0]),
         }
     }
@@ -143,6 +146,7 @@ impl Estimator for QuadEstimator {
                 return AttitudeState {
                     q_hat: self.q_hat,
                     q_dot: self.q_dot,
+                    body_rate: self.body_rate,
                     b_hat: self.b_hat,
                     is_healthy: true,
                 };
@@ -164,7 +168,10 @@ impl Estimator for QuadEstimator {
 
             // corrected angular rate (body frame)
             // if signs are opposite in your convention, change +self.k_p*e to -self.k_p*e
-            let omega_corr = Vector::from_array(imu_packet.gyro) - self.b_hat + self.k_p * e;
+            // omega_corr is a correction command... it's what we're eventually using to TELL
+            // THE QUATERNION INTEGRATOR TO DO
+            let body_rate = Vector::from_array(imu_packet.gyro) - self.b_hat;
+            let omega_corr = body_rate + self.k_p * e;
 
             // quaternion derivative
             let omega_q = Quaternion::from_array([0.0, omega_corr[0], omega_corr[1], omega_corr[2]]);
@@ -184,6 +191,7 @@ impl Estimator for QuadEstimator {
         AttitudeState {
             q_hat: self.q_hat,
             q_dot: self.q_dot,
+            body_rate: self.body_rate,
             b_hat: self.b_hat,
             is_healthy: is_healthy
         }

@@ -346,14 +346,16 @@ impl Controller for QuadController {
             
                 // --- Step 2: Calculate angular velocity using the kinematic equation ---
                 let q_conj = q_hat.conjugate();
-                let omega_q = 2.0 * (q_conj * q_dot);
-            
+                
+                // BAD: don't ever update based on how fast the estimator is catching up to true body rates... use the body rates!!! 
+                //let omega_q = 2.0 * (q_conj * q_dot);
                 // The vector part of omega_q is our current angular rate [p, q, r]
-                let current_rates = Vector::from_array([
-                    omega_q.get_x(),
-                    omega_q.get_y(),
-                    omega_q.get_z(),
-                ]);
+                //let current_rates = Vector::from_array([
+                //    omega_q.get_x(),
+                //    omega_q.get_y(),
+                //    omega_q.get_z(),
+                //]);
+                let current_rates = state.body_rate;
 
                 let mut rate_setpoints = Vector::from_array([0.0, 0.0, 0.0, 0.0]);
 
