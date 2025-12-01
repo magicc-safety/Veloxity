@@ -37,7 +37,7 @@
 
 use std::time::Instant;
 
-use crate::ros_messages::{self, Header, Time, OutputRaw}; use rustflight_core::board::BoardTrait;
+use crate::ros_messages::{self, Header, Time, PwmOutput}; use rustflight_core::board::BoardTrait;
 // Ensure OutputRaw is imported
 use rustflight_core::errors; // Assuming errors is in core
 use rustflight_core::packets; // Assuming packets is in core
@@ -63,9 +63,9 @@ const NUM_SIM_CHANNELS: usize = 14; // Match OutputRaw array size
 /// Simulator implementation of the PwmDriver trait.
 #[derive(Clone)]
 pub struct SimPwmDriver {
-    sender: mpsc::Sender<ros_messages::OutputRaw>,
+    sender: mpsc::Sender<ros_messages::PwmOutput>,
     // Internal state to hold the current PWM value (1000-2000us) for each channel
-    current_values: [f32; NUM_SIM_CHANNELS],
+    current_values: [u16; NUM_SIM_CHANNELS],
     // Optional: Track enabled state if needed, otherwise enable/disable just sets value
     // enabled_mask: u16, // Example using a bitmask for 14 channels
 }
@@ -79,7 +79,7 @@ impl SimPwmDriver {
             .await
             .unwrap();
 
-        let (sender, mut receiver) = mpsc::channel::<ros_messages::OutputRaw>(10);
+        let (sender, mut receiver) = mpsc::channel::<ros_messages::PwmOutput>(10);
 
         // Spawn a dedicated tokio task to handle publishing.
         tokio::spawn(async move {
@@ -102,7 +102,7 @@ impl SimPwmDriver {
         Self {
              sender,
              // Initialize all channels to the minimum value (disarmed/disabled state)
-             current_values: [0.0f32; NUM_SIM_CHANNELS],
+             current_values: [1000u16; NUM_SIM_CHANNELS],
              // enabled_mask: 0, // Initialize if using mask
         }
     }
@@ -116,7 +116,6 @@ impl SimPwmDriver {
     }
 }
 
-// Implement the updated PwmDriver trait
 impl PwmDriver for SimPwmDriver {
     fn len(&self) -> usize {
         NUM_SIM_CHANNELS
@@ -126,11 +125,9 @@ impl PwmDriver for SimPwmDriver {
         if channel >= NUM_SIM_CHANNELS {
             return Err(PwmError::ChannelOutOfRange);
         }
-        // For the sim, 'enabling' might mean ensuring it's not stuck at a zero value
-        // if the mixer could potentially output zero. Since we initialize to 1000us,
-        // and disable sets to 1000us, this might be a no-op unless a specific
-        // 'armed idle' value is desired upon enabling.
-        println!("SimPwmDriver: Enabled channel {}", channel); // Placeholder log
+        // Optional: Set to idle (1000us) on enable
+        // self.current_values[channel] = 1000.0; 
+        println!("SimPwmDriver: Enabled channel {}", channel);
         Ok(())
     }
 
@@ -138,21 +135,22 @@ impl PwmDriver for SimPwmDriver {
         if channel >= NUM_SIM_CHANNELS {
             return Err(PwmError::ChannelOutOfRange);
         }
-        // Set the channel to its minimum value (1000 us) to simulate disabling it
-        self.current_values[channel] = 0.0;
+        // Set to 1000us (disarmed/min throttle)
+        self.current_values[channel] = 1000;
         println!("SimPwmDriver: Disabled channel {} (set to 1000us)", channel);
         Ok(())
     }
 
     fn set_duty_cycle(&mut self, channel: usize, duty: u16) -> Result<(), PwmError> {
         if channel >= NUM_SIM_CHANNELS {
-            println!("Error: PWM channel {} out of range (0-{})", channel, NUM_SIM_CHANNELS - 1);
             return Err(PwmError::ChannelOutOfRange);
         }
-        // Convert u16 duty to 1000-2000 us range and store it internally
-        self.current_values[channel] = Self::duty_u16_to_normalized(duty);
-        // Optional debug print:
-        // println!("Set channel {} duty {} -> stored {}us", channel, duty, self.current_values[channel]);
+        
+        // If something calls this with a u16 (0-65535), map it to 1000-2000us
+        let normalized = (duty as f32) / (u16::MAX as f32);
+        let pwm_us = 1000.0 + (normalized * 1000.0);
+        
+        self.current_values[channel] = pwm_us as u16;
         Ok(())
     }
 
@@ -161,44 +159,31 @@ impl PwmDriver for SimPwmDriver {
         let now_sec = (now_us / 1_000_000) as i32;
         let now_nanosec = ((now_us % 1_000_000) * 1000) as u32;
 
-        // Construct the message using the current internal state array
-        let msg = ros_messages::OutputRaw {
+        let msg = ros_messages::PwmOutput {
             header: ros_messages::Header {
                 stamp: ros_messages::Time { sec: now_sec, nanosec: now_nanosec },
-                frame_id: String::new(), // Or an appropriate frame ID
+                frame_id: String::from(""),
             },
-            // Assign the internal state directly, as it's already [f32; 14]
             values: self.current_values,
         };
-
-        // Attempt to send the message through the MPSC channel to the async publishing task
-        match self.sender.try_send(msg) {
-            Ok(_) => {} // Success
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                // Log if the channel is full (indicates sender is faster than receiver/publisher)
-                println!("Warning: PWM output channel full during flush. Dropping message.");
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                // Log if the channel is closed (indicates the publishing task stopped)
-                println!("Error: PWM output channel closed during flush!");
-            }
-        }
+        
+        let _ = self.sender.try_send(msg);
     }
 
     fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands_slice: &[f64]) {
-        let num_channels_to_write = commands_slice.len().min(self.len()); // Don't write past driver's capacity
+        let num_channels_to_write = commands_slice.len().min(self.len());
+        
         for i in 0..num_channels_to_write {
-            // Convert mixer output (0.0 to 1.0) to u16 (0 to u16::MAX)
-            let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
-            // Set duty cycle for the current channel
-            if let Err(e) = self.set_duty_cycle(i, duty_u16) {
-                // Handle potential error (e.g., channel out of range, though we checked)
-                println!("Error setting duty cycle for channel {}: {:?}", i, e);
-            }
+            // 1. Clamp 0.0-1.0
+            let cmd_norm = commands_slice[i].clamp(0.0, 1.0);
+            
+            // 2. Scale to 1000-2000us
+            let pwm_us = 1000.0 + (cmd_norm * 1000.0);
+            
+            // 3. Store as u16
+            self.current_values[i] = pwm_us as u16;
         }
 
-        // After setting all channels for this loop, flush/send the state
         self.flush(board);
     }
 }
-

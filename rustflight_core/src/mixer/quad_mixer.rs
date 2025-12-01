@@ -490,32 +490,21 @@ impl QuadMixer {
             spin_when_armed: if let ParamValue::Bool(v) = params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) { v } else { true },
         };
         
-        // NORMALIZED ALLOCATION MATRIX (Simplified Model)
-        // -----------------------------------------------------
-        // In the simplified model (Appendix B of ROSflight paper), we assume the PIDs 
-        // output normalized "effort" (-1.0 to 1.0) rather than physical torques.
-        // Therefore, we use 1.0 coefficients to simply distribute this effort to the motors.
-        //
-        // Layout: 
-        // 0: FL (Front Left), 1: RL (Rear Left), 2: FR (Front Right), 3: RR (Rear Right)
-        // Note: Signs for Roll/Pitch/Yaw depend on motor position relative to CG.
-        
-        #[rustfmt::skip]
         let data: [f64; 16] = [
             // Thrust, Roll, Pitch, Yaw
-            // Motor 0: Front Left (+Roll, +Pitch, -Yaw)
-            1.0,      1.0,  1.0,   -1.0, 
+            // Motor 0: Front Right (CW) -> Yaw must be NEGATIVE
+            1.0,     -1.0,  1.0,   -1.0, 
+
+            // Motor 1: Rear Right (CCW) -> Yaw must be POSITIVE
+            1.0,     -1.0, -1.0,    1.0,
+
+            // Motor 2: Rear Left (CW) -> Yaw must be NEGATIVE
+            1.0,      1.0, -1.0,   -1.0, 
             
-            // Motor 1: Rear Left (+Roll, -Pitch, +Yaw)
-            1.0,      1.0, -1.0,    1.0, 
-            
-            // Motor 2: Front Right (-Roll, +Pitch, +Yaw)
-            1.0,     -1.0,  1.0,    1.0, 
-            
-            // Motor 3: Rear Right (-Roll, -Pitch, -Yaw)
-            1.0,     -1.0, -1.0,   -1.0, 
+            // Motor 3: Front Left (CCW) -> Yaw must be POSITIVE
+            1.0,      1.0,  1.0,    1.0, 
         ];
-        
+
         let allocation_matrix = Matrix::from_array(data);
 
         Self {
@@ -577,6 +566,7 @@ impl Mixer for QuadMixer {
             }
             // Hard clamp to valid 0.0 - 1.0 range
             outputs[i] = outputs[i].clamp(0.0, 1.0);
+            println!("outputs[i]: {}", outputs[i])
         }
 
         outputs

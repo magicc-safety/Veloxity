@@ -153,7 +153,7 @@ impl Estimator for QuadEstimator {
             }
             
             // predict gravity in body frame using our latest estimate of q_hat
-            let g_intertial_q = Quaternion::from_array([0.0f64, 0.0f64, 0.0f64, 1.0f64]);
+            let g_intertial_q = Quaternion::from_array([0.0f64, 0.0f64, 0.0f64, -1.0f64]);
             let q_conj = self.q_hat.conjugate();
             let tmp = q_conj * g_intertial_q;
             let gravity_in_body_q = tmp * self.q_hat;
