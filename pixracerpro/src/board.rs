@@ -575,6 +575,29 @@ impl Board {
             servos.disable(i);
         }
 
+        // TESTING ONLY
+        for i in 0..servos.len() {
+            match servos.enable(i) {
+                Ok(_) => defmt::info!("Channel {} enabled successfully", i),
+                Err(_) => defmt::error!("Failed to enable channel {}", i),
+            }
+            let tim1_duty_cycle = (1000 as u32 * 65536 as u32) / 2500;
+            match servos.set_duty_cycle(i, tim1_duty_cycle as u16) {
+                Ok(_) => defmt::info!("Channel {} duty cycle set successfully", i),
+                Err(_) => defmt::error!("Failed to set duty cycle on channel {}", i),
+            }
+        }
+
+        // match servos.enable(1) {
+        //     Ok(_) => defmt::info!("Channel {} enabled successfully", 1),
+        //     Err(_) => defmt::error!("Failed to enable channel {}", 1),
+        // }
+        // let tim1_duty_cycle = (1000 as u32 * 65536 as u32) / 2500;
+        // match servos.set_duty_cycle(1, tim1_duty_cycle as u16) {
+        //     Ok(_) => defmt::info!("Channel {} duty cycle set successfully", 1),
+        //     Err(_) => defmt::error!("Failed to set duty cycle on channel {}", 1),
+        // }
+
         // Setup Probe GPIO's
         let probe = [
             Output::new(p.PG13, Level::Low, Speed::Low),

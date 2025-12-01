@@ -118,8 +118,10 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         for i in 0..count {
             let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
             let _ = self.set_duty_cycle(i, duty_u16);
-            defmt::info!("PWM Channel {} set to duty {}", i, duty_u16);
+            // defmt::info!("PWM Channel {} set to duty {}", i, duty_u16);
         }
+        // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
+        // defmt::info!("PWM commands sent: {:?}", &commands_slice[0..count]);
         self.flush(board);
     }
 }
