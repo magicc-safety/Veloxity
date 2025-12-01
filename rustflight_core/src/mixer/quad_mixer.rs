@@ -178,6 +178,8 @@ impl Mixer for QuadMixer {
             }
             motor_outputs[i] = motor_outputs[i].clamp(0.0, 1.0);
         }
+        // Mixer debug output
+        defmt::info!("Motor outputs with params: {:?} {:?} {:?} {:?}", motor_outputs[0], motor_outputs[1], motor_outputs[2], motor_outputs[3]);
 
         motor_outputs
     }

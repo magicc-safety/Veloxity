@@ -261,8 +261,8 @@ where
         let controls = self.controller.control(&state, &mut self.state_manager, &*combined_command, );
         let actuator_commands = self.mixer.mix(&controls);
 
-        // // PWM command output
-        //self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
+        // PWM command output
+        self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
 
         self.comm_manager.send_telemetry_streams::<BT, C, _>(
             &mut self.board,
