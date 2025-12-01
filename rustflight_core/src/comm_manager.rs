@@ -471,7 +471,6 @@ where
                 Ok(param_name_str) => {
                     // Successfully converted, now set the parameter
                     if params.set_by_name(param_name_str, msg.param_value) {
-                        // println!("Set parameter '{}' successfully to {:?}.", param_name_str, msg.param_value);
 
                         // MAVLink spec requires acknowledging the change by sending PARAM_VALUE
                         // Find the ParamDefinition to get the ID and count

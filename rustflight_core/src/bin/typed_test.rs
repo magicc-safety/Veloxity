@@ -1,8 +1,8 @@
-use std::time::Duration;
+// use std::time::Duration;
 
 // /**
 // ******************************************************************************
-// * File     : rustflight_typed.rs
+// * File     : typed_test.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -36,73 +36,77 @@ use std::time::Duration;
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::{
-    board::{dummy::DummyBoard, BoardTrait},
-    bodytype::{quadrotor::Quadrotor, BodyType},
-    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
-    controller::{Controller, quad_controller::QuadController},
-    estimator::{Estimator, quad_estimator::QuadEstimator},
-    params2::Params,
-    mixer::{Mixer, quad_mixer::{QuadMixer}},
-    hlist::{Here, There},
-    hlist_type,
-    packets,
-    rc::Rc,
-    rustflight::{rustflight_typed::ROSFlight, Configuration},
-    state_machine::StateManager,
-    pwm::PwmDriver // We need to switch this out for the PwmDriver written for this test.
-};
+// use rustflight_core::{
+//     board::{dummy::DummyBoard, BoardTrait},
+//     bodytype::{quadrotor::Quadrotor, BodyType},
+//     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
+//     controller::{Controller, quad_controller::QuadController},
+//     estimator::{Estimator, quad_estimator::QuadEstimator},
+//     params2::Params,
+//     mixer::{Mixer, quad_mixer::{QuadMixer}},
+//     hlist::{Here, There},
+//     hlist_type,
+//     packets,
+//     rc::Rc,
+//     rustflight::{rustflight_typed::ROSFlight, Configuration},
+//     state_machine::StateManager,
+//     pwm::PwmDriver // We need to switch this out for the PwmDriver written for this test.
+// };
 
-// define the wiring diagram
-#[derive(Default)]
-pub struct DummyQuadConfig;
-impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
-    type SculptIndices = hlist_type![
-        Here,
-        Here, 
-        There<There<There<There<There<Here>>>>>
-    ];
+// // define the wiring diagram
+// #[derive(Default)]
+// pub struct DummyQuadConfig;
+// impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
+//     type SculptIndices = hlist_type![
+//         Here,
+//         Here, 
+//         There<There<There<There<There<Here>>>>>
+//     ];
 
-    type RcPacketSculptedIndex = There<There<Here>>;
+//     type RcPacketSculptedIndex = There<There<Here>>;
 
-    type ImuPacketIndex = Here;
-    type MagPacketIndex = There<Here>;
-    type BaroPacketIndex = There<There<Here>>;
-    type PitotPacketIndex = There<There<There<Here>>>;
-    type RangePacketIndex = There<There<There<There<Here>>>>;
-    type GNSSPacketIndex = There<There<There<There<There<Here>>>>>;
-    type BatteryPacketIndex = There<There<There<There<There<There<Here>>>>>>;
-    type RcPacketIndex = There<There<There<There<There<There<There<Here>>>>>>>;
-    type AttitudePacketIndex = There<There<There<There<There<There<There<There<Here>>>>>>>>;
-}
+//     type ImuPacketIndex = Here;
+//     type MagPacketIndex = There<Here>;
+//     type BaroPacketIndex = There<There<Here>>;
+//     type PitotPacketIndex = There<There<There<Here>>>;
+//     type RangePacketIndex = There<There<There<There<Here>>>>;
+//     type GNSSPacketIndex = There<There<There<There<There<Here>>>>>;
+//     type BatteryPacketIndex = There<There<There<There<There<There<Here>>>>>>;
+//     type RcPacketIndex = There<There<There<There<There<There<There<Here>>>>>>>;
+//     type AttitudePacketIndex = There<There<There<There<There<There<There<There<Here>>>>>>>>;
+// }
 
 fn main() {
-    // board implementation
-    let (board, servos) = DummyBoard::default(); // We need to update the Default to return the (board, servos) tuple
-    let mut params = Params::new();
 
-    // body type instantiations...
-    let estimator = QuadEstimator::default();
-    let controller = QuadController::default();
-    let mixer = QuadMixer::new(&params);
-
-    // zero-sized configuration marker (necessary)
-    let config = DummyQuadConfig::default();
-
-    // comm_link implementation
-    let mavlink = MavlinkInterface::new();
-
-    let state_manager = StateManager::new();
-
-    let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config, PwmDriver::new(&mut servos),); // we need to create a PwmDriver for this test
-
-    loop {
-        println!("Highest Level Loop");
-        println!("---------------------------------");
-        rosflight.run();
-        println!("---------------------------------");
-        println!("");
-
-        std::thread::sleep(Duration::from_secs(1));
-    }
 }
+
+// fn main() {
+//     // board implementation
+//     let (board, servos) = DummyBoard::default(); // We need to update the Default to return the (board, servos) tuple
+//     let mut params = Params::new();
+
+//     // body type instantiations...
+//     let estimator = QuadEstimator::default();
+//     let controller = QuadController::default();
+//     let mixer = QuadMixer::new(&params);
+
+//     // zero-sized configuration marker (necessary)
+//     let config = DummyQuadConfig::default();
+
+//     // comm_link implementation
+//     let mavlink = MavlinkInterface::new();
+
+//     let state_manager = StateManager::new();
+
+//     let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config, PwmDriver::new(&mut servos),); // we need to create a PwmDriver for this test
+
+//     loop {
+//         println!("Highest Level Loop");
+//         println!("---------------------------------");
+//         rosflight.run();
+//         println!("---------------------------------");
+//         println!("");
+
+//         std::thread::sleep(Duration::from_secs(1));
+//     }
+// }

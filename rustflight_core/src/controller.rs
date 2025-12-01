@@ -38,9 +38,11 @@ use crate::hlist::*;
 pub mod quad_controller;
 use crate::command_manager::CombinedControl;
 use crate::state_machine::StateManager;
+use crate::params2::Params;
 
 pub trait Controller {
     type State;
     type ControlOutput;
-    fn control(&mut self, state: &Self::State, state_manager: &mut StateManager, command: &CombinedControl) -> Self::ControlOutput;
+    fn control(&mut self, state: &Self::State, state_manager: &mut StateManager, command: &CombinedControl, params: &Params) -> Self::ControlOutput;
+    fn update_gains(&mut self, params: &Params);
 }

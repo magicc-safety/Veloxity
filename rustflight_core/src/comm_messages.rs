@@ -343,9 +343,10 @@ pub mod enums {
     #[repr(u8)]
     #[derive(Clone, Copy, Debug, PartialEq, Default)]
     pub enum OffboardControlMode {
-        #[default]
         ModePassThrough = 0,
         ModeRollratePitchrateYawrateThrottle = 1,
+        #[default]
+        ModeRollPitchYawrateThrottle = 2,
     }
 
     #[derive(Debug, Clone, Copy)]

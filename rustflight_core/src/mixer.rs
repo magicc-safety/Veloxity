@@ -35,10 +35,11 @@
 // ******************************************************************************
 // **/
 
-pub mod quad_mixer;
+use crate::state_machine::StateManager;
 
+pub mod quad_mixer;
 pub trait Mixer {
     type MixerInput;
     type ActuatorCommands: AsRef<[f64]>;
-    fn mix(&mut self, controls: &Self::MixerInput) -> Self::ActuatorCommands;
+    fn mix(&mut self, controls: &Self::MixerInput, state_manager: &StateManager) -> Self::ActuatorCommands;
 }

@@ -94,8 +94,8 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
     let mut estimator = QuadEstimator::default();
     
     // Cargo runs tests from the project root, so paths are relative to that.
-    let input_path = "tests/imu_sensor_data.csv";
-    let output_path = "tests/rust_estimation_results.csv";
+    let input_path = "tests/estimator/imu_sensor_data.csv";
+    let output_path = "tests/estimator/rust_estimator_results.csv";
     
     let file = File::open(input_path)?;
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);
