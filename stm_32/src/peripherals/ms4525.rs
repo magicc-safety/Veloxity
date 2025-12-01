@@ -86,7 +86,7 @@ impl Ms4525Sensor {
         }
     
         let sample_period_us = Duration::from_hz(100).as_micros();
-        let loop_period = Duration::from_hz(500);
+        let loop_period = Duration::from_hz(400);
         const PMAX: f64 = 6894.76; // (=-pmin) Pa
         let mut sum_pressure:u32 = 0;
         let mut sum_temperature:u32 = 0;
