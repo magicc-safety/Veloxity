@@ -49,7 +49,6 @@ include!("../../stm_32/stm32h7x3_common.rs");
 
 pub struct Board {
     probe: [Output<'static>; 3], // We only have 3 from ROSFlight
-    // pub servos: peripherals::pwm::PixRacerProServoMonstrosity,
     pub start_time: embassy_time::Instant,
 }
 
