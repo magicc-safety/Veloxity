@@ -566,7 +566,7 @@ impl Mixer for QuadMixer {
             }
             // Hard clamp to valid 0.0 - 1.0 range
             outputs[i] = outputs[i].clamp(0.0, 1.0);
-            println!("outputs[i]: {}", outputs[i])
+            // println!("outputs[i]: {}", outputs[i])
         }
         // Mixer debug output
         // defmt::info!("Motor outputs with params: {:?} {:?} {:?} {:?}", outputs[0], outputs[1], outputs[2], outputs[3]);
