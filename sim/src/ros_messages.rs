@@ -252,11 +252,10 @@ pub struct Error {
     pub rearm: bool,
 }
 
-// OutputRaw.msg
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct OutputRaw {
+pub struct PwmOutput {
     pub header: Header,
-    pub values: [f32; 14]
+    pub values: [u16; 14], // Correct type for the simulator!
 }
 
 
