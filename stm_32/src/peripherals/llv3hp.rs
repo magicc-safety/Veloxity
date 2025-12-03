@@ -104,11 +104,15 @@ impl Llv3hpSensor {
             Err(e) => return Err(()),
             Ok(_) => {}
         }
+
+        Timer::after(Duration::from_micros(0)).await;
+
         // Read register
         match self.dev.read(address, data).await {
             Err(e) => return Err(()),
             Ok(_) => {}           
         }
+     
         Ok(())
     }
 
@@ -138,6 +142,7 @@ impl Llv3hpSensor {
               RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: reading HEALTH_STATUS")));
             return;           
         }
+        
         if (health[0] & 0x17) != 0x17 {
             // defmt::error!("LLV3HP Lidar failed: bad HEALTH_STATUS {:02X}",health[0]);
             RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: bad HEALTH_STATUS")));
@@ -194,15 +199,15 @@ impl Llv3hpSensor {
             Timer::at(timestamp).await; 
 
              // Check System Status Register
-            let mut status = [0u8;1];
-            if self.write_read(ADDRESS,&[STATUS],&mut status ).await.is_err() {
-                RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: reading STATUS")));
-                continue;           
-            }
-            if (status[0] & 0x30) != 0x30 {
-                RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: bad STATUS")));
-                continue;        
-            }           
+            // let mut status = [0u8;1];
+            // if self.write_read(ADDRESS,&[STATUS],&mut status ).await.is_err() {
+            //     RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: reading STATUS")));
+            //     continue;           
+            // }
+            // if (status[0] & 0x30) != 0x30 {
+            //     RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: bad STATUS")));
+            //     continue;        
+            // }           
   
             // Read Data
             let mut data = [0u8;2];
