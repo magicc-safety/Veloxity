@@ -69,20 +69,35 @@ pub struct Ist8308Sensor {
 
 impl Ist8308Sensor {
 
+    async fn write_read(&mut self, address: u8, register: &[u8], data: &mut [u8]) -> Result<(),()> 
+    {
+        match self.dev.write(address, register).await {
+            Err(e) => return Err(()),
+            Ok(_) => {}
+        }
+
+        Timer::after(Duration::from_micros(0)).await;
+
+        // Read register
+        match self.dev.read(address, data).await {
+            Err(e) => return Err(()),
+            Ok(_) => {}           
+        }
+ 
+
+        Ok(())
+    }
+
    pub async fn run(&mut self) {
         const ADDRESS: u8 = 0x0C;
 
         // Check device ID
 
         const WAI_REG: u8 = 0x00;
-        if self.dev.write(ADDRESS, &[WAI_REG]).await.is_err() {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: writing WAI_REG")));
-            return;           
-        }
         let mut device_id = [0u8; 1];
-        if self.dev.read(ADDRESS, &mut device_id).await.is_err() {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: read device ID")));
-            return;     
+        if self.write_read(ADDRESS,&[WAI_REG],&mut device_id ).await.is_err() {
+            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: reading WAI_REG")));
+            return;           
         }
         const DEVICE_ID: u8 = 0x08;    
         if device_id[0] != DEVICE_ID {
@@ -101,13 +116,8 @@ impl Ist8308Sensor {
         Timer::after(Duration::from_millis(20)).await; // allow 20 ms to reset
     
         //  Check status
-
-        if self.dev.write(ADDRESS, &[CNTL3_REG]).await.is_err() {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: writing CNTL3_REG")));
-            return;          
-        }
         let mut cntrl3 = [0u8;1];
-        if self.dev.read(ADDRESS, &mut cntrl3).await.is_err() {
+        if self.write_read(ADDRESS,&[CNTL3_REG],&mut cntrl3 ).await.is_err() {
             MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: reading CNTL3_REG")));
             return;           
         }
@@ -156,20 +166,15 @@ impl Ist8308Sensor {
         let loop_period = Duration::from_hz(100);
         // let mut previous_timestamp_us: u64 = 0u64;
         loop {
-          let timestamp = synch_at(loop_period+Duration::from_micros(1_000));
+          let timestamp = synch_at(loop_period) + Duration::from_micros(900);
           Timer::at(timestamp).await; 
 
             // Read Data
             const STAT1_REG: u8 = 0x10;
             let mut data = [0u8;7];
-            if self.dev.write(ADDRESS, &[STAT1_REG]).await.is_err() {
-                MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: writing STAT1_REG for data")));
-                continue;            
-            }
-
-            if self.dev.read(ADDRESS, &mut data).await.is_err() {
-                MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: reading STAT1_REG for data")));
-                continue;               
+            if self.write_read(ADDRESS,&[STAT1_REG],&mut data ).await.is_err() {
+                MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("IST8308 Mag failed: reading STAT1_REG")));
+                continue;           
             }
 
             const STAT1_VAL_DRDY: u8 = 0x01;

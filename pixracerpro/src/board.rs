@@ -94,6 +94,7 @@ impl BoardTrait for Board {
         sensors.1.0 = peripherals::ist8308::MAG_SIGNAL.try_take();
         sensors.1.1.0 = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.1.1.1.0 = peripherals::ms4525::PITOT_SIGNAL.try_take();
+        sensors.1.1.1.1.0 = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.1.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
 
@@ -290,7 +291,7 @@ impl Board {
             IrqsI2c1,
             p.DMA2_CH2,
             p.DMA2_CH3,
-            Hertz(400_000),
+            Hertz(100_000),
             i2c_config,
         );
         let i2c1_bus = Mutex::new(i2c1);
@@ -303,6 +304,10 @@ impl Board {
 
         // MS4525 Pitot (External)
         let mut ms4525_sensor = peripherals::ms4525::Ms4525Sensor {
+            dev: I2cDevice::new(i2c1_bus),
+        };
+
+        let mut llv3hp_sensor = peripherals::llv3hp::Llv3hpSensor {
             dev: I2cDevice::new(i2c1_bus),
         };
 
@@ -482,6 +487,7 @@ impl Board {
             .unwrap();
         spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
+        spawner3.spawn(peripherals::llv3hp::task(llv3hp_sensor)).unwrap();
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);

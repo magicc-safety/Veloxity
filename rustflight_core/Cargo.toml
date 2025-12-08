@@ -40,7 +40,9 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2.6.0"
-micro_algebra = { git = "ssh://git@github.com/magicc-safety/micro_algebra.git", branch = "main" }
+#micro_algebra = { git = "ssh://git@github.com/magicc-safety/micro_algebra.git", branch = "main" }
+micro_algebra = { version = "0.1.0", path = "../../micro_algebra" }
+
 # For .sqrt(), .powf() and .powi() traits for f64s
 num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 libm = "0.2"
