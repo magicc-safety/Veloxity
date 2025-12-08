@@ -37,7 +37,7 @@
 // ******************************************************************************
 // **/
 use rustflight_core::board::BoardTrait;
-use rustflight_core::pwm::{PwmDriver, PwmError};
+use rustflight_core::pwm::{self, PwmDriver, PwmError};
 // use crate::ros_messages::{OutputRaw, Header, Time};
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 
@@ -90,6 +90,7 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
             return Err(PwmError::ChannelOutOfRange);
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
+        defmt::info!("Duty: {} PWM_US: {}", duty, pwm_us);
         self.current_values[channel] = pwm_us;
         self.servos
             .set_duty_cycle(channel, pwm_us as u16)
