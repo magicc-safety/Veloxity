@@ -523,7 +523,7 @@ impl Board {
             Some(tim1_ch2_pin),
             Some(tim1_ch3_pin),
             Some(tim1_ch4_pin),
-            Hertz::hz(400), // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
         let mut timer4 = SimplePwm::new(
@@ -532,7 +532,7 @@ impl Board {
             Some(tim4_ch2_pin),
             Some(tim4_ch3_pin), // Some(ch7_pin),
             None,               // Some(ch8_pin),
-            Hertz::hz(400),     // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
         let mut timer2 = SimplePwm::new(
@@ -541,7 +541,7 @@ impl Board {
             None,
             None,
             None,           // Some(ch9_pin),
-            Hertz::hz(400), // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
         // let mut timer3 = SimplePwm::new(
@@ -550,7 +550,7 @@ impl Board {
         //     None,
         //     Some(tim3_ch3_pin),
         //     None,           // Some(ch11_pin),
-        //     Hertz::hz(400), // Should this be 100_000?
+        //     Hertz::hz(400),
         //     Default::default(),
         // );
 
