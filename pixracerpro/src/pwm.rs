@@ -90,10 +90,11 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
             return Err(PwmError::ChannelOutOfRange);
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
-        defmt::info!("Duty: {} PWM_US: {}", duty, pwm_us);
+        let raw_pwm = (pwm_us as u32 * 65536 as u32 / 2500);
+        defmt::info!("Channel: {} Duty: {} PWM_US: {}, Raw PWM: {}", channel, duty, pwm_us, raw_pwm);
         self.current_values[channel] = pwm_us;
         self.servos
-            .set_duty_cycle(channel, pwm_us as u16)
+            .set_duty_cycle(channel, raw_pwm as u16)
             .map_err(|_| PwmError::GenericError)
     }
 
