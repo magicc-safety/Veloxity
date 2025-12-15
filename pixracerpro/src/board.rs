@@ -500,7 +500,7 @@ impl Board {
             .unwrap();
 
         // SERVOS + TIMERS
-        // There are only 8 Servo Channels on the PixRacer Pro
+        // There are only 7 available Servo Channels on the PixRacer Pro
         // TIM1
         let tim1_ch1_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
         let tim1_ch2_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
@@ -513,9 +513,6 @@ impl Board {
 
         // TIM2
         let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
-
-        // TIM3
-        // let tim3_ch3_pin = PwmPin::new_ch3(p.PB0, OutputType::PushPull); // We may need to reserve this pin for RC input
 
         let mut timer1 = SimplePwm::new(
             p.TIM1,
@@ -544,22 +541,12 @@ impl Board {
             Hertz::hz(400),
             Default::default(),
         );
-        // let mut timer3 = SimplePwm::new(
-        //     p.TIM3,
-        //     None, // Some(ch10_pin),
-        //     None,
-        //     Some(tim3_ch3_pin),
-        //     None,           // Some(ch11_pin),
-        //     Hertz::hz(400),
-        //     Default::default(),
-        // );
 
         let mut timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
         let mut timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
         let mut timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
-        // let mut timer3 = peripherals::pwm::TimerEnum::TIM3(timer3);
 
-        let mut timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4]; // timer3,
+        let mut timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4];
 
         let mut servos: peripherals::pwm::PixRacerProServoMonstrosity =
             peripherals::pwm::PixRacerProServoMonstrosity {
@@ -570,18 +557,10 @@ impl Board {
                     (0, peripherals::pwm::TimerChannel::Ch3), // -
                     (0, peripherals::pwm::TimerChannel::Ch4), // -
                     (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
-                    // (2, peripherals::pwm::TimerChannel::Ch3), // TIM3, channel 3
                     (2, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
                     (2, peripherals::pwm::TimerChannel::Ch3), // -
                 ],
             };
-
-        // for i in 0..servos.len() {
-        //     match servos.enable(i) {
-        //         Ok(_) => defmt::info!("Channel {} enabled successfully", i),
-        //         Err(_) => defmt::error!("Failed to enable channel {}", i),
-        //     }
-        // }
 
         // Setup Probe GPIO's
         let probe = [
