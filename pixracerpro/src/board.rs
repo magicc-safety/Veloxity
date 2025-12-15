@@ -576,12 +576,12 @@ impl Board {
                 ],
             };
 
-        for i in 0..servos.len() {
-            match servos.enable(i) {
-                Ok(_) => defmt::info!("Channel {} enabled successfully", i),
-                Err(_) => defmt::error!("Failed to enable channel {}", i),
-            }
-        }
+        // for i in 0..servos.len() {
+        //     match servos.enable(i) {
+        //         Ok(_) => defmt::info!("Channel {} enabled successfully", i),
+        //         Err(_) => defmt::error!("Failed to enable channel {}", i),
+        //     }
+        // }
 
         // Setup Probe GPIO's
         let probe = [

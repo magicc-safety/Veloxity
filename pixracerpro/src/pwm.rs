@@ -41,11 +41,12 @@ use rustflight_core::pwm::{self, PwmDriver, PwmError};
 // use crate::ros_messages::{OutputRaw, Header, Time};
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 
-const NUM_HW_CHANNELS: usize = 8;
+const NUM_HW_CHANNELS: usize = 7;
 
 pub struct BoardPwmDriver<'a> {
     servos: &'a mut PixRacerProServoMonstrosity,
     current_values: [f32; NUM_HW_CHANNELS],
+    enabled_chan_mask: u16,
 }
 
 impl<'a> BoardPwmDriver<'a> {
@@ -53,6 +54,7 @@ impl<'a> BoardPwmDriver<'a> {
         Self {
             servos,
             current_values: [1000.0; NUM_HW_CHANNELS],
+            enabled_chan_mask: 0,
         }
     }
 
@@ -67,13 +69,21 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         NUM_HW_CHANNELS
     }
 
+    fn is_enabled(&self) -> bool {
+        self.enabled_chan_mask == ((1 << NUM_HW_CHANNELS) - 1)
+    }
+
     fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
         if channel >= NUM_HW_CHANNELS {
             return Err(PwmError::ChannelOutOfRange);
         }
         self.servos
             .enable(channel)
-            .map_err(|_| PwmError::GenericError)
+            .map_err(|_| PwmError::GenericError)?;
+
+        self.enabled_chan_mask |= 1 << channel;
+
+        Ok(())
     }
 
     fn disable(&mut self, channel: usize) -> Result<(), PwmError> {
@@ -82,7 +92,26 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         }
         self.servos
             .disable(channel)
-            .map_err(|_| PwmError::GenericError)
+            .map_err(|_| PwmError::GenericError)?;
+
+        self.enabled_chan_mask &= !(1 << channel);
+
+        Ok(())
+    }
+
+    fn enable_all(&mut self) -> Result<(), PwmError> {
+        for i in 0..self.servos.len() {
+            self.servos
+                .enable(i)
+                .map_err(|_| PwmError::GenericError)?;
+        };
+        Ok(())
+    }
+
+    fn disable_all(&mut self) {
+        for i in 0..self.servos.len() {
+            self.servos.disable(i);
+        }
     }
 
     fn set_duty_cycle(&mut self, channel: usize, duty: u16) -> Result<(), PwmError> {
@@ -91,7 +120,7 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
         let raw_pwm = (pwm_us as u32 * 65536 as u32 / 2500);
-        defmt::info!("Channel: {} Duty: {} PWM_US: {}, Raw PWM: {}", channel, duty, pwm_us, raw_pwm);
+        // defmt::info!("Channel: {} Duty: {} PWM_US: {}, Raw PWM: {}", channel, duty, pwm_us, raw_pwm);
         self.current_values[channel] = pwm_us;
         self.servos
             .set_duty_cycle(channel, raw_pwm as u16)

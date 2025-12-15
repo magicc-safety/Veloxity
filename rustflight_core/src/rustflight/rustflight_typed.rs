@@ -245,6 +245,15 @@ where
         // Update the state manager...
         self.state_manager.run(&self.params);
 
+        // Enable PWM after transition to ARMED, disable after transition to DISARMED
+        if self.state_manager.is_armed() && !self.pwm_driver.is_enabled() {
+            if let Err(_) = self.pwm_driver.enable_all() {
+                defmt::error!("Critical: Failed to enable PWM driver!");
+            }
+        } else if !self.state_manager.is_armed() && self.pwm_driver.is_enabled() {
+            self.pwm_driver.disable_all();
+        }
+
         // Now run the estimator 
         let state = self.estimator.estimate(&estimator_sensors);
 
