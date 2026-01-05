@@ -549,13 +549,16 @@ impl Rc {
             //println!("The arm switch is mapped!!!");
             let f_stick = self.stick(Stick::F);
             if self.switch_on(Switch::Arm) {
+                defmt::info!("is_armed: {} f_stick: {} arm_threshold: {}", is_armed, f_stick, arm_threshold);
                 if !is_armed && (f_stick < arm_threshold) {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
             } else {
-                // Use update() with params
-                state_manager.update(Event::REQUEST_DISARM, params);
+                if is_armed {
+                    // Use update() with params
+                    state_manager.update(Event::REQUEST_DISARM, params);
+                }
             }
         }
     }
