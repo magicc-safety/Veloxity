@@ -258,12 +258,12 @@ impl Rc {
             self.switches[i].channel = channel_num;
             self.switches[i].mapped = channel_num > 3 && channel_num < rc_num_channels;
 
-            // debugging code to see if we mapped it or not...
-            if self.switches[i].mapped {
-                // println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
-            } else {
-                // println!("Switch \"{}\" will not be mapped.", channel_name);
-            }
+            // // debugging code to see if we mapped it or not...
+            // if self.switches[i].mapped {
+            //     defmt::println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
+            // } else {
+            //     defmt::println!("Switch \"{}\" will not be mapped.", channel_name);
+            // }
 
             let direction_param_id = match channel_num {
                 4 => Some(ParamId::PARAM_RC_SWITCH_5_DIRECTION),
@@ -358,28 +358,16 @@ impl Rc {
         }
     }
 
-    fn normalize_rc_input(&mut self, packet: &RcPacket, length: usize){
-
-        // Now iterate over the channels
-        for i in 0..length {
-            // FIX: Normalize 1000-2000us to 0.0-1.0
-            let normalized = (packet.chan[i] as f32 - 1000.0) / 1000.0;
-            self.rc.chan[i] = normalized.clamp(-0.25, 1.25);
-        }
-    }
-
     pub fn receive(
         &mut self,
         packet: &RcPacket, // <-- Takes the packet
         params: &Params,
         state_manager: &mut StateManager,
     ) {
-        // 1. Normalize and Copy data from the packet into the internal rc_struct
+        // 1. Copy data from the packet into the internal rc_struct: We assume it has been normalized before this point
         // Get the number of channels
         let len = (packet.n_chan as usize).min(self.rc.chan.len());
-        // self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
-
-        self.normalize_rc_input(packet, len);
+        self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
 
         self.rc.header.timestamp = packet.header.timestamp;
         self.rc.header.status = packet.header.status;
@@ -549,7 +537,7 @@ impl Rc {
             //println!("The arm switch is mapped!!!");
             let f_stick = self.stick(Stick::F);
             if self.switch_on(Switch::Arm) {
-                defmt::info!("is_armed: {} f_stick: {} arm_threshold: {}", is_armed, f_stick, arm_threshold);
+                // defmt::info!("is_armed: {} f_stick: {} arm_threshold: {}", is_armed, f_stick, arm_threshold);
                 if !is_armed && (f_stick < arm_threshold) {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);

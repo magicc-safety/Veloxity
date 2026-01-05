@@ -228,6 +228,7 @@ where
 
         // now run the RC unit and the command manager unit
         if let Some(rc_packet) = rc_packet_option {
+            // defmt::info!("Received RC in rustflight_typed");
             self.rc_manager.receive(
                 &rc_packet, 
                 &self.params,
