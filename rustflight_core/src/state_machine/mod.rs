@@ -323,7 +323,7 @@ impl StateManager {
         let start_state = self.machine;
         self.machine.update(event, params);
         if start_state != self.machine {
-            // defmt::info!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {:b}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
+            println!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {:b}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
         }
     }
 

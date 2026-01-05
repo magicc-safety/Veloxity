@@ -405,7 +405,7 @@ impl BoardTrait for Board {
         match self.mavlink_socket.try_recv(buf) {
             Ok(n) => Some(Ok(n)), // Successfully read n bytes
             Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                //println!("No MAVLink data received!!!");
+                println!("No MAVLink data received!!!");
                 None // No data available to read, not an error
             }
             Err(_) => {
