@@ -166,7 +166,7 @@ pub mod messages {
 
     #[derive(Debug, Clone, Copy)]
     pub struct StatustextMsg {
-        pub severity: MavSeverity,
+        pub severity: Severity,
         pub text: [u8; 50],
     }
 
@@ -304,12 +304,6 @@ pub mod messages {
         pub battery_voltage: f32,
         pub battery_current: f32,
     }
-
-    #[derive(Debug, Clone, Copy, Default)]
-    pub struct LogPacket {
-    pub level: LogLevel,
-    pub msg: [u8; 16],
-    }
 }
 
 // Enums
@@ -357,7 +351,7 @@ pub mod enums {
     }
 
     #[derive(Debug, Clone, Copy)]
-    pub enum MavSeverity {
+    pub enum Severity {
         Emergency,
         Alert,
         Critical,

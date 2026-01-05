@@ -59,6 +59,7 @@ pub trait CommInterface<B: board::BoardTrait> {
     fn send_cmd_ack(&mut self, board: &mut B, system_id: u8, msg: RosflightCmdAckMsg);
     fn send_rc_channels(&mut self, board: &mut B, system_id: u8, msg: RcChannelsMsg);
     fn send_battery_status(&mut self, board: &mut B, system_id: u8, msg: BatteryStatusMsg);
+    fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: StatustextMsg);
 
     fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut comm_messages::Messages);
 }

@@ -680,4 +680,19 @@ where
     pub fn send_rosflight_output_raw(&mut self, board: &mut B, msg: RosflightOutputRawMsg) {
         self.comm_link.send_output_raw(board, self.sysid, msg);
     }
+
+    pub fn send_statustext(&mut self, board: &mut B, severity: Severity, text: &str) {
+        let text_bytes = {
+            let mut arr = [0u8; 50];
+            let len = text.len().min(50);
+            arr[..len].copy_from_slice(&text.as_bytes()[..len]);
+            arr
+        };
+        
+        self.comm_link.send_statustext(board, self.sysid, StatustextMsg { 
+            severity, 
+            text: text_bytes 
+        });
+    }
+
 }

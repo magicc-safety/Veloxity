@@ -255,6 +255,9 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
     fn send_battery_status(&mut self, board: &mut B, system_id: u8, msg: comm_messages::BatteryStatusMsg) {
         self.send_message(board, system_id, mav_messages::RosflightBatteryStatus::from(msg));
     }
+    fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: comm_messages::StatustextMsg) {
+        self.send_message(board, system_id, mav_messages::Statustext::from(msg));
+    }
 }
 
 impl From<mav_enums::RosflightAuxCmdType> for comm_enums::RosflightAuxCmdType {
@@ -752,6 +755,32 @@ impl From<packets::GNSSFixType> for mav_enums::GnssFixType {
             CommType::ThreeD => MavType::GnssFix3dFix,
             CommType::GnssPlusDeadReckoning => MavType::GnssFixGnssPlusDeadReckoning,
             CommType::TimeFixOnly => MavType::GnssFixTimeFixOnly,
+        }
+    }
+}
+
+impl From<comm_messages::StatustextMsg> for mav_messages::Statustext {
+    fn from(msg: comm_messages::StatustextMsg) -> Self {
+        Self {
+            severity: msg.severity.into(),
+            text: msg.text,
+        }
+    }
+}
+
+impl From<comm_enums::Severity> for mav_enums::MavSeverity {
+    fn from(val: comm_enums::Severity) -> Self {
+        use comm_enums::Severity;
+        use mav_enums::MavSeverity;
+        match val {
+            Severity::Emergency => MavSeverity::Emergency,
+            Severity::Alert => MavSeverity::Alert,
+            Severity::Critical => MavSeverity::Critical,
+            Severity::Error => MavSeverity::Error,
+            Severity::Warning => MavSeverity::Warning,
+            Severity::Notice => MavSeverity::Notice,
+            Severity::Info => MavSeverity::Info,
+            Severity::Debug => MavSeverity::Debug,
         }
     }
 }
