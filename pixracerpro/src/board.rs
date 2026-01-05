@@ -78,7 +78,7 @@ impl BoardTrait for Board {
     ];
 
     type ProcessorHList = hlist_type![
-        sensorprocessors::PassthroughImuProcessor,
+        sensorprocessors::ImuProcessor,
         sensorprocessors::PassthroughMagProcessor,
         sensorprocessors::PassthroughBaroProcessor,
         sensorprocessors::PassthroughPitotProcessor,
@@ -101,6 +101,7 @@ impl BoardTrait for Board {
         // Debug statements to check receiving sensor data
         if let Some(imu_packet) = sensors.0 {
             // match imu_packet {
+                
             //     Ok(data) => defmt::info!(
             //         "IMU data: accel {:?} | gyro {:?} | temp {:?}",
             //         data.accel,
@@ -109,14 +110,14 @@ impl BoardTrait for Board {
             //     ),
             //     Err(e) => defmt::error!("Error reading IMU data"),
             // }
-            // defmt::info!("Sensor IMU data received!");
+            // // defmt::info!("Sensor IMU data received!");
         }
         if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
             // match gnss_packet {
             //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
-            //     Err(e) => defmt::error!("Error reading IMU data"),
+            //     Err(e) => defmt::error!("Error reading GPS data"),
             // }
-            // defmt::info!("GPS data received!");
+            // // defmt::info!("GPS data received!");
         }
         if let Some(mag_packet) = sensors.1.0 {
             // match mag_packet {
@@ -127,7 +128,7 @@ impl BoardTrait for Board {
             //     ),
             //     Err(e) => defmt::error!("Error reading Mag data"),
             // }
-            // defmt::info!("Sensor Magnetometer data received!");
+            // // defmt::info!("Sensor Magnetometer data received!");
         }
         if let Some(baro_packet) = sensors.1.1.0 {
             // match baro_packet {
@@ -138,7 +139,7 @@ impl BoardTrait for Board {
             //     ),
             //     Err(e) => defmt::error!("Error reading Barometer data"),
             // }
-            // defmt::info!("Sensor Baro data received!");
+            // // defmt::info!("Sensor Baro data received!");
         }
         if let Some(pitot_packet) = sensors.1.1.1.0 {
             // match pitot_packet {
@@ -148,7 +149,7 @@ impl BoardTrait for Board {
             //     ),
             //     Err(e) => defmt::error!("Error reading Pitot data"),
             // }
-            // defmt::info!("Sensor Pitot data received!");
+            // // defmt::info!("Sensor Pitot data received!");
         }
         if let Some(range_packet) = sensors.1.1.1.1.0 {
             // match pitot_packet {
@@ -160,8 +161,24 @@ impl BoardTrait for Board {
             // }
             //defmt::info!("Sensor Range data received!");
         }
-        if sensors.1.1.1.1.1.1.1.0.is_some() {
-            // defmt::info!("Sensor RC data received!");
+        if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
+            // match rc_packet_result {
+            //     Ok(data) => {
+            //         // This confirms the SBUS driver is working
+            //         // defmt::info!(
+            //         //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
+            //         //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
+            //         // );
+            //         // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
+            //         // defmt::info!(
+            //         //     "BOARD: RC Packet Received! Channels {}",
+            //         //     data.chan[..data.n_chan as usize]
+            //         // );
+            //     },
+            //     Err(_) => {
+            //         defmt::error!("BOARD: Error reading RC data");
+            //     }
+            // }
         }
     }
 
@@ -493,7 +510,7 @@ impl Board {
             .unwrap();
 
         // SERVOS + TIMERS
-        // There are only 8 Servo Channels on the PixRacer Pro
+        // There are only 7 available Servo Channels on the PixRacer Pro
         // TIM1
         let tim1_ch1_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
         let tim1_ch2_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
@@ -507,16 +524,13 @@ impl Board {
         // TIM2
         let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
 
-        // TIM3
-        let tim3_ch3_pin = PwmPin::new_ch3(p.PB0, OutputType::PushPull); // We may need to reserve this pin for RC input
-
         let mut timer1 = SimplePwm::new(
             p.TIM1,
             Some(tim1_ch1_pin),
             Some(tim1_ch2_pin),
             Some(tim1_ch3_pin),
             Some(tim1_ch4_pin),
-            Hertz::hz(400), // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
         let mut timer4 = SimplePwm::new(
@@ -525,7 +539,7 @@ impl Board {
             Some(tim4_ch2_pin),
             Some(tim4_ch3_pin), // Some(ch7_pin),
             None,               // Some(ch8_pin),
-            Hertz::hz(400),     // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
         let mut timer2 = SimplePwm::new(
@@ -534,25 +548,15 @@ impl Board {
             None,
             None,
             None,           // Some(ch9_pin),
-            Hertz::hz(400), // Should this be 100_000?
-            Default::default(),
-        );
-        let mut timer3 = SimplePwm::new(
-            p.TIM3,
-            None, // Some(ch10_pin),
-            None,
-            Some(tim3_ch3_pin),
-            None,           // Some(ch11_pin),
-            Hertz::hz(400), // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
 
         let mut timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
         let mut timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
         let mut timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
-        let mut timer3 = peripherals::pwm::TimerEnum::TIM3(timer3);
 
-        let mut timers: [peripherals::pwm::TimerEnum; 4] = [timer1, timer2, timer3, timer4];
+        let mut timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4];
 
         let mut servos: peripherals::pwm::PixRacerProServoMonstrosity =
             peripherals::pwm::PixRacerProServoMonstrosity {
@@ -563,16 +567,10 @@ impl Board {
                     (0, peripherals::pwm::TimerChannel::Ch3), // -
                     (0, peripherals::pwm::TimerChannel::Ch4), // -
                     (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
-                    (2, peripherals::pwm::TimerChannel::Ch3), // TIM3, channel 3
-                    (3, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
-                    (3, peripherals::pwm::TimerChannel::Ch3), // -
+                    (2, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
+                    (2, peripherals::pwm::TimerChannel::Ch3), // -
                 ],
             };
-
-        // disable all channels at start
-        for i in 0..servos.len() {
-            servos.disable(i);
-        }
 
         // Setup Probe GPIO's
         let probe = [

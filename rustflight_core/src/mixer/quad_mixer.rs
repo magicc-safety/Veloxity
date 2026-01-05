@@ -177,6 +177,8 @@ impl Mixer for QuadMixer {
                 outputs[i] = 0.0;
             }
         }
+        // Mixer debug output
+        // defmt::info!("Motor outputs with params: {:?} {:?} {:?} {:?}", outputs[0], outputs[1], outputs[2], outputs[3]);
 
         outputs
     }

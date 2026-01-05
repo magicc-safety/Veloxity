@@ -70,8 +70,8 @@ impl ServoMonstrosity {
 }
 
 pub struct PixRacerProServoMonstrosity {
-    pub timers: [TimerEnum; 4],
-    pub chan_list: [(usize, TimerChannel); 8],
+    pub timers: [TimerEnum; 3],
+    pub chan_list: [(usize, TimerChannel); 7],
 }
 
 impl PixRacerProServoMonstrosity {

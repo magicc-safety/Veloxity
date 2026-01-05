@@ -196,7 +196,7 @@ where
         // which consumes the raw data and produces the clean 'ProcessedSensorSet'
         // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
         self.board.update_sensors(&mut self.sensors);
-        let processed_sensors = self.sensors.map(self.processorhlist, &mut self.cal_flags, &mut self.params);
+        let processed_sensors = self.sensors.map(&mut self.processorhlist, &mut self.cal_flags, &mut self.params);
 
        // also check for imu: if it's been too long, add a flag for imu not responding...
         let imu_packet_option: &Option<packets::ImuPacket> = processed_sensors.get();
@@ -215,6 +215,11 @@ where
         {
             // The processor has finished! (It removed the flag)
             // We can now send the event to complete the transition.
+            // defmt::info!("New Gyro parameters: {}, {}, {}", 
+            //     self.params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
+            //     self.params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS),
+            //     self.params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS)
+            // );
             self.state_manager.update(Event::CALIBRATION_COMPLETE, &self.params);
         }
 
@@ -240,6 +245,15 @@ where
         // Update the state manager...
         self.state_manager.run(&self.params);
 
+        // Enable PWM after transition to ARMED, disable after transition to DISARMED
+        if self.state_manager.is_armed() && !self.pwm_driver.is_enabled() {
+            if let Err(_) = self.pwm_driver.enable_all() {
+                defmt::error!("Critical: Failed to enable PWM driver!");
+            }
+        } else if !self.state_manager.is_armed() && self.pwm_driver.is_enabled() {
+            self.pwm_driver.disable_all();
+        }
+
         // Now run the estimator 
         let state = self.estimator.estimate(&estimator_sensors);
 
@@ -254,7 +268,7 @@ where
         let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params);
         let actuator_commands = self.mixer.mix(&controls, &mut self.state_manager);
 
-        // // PWM command output
+        // PWM command output
         self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
 
         self.comm_manager.send_telemetry_streams::<BT, C, _>(
@@ -270,6 +284,7 @@ where
 
         // (We do this *after* telemetry, so telemetry can log if needed)
         if let Some(param_id) = changed_param_id {
+            // defmt::info!("Parameter change callback for {:?}", param_id);
             self.rc_manager.param_change_callback(
                 param_id, 
                 &mut self.board, 
