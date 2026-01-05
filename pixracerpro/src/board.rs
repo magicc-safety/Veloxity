@@ -151,6 +151,16 @@ impl BoardTrait for Board {
             // }
             // // defmt::info!("Sensor Pitot data received!");
         }
+        if let Some(range_packet) = sensors.1.1.1.1.0 {
+            // match pitot_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Pitot data: diff_pressure {:?}",
+            //         data.differential_pressure,
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Pitot data"),
+            // }
+            //defmt::info!("Sensor Range data received!");
+        }
         if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
             // match rc_packet_result {
             //     Ok(data) => {
