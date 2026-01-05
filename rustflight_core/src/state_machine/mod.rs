@@ -44,6 +44,7 @@ use bitflags::bitflags;
 use crate::{board::BoardTrait, comm_manager::CommManager, params2::{ParamValue, Params, ParamId}};
 use core::{error, mem::take};
 // use std::default;
+// use defmt::println; // do we want to print logs when running on embedded targets? We may need to build-gate this import
 
 // Events that trigger state transitions
 #[derive(Debug, Clone, Copy)]
@@ -323,7 +324,7 @@ impl StateManager {
         let start_state = self.machine;
         self.machine.update(event, params);
         if start_state != self.machine {
-            println!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {:b}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
+            // println!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {:b}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits()); // Do we want to print output?
         }
     }
 
