@@ -99,77 +99,77 @@ impl BoardTrait for Board {
         sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
 
         // Debug statements to check receiving sensor data
-        // if let Some(imu_packet) = sensors.0 {
-        //     match imu_packet {
+        if let Some(imu_packet) = sensors.0 {
+            // match imu_packet {
                 
-        //         Ok(data) => defmt::info!(
-        //             "IMU data: accel {:?} | gyro {:?} | temp {:?}",
-        //             data.accel,
-        //             data.gyro,
-        //             data.temperature
-        //         ),
-        //         Err(e) => defmt::error!("Error reading IMU data"),
-        //     }
-        //     // defmt::info!("Sensor IMU data received!");
-        // }
-        // if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
-        //     match gnss_packet {
-        //         Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
-        //         Err(e) => defmt::error!("Error reading GPS data"),
-        //     }
-        //     // defmt::info!("GPS data received!");
-        // }
-        // if let Some(mag_packet) = sensors.1.0 {
-        //     match mag_packet {
-        //         Ok(data) => defmt::info!(
-        //             "Mag data: flux {:?} | temperature {:?}",
-        //             data.flux,
-        //             data.temperature
-        //         ),
-        //         Err(e) => defmt::error!("Error reading Mag data"),
-        //     }
-        //     // defmt::info!("Sensor Magnetometer data received!");
-        // }
-        // if let Some(baro_packet) = sensors.1.1.0 {
-        //     match baro_packet {
-        //         Ok(data) => defmt::info!(
-        //             "Baro data: pressure {:?} | temperature {:?}",
-        //             data.pressure,
-        //             data.temperature
-        //         ),
-        //         Err(e) => defmt::error!("Error reading Barometer data"),
-        //     }
-        //     // defmt::info!("Sensor Baro data received!");
-        // }
-        // if let Some(pitot_packet) = sensors.1.1.1.0 {
-        //     match pitot_packet {
-        //         Ok(data) => defmt::info!(
-        //             "Pitot data: diff_pressure {:?}",
-        //             data.differential_pressure,
-        //         ),
-        //         Err(e) => defmt::error!("Error reading Pitot data"),
-        //     }
-        //     // defmt::info!("Sensor Pitot data received!");
-        // }
-        // if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
-        //     match rc_packet_result {
-        //         Ok(data) => {
-        //             // This confirms the SBUS driver is working
-        //             // defmt::info!(
-        //             //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
-        //             //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
-        //             // );
-        //             // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
-        //             // defmt::info!(
-        //             //     "BOARD: RC Packet Received! Channels {}",
-        //             //     data.chan[..data.n_chan as usize]
-        //             // );
-        //         },
-        //         Err(_) => {
-        //             defmt::error!("BOARD: Error reading RC data");
-        //         }
-        //     }
-        // }
+            //     Ok(data) => defmt::info!(
+            //         "IMU data: accel {:?} | gyro {:?} | temp {:?}",
+            //         data.accel,
+            //         data.gyro,
+            //         data.temperature
+            //     ),
+            //     Err(e) => defmt::error!("Error reading IMU data"),
+            // }
+            // // defmt::info!("Sensor IMU data received!");
+        }
+        if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
+            // match gnss_packet {
+            //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
+            //     Err(e) => defmt::error!("Error reading GPS data"),
+            // }
+            // // defmt::info!("GPS data received!");
+        }
+        if let Some(mag_packet) = sensors.1.0 {
+            // match mag_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Mag data: flux {:?} | temperature {:?}",
+            //         data.flux,
+            //         data.temperature
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Mag data"),
+            // }
+            // // defmt::info!("Sensor Magnetometer data received!");
+        }
+        if let Some(baro_packet) = sensors.1.1.0 {
+            // match baro_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Baro data: pressure {:?} | temperature {:?}",
+            //         data.pressure,
+            //         data.temperature
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Barometer data"),
+            // }
+            // // defmt::info!("Sensor Baro data received!");
+        }
+        if let Some(pitot_packet) = sensors.1.1.1.0 {
+            // match pitot_packet {
+            //     Ok(data) => defmt::info!(
+            //         "Pitot data: diff_pressure {:?}",
+            //         data.differential_pressure,
+            //     ),
+            //     Err(e) => defmt::error!("Error reading Pitot data"),
+            // }
+            // // defmt::info!("Sensor Pitot data received!");
+        }
+        if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
+            // match rc_packet_result {
+            //     Ok(data) => {
+            //         // This confirms the SBUS driver is working
+            //         // defmt::info!(
+            //         //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
+            //         //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
+            //         // );
+            //         // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
+            //         // defmt::info!(
+            //         //     "BOARD: RC Packet Received! Channels {}",
+            //         //     data.chan[..data.n_chan as usize]
+            //         // );
+            //     },
+            //     Err(_) => {
+            //         defmt::error!("BOARD: Error reading RC data");
+            //     }
+            // }
+        }
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
