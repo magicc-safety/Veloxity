@@ -168,7 +168,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                         self.calibration_state.gyro_sum = [0.0; 3];
                         self.calibration_state.gyro_calibration_count = 0;
                         flags.remove(CalibrationFlags::GYRO);
-                        defmt::info!("Gyro calibration complete.")
+                        //defmt::info!("Gyro calibration complete.")
                     }
                 }
 
@@ -208,7 +208,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                             params.set_by_id(ParamId::PARAM_ACC_Y_BIAS, ParamValue::Float(bias_y as f32));
                             params.set_by_id(ParamId::PARAM_ACC_Z_BIAS, ParamValue::Float(bias_z as f32));
                         } else {
-                            defmt::warn!("Too much movement for IMU calibration.");
+                            //defmt::warn!("Too much movement for IMU calibration.");
                             // defmt::info!("Max Accel Delta: {}", max_delta);
                         }
                         
@@ -218,7 +218,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                         self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
                         self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
                         flags.remove(CalibrationFlags::ACCEL);
-                        defmt::info!("IMU calibration complete.")
+                        //defmt::info!("IMU calibration complete.")
                     }
                 }
                 // defmt::info!("Gyro Cal Count at end of cal: {}", self.calibration_state.gyro_calibration_count);
@@ -426,9 +426,9 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for Pito
                     if variance < PITOT_MAX_CALIBRATION_VARIANCE {
                         params.set_by_id(ParamId::PARAM_DIFF_PRESS_BIAS, ParamValue::Float(self.calibration_state.mean as f32));
                         self.calibration_state.calibrated = true;
-                        defmt::info!("Airspeed calibration successful!");
+                        //defmt::info!("Airspeed calibration successful!");
                     } else {
-                        defmt::info!("Too much movement for diff pressure calibration.");
+                        //defmt::info!("Too much movement for diff pressure calibration.");
                     }
                     
                     self.calibration_state = PitotCalibrationState::default();

@@ -405,7 +405,7 @@ impl BoardTrait for Board {
         match self.mavlink_socket.try_recv(buf) {
             Ok(n) => Some(Ok(n)), // Successfully read n bytes
             Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                println!("No MAVLink data received!!!");
+                //println!("No MAVLink data received!!!");
                 None // No data available to read, not an error
             }
             Err(_) => {
@@ -466,15 +466,15 @@ impl Board {
         println!("Zenoh sessions opened!");
 
         // Establish all channels for sub
-        let (chan_send_imu_data, mut chan_recv_imu_data) = mpsc::channel::<ros_messages::ImuData>(1);
+        let (chan_send_imu_data, mut chan_recv_imu_data) = mpsc::channel::<ros_messages::ImuData>(50);
         let (chan_send_mag, mut chan_recv_mag) = mpsc::channel::<ros_messages::MagneticField>(1);
         let (chan_send_baro, mut chan_recv_baro) = mpsc::channel::<ros_messages::Barometer>(1);
         let (chan_send_gnss, mut chan_recv_gnss) = mpsc::channel::<ros_messages::GNSS>(1);
-        let (chan_send_rc, mut chan_recv_rc) = mpsc::channel::<ros_messages::RCRaw>(1);
+        let (chan_send_rc, mut chan_recv_rc) = mpsc::channel::<ros_messages::RCRaw>(50);
 
         let sub_imu_data = zenoh_session
             .declare_subscriber("simulated_sensors/imu/data")
-            .with(zenoh::handlers::RingChannel::new(2))            
+            .with(zenoh::handlers::RingChannel::new(50))            
             .await
             .unwrap();
         let sub_mag = zenoh_session
@@ -494,7 +494,7 @@ impl Board {
             .unwrap();
         let sub_rc = zenoh_session
             .declare_subscriber("sim/RC")
-            .with(zenoh::handlers::RingChannel::new(2))            
+            .with(zenoh::handlers::RingChannel::new(50))            
             .await
             .unwrap();
 

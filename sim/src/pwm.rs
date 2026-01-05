@@ -121,13 +121,31 @@ impl PwmDriver for SimPwmDriver {
         NUM_SIM_CHANNELS
     }
 
+    fn enable_all(&mut self) -> Result<(), PwmError> {
+        for i in 0..self.len() {
+            self.enable(i)?;
+        }
+        
+        Ok(())
+    }
+
+    fn disable_all(&mut self) {
+        for i in 0..self.len() {
+            self.disable(i);
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
     fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
         if channel >= NUM_SIM_CHANNELS {
             return Err(PwmError::ChannelOutOfRange);
         }
         // Optional: Set to idle (1000us) on enable
         // self.current_values[channel] = 1000.0; 
-        println!("SimPwmDriver: Enabled channel {}", channel);
+        //println!("SimPwmDriver: Enabled channel {}", channel);
         Ok(())
     }
 
@@ -137,7 +155,7 @@ impl PwmDriver for SimPwmDriver {
         }
         // Set to 1000us (disarmed/min throttle)
         self.current_values[channel] = 1000;
-        println!("SimPwmDriver: Disabled channel {} (set to 1000us)", channel);
+        //println!("SimPwmDriver: Disabled channel {} (set to 1000us)", channel);
         Ok(())
     }
 

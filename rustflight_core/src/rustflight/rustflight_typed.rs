@@ -249,7 +249,7 @@ where
         // Enable PWM after transition to ARMED, disable after transition to DISARMED
         if self.state_manager.is_armed() && !self.pwm_driver.is_enabled() {
             if let Err(_) = self.pwm_driver.enable_all() {
-                defmt::error!("Critical: Failed to enable PWM driver!");
+                //defmt::error!("Critical: Failed to enable PWM driver!");
             }
         } else if !self.state_manager.is_armed() && self.pwm_driver.is_enabled() {
             self.pwm_driver.disable_all();
