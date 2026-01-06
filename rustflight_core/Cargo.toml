@@ -56,6 +56,9 @@ mavspec = { version = "0.6.4", default-features = false, features = ["rust"] }
 # for debugging stm32 devices:
 defmt = { version = "0.3" }
 
+# For safe logging concurrency:
+critical-section = { version = "1.2.0" }
+
 # for testing the estimator
 [dev-dependencies]
 csv = { version = "1.3.1"}
