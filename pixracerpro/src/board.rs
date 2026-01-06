@@ -183,22 +183,31 @@ impl BoardTrait for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        match peripherals::vcp::VCP_RX.try_read(buf) {
-            Ok(n) => return Some(Ok(n)),
-            Err(_) => {
+        match peripherals::telem::TELEM_RX.try_read(buf) {
+            Ok(n) => {
+                defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
+                return Some(Ok(n))
+            },
+            Err(embassy_sync::pipe::TryReadError::Empty) => {
+                // This is NORMAL. Do not log an error.
+                // Return Ok(0) to indicate "no bytes right now" without erroring.
+                return Some(Ok(0)); 
+            },
+            Err(error) => {
+                defmt::info!("Error reading from Serial: {}", error);
                 return Some(Err(errors::TelemError::GenericTelemError(
                     "Error Reading Telem Packet",
                 )));
             }
         }
-    }
+    }   
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         let mut n = 0;
         //let len = byte_count;
         let len = bytes.len();
-
+        // defmt::info!("Writing to Serial");
         loop {
-            match peripherals::vcp::VCP_TX.try_write(&bytes[n..len]) {
+            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
                     if wrote == (len - n) {
                         break;
@@ -207,6 +216,7 @@ impl BoardTrait for Board {
                     }
                 }
                 Err(_) => {
+                    defmt::info!("Error writing to Serial");
                     return Some(Err(errors::TelemError::GenericTelemError(
                         "Error Writing Telem Packet!",
                     )));
@@ -321,27 +331,49 @@ impl Board {
             dev: I2cDevice::new(i2c1_bus),
         };
 
-        // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
-        let mut uart2config = usart::Config::default();
-        uart2config.baudrate = 921600; //230400? This may very well need to be updated
-        let mut uart2 = Uart::new(
-            p.USART2,
-            p.PD6,
-            p.PD5,
-            Usart2Irqs,
+        // // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
+        // let mut uart2config = usart::Config::default();
+        // uart2config.baudrate = 921600;
+        // let mut uart2 = Uart::new(
+        //     p.USART2,
+        //     p.PD6,
+        //     p.PD5,
+        //     Usart2Irqs,
+        //     p.DMA2_CH4,
+        //     p.DMA2_CH5,
+        //     uart2config,
+        // )
+        // .unwrap();
+        // let (mut uart2_tx, mut uart2_rx) = uart2.split();
+
+        // let telem2_rx = peripherals::telem::TelemRx {
+        //     uart_rx: uart2_rx,
+        //     byte_processor: stm_32::peripherals::telem::BasicProcessor {},
+        // };
+
+        // let telem2_tx = peripherals::telem::TelemTx { uart_tx: uart2_tx };
+
+        // Companion Computer UART - Austin's documentation references uart3 instead of 2 for companion computer
+        let mut uart3config = usart::Config::default();
+        uart3config.baudrate = 115200; // 921600;
+        let mut uart3 = Uart::new(
+            p.USART3,
+            p.PD9,
+            p.PD8,
+            Usart3Irqs,
             p.DMA2_CH4,
             p.DMA2_CH5,
-            uart2config,
+            uart3config,
         )
         .unwrap();
-        let (mut uart2_tx, mut uart2_rx) = uart2.split();
+        let (mut uart3_tx, mut uart3_rx) = uart3.split();
 
-        let telem2_rx = peripherals::telem::TelemRx {
-            uart_rx: uart2_rx,
+        let telem3_rx = peripherals::telem::TelemRx {
+            uart_rx: uart3_rx,
             byte_processor: stm_32::peripherals::telem::BasicProcessor {},
         };
 
-        let telem2_tx = peripherals::telem::TelemTx { uart_tx: uart2_tx };
+        let telem3_tx = peripherals::telem::TelemTx { uart_tx: uart3_tx };
 
         // VCP
         static EP_BUF_CELL: StaticCell<[u8; 256]> = StaticCell::new();
@@ -360,11 +392,11 @@ impl Board {
             byte_processor: stm_32::peripherals::vcp::BasicProcessor {},
         };
 
-        // P1 Priority Task for Rx Tememetry
+        // P1 Priority Task for Rx Telemetry
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
-        spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
+        spawner1.spawn(peripherals::telem::task_rx(telem3_rx));
+        // spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
         // USART4 (external GPS)
         let mut uart4config = usart::Config::default();
@@ -503,7 +535,7 @@ impl Board {
         interrupt::SAI4.set_priority(Priority::P4);
         let spawner4 = P4_EXECUTOR.start(interrupt::SAI4);
         spawner4
-            .spawn(peripherals::telem::task_tx(telem2_tx))
+            .spawn(peripherals::telem::task_tx(telem3_tx))
             .unwrap();
         spawner4
             .spawn(peripherals::sd_card::task(usd_card))

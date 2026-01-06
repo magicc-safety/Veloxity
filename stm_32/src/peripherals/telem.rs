@@ -44,6 +44,8 @@ use embassy_sync::channel::Channel;
 use embassy_sync::pipe::Pipe;
 use embassy_time::Timer;
 
+use static_cell::StaticCell; // Testing storage issues
+
 //use defmt::trace;
 
 use rustflight_core::comm_manager::comm_link_trait::EmbeddedComInterface;
@@ -52,6 +54,8 @@ use rustflight_core::packets;
 
 pub static TX_BUFF_SIZE: usize = 2048;
 pub static RX_BUFF_SIZE: usize = 2048;
+
+static RX_BUFFER_MEMORY: StaticCell<[u8; RX_BUFF_SIZE]> = StaticCell::new(); // testing storage issues
 
 pub static TELEM_TX: Pipe<CriticalSectionRawMutex, TX_BUFF_SIZE> = Pipe::new();
 pub static TELEM_RX: Pipe<CriticalSectionRawMutex, RX_BUFF_SIZE> = Pipe::new();
@@ -107,13 +111,13 @@ impl<ECI: EmbeddedComInterface> TelemRx<ECI> {
             let result = self.uart_rx.read_until_idle(&mut buf).await;
             match result {
                 Err(_) => {
-                    //defmt::trace!("System: Uart read error");
+                    defmt::trace!("System: Uart read error");
                     Timer::after_millis(1).await;
                 }
                 Ok(n) => {
                     if n > 0 && n <= RX_BUFF_SIZE {
                         // added the above if statement to match phil's code
-                        //defmt::trace!("Heartbeat: Got {} bytes", n);
+                        defmt::trace!("Heartbeat: Got {} bytes", n);
                         self.byte_processor.process_bytes(&buf, n).await;
                     }
                 }
