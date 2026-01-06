@@ -220,7 +220,7 @@ impl Mixer for QuadMixer {
         }
 
         // // Mixer debug output
-        // crate::log_info!("Motor outputs with params: {:.3?} {:.3?} {:.3?} {:.3?}", outputs[0], outputs[1], outputs[2], outputs[3]);
+        crate::log_info!("Motor outputs with params: {:.3?} {:.3?} {:.3?} {:.3?}", outputs[0], outputs[1], outputs[2], outputs[3]);
 
         outputs
     }

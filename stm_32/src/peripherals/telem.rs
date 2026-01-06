@@ -50,8 +50,8 @@ use rustflight_core::comm_manager::comm_link_trait::EmbeddedComInterface;
 use rustflight_core::errors;
 use rustflight_core::packets;
 
-pub static TX_BUFF_SIZE: usize = 2048;
-pub static RX_BUFF_SIZE: usize = 2048;
+pub static TX_BUFF_SIZE: usize = 4 * 2048;
+pub static RX_BUFF_SIZE: usize = 4 * 2048;
 
 pub static TELEM_TX: Pipe<CriticalSectionRawMutex, TX_BUFF_SIZE> = Pipe::new();
 pub static TELEM_RX: Pipe<CriticalSectionRawMutex, RX_BUFF_SIZE> = Pipe::new();
