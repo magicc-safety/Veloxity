@@ -107,13 +107,13 @@ impl<ECI: EmbeddedComInterface> TelemRx<ECI> {
             let result = self.uart_rx.read_until_idle(&mut buf).await;
             match result {
                 Err(_) => {
-                    //defmt::trace!("System: Uart read error");
+                    // defmt::trace!("System: Uart read error");
                     Timer::after_millis(1).await;
                 }
                 Ok(n) => {
                     if n > 0 && n <= RX_BUFF_SIZE {
                         // added the above if statement to match phil's code
-                        //defmt::trace!("Heartbeat: Got {} bytes", n);
+                        // defmt::trace!("Heartbeat: Got {} bytes", n);
                         self.byte_processor.process_bytes(&buf, n).await;
                     }
                 }
