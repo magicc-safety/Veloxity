@@ -355,7 +355,7 @@ impl Board {
 
         // Companion Computer UART - Austin's documentation references uart3 instead of 2 for companion computer
         let mut uart3config = usart::Config::default();
-        uart3config.baudrate = 115200; // 921600;
+        uart3config.baudrate = 921600;
         let mut uart3 = Uart::new(
             p.USART3,
             p.PD9,
