@@ -187,10 +187,10 @@ impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
         let mut buf = [0u8; RX_BUFF_SIZE];
         match board.serial_rx_read(&mut buf) {
             Some(Ok(n)) => {
-                defmt::debug!("got {} bytes", n);
+                // defmt::debug!("got {} bytes", n);
                 for i in 0..n {
                     if let Some(frame) = self.mav_parser.feed_byte(buf[i]) {
-                        defmt::debug!("got a frame!");
+                        // defmt::debug!("got a frame!");
                         if let Some(message) = mavlink_parser::process_mavlink_frame(frame) {
                             self.process_rosflight_message(message, msgs);
                         }
