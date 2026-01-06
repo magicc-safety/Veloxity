@@ -185,7 +185,7 @@ impl BoardTrait for Board {
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         match peripherals::telem::TELEM_RX.try_read(buf) {
             Ok(n) => {
-                defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
+                // defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
                 return Some(Ok(n))
             },
             Err(embassy_sync::pipe::TryReadError::Empty) => {
@@ -194,7 +194,7 @@ impl BoardTrait for Board {
                 return Some(Ok(0)); 
             },
             Err(error) => {
-                defmt::info!("Error reading from Serial: {}", error);
+                // defmt::info!("Error reading from Serial: {}", error);
                 return Some(Err(errors::TelemError::GenericTelemError(
                     "Error Reading Telem Packet",
                 )));
