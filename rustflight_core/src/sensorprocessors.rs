@@ -177,7 +177,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                     const GRAVITY: f64 = 9.80665;
                     self.calibration_state.accel_sum[0] += packet.accel[0] as f64;
                     self.calibration_state.accel_sum[1] += packet.accel[1] as f64;
-                    self.calibration_state.accel_sum[2] += packet.accel[2] as f64 + GRAVITY;
+                    self.calibration_state.accel_sum[2] += packet.accel[2] as f64 - GRAVITY;
                     self.calibration_state.accel_temp_sum += packet.temperature as f64;
                     self.calibration_state.accel_calibration_count += 1;
 
@@ -194,7 +194,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                                        + (self.calibration_state.max_accel[1] - self.calibration_state.min_accel[1]).powi(2)
                                        + (self.calibration_state.max_accel[2] - self.calibration_state.min_accel[2]).powi(2)).sqrt();
                         
-                        if max_delta < 20.0 {
+                        if max_delta < 1.0 {
                             let count = self.calibration_state.accel_calibration_count as f64;
                             let temp_comp_x = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP) { v as f64 } else { 0.0 };
                             let temp_comp_y = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP) { v as f64 } else { 0.0 };
