@@ -194,7 +194,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                                        + (self.calibration_state.max_accel[1] - self.calibration_state.min_accel[1]).powi(2)
                                        + (self.calibration_state.max_accel[2] - self.calibration_state.min_accel[2]).powi(2)).sqrt();
                         
-                        if max_delta < 1.0 {
+                        if max_delta < 20.0 {
                             let count = self.calibration_state.accel_calibration_count as f64;
                             let temp_comp_x = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP) { v as f64 } else { 0.0 };
                             let temp_comp_y = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP) { v as f64 } else { 0.0 };
