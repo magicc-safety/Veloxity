@@ -32,164 +32,100 @@
 // * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // *
 // ******************************************************************************
-use core::fmt;
+
+use core::fmt::Write;
 use core::cell::RefCell;
+use heapless::{String, Deque};
 use critical_section::Mutex;
-use crate::comm_messages::enums::Severity; 
+use crate::comm_messages::enums::Severity;
 
 // --- Configuration ---
+// Adjust queue size based on RAM availability.
+// 16 messages * ~54 bytes = ~864 bytes of static RAM.
 const LOG_QUEUE_SIZE: usize = 16;
-const MAX_LOG_LEN: usize = 50; // Matches MAVLink STATUSTEXT length
+// Matches MAVLink STATUSTEXT length (50 chars)
+const MAX_LOG_LEN: usize = 50; 
 
-// --- Data Structures ---
+// --- Data Types ---
 
-/// A minimal fixed-capacity string buffer (Replaces heapless::String)
-#[derive(Clone, Copy)]
-pub struct LogString {
-    buffer: [u8; MAX_LOG_LEN],
-    len: usize,
-}
-
-impl LogString {
-    pub const fn new() -> Self {
-        Self { buffer: [0; MAX_LOG_LEN], len: 0 }
-    }
-
-    pub fn as_str(&self) -> &str {
-        // SAFETY: We only write valid UTF-8 via fmt::Write
-        unsafe { core::str::from_utf8_unchecked(&self.buffer[..self.len]) }
-    }
-}
-
-impl fmt::Write for LogString {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        let bytes = s.as_bytes();
-        let remaining = MAX_LOG_LEN - self.len;
-        let copy_len = bytes.len().min(remaining);
-        
-        // Copy data
-        self.buffer[self.len..self.len + copy_len].copy_from_slice(&bytes[..copy_len]);
-        self.len += copy_len;
-        
-        if bytes.len() > remaining {
-            return Err(fmt::Error); // Indicate truncation
-        }
-        Ok(())
-    }
-}
-
-/// A combined entry holding severity and text
-#[derive(Clone, Copy)]
+/// A single log entry holding severity and text
+#[derive(Clone)]
 pub struct LogEntry {
     pub severity: Severity,
-    pub message: LogString,
+    pub message: String<MAX_LOG_LEN>,
 }
 
-impl LogEntry {
-    pub const fn empty() -> Self {
-        Self { 
-            // FIXED: Updated to match your comm_messages.rs definition
-            severity: Severity::Info, 
-            message: LogString { buffer: [0; MAX_LOG_LEN], len: 0 } 
-        }
-    }
-}
+// --- Global Storage ---
 
-/// A minimal Ring Buffer (Replaces heapless::Deque)
-struct LogQueue {
-    storage: [LogEntry; LOG_QUEUE_SIZE],
-    head: usize, // Write index
-    tail: usize, // Read index
-    full: bool,
-}
-
-impl LogQueue {
-    const fn new() -> Self {
-        Self {
-            storage: [LogEntry::empty(); LOG_QUEUE_SIZE],
-            head: 0,
-            tail: 0,
-            full: false,
-        }
-    }
-
-    fn push(&mut self, entry: LogEntry) {
-        self.storage[self.head] = entry;
-        self.head = (self.head + 1) % LOG_QUEUE_SIZE;
-        
-        if self.full {
-            // If full, head bumped into tail, so move tail (overwrite oldest)
-            self.tail = (self.tail + 1) % LOG_QUEUE_SIZE;
-        }
-        
-        self.full = self.head == self.tail;
-    }
-
-    fn pop(&mut self) -> Option<LogEntry> {
-        if !self.full && self.head == self.tail {
-            return None; // Empty
-        }
-
-        let entry = self.storage[self.tail];
-        self.tail = (self.tail + 1) % LOG_QUEUE_SIZE;
-        self.full = false;
-        Some(entry)
-    }
-}
-
-// --- Global State ---
-
-static LOG_QUEUE: Mutex<RefCell<LogQueue>> = Mutex::new(RefCell::new(LogQueue::new()));
+static LOG_QUEUE: Mutex<RefCell<Deque<LogEntry, LOG_QUEUE_SIZE>>> = 
+    Mutex::new(RefCell::new(Deque::new()));
 
 // --- Public API ---
 
 pub struct Logger;
 
 impl Logger {
-    pub fn log(severity: Severity, args: fmt::Arguments) {
+    /// The main logging function.
+    /// Usage: Logger::log(Severity::Info, format_args!("Val: {}", 42));
+    pub fn log(severity: Severity, args: core::fmt::Arguments) {
         critical_section::with(|cs| {
+            // Borrow the queue mutably
             let mut queue = LOG_QUEUE.borrow_ref_mut(cs);
-            
-            let mut entry = LogEntry::empty();
-            entry.severity = severity;
-            
-            // Write the formatted string into our buffer
-            // We ignore errors (truncation) to ensure we always log something
-            let _ = fmt::Write::write_fmt(&mut entry.message, args);
-            
-            queue.push(entry);
+
+            // Create new entry
+            let mut entry = LogEntry {
+                severity,
+                message: String::new(),
+            };
+
+            // Write text to buffer. 
+            // write_fmt returns a Result. If the string is too long (>50 chars), 
+            // it returns an error, but the buffer will contain as much as fits.
+            // We ignore the error to ensure we still get the truncated log.
+            let _ = entry.message.write_fmt(args);
+
+            // Push to queue. 
+            // If queue is full, we pop the oldest message to make room for the new one.
+            if queue.is_full() {
+                let _ = queue.pop_front();
+            }
+            let _ = queue.push_back(entry);
         });
     }
 
-    // FIXED: Updated variants to match comm_messages.rs
-    pub fn info(args: fmt::Arguments) { Self::log(Severity::Info, args); }
-    pub fn warn(args: fmt::Arguments) { Self::log(Severity::Warning, args); }
-    pub fn error(args: fmt::Arguments) { Self::log(Severity::Error, args); }
-    pub fn debug(args: fmt::Arguments) { Self::log(Severity::Debug, args); }
-
-    /// Called by Main Loop to drain queue
+    // Convenience wrappers matching your existing comm_messages.rs enum names
+    pub fn info(args: core::fmt::Arguments) { Self::log(Severity::Info, args); }
+    pub fn warn(args: core::fmt::Arguments) { Self::log(Severity::Warning, args); }
+    pub fn error(args: core::fmt::Arguments) { Self::log(Severity::Error, args); }
+    pub fn debug(args: core::fmt::Arguments) { Self::log(Severity::Debug, args); }
+    
+    // Drain function for Main Loop
     pub fn pop() -> Option<LogEntry> {
         critical_section::with(|cs| {
-            LOG_QUEUE.borrow_ref_mut(cs).pop()
+            LOG_QUEUE.borrow_ref_mut(cs).pop_front()
         })
     }
 }
 
-// Macro to make usage cleaner
+// --- Macros ---
+// These allow you to use log_info!("val: {}", x) anywhere in your code.
+
 #[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => { $crate::logger::Logger::info(format_args!($($arg)*)) };
 }
+
 #[macro_export]
 macro_rules! log_warn {
     ($($arg:tt)*) => { $crate::logger::Logger::warn(format_args!($($arg)*)) };
 }
+
 #[macro_export]
 macro_rules! log_error {
     ($($arg:tt)*) => { $crate::logger::Logger::error(format_args!($($arg)*)) };
 }
-// Add debug macro if you want it exposed
+
 #[macro_export]
 macro_rules! log_debug {
-    ($($arg:tt)*) => { $crate::logger::Logger::debug(format_args!($($arg)*))};
+    ($($arg:tt)*) => { $crate::logger::Logger::debug(format_args!($($arg)*)) };
 }

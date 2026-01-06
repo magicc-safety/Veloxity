@@ -281,7 +281,7 @@ where
                 self.comm_manager.send_statustext(
                     &mut self.board, 
                     entry.severity, 
-                    entry.message.as_str()
+                    &entry.message // heapless::String auto-derefs to &str here
                 );
                 logs_processed += 1;
             } else {
