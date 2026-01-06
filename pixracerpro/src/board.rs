@@ -332,6 +332,7 @@ impl Board {
         };
 
         // // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
+        // UART2 is currently not in use. We use UART3 for our Mavlink Serial connection to ROS2.
         // let mut uart2config = usart::Config::default();
         // uart2config.baudrate = 921600;
         // let mut uart2 = Uart::new(
