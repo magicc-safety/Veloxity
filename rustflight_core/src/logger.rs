@@ -36,7 +36,11 @@
 use core::fmt::Write;
 use core::cell::RefCell;
 use heapless::{String, Deque};
+
+// WARNING: Critical Section forces interrupts to wait while processing, 
+// never do complex processing from within a Critical Section!
 use critical_section::Mutex;
+
 use crate::comm_messages::enums::Severity;
 
 // --- Configuration ---
