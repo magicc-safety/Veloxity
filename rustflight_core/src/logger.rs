@@ -109,6 +109,10 @@ impl Logger {
 
 // --- Macros ---
 // These allow you to use log_info!("val: {}", x) anywhere in your code.
+// The Macros can generally be used either by placing 
+//  `use crate::log_<info, warn, error, or debug>` 
+// at the top of the crate, then using `log_<info, warn, error, or debug>!("{}", var);`, 
+// or by using `crate::log_<info, warn, error, or debug>!("{}", var);` directly.
 
 #[macro_export]
 macro_rules! log_info {
