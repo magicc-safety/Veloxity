@@ -2811,6 +2811,7 @@ name = "rustflight_core"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.10.0",
+ "critical-section",
  "csv",
  "defmt 0.3.100",
  "libm",

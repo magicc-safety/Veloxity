@@ -272,6 +272,23 @@ where
         // PWM command output
         self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
 
+        // NON-CRITICAL: Logging
+        // We limit to 5 logs per loop to prevent a burst of logs from violating 
+        // the loop time budget.
+        let mut logs_processed = 0;
+        while logs_processed < 5 {
+            if let Some(entry) = crate::logger::Logger::pop() {
+                self.comm_manager.send_statustext(
+                    &mut self.board, 
+                    entry.severity, 
+                    entry.message.as_str()
+                );
+                logs_processed += 1;
+            } else {
+                break; 
+            }
+        }
+
         self.comm_manager.send_telemetry_streams::<BT, C, _>(
             &mut self.board,
             now_us,

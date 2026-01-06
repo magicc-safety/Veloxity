@@ -62,3 +62,5 @@ pub use micro_algebra;
 pub mod mavlink {
     include!(concat!(env!("OUT_DIR"), "/mavlink_generated/mod.rs"));
 }
+
+pub mod logger; // make the logging macros public
