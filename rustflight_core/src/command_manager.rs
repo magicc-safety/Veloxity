@@ -486,10 +486,12 @@ impl CommandManager {
             if override_this_axis {
                 //*combined_channel = rc.stick(stick) as f64;
                 //*combined_channel = self.rc_command[stick as usize];
-                (*combined_channel).value = rc_command.value;
+                //(*combined_channel).value = rc_command.value;
+                *combined_channel = *rc_command;
                 any_axis_overridden = true;
             } else{
-                (*combined_channel).value = offboard_channel.value;
+                //(*combined_channel).value = offboard_channel.value;
+                *combined_channel = *offboard_channel;
             }
         }
 
