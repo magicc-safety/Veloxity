@@ -607,9 +607,9 @@ impl From<comm_messages::ParamValueMsg> for mav_messages::ParamValue {
         let (value_f32, value_type) = match msg.param_value {
             // Should the ParamValue type be updated to support smaller types?
             CommParamValue::Float(f) => (f, MavParamType::Real32),
-            CommParamValue::Int(i) => (i as f32, MavParamType::Int32),
-            CommParamValue::Uint(u) => (u as f32, MavParamType::Uint32),
-            CommParamValue::Bool(b) => (if b { 1.0 } else { 0.0 }, MavParamType::Uint32),
+            CommParamValue::Int(i) => (f32::from_bits(i as u32), MavParamType::Int32),
+            CommParamValue::Uint(u) => (f32::from_bits(u), MavParamType::Uint32),
+            CommParamValue::Bool(b) => (f32::from_bits(if b { 1 } else { 0 }), MavParamType::Uint32),
             // Not sure if it's okay to pass these as floats if raw byte value is being used
         };
         Self {
