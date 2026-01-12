@@ -36,7 +36,7 @@
 pub mod comm_link_trait;
 pub mod mavlink_parser;
 
-use crate::board;
+use crate::{board, log_info};
 use crate::comm_messages::{self, messages::*, enums::*};
 use crate::state_machine::StateManager;
 use crate::command_manager::CommandManager;
@@ -216,6 +216,8 @@ where
                     ygyro: imu_packet.gyro[1] as f32,
                     zgyro: imu_packet.gyro[2] as f32,
                 };
+
+                log_info!("Wrote small IMU");
                 self.send_rosflight_small_imu(board, imu_msg);
             }
             self.last_imu_send_us = now_us;
