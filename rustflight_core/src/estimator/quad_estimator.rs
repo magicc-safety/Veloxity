@@ -108,7 +108,7 @@ impl QuadEstimator {
             k_p,
             k_i,
             q_hat: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
-            q_dot: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
+            q_dot: Quaternion::from_array([0.0, 0.0, 0.0, 0.0]),
             body_rate: Vector::from_array([0.0, 0.0, 0.0]),
             b_hat: Vector::from_array([0.0, 0.0, 0.0]),
         }
@@ -179,6 +179,9 @@ impl Estimator for QuadEstimator {
 
             self.q_hat = self.q_hat + self.q_dot * DT;
             self.q_hat.normalize_fill();
+
+            // Store the bias-corrected body rate for the controller
+            self.body_rate = body_rate;
         }
 
         let q = self.q_hat;

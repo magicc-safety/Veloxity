@@ -208,8 +208,8 @@ impl Controller for QuadController {
 
         // Pitch Rate
         self.pitch_rate_pid.p = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_P) {
-            // ParamValue::Float(val) => val as f64,
-            other => {
+            ParamValue::Float(val) => val as f64,
+            _ => {
                 0.0
             }
         };
