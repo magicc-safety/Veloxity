@@ -105,7 +105,7 @@ impl QuadMixer {
             // M0 (FR)   M1 (RR)    M2 (RL)    M3 (FL)
             // ---------------------------------------
              1.0,       1.0,       1.0,       1.0,     // Fz (Thrust)
-            s,        s,         -s,         -s,       // Tx (Roll)  = -sin(theta)
+            -s,        -s,         s,         s,       // Tx (Roll)  = -sin(theta)
              c,        -c,        -c,         c,       // Ty (Pitch) = cos(theta)
             -1.0,       1.0,      -1.0,       1.0      // Tz (Yaw)   = d_i
         ];

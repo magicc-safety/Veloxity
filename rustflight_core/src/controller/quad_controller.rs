@@ -73,10 +73,10 @@ impl Pid {
     pub fn run(&mut self, x: f64, x_c: f64, dt: f64, enable_integrator: bool) -> f64 {
         let error = x_c - x;
         let p_term = self.p * error;
-        if enable_integrator {
-            self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
-        }
-        let i_term = self.i * self.integrator;
+        //if enable_integrator {
+            //self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
+        //}
+        //let i_term = self.i * self.integrator;
         let d_term = if self.prev_t < 0.0 {
             self.prev_x = x;
             self.prev_t = 0.0;
@@ -98,7 +98,8 @@ impl Pid {
             self.d * derivative
 
         };
-        p_term + i_term - d_term
+        //p_term + i_term - d_term
+        p_term - d_term
     }
 
     pub fn run_with_derivative(&mut self, x: f64, x_c: f64, xdot: f64, dt: f64, enable_integrator: bool) -> f64 {
@@ -108,14 +109,15 @@ impl Pid {
         let p_term = self.p * error;
 
         // I Term
-        if enable_integrator {
-            self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
-        }
-        let i_term = self.i * self.integrator;
+        //if enable_integrator {
+        //    self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
+        //}
+        //let i_term = self.i * self.integrator;
 
         let d_term = self.d * xdot; 
 
-        p_term + i_term - d_term
+        //p_term + i_term - d_term
+        p_term - d_term
     }
 
     pub fn reset(&mut self) {
@@ -185,8 +187,9 @@ impl Controller for QuadController {
             }
         };
         self.roll_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_I) {
-            ParamValue::Float(val) => val as f64,
-            other => {
+            // ParamValue::Float(val) => val as f64,
+            // other => {
+            _ => {
                 0.0
             }
         };
@@ -205,14 +208,15 @@ impl Controller for QuadController {
 
         // Pitch Rate
         self.pitch_rate_pid.p = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_P) {
-            ParamValue::Float(val) => val as f64,
+            // ParamValue::Float(val) => val as f64,
             other => {
                 0.0
             }
         };
         self.pitch_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_I) {
-            ParamValue::Float(val) => val as f64,
-            other => {
+            // ParamValue::Float(val) => val as f64,
+            // other => {
+            _ => {
                 0.0
             }
         };
@@ -237,8 +241,9 @@ impl Controller for QuadController {
             }
         };
         self.yaw_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_I) {
-            ParamValue::Float(val) => val as f64,
-            other => {
+            // ParamValue::Float(val) => val as f64,
+            // other => {
+            _ => {
                 0.0
             }
         };
@@ -263,8 +268,9 @@ impl Controller for QuadController {
             }
         };
         self.roll_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_I) {
-            ParamValue::Float(val) => val as f64,
-            other => {
+            // ParamValue::Float(val) => val as f64,
+            // other => {
+            _ => {
                 0.0
             }
         };
@@ -289,8 +295,9 @@ impl Controller for QuadController {
             }
         };
         self.pitch_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_I) {
-            ParamValue::Float(val) => val as f64,
-            other => {
+            // ParamValue::Float(val) => val as f64,
+            // other => {
+            _ => {
                 0.0
             }
         };
@@ -338,7 +345,8 @@ impl Controller for QuadController {
             } else {
 
                 // prevent ourselves from running the integrator while we're on the ground...
-                let enable_integrator = command.fz.value > 0.1;
+                //let enable_integrator = command.fz.value > 0.1;
+                let enable_integrator = false;
 
                 // --- Step 1: Extract the necessary quaternions from the input state ---
                 let q_hat = state.q_hat;

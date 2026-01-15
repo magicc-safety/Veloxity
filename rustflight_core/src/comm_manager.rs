@@ -217,7 +217,7 @@ where
                     zgyro: imu_packet.gyro[2] as f32,
                 };
 
-                log_info!("Wrote small IMU");
+                //log_info!("Wrote small IMU");
                 self.send_rosflight_small_imu(board, imu_msg);
             }
             self.last_imu_send_us = now_us;
@@ -225,35 +225,36 @@ where
 
 
         // TODO RE-ENABLE AFTER CHECK IF UNHEALTHY QUATERNION ERROR PERSISTS
-        // if now_us >= self.last_attitude_send_us + ATTITUDE_INTERVAL_US {
+        if now_us >= self.last_attitude_send_us + ATTITUDE_INTERVAL_US {
     
-        //     // 1. Get attitude and its derivative from the estimator state
-        //     let q = estimator_state.q();    // [w, x, y, z]
-        //     let qd = estimator_state.q_dot(); // [w_dot, x_dot, y_dot, z_dot]
+            // 1. Get attitude and its derivative from the estimator state
+            let q = estimator_state.q();    // [w, x, y, z]
+            let qd = estimator_state.q_dot(); // [w_dot, x_dot, y_dot, z_dot]
 
-        //     let w = q[0]; let x = q[1]; let y = q[2]; let z = q[3];
-        //     let wd = qd[0]; let xd = qd[1]; let yd = qd[2]; let zd = qd[3];
+            let w = q[0]; let x = q[1]; let y = q[2]; let z = q[3];
+            let wd = qd[0]; let xd = qd[1]; let yd = qd[2]; let zd = qd[3];
 
-        //     // 2. Calculate angular rates (omega) from q and q_dot
-        //     //    omega_vec = 2 * conjugate(q) * q_dot
-        //     let rollspeed  = 2.0 * (w*xd - x*wd - y*zd + z*yd);
-        //     let pitchspeed = 2.0 * (w*yd - x*zd - y*wd + z*xd);
-        //     let yawspeed   = 2.0 * (w*zd - x*yd - y*xd + z*wd);
+            // 2. Calculate angular rates (omega) from q and q_dot
+            //    omega_vec = 2 * conjugate(q) * q_dot
+            let rollspeed  = 2.0 * (w*xd - x*wd - y*zd + z*yd);
+            let pitchspeed = 2.0 * (w*yd - x*zd - y*wd + z*xd);
+            let yawspeed   = 2.0 * (w*zd - x*yd - y*xd + z*wd);
     
-        //     let msg = comm_messages::messages::AttitudeQuaternionMsg {
-        //         time_boot_ms: (now_us / 1000) as u32,
-        //         q1: w,
-        //         q2: x,
-        //         q3: y,
-        //         q4: z,
-        //         rollspeed: rollspeed,
-        //         pitchspeed: pitchspeed,
-        //         yawspeed: yawspeed,
-        //     };
-        //     self.send_rosflight_attitude_quaternion(board, msg);
+            let msg = comm_messages::messages::AttitudeQuaternionMsg {
+                time_boot_ms: (now_us / 1000) as u32,
+                q1: w,
+                q2: x,
+                q3: y,
+                q4: z,
+                rollspeed: rollspeed,
+                pitchspeed: pitchspeed,
+                yawspeed: yawspeed,
+            };
 
-        //     self.last_attitude_send_us = now_us;
-        // }
+            self.send_rosflight_attitude_quaternion(board, msg);
+
+            self.last_attitude_send_us = now_us;
+        }
 
         // --- Send Baro Telemetry ---
         if now_us >= self.last_baro_send_us + BARO_INTERVAL_US {
