@@ -95,6 +95,11 @@ impl PixRacerProServoMonstrosity {
         let (ix, chan) = self.chan_list[ch];
         self.timers[ix].set_duty_cycle(chan, duty)
     }
+
+    pub fn max_duty_cycle(&self, ch: usize) -> u16 {
+        let (ix, _chan) = self.chan_list[ch];
+        self.timers[ix].max_duty_cycle()
+    }
 }
 
 pub enum TimerEnum {
@@ -449,6 +454,23 @@ impl TimerEnum {
                 }
                 _ => Err(TimerError::ChanNotSupported),
             },
+        }
+    }
+
+    pub fn max_duty_cycle(&self) -> u16 {
+        match self {
+            TimerEnum::TIM1(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM2(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM3(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM4(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM5(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM8(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM12(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM13(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM14(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM15(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM16(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM17(timer) => timer.max_duty_cycle(),
         }
     }
 
