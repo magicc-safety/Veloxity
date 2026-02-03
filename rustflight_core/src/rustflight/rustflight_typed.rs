@@ -60,6 +60,7 @@ use crate::{
 };
 
 const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
+const ESTIMATOR_DT: f64 = 1.0 / 400.0; // Assume constant 400Hz for estimator
 
 pub struct ROSFlight<B, BT, C, CI, PD>
 //pub struct ROSFlight<B, BT, C, CI>
@@ -73,7 +74,7 @@ where
     loop_time_us: u32,
     last_imu_seen: u64,
     last_imu_time: u64,  // Track last IMU timestamp to detect new data
-    dt: f64,  // Calculated time step from IMU timestamps (matches C implementation)
+    // dt: f64,  // Commented out - now using constant ESTIMATOR_DT instead of calculated dt
 
     pub board: B,
     params: params2::Params,
@@ -151,7 +152,7 @@ where
             loop_time_us,
             last_imu_seen: now_us,
             last_imu_time: 0,  // Initialize to 0
-            dt: 0.0,  // Initialize to 0
+            // dt: 0.0,  // Commented out - now using constant ESTIMATOR_DT
 
             board,
             params,
@@ -259,17 +260,22 @@ where
             self.pwm_driver.disable_all();
         }
 
-        // Check if we have NEW IMU data and calculate dt (matches C implementation)
+        // Check if we have NEW IMU data
+        // NOTE: We assume constant 400Hz IMU rate (dt = 1/400 = 0.0025s) for both estimator and controller.
+        // The C implementation calculates dt from timestamps, but doesn't handle dropped packets specially
+        // (it just uses 2× or 3× dt if packets are dropped). Using constant dt is safer because:
+        // - Dropped packet = missed update (same net effect as C)
+        // - Avoids potential instability from variable integration timesteps
         let got_new_imu = if let Some(imu_packet) = imu_packet_option {
             let current_time = imu_packet.header.timestamp;
             let is_new = current_time != self.last_imu_time;
             if is_new {
-                // Calculate dt from timestamp difference (in seconds)
-                if self.last_imu_time > 0 {
-                    self.dt = (current_time - self.last_imu_time) as f64 * 1e-6;
-                } else {
-                    self.dt = 0.0;  // First IMU packet, no dt yet
-                }
+                // Original dt calculation (commented out - now using constant ESTIMATOR_DT)
+                // if self.last_imu_time > 0 {
+                //     self.dt = (current_time - self.last_imu_time) as f64 * 1e-6;
+                // } else {
+                //     self.dt = 0.0;  // First IMU packet, no dt yet
+                // }
                 self.last_imu_time = current_time;
             }
             is_new
@@ -278,11 +284,11 @@ where
         };
 
         // Only run control pipeline when we have NEW IMU data (matches C implementation)
-        if got_new_imu && self.dt > 0.0 {
+        if got_new_imu {
             let start_time_us = self.board.clock_micros();
 
-            // Run the estimator with calculated dt
-            let state = self.estimator.estimate(&estimator_sensors, &self.params, self.dt);
+            // Run the estimator with constant dt (assume 400Hz)
+            let state = self.estimator.estimate(&estimator_sensors, &self.params, ESTIMATOR_DT);
 
             // Health check
             if state.is_healthy() {
@@ -294,8 +300,8 @@ where
             // Get the final command from the manager
             let combined_command = self.command_manager.combined_control();
 
-            // Run controller with same dt
-            let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params, self.dt);
+            // Run controller with same constant dt (assume 400Hz)
+            let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params, ESTIMATOR_DT);
 
             // Run mixer
             let actuator_commands = self.mixer.mix(&controls, &mut self.state_manager);
