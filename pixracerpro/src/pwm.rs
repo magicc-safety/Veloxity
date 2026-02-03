@@ -38,6 +38,7 @@
 // **/
 use rustflight_core::board::BoardTrait;
 use rustflight_core::pwm::{self, PwmDriver, PwmError};
+use stm_32::defmt;
 // use crate::ros_messages::{OutputRaw, Header, Time};
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 
@@ -127,10 +128,12 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
         // defmt::info!("Channel: {} Duty: {} PWM_US: {}, Raw PWM: {}", channel, duty, pwm_us, raw_pwm);
-        self.current_values[channel] = pwm_us;
+        //self.current_values[channel] = pwm_us;
 
         let max_duty = self.max_duty_counts[channel] as f32;
-        let raw_pwm = (pwm_us / 2500.0) * max_duty;
+        //let raw_pwm = (pwm_us / 2500.0) * max_duty;
+        let raw_pwm = (pwm_us - 1000.0) / 1000.0 * max_duty;
+        defmt::info!("Channel: {} Duty: {} MAX_DUTY: {}, PWM_OUT: {}", channel, duty, max_duty, raw_pwm);
 
         self.servos
             .set_duty_cycle(channel, raw_pwm as u16)
