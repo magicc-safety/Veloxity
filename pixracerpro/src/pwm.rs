@@ -47,14 +47,21 @@ pub struct BoardPwmDriver<'a> {
     servos: &'a mut PixRacerProServoMonstrosity,
     current_values: [f32; NUM_HW_CHANNELS],
     enabled_chan_mask: u16,
+    max_duty_counts: [u16; NUM_HW_CHANNELS],
 }
 
 impl<'a> BoardPwmDriver<'a> {
     pub fn new(servos: &'a mut PixRacerProServoMonstrosity) -> Self {
+        let mut max_duty_counts = [0u16; NUM_HW_CHANNELS];
+        for i in 0..NUM_HW_CHANNELS {
+            max_duty_counts[i] = servos.max_duty_cycle(i);
+        }
+
         Self {
             servos,
             current_values: [1000.0; NUM_HW_CHANNELS],
             enabled_chan_mask: 0,
+            max_duty_counts,
         }
     }
 
@@ -119,9 +126,12 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
             return Err(PwmError::ChannelOutOfRange);
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
-        let raw_pwm = (pwm_us as u32 * 65536 as u32 / 2500);
         // defmt::info!("Channel: {} Duty: {} PWM_US: {}, Raw PWM: {}", channel, duty, pwm_us, raw_pwm);
         self.current_values[channel] = pwm_us;
+
+        let max_duty = self.max_duty_counts[channel] as f32;
+        let raw_pwm = (pwm_us / 2500.0) * max_duty;
+
         self.servos
             .set_duty_cycle(channel, raw_pwm as u16)
             .map_err(|_| PwmError::GenericError)
