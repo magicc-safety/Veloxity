@@ -200,48 +200,42 @@ where
             self.last_status_send_us = now_us;
         }
 
-        // --- Send IMU Telemetry ---
-        if now_us >= self.last_imu_send_us + IMU_INTERVAL_US {
-            let imu_packet_option: &Option<packets::ImuPacket> = 
-                processed_sensors.get();
+        // --- Send IMU and Attitude Telemetry ---
+        // Send immediately when called (matches C: send when got.imu flag is set)
+        // No interval timer - this function is only called when there's new IMU data
+        let imu_packet_option: &Option<packets::ImuPacket> =
+            processed_sensors.get();
 
-            if let Some(imu_packet) = imu_packet_option {
-                let imu_msg = comm_messages::messages::SmallImuMsg {
-                    temperature: 0.0f32,
-                    time_boot_us: imu_packet.header.timestamp,
-                    xacc: imu_packet.accel[0] as f32,
-                    yacc: imu_packet.accel[1] as f32,
-                    zacc: imu_packet.accel[2] as f32,
-                    xgyro: imu_packet.gyro[0] as f32,
-                    ygyro: imu_packet.gyro[1] as f32,
-                    zgyro: imu_packet.gyro[2] as f32,
-                };
+        if let Some(imu_packet) = imu_packet_option {
+            // Send IMU message
+            let imu_msg = comm_messages::messages::SmallImuMsg {
+                temperature: 0.0f32,
+                time_boot_us: imu_packet.header.timestamp,
+                xacc: imu_packet.accel[0] as f32,
+                yacc: imu_packet.accel[1] as f32,
+                zacc: imu_packet.accel[2] as f32,
+                xgyro: imu_packet.gyro[0] as f32,
+                ygyro: imu_packet.gyro[1] as f32,
+                zgyro: imu_packet.gyro[2] as f32,
+            };
+            self.send_rosflight_small_imu(board, imu_msg);
 
-                //log_info!("Wrote small IMU");
-                self.send_rosflight_small_imu(board, imu_msg);
-            }
-            self.last_imu_send_us = now_us;
-        }
-
-
-        // TODO RE-ENABLE AFTER CHECK IF UNHEALTHY QUATERNION ERROR PERSISTS
-        if now_us >= self.last_attitude_send_us + ATTITUDE_INTERVAL_US {
-    
-            // 1. Get attitude and its derivative from the estimator state
+            // Send attitude message (with every IMU, matching C implementation)
+            // Use IMU timestamp directly from IMU packet (matches C: uses sensor timestamp)
             let q = estimator_state.q();    // [w, x, y, z]
             let qd = estimator_state.q_dot(); // [w_dot, x_dot, y_dot, z_dot]
 
             let w = q[0]; let x = q[1]; let y = q[2]; let z = q[3];
             let wd = qd[0]; let xd = qd[1]; let yd = qd[2]; let zd = qd[3];
 
-            // 2. Calculate angular rates (omega) from q and q_dot
+            // Calculate angular rates (omega) from q and q_dot
             //    omega_vec = 2 * conjugate(q) * q_dot
             let rollspeed  = 2.0 * (w*xd - x*wd - y*zd + z*yd);
             let pitchspeed = 2.0 * (w*yd - x*zd - y*wd + z*xd);
             let yawspeed   = 2.0 * (w*zd - x*yd - y*xd + z*wd);
-    
+
             let msg = comm_messages::messages::AttitudeQuaternionMsg {
-                time_boot_ms: (now_us / 1000) as u32,
+                time_boot_ms: (imu_packet.header.timestamp / 1000) as u32,  // Use IMU timestamp, not now_us
                 q1: w,
                 q2: x,
                 q3: y,
@@ -250,15 +244,14 @@ where
                 pitchspeed: pitchspeed,
                 yawspeed: yawspeed,
             };
-
             self.send_rosflight_attitude_quaternion(board, msg);
-
-            self.last_attitude_send_us = now_us;
         }
 
         // --- Send Baro Telemetry ---
-        if now_us >= self.last_baro_send_us + BARO_INTERVAL_US {
-            let baro_packet_option: &Option<packets::BaroPacket> = 
+        // Interval timer commented out to match C's event-driven architecture
+        // C sends immediately when new data is available (got.baro flag)
+        // if now_us >= self.last_baro_send_us + BARO_INTERVAL_US {
+            let baro_packet_option: &Option<packets::BaroPacket> =
                 processed_sensors.get();
 
             if let Some(baro_packet) = baro_packet_option {
@@ -269,11 +262,12 @@ where
                 };
                 self.send_rosflight_small_baro(board, baro_msg);
             }
-            self.last_baro_send_us = now_us;
-        }
+            // self.last_baro_send_us = now_us;
+        // }
 
         // --- Send Mag Telemetry ---
-        if now_us >= self.last_mag_send_us + MAG_INTERVAL_US {
+        // Interval timer commented out to match C's event-driven architecture
+        // if now_us >= self.last_mag_send_us + MAG_INTERVAL_US {
             let mag_packet_option: &Option<packets::MagPacket> = processed_sensors.get();
             if let Some(packet) = *mag_packet_option {
                 let msg = comm_messages::messages::SmallMagMsg {
@@ -283,10 +277,12 @@ where
                 };
                 self.send_rosflight_small_mag(board, msg);
             }
-            self.last_mag_send_us = now_us;
-        }
+            // self.last_mag_send_us = now_us;
+        // }
 
-        if now_us >= self.last_sonar_send_us + SONAR_INTERVAL_US {
+        // --- Send Sonar Telemetry ---
+        // Interval timer commented out to match C's event-driven architecture
+        // if now_us >= self.last_sonar_send_us + SONAR_INTERVAL_US {
             let range_packet_option: &Option<packets::RangePacket> = processed_sensors.get();
             if let Some(packet) = *range_packet_option {
                 let msg = comm_messages::messages::SmallRangeMsg {
@@ -294,15 +290,17 @@ where
                     range: packet.range,
                     // TODO: These values aren't in the generic RangePacket.
                     // You may need to add them or send 0.
-                    max_range: 0.0, 
+                    max_range: 0.0,
                     min_range: 0.0,
                 };
                 self.send_rosflight_small_range(board, msg);
             }
-            self.last_sonar_send_us = now_us;
-        }
+            // self.last_sonar_send_us = now_us;
+        // }
 
-        if now_us >= self.last_battery_send_us + BATTERY_INTERVAL_US {
+        // --- Send Battery Telemetry ---
+        // Interval timer commented out to match C's event-driven architecture
+        // if now_us >= self.last_battery_send_us + BATTERY_INTERVAL_US {
             let battery_packet_option: &Option<packets::BatteryPacket> = processed_sensors.get();
             if let Some(packet) = *battery_packet_option {
                 let msg = comm_messages::messages::BatteryStatusMsg {
@@ -311,10 +309,12 @@ where
                 };
                 self.send_rosflight_battery_status(board, msg);
             }
-            self.last_battery_send_us = now_us;
-        }
+            // self.last_battery_send_us = now_us;
+        // }
 
-        if now_us >= self.last_gnss_send_us + GNSS_INTERVAL_US {
+        // --- Send GNSS Telemetry ---
+        // Interval timer commented out to match C's event-driven architecture
+        // if now_us >= self.last_gnss_send_us + GNSS_INTERVAL_US {
             let gnss_packet_option: &Option<packets::GNSSPacket> = processed_sensors.get();
             if let Some(packet) = *gnss_packet_option {
                 let msg = comm_messages::messages::RosflightGnssMsg {
@@ -339,14 +339,16 @@ where
                 };
                 self.send_rosflight_gnss(board, msg);
             }
-            self.last_gnss_send_us = now_us;
-        }
+            // self.last_gnss_send_us = now_us;
+        // }
 
-        if now_us >= self.last_rc_send_us + RC_INTERVAL_US {
+        // --- Send RC Telemetry ---
+        // Interval timer commented out to match C's event-driven architecture
+        // if now_us >= self.last_rc_send_us + RC_INTERVAL_US {
             // Get the raw f32 packet
             let rc_packet_option: &Option<packets::RcPacket> = processed_sensors.get();
             if let Some(packet) = *rc_packet_option {
-                
+
                 // Create the destination array for u16 channels
                 let mut scaled_channels: [u16; RC_PACKET_CHANNELS] = [0; RC_PACKET_CHANNELS];
                 let num_channels_to_scale = (packet.n_chan as usize).min(16); // Param arrays are size 16
@@ -358,7 +360,7 @@ where
                     // Cast to u16
                     scaled_channels[i] = scaled_f32 as u16;
                 }
-                
+
                 // Copy any remaining channels (16-17) as-is (though they are likely 0)
                 if packet.n_chan as usize > 16 {
                     for i in 16..packet.n_chan as usize {
@@ -374,16 +376,18 @@ where
                     time_boot_ms: (packet.header.timestamp / 1000) as u32,
                     chancount: packet.n_chan as u8,
                     channels: scaled_channels, // The new [u16; N] array
-                    // TODO: The RcPacket does not contain RSSI. 
+                    // TODO: The RcPacket does not contain RSSI.
                     // You may need to add this from another source if available.
                     rssi: 255, // 255 = Invalid
                 };
                 self.send_rosflight_rc_channels(board, msg);
             }
-            self.last_rc_send_us = now_us;
-        }
+            // self.last_rc_send_us = now_us;
+        // }
 
-        if now_us >= self.last_output_raw_us + OUTPUT_RAW_INTERVAL_US {
+        // --- Send Output Raw Telemetry ---
+        // Interval timer commented out to match C's event-driven architecture
+        // if now_us >= self.last_output_raw_us + OUTPUT_RAW_INTERVAL_US {
             let outputs: &[f64] = actuator_commands.as_ref();
             
             // 1. Create the destination array with the new size
@@ -402,8 +406,8 @@ where
                 values,        // 4. Pass the [f32; 14] array
             };
             self.send_rosflight_output_raw(board, msg);
-            self.last_output_raw_us = now_us;
-        }
+            // self.last_output_raw_us = now_us;
+        // }
 
     }
 

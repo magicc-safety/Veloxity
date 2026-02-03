@@ -72,7 +72,9 @@ where
 {
     loop_time_us: u32,
     last_imu_seen: u64,
-    
+    last_imu_time: u64,  // Track last IMU timestamp to detect new data
+    dt: f64,  // Calculated time step from IMU timestamps (matches C implementation)
+
     pub board: B,
     params: params2::Params,
     params_iter: Option<ParamIter>,
@@ -148,6 +150,8 @@ where
         Self {
             loop_time_us,
             last_imu_seen: now_us,
+            last_imu_time: 0,  // Initialize to 0
+            dt: 0.0,  // Initialize to 0
 
             board,
             params,
@@ -255,50 +259,83 @@ where
             self.pwm_driver.disable_all();
         }
 
-        // Now run the estimator 
-        let state = self.estimator.estimate(&estimator_sensors);
-
-        if state.is_healthy() {
-            self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
-        } else {
-            self.state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
-        }
-
-        // Get the final command from the manager, and translate to what the Controller needs:
-        let combined_command = self.command_manager.combined_control();
-        let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params);
-        let actuator_commands = self.mixer.mix(&controls, &mut self.state_manager);
-
-        // PWM command output
-        self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
-
-        // NON-CRITICAL: Logging
-        // We limit to 5 logs per loop to prevent a burst of logs from violating 
-        // the loop time budget.
-        let mut logs_processed = 0;
-        while logs_processed < 5 {
-            if let Some(entry) = crate::logger::Logger::pop() {
-                self.comm_manager.send_statustext(
-                    &mut self.board, 
-                    entry.severity, 
-                    entry.message.as_str()
-                );
-                logs_processed += 1;
-            } else {
-                break; 
+        // Check if we have NEW IMU data and calculate dt (matches C implementation)
+        let got_new_imu = if let Some(imu_packet) = imu_packet_option {
+            let current_time = imu_packet.header.timestamp;
+            let is_new = current_time != self.last_imu_time;
+            if is_new {
+                // Calculate dt from timestamp difference (in seconds)
+                if self.last_imu_time > 0 {
+                    self.dt = (current_time - self.last_imu_time) as f64 * 1e-6;
+                } else {
+                    self.dt = 0.0;  // First IMU packet, no dt yet
+                }
+                self.last_imu_time = current_time;
             }
-        }
+            is_new
+        } else {
+            false
+        };
 
-        self.comm_manager.send_telemetry_streams::<BT, C, _>(
-            &mut self.board,
-            now_us,
-            &self.state_manager,
-            &self.command_manager,
-            &self.params,
-            &state, // The estimator state we just calculated
-            &processed_sensors, // The full set of processed sensors
-            &actuator_commands, // The final motor commands
-        );
+        // Only run control pipeline when we have NEW IMU data (matches C implementation)
+        if got_new_imu && self.dt > 0.0 {
+            let start_time_us = self.board.clock_micros();
+
+            // Run the estimator with calculated dt
+            let state = self.estimator.estimate(&estimator_sensors, &self.params, self.dt);
+
+            // Health check
+            if state.is_healthy() {
+                self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
+            } else {
+                self.state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
+            }
+
+            // Get the final command from the manager
+            let combined_command = self.command_manager.combined_control();
+
+            // Run controller with same dt
+            let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params, self.dt);
+
+            // Run mixer
+            let actuator_commands = self.mixer.mix(&controls, &mut self.state_manager);
+
+            // PWM command output
+            self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
+
+            // Measure loop time for this control cycle
+            self.loop_time_us = (self.board.clock_micros() - start_time_us) as u32;
+
+            // NON-CRITICAL: Logging
+            // We limit to 5 logs per loop to prevent a burst of logs from violating
+            // the loop time budget.
+            let mut logs_processed = 0;
+            while logs_processed < 5 {
+                if let Some(entry) = crate::logger::Logger::pop() {
+                    self.comm_manager.send_statustext(
+                        &mut self.board,
+                        entry.severity,
+                        entry.message.as_str()
+                    );
+                    logs_processed += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Send telemetry with the new state
+            self.comm_manager.send_telemetry_streams::<BT, C, _>(
+                &mut self.board,
+                now_us,
+                &self.state_manager,
+                &self.command_manager,
+                &self.params,
+                &state, // The estimator state we just calculated
+                &processed_sensors, // The full set of processed sensors
+                &actuator_commands, // The final motor commands
+            );
+        }
+        // End of got_new_imu conditional block
 
         // (We do this *after* telemetry, so telemetry can log if needed)
         if let Some(param_id) = changed_param_id {

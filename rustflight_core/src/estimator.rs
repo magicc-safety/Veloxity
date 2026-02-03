@@ -36,12 +36,13 @@
 // **/
 
 use crate::hlist::*;
+use crate::params2::Params;
 pub mod quad_estimator;
 
 pub trait Estimator {
     type Inputs: HList;
     type State: AttitudeStateTrait;
-    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State;
+    fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State;
 }
 
 pub trait AttitudeStateTrait {

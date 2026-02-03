@@ -47,6 +47,7 @@ use rustflight_core::{
     estimator::quad_estimator::AttitudeState,
     packets::ImuPacket,
     packets::MagPacket,
+    params2::Params,
     hlist_type,
     hlist::{
         HCons, HNil
@@ -92,7 +93,8 @@ struct OutputRecord {
 fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
     // --- Setup ---
     let mut estimator = QuadEstimator::default();
-    
+    let params = Params::new();  // Create default parameters for test
+
     // Cargo runs tests from the project root, so paths are relative to that.
     let input_path = "tests/estimator/imu_sensor_data.csv";
     let output_path = "tests/estimator/rust_estimator_results.csv";
@@ -117,7 +119,7 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
         // We call the estimator's method directly.
         let inputs = HCons(Some(imu_packet), HCons(None, HNil));
 
-        let state = estimator.estimate(&inputs);
+        let state = estimator.estimate(&inputs, &params);
 
         let euler_angles = state.q_hat.to_euler_angles();
 

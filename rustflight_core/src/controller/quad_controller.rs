@@ -44,8 +44,7 @@ use crate::state_machine::StateManager;
 use crate::params2::{Params, ParamId, ParamValue};
 use libm::{sin, cos, atan2};
 
-// The system's fixed time step, as defined in the estimator.
-const DT: f64 = 1.0 / 400.0;
+// DT is now passed as a parameter from the main loop (matches C implementation)
 
 /// Clamps a value between a lower and upper bound.
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
@@ -315,7 +314,7 @@ impl Controller for QuadController {
         };
     }
 
-    fn control(&mut self, state: &Self::State, state_manager: &mut StateManager, command: &CombinedControl, params: &Params) -> Self::ControlOutput {
+    fn control(&mut self, state: &Self::State, state_manager: &mut StateManager, command: &CombinedControl, params: &Params, dt: f64) -> Self::ControlOutput {
 
         self.update_gains(params);
 
@@ -383,8 +382,8 @@ impl Controller for QuadController {
                         q_err = q_err * -1.0;
                     }
 
-                    rate_setpoints[0] = self.roll_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_x(), current_rates[0], DT, enable_integrator);
-                    rate_setpoints[1] = self.pitch_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_y(), current_rates[1], DT, enable_integrator)
+                    rate_setpoints[0] = self.roll_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_x(), current_rates[0], dt, enable_integrator);
+                    rate_setpoints[1] = self.pitch_angle_pid.run_with_derivative(0.0, 2.0*q_err.get_y(), current_rates[1], dt, enable_integrator)
                 } else {
                     // Mode: RollratePitchrateYawrateThrottle (Acro)
                     rate_setpoints[0] = command.qx.value as f64;
@@ -393,9 +392,9 @@ impl Controller for QuadController {
 
                 rate_setpoints[2] = command.qz.value as f64;
 
-                let torque_x = self.roll_rate_pid.run(current_rates[0], rate_setpoints[0], DT, enable_integrator);
-                let torque_y = self.pitch_rate_pid.run(current_rates[1], rate_setpoints[1], DT, enable_integrator);
-                let torque_z = self.yaw_rate_pid.run(current_rates[2], rate_setpoints[2], DT, enable_integrator);
+                let torque_x = self.roll_rate_pid.run(current_rates[0], rate_setpoints[0], dt, enable_integrator);
+                let torque_y = self.pitch_rate_pid.run(current_rates[1], rate_setpoints[1], dt, enable_integrator);
+                let torque_z = self.yaw_rate_pid.run(current_rates[2], rate_setpoints[2], dt, enable_integrator);
             
                 // --- Step 5: Assemble and return the final output ---
                 MixerInput {
