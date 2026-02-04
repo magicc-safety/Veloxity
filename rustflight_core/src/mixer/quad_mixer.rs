@@ -175,43 +175,43 @@ impl Mixer for QuadMixer {
 
 
         // ====================================================================
-        // SATURATION HANDLING (Priority: Direction > Thrust)
+        // SATURATION HANDLING (Proportional Scaling - matches C++ behavior)
         // ====================================================================
-        // We use a "Sliding Window" approach. If outputs exceed [0.0, 1.0], we shift
-        // the whole set up or down. This preserves the differential (steering) 
-        // while sacrificing total thrust (altitude).
+        // We use the C++ ROSflight approach: if any motor exceeds 1.0, scale ALL
+        // motors proportionally. This preserves the RATIO between motors while
+        // reducing overall thrust to maintain controllability.
+        //
+        // Reference: rosflight_firmware/src/mixer.cpp:498-508
 
-        // 1. Find the min and max requested motor outputs
-        let mut max_val = -f64::INFINITY;
-        let mut min_val = f64::INFINITY;
-
+        // 1. Find the maximum absolute motor output value
+        let mut max_output = 1.0;
         for i in 0..4 {
-            if outputs[i] > max_val { max_val = outputs[i]; }
-            if outputs[i] < min_val { min_val = outputs[i]; }
-        }
-
-        // 2. Ceiling Violation: If any motor is > 1.0, shift EVERYTHING down.
-        if max_val > 1.0 {
-            let shift = max_val - 1.0;
-            for i in 0..4 {
-                outputs[i] -= shift;
+            if outputs[i].abs() > max_output {
+                max_output = outputs[i].abs();
             }
         }
 
-        // 3. Floor Violation (Airmode): If any motor is < idle, shift EVERYTHING up.
-        // We check this after the ceiling shift. This ensures steering control 
-        // even at zero throttle.
-        if self.params.spin_when_armed && min_val < self.params.idle_throttle {
-            let shift = self.params.idle_throttle - min_val;
-            for i in 0..4 {
-                outputs[i] += shift;
-            }
-        }
+        // 2. Calculate proportional scale factor
+        // If max_output > 1.0, we need to scale everything down
+        let scale_factor = if max_output > 1.0 {
+            1.0 / max_output
+        } else {
+            1.0
+        };
 
-        // 4. Final Safety Clamping
-        // In extreme cases (Max Throttle + Max Roll), the spread might still be too wide.
-        // We hard clamp to ensure safety.
+        // 3. Apply proportional scaling and enforce constraints
         for i in 0..4 {
+            // Scale all motor outputs proportionally
+            outputs[i] *= scale_factor;
+
+            // After scaling, apply idle throttle constraint if armed
+            if self.params.spin_when_armed {
+                if outputs[i] < self.params.idle_throttle {
+                    outputs[i] = self.params.idle_throttle;
+                }
+            }
+
+            // Final safety clamp to [0.0, 1.0]
             if outputs[i] > 1.0 {
                 outputs[i] = 1.0;
             } else if outputs[i] < 0.0 {
