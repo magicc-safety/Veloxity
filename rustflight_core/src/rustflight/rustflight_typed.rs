@@ -175,6 +175,9 @@ where
 
     pub fn run(&mut self) -> bool {
 
+        self.board.set_test_pin_1(true);
+        self.board.set_test_pin_2(true);
+
         let now_ms = self.board.clock_millis();
         let now_us = self.board.clock_micros();
 

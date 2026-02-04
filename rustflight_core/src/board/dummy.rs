@@ -109,4 +109,11 @@ impl BoardTrait for DummyBoard {
     fn clock_micros(&self) -> u64 {
         self.current_time_us
     }
+
+    fn set_test_pin_1(&mut self, high: bool) {
+        // Dummy implementation does nothing
+    }
+    fn set_test_pin_2(&mut self, high: bool) {
+        // Dummy implementation does nothing
+    }
 }

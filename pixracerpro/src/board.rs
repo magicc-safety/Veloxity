@@ -50,6 +50,8 @@ include!("../../stm_32/stm32h7x3_common.rs");
 pub struct Board {
     probe: [Output<'static>; 3], // We only have 3 from ROSFlight
     pub start_time: embassy_time::Instant,
+    test_pin_1: Output<'static>,
+    test_pin_2: Output<'static>,
 }
 
 impl BoardTrait for Board {
@@ -88,6 +90,22 @@ impl BoardTrait for Board {
         sensorprocessors::PassthroughRcProcessor,
         sensorprocessors::PassthroughAttitudeProcessor
     ];
+
+    fn set_test_pin_1(&mut self, high: bool) {
+        if high {
+            self.test_pin_1.set_high();
+        } else {
+            self.test_pin_1.set_low();
+        }
+    }
+
+    fn set_test_pin_2(&mut self, high: bool) {
+        if high {
+            self.test_pin_2.set_high();
+        } else {
+            self.test_pin_2.set_low();
+        }
+    }
 
     fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
         sensors.0 = peripherals::bmi08x::IMU_SIGNAL.try_take();
@@ -422,7 +440,7 @@ impl Board {
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PD12, p.EXTI12, Pull::Down);
+        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down);
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART6
@@ -606,6 +624,12 @@ impl Board {
                 ],
             };
 
+        // Test PWM pins
+        let mut test_pin_1 = Output::new(p.PD11, Level::Low, Speed::VeryHigh);
+        test_pin_1.set_high();
+        let mut test_pin_2 = Output::new(p.PD12, Level::Low, Speed::VeryHigh);
+        test_pin_2.set_high();
+
         // Setup Probe GPIO's
         let probe = [
             Output::new(p.PG13, Level::Low, Speed::Low),
@@ -613,6 +637,6 @@ impl Board {
             Output::new(p.PG14, Level::Low, Speed::Low),
             // Output::new(p.PG0, Level::Low, Speed::Low), // unknown
         ];
-        (Board { probe, start_time }, servos)
+        (Board { probe, start_time, test_pin_1, test_pin_2 }, servos)
     }
 }
