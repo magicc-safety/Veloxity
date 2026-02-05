@@ -41,6 +41,9 @@ use rustflight_core::packets;
 use rustflight_core::packets::BaroPacket;
 use rustflight_core::sensorprocessors;
 
+use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
+use stm_32::embassy_stm32::lptim::timer::Timer;
+use embassy_time::{Delay};
 use stm_32::peripherals;
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 use stm_32::*;
@@ -115,9 +118,13 @@ impl BoardTrait for Board {
         sensors.1.1.1.1.0 = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.1.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+        let mut delay = Delay;
 
         // Debug statements to check receiving sensor data
         if let Some(imu_packet) = sensors.0 {
+            self.set_test_pin_1(true);
+            delay.delay_us(1u32);  
+            self.set_test_pin_1(false);
             // match imu_packet {
                 
             //     Ok(data) => defmt::info!(
@@ -130,14 +137,14 @@ impl BoardTrait for Board {
             // }
             // // defmt::info!("Sensor IMU data received!");
         }
-        if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
+        //if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
             // match gnss_packet {
             //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
             //     Err(e) => defmt::error!("Error reading GPS data"),
             // }
             // // defmt::info!("GPS data received!");
-        }
-        if let Some(mag_packet) = sensors.1.0 {
+        //}
+        //if let Some(mag_packet) = sensors.1.0 {
             // match mag_packet {
             //     Ok(data) => defmt::info!(
             //         "Mag data: flux {:?} | temperature {:?}",
@@ -147,8 +154,8 @@ impl BoardTrait for Board {
             //     Err(e) => defmt::error!("Error reading Mag data"),
             // }
             // // defmt::info!("Sensor Magnetometer data received!");
-        }
-        if let Some(baro_packet) = sensors.1.1.0 {
+        //}
+        //if let Some(baro_packet) = sensors.1.1.0 {
             // match baro_packet {
             //     Ok(data) => defmt::info!(
             //         "Baro data: pressure {:?} | temperature {:?}",
@@ -158,8 +165,8 @@ impl BoardTrait for Board {
             //     Err(e) => defmt::error!("Error reading Barometer data"),
             // }
             // // defmt::info!("Sensor Baro data received!");
-        }
-        if let Some(pitot_packet) = sensors.1.1.1.0 {
+        //}
+        //if let Some(pitot_packet) = sensors.1.1.1.0 {
             // match pitot_packet {
             //     Ok(data) => defmt::info!(
             //         "Pitot data: diff_pressure {:?}",
@@ -168,8 +175,8 @@ impl BoardTrait for Board {
             //     Err(e) => defmt::error!("Error reading Pitot data"),
             // }
             // // defmt::info!("Sensor Pitot data received!");
-        }
-        if let Some(range_packet) = sensors.1.1.1.1.0 {
+        //}
+        //if let Some(range_packet) = sensors.1.1.1.1.0 {
             // match pitot_packet {
             //     Ok(data) => defmt::info!(
             //         "Pitot data: diff_pressure {:?}",
@@ -178,8 +185,8 @@ impl BoardTrait for Board {
             //     Err(e) => defmt::error!("Error reading Pitot data"),
             // }
             //defmt::info!("Sensor Range data received!");
-        }
-        if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
+        //}
+        //if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
             // match rc_packet_result {
             //     Ok(data) => {
             //         // This confirms the SBUS driver is working
@@ -197,7 +204,7 @@ impl BoardTrait for Board {
             //         defmt::error!("BOARD: Error reading RC data");
             //     }
             // }
-        }
+        //}
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -234,14 +241,15 @@ impl BoardTrait for Board {
                     }
                 }
                 Err(_) => {
-                    defmt::info!("Error writing to Serial");
+                    //defmt::info!("Error writing to Serial");
                     return Some(Err(errors::TelemError::GenericTelemError(
                         "Error Writing Telem Packet!",
                     )));
                 }
             }
         }
-        Some(Ok(n))
+        //Some(Ok(n))
+        Some(Ok(len))
     }
 
     fn clock_millis(&self) -> u32 {
@@ -259,7 +267,7 @@ impl Board {
     }
 
     fn probe_lo(&mut self, id: usize) {
-        self.probe[id].set_high(); // so we can see something on the logic analyzer.
+        self.probe[id].set_low(); // so we can see something on the logic analyzer.
     }
 
     fn probe_tog(&mut self, id: usize) {
@@ -412,12 +420,6 @@ impl Board {
             byte_processor: stm_32::peripherals::vcp::BasicProcessor {},
         };
 
-        // P1 Priority Task for Rx Telemetry
-        interrupt::SAI1.set_priority(Priority::P1);
-        let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        spawner1.spawn(peripherals::telem::task_rx(telem3_rx));
-        // spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
-
         // USART4 (external GPS)
         let mut uart4config = usart::Config::default();
         uart4config.baudrate = 9600u32;
@@ -518,19 +520,25 @@ impl Board {
             sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
         };
 
-        // P2 Priority Task for Gyros
-        interrupt::SAI2.set_priority(Priority::P2);
-        let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
-        spawner2
-            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
-            .unwrap();
-
         // Detect GPIO input.
         let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None); // PG3 is not connected
         let usd_card = peripherals::sd_card::SdCard {
             sdmmc: sdmmc1,
             detect: usd_detect,
         };
+
+        // P1 Priority Task for Rx Telemetry
+        interrupt::SAI1.set_priority(Priority::P0);
+        let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
+        spawner1
+            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
+            .unwrap();
+
+        // P2 Priority Task for Gyros
+        interrupt::SAI2.set_priority(Priority::P2);
+        let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
+        spawner2.spawn(peripherals::vcp::task(vcp)).unwrap();
+        spawner2.spawn(peripherals::telem::task_rx(telem3_rx));
 
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);

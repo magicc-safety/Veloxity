@@ -45,6 +45,8 @@ rustflight_core = { workspace = true }
 # # for debugging stm32 devices:
 # defmt = { version = "0.3" }
 
+panic-halt = "1.0.0"
+
 [lints]
 workspace = true
 

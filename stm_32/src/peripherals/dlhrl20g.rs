@@ -37,7 +37,7 @@
 // THIS CODE HAS BEEN MADE SAFE BUT SAFETY HAS NOT BEEN TESTED
 //#![allow(unused)]
 use crate::synch_at;
-use defmt::*;
+//use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::i2c::I2c;

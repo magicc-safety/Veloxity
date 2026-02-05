@@ -59,7 +59,7 @@ use embassy_time::Timer;
 // Other
 //use core::f32;
 //use embassy_time::Instant;
-use defmt::info;
+// use defmt::info;
 
 pub static RANGE_SIGNAL: Signal<
     CriticalSectionRawMutex,

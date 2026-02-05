@@ -59,6 +59,7 @@ use rustflight_core::{
     state_machine::StateManager,
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
+use panic_halt as _;
 
 // Tiny aliases for readability
 pub type I0 = Here;

@@ -52,4 +52,4 @@ target = "thumbv7em-none-eabihf"
 
 # Environment variables are also applied correctly from this file
 [env]
-DEFMT_LOG = "debug"
+#DEFMT_LOG = "debug"

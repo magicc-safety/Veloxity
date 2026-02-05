@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use defmt::Format;
+//use defmt::Format;
 
 #[derive(Debug, Clone, Copy)]
 pub enum TelemError {
@@ -58,7 +58,8 @@ impl Default for EstimatorError {
     }
 }
 
-#[derive(Debug, Clone, Copy, Format)]
+// #[derive(Debug, Clone, Copy, Format)]
+#[derive(Debug, Clone, Copy)]
 pub enum SensorError {
     GenericSensorError(&'static str),
 }

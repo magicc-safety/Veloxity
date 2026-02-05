@@ -59,7 +59,8 @@ overflow-checks = true  # integer overflow checks
 # cargo build/run --release
 [profile.release]
 codegen-units = 1
-debug = 2
+#debug = 2
+debug = false
 debug-assertions = false # disables debug checks
 incremental = false
 lto = 'fat'              # link-time optimization (agressive whole-program optimization)

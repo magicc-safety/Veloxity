@@ -175,7 +175,7 @@ where
 
     pub fn run(&mut self) -> bool {
 
-        self.board.set_test_pin_1(true);
+        ///*
         self.board.set_test_pin_2(true);
 
         let now_ms = self.board.clock_millis();
@@ -190,6 +190,7 @@ where
             &mut self.board,
             &mut self.command_manager,
         );
+        
 
 
         if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
@@ -197,6 +198,7 @@ where
             // this must mean that rc asked for arm, but calibration hadn't happened and needed to... go ahead and raise the calibration flag
             self.cal_flags.insert(CalibrationFlags::GYRO);
         }
+        //*/
 
         // Data ingestion: let the board update the sensor data store
         // Data processing: run the map operation across HLists
@@ -204,14 +206,18 @@ where
         // which consumes the raw data and produces the clean 'ProcessedSensorSet'
         // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
         self.board.update_sensors(&mut self.sensors);
+        ///*
         let processed_sensors = self.sensors.map(&mut self.processorhlist, &mut self.cal_flags, &mut self.params);
 
        // also check for imu: if it's been too long, add a flag for imu not responding...
         let imu_packet_option: &Option<packets::ImuPacket> = processed_sensors.get();
         if imu_packet_option.is_some() {
+            //self.board.set_test_pin_1(true);
             // We got data! Reset the timer and clear the error.
             self.last_imu_seen = now_us;
             self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING), &self.params);
+            //self.board.set_test_pin_1(false);
+
         } else {
             // No data this cycle. Check if the timer has expired.
             if now_us > self.last_imu_seen + IMU_TIMEOUT_US {
@@ -376,7 +382,10 @@ where
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);
 
+        self.board.set_test_pin_2(false);
 
+
+    //*/
         true
     }
 }

@@ -37,7 +37,7 @@
 // ******************************************************************************
 // **/
 use cortex_m_rt::entry;
-use defmt;
+//use defmt;
 use nucleo::*;
 use rustflight_core::{
     board::BoardTrait,
