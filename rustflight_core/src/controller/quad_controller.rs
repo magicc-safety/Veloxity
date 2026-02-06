@@ -71,33 +71,46 @@ impl Pid {
     }
     pub fn run(&mut self, x: f64, x_c: f64, dt: f64, enable_integrator: bool) -> f64 {
         let error = x_c - x;
+
+        // P Term
         let p_term = self.p * error;
-        //if enable_integrator {
-            //self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
-        //}
-        //let i_term = self.i * self.integrator;
+
+        // I Term (commented out - not currently used)
+        // if enable_integrator {
+        //     self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
+        // }
+        // let i_term = self.i * self.integrator;
+
+        // D Term using β-filter (dirty derivative from PDF Chapter 10, pages 11-12)
+        // PDF notation mapping:
+        //   dt ≡ Ts (sample time)
+        //   self.tau ≡ σ (filter time constant)
+        //   x ≡ ξ[n] (current state)
+        //   self.prev_x ≡ ξ[n-1] (previous state)
+        //   self.differentiator ≡ u_D[n] (filtered derivative output)
         let d_term = if self.prev_t < 0.0 {
+            // First call - initialize
             self.prev_x = x;
             self.prev_t = 0.0;
             0.0
         } else {
-            // self.differentiator = ((2.0 * self.tau - dt) / (2.0 * self.tau + dt)) * self.differentiator
-            //     + (2.0 / (2.0 * self.tau + dt)) * (x - self.prev_x);
-            // self.prev_x = x;
-            // self.d * self.differentiator
+            // β = (2σ - Ts) / (2σ + Ts)
+            let beta = (2.0 * self.tau - dt) / (2.0 * self.tau + dt);
 
-            // dirty derivative estimator as recommended by Gemini
-            let alpha = (2.0 * self.tau - dt) / (2.0 * self.tau + dt);
-            let beta = 2.0 / (2.0 * self.tau + dt);
-            
-            let derivative = alpha * self.differentiator + beta * (x - self.prev_x);
-            self.differentiator = derivative;
+            // (1 - β) = 2*Ts / (2σ + Ts)
+            let one_minus_beta = 1.0 - beta;
+
+            // (ξ[n] - ξ[n-1]) / Ts
+            let derivative_estimate = (x - self.prev_x) / dt;
+
+            // u_D[n] = β * u_D[n-1] + (1-β) * ((ξ[n] - ξ[n-1]) / Ts)
+            self.differentiator = beta * self.differentiator + one_minus_beta * derivative_estimate;
             self.prev_x = x;
-            
-            self.d * derivative
 
+            self.d * self.differentiator
         };
-        //p_term + i_term - d_term
+
+        // Output (no I term currently)
         p_term - d_term
     }
 
