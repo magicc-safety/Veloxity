@@ -39,6 +39,7 @@ use crate::errors;
 use crate::hlist::*;
 use crate::packets::*;
 use crate::params2::{Params, ParamId, ParamValue};
+use crate::log_info;
 use bitflags::bitflags;
 use num_traits::Float;
 
@@ -168,6 +169,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                         self.calibration_state.gyro_sum = [0.0; 3];
                         self.calibration_state.gyro_calibration_count = 0;
                         flags.remove(CalibrationFlags::GYRO);
+                        log_info!("Gyro Calibration complete!");
                         //defmt::info!("Gyro calibration complete.")
                     }
                 }
@@ -218,6 +220,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
                         self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
                         self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
                         flags.remove(CalibrationFlags::ACCEL);
+                        log_info!("Accelerometer Calibration Complete!");
                         //defmt::info!("IMU calibration complete.")
                     }
                 }

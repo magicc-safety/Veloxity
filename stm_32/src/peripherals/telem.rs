@@ -56,10 +56,10 @@ pub static RX_BUFF_SIZE: usize = 4 * 2048;
 pub static TELEM_TX: Pipe<CriticalSectionRawMutex, TX_BUFF_SIZE> = Pipe::new();
 pub static TELEM_RX: Pipe<CriticalSectionRawMutex, RX_BUFF_SIZE> = Pipe::new();
 
-//pub static LOGGER_CHANNEL: Channel<CriticalSectionRawMutex, packets::LogPacket, 64> = Channel::new();
-//pub static TELEMETRY_CHANNEL: Channel<CriticalSectionRawMutex, packets::RosflightPacket, 64> =
+// pub static LOGGER_CHANNEL: Channel<CriticalSectionRawMutex, packets::LogPacket, 64> = Channel::new();
+// pub static TELEMETRY_CHANNEL: Channel<CriticalSectionRawMutex, packets::RosflightPacket, 64> =
 //    Channel::new();
-//pub static IMU_CHANNEL: Channel<CriticalSectionRawMutex, packets::ImuPacket, 64> = Channel::new();
+// pub static IMU_CHANNEL: Channel<CriticalSectionRawMutex, packets::ImuPacket, 64> = Channel::new();
 
 // ----------------------------- Telemetry Specific Structures ----------------------------
 

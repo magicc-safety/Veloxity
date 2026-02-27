@@ -35,6 +35,7 @@
 // **/
 
 use crate::board::BoardTrait;
+use crate::{log_info, log_warn};
 use crate::params2::{ParamId, Params, ParamValue};
 use crate::comm_manager::{CommManager, comm_link_trait::CommInterface};
 use crate::state_machine::{Event, StateManager, ErrorFlag};
@@ -310,11 +311,13 @@ impl Rc {
                 //     LogSeverity::LOG_INFO,
                 //     &format!("{} switch mapped to RC channel {}", channel_name, self.switches[i].channel)
                 // );
+                log_info!("{} switch mapped to RC Channel {}", channel_name, self.switches[i].channel);
             } else {
                 // comm_manager.log(
                 //     LogSeverity::LOG_INFO,
                 //     &format!("{} switch not mapped", channel_name)
                 // );
+                log_info!("{} switch not mapped", channel_name);
             }
         }
     }
