@@ -84,7 +84,7 @@ impl BoardTrait for Board {
 
     type ProcessorHList = hlist_type![
         sensorprocessors::ImuProcessor,
-        sensorprocessors::PassthroughMagProcessor,
+        sensorprocessors::MagProcessor,
         sensorprocessors::PassthroughBaroProcessor,
         sensorprocessors::PassthroughPitotProcessor,
         sensorprocessors::PassthroughRangeProcessor,
@@ -208,7 +208,7 @@ impl BoardTrait for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        match peripherals::telem::TELEM_RX.try_read(buf) {
+        match peripherals::vcp::VCP_RX.try_read(buf) {
             Ok(n) => {
                 // defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
                 return Some(Ok(n))
@@ -232,7 +232,7 @@ impl BoardTrait for Board {
         let len = bytes.len();
         // defmt::info!("Writing to Serial");
         loop {
-            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
+            match peripherals::vcp::VCP_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
                     if wrote == (len - n) {
                         break;
@@ -537,6 +537,8 @@ impl Board {
         // P2 Priority Task for Gyros
         interrupt::SAI2.set_priority(Priority::P2);
         let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
+        
+        // P2 VCP Task (Telemetry alternate)
         spawner2.spawn(peripherals::vcp::task(vcp)).unwrap();
         spawner2.spawn(peripherals::telem::task_rx(telem3_rx));
 
