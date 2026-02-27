@@ -208,7 +208,7 @@ impl BoardTrait for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        match peripherals::vcp::VCP_RX.try_read(buf) {
+        match peripherals::telem::TELEM_RX.try_read(buf) {
             Ok(n) => {
                 // defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
                 return Some(Ok(n))
@@ -232,7 +232,7 @@ impl BoardTrait for Board {
         let len = bytes.len();
         // defmt::info!("Writing to Serial");
         loop {
-            match peripherals::vcp::VCP_TX.try_write(&bytes[n..len]) {
+            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
                     if wrote == (len - n) {
                         break;
