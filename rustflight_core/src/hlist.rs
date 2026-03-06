@@ -67,7 +67,8 @@ impl<H, T: HList> HList for HCons<H, T> {}
 // standard `Fn` traits because we need an associated `Output` type.
 pub trait Func<Arg> {
     type Output;
-    fn call(&mut self, arg: Arg, flags: &mut CalibrationFlags, params: &mut Params) -> Self::Output;
+    fn call(&mut self, arg: Arg, flags: &mut CalibrationFlags, params: &mut Params)
+    -> Self::Output;
 }
 
 // A marker trait for a "Polymorphic Function" (an HList of `Func`s).
@@ -123,8 +124,8 @@ impl<'a, Mapper: PolyFunc> HMappable<'a, Mapper> for HNil {
 impl<'a, F, FTail, D, DTail> HMappable<'a, HCons<F, FTail>> for HCons<D, DTail>
 where
     F: Func<&'a mut D> + Default, // function is operable with data type D as it's Arg
-    FTail: PolyFunc,                     // recursive definition
-    D: 'a,                               // obviously
+    FTail: PolyFunc,              // recursive definition
+    D: 'a,                        // obviously
     DTail: HList + HMappable<'a, FTail> + 'a, // DTail should be a HList for recursion, and it needs the
                                               // same lifetime, and it also needs to be mapable via/by a
                                               // mapper (and FTail satisfies that because FTail is of type PolyFunc)

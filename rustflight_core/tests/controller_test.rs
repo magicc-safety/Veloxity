@@ -34,26 +34,25 @@
 // *
 // ******************************************************************************
 // **/
-
-use std::error::Error;
 use csv::WriterBuilder;
 use serde::Serialize;
+use std::error::Error;
 
 // Import your library components
 use rustflight_core::{
-    controller::{Controller, quad_controller::{QuadController, Pid, MixerInput}},
+    command_manager::{CombinedControl, ControlChannel, ControlType},
+    controller::{
+        Controller,
+        quad_controller::{MixerInput, Pid, QuadController},
+    },
     estimator::quad_estimator::AttitudeState,
-    command_manager::{CombinedControl, ControlType, ControlChannel},
-    state_machine::{StateManager, Event},
-    params2::{Params, ParamId, ParamValue},
+    params2::{ParamId, ParamValue, Params},
+    state_machine::{Event, StateManager},
 };
 
-use micro_algebra::stack::{
-    quaternion::Quaternion,
-    vector::Vector,
-};
+use micro_algebra::stack::{quaternion::Quaternion, vector::Vector};
 
-use libm::{sin, cos, pow, fabs};
+use libm::{cos, fabs, pow, sin};
 
 const PI: f64 = 3.14159265359;
 
@@ -64,12 +63,36 @@ const PI: f64 = 3.14159265359;
 fn create_mock_command() -> CombinedControl {
     CombinedControl {
         stamp_ms: 0,
-        qx: ControlChannel { value: 0.0, control_type: ControlType::Rate, active: true },
-        qy: ControlChannel { value: 0.0, control_type: ControlType::Rate, active: true },
-        qz: ControlChannel { value: 0.0, control_type: ControlType::Rate, active: true },
-        fx: ControlChannel { value: 0.0, control_type: ControlType::Throttle, active: true },
-        fy: ControlChannel { value: 0.0, control_type: ControlType::Throttle, active: true },
-        fz: ControlChannel { value: 0.0, control_type: ControlType::Throttle, active: true },
+        qx: ControlChannel {
+            value: 0.0,
+            control_type: ControlType::Rate,
+            active: true,
+        },
+        qy: ControlChannel {
+            value: 0.0,
+            control_type: ControlType::Rate,
+            active: true,
+        },
+        qz: ControlChannel {
+            value: 0.0,
+            control_type: ControlType::Rate,
+            active: true,
+        },
+        fx: ControlChannel {
+            value: 0.0,
+            control_type: ControlType::Throttle,
+            active: true,
+        },
+        fy: ControlChannel {
+            value: 0.0,
+            control_type: ControlType::Throttle,
+            active: true,
+        },
+        fz: ControlChannel {
+            value: 0.0,
+            control_type: ControlType::Throttle,
+            active: true,
+        },
     }
 }
 
@@ -78,23 +101,32 @@ fn create_mock_command() -> CombinedControl {
 // ============================================================================
 
 struct QuadcopterDynamics {
-    p: f64, q: f64, r: f64,
+    p: f64,
+    q: f64,
+    r: f64,
     orientation: Quaternion<f64>,
-    ixx: f64, iyy: f64, izz: f64,
+    ixx: f64,
+    iyy: f64,
+    izz: f64,
 }
 
 impl QuadcopterDynamics {
     fn new(ixx: f64, iyy: f64, izz: f64) -> Self {
         Self {
-            p: 0.0, q: 0.0, r: 0.0,
-            orientation: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]), 
-            ixx, iyy, izz,
+            p: 0.0,
+            q: 0.0,
+            r: 0.0,
+            orientation: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
+            ixx,
+            iyy,
+            izz,
         }
     }
 
     fn update(&mut self, torques: &Vector<f64, 3>, dt: f64) {
         let p_dot = ((self.iyy - self.izz) * self.q * self.r / self.ixx) + (torques[0] / self.ixx);
-        let q_dot_kin = ((self.izz - self.ixx) * self.r * self.p / self.iyy) + (torques[1] / self.iyy);
+        let q_dot_kin =
+            ((self.izz - self.ixx) * self.r * self.p / self.iyy) + (torques[1] / self.iyy);
         let r_dot = ((self.ixx - self.iyy) * self.p * self.q / self.izz) + (torques[2] / self.izz);
 
         self.p += p_dot * dt;
@@ -102,9 +134,9 @@ impl QuadcopterDynamics {
         self.r += r_dot * dt;
 
         let omega_q = Quaternion::from_array([0.0, self.p, self.q, self.r]);
-        let q_dot = (self.orientation * omega_q) * 0.5; 
+        let q_dot = (self.orientation * omega_q) * 0.5;
         self.orientation = self.orientation + q_dot * dt;
-        
+
         self.orientation.normalize_fill();
     }
 }
@@ -119,13 +151,19 @@ fn get_commands(t: f64) -> (Vector<f64, 3>, ControlType) {
         let roll_rate = 1.0 * sin(2.0 * PI * 0.5 * t); // +/- 0.5 rad/s
         let pitch_rate = 1.0 * cos(2.0 * PI * 0.5 * t);
         let yaw_rate = 0.4 * sin(2.0 * PI * 0.2 * t);
-        (Vector::from_array([roll_rate, pitch_rate, yaw_rate]), ControlType::Rate)
+        (
+            Vector::from_array([roll_rate, pitch_rate, yaw_rate]),
+            ControlType::Rate,
+        )
     } else if t < 10.0 {
         // --- ANGLE MODE SINE (5-10s) ---
-        let roll_angle = 1.0 * sin(2.0 * PI * 0.2 * (t - 5.0)); 
+        let roll_angle = 1.0 * sin(2.0 * PI * 0.2 * (t - 5.0));
         let pitch_angle = 1.0 * cos(2.0 * PI * 0.2 * (t - 5.0));
-        let yaw_rate = 0.5; 
-        (Vector::from_array([roll_angle, pitch_angle, yaw_rate]), ControlType::Angle)
+        let yaw_rate = 0.5;
+        (
+            Vector::from_array([roll_angle, pitch_angle, yaw_rate]),
+            ControlType::Angle,
+        )
     } else {
         // --- ANGLE MODE SQUARE WAVE (10-20s) ---
         // Pulse every 2.5 seconds
@@ -134,12 +172,23 @@ fn get_commands(t: f64) -> (Vector<f64, 3>, ControlType) {
         // ...
         let cycle_pos = (t - 10.0) % 7.5; // 7.5 second full period
         let magnitude = 0.3;
-        
-        let roll_angle = if cycle_pos < 2.5 { magnitude } else { -magnitude };
-        let pitch_angle = if cycle_pos < 2.5 { -magnitude } else { magnitude }; // Opposite phase
+
+        let roll_angle = if cycle_pos < 2.5 {
+            magnitude
+        } else {
+            -magnitude
+        };
+        let pitch_angle = if cycle_pos < 2.5 {
+            -magnitude
+        } else {
+            magnitude
+        }; // Opposite phase
         let yaw_rate = 0.5;
 
-        (Vector::from_array([roll_angle, pitch_angle, yaw_rate]), ControlType::Angle)
+        (
+            Vector::from_array([roll_angle, pitch_angle, yaw_rate]),
+            ControlType::Angle,
+        )
     }
 }
 
@@ -147,10 +196,18 @@ fn get_commands(t: f64) -> (Vector<f64, 3>, ControlType) {
 struct SimulationRecord {
     time_s: f64,
     mode_id: u8, // 0 = Rate, 1 = Angle
-    cmd_x: f64, cmd_y: f64, cmd_z: f64, 
-    act_roll_rad: f64, act_pitch_rad: f64, act_yaw_rad: f64, 
-    act_p_rad_s: f64, act_q_rad_s: f64, act_r_rad_s: f64,     
-    torque_x: f64, torque_y: f64, torque_z: f64,
+    cmd_x: f64,
+    cmd_y: f64,
+    cmd_z: f64,
+    act_roll_rad: f64,
+    act_pitch_rad: f64,
+    act_yaw_rad: f64,
+    act_p_rad_s: f64,
+    act_q_rad_s: f64,
+    act_r_rad_s: f64,
+    torque_x: f64,
+    torque_y: f64,
+    torque_z: f64,
 }
 
 #[test]
@@ -159,20 +216,20 @@ fn run_mixed_mode_simulation() -> Result<(), Box<dyn Error>> {
     const DT: f64 = 1.0 / 400.0;
 
     let mut params = Params::new();
-    params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.001)); 
+    params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.001));
 
-    // Rate Parameters 
+    // Rate Parameters
     params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_P, ParamValue::Float(0.15));
     params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_I, ParamValue::Float(0.05));
-    params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_D, ParamValue::Float(0.005)); 
+    params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_D, ParamValue::Float(0.005));
 
     params.set_by_id(ParamId::PARAM_PID_PITCH_RATE_P, ParamValue::Float(0.15));
     params.set_by_id(ParamId::PARAM_PID_PITCH_RATE_I, ParamValue::Float(0.05));
-    params.set_by_id(ParamId::PARAM_PID_PITCH_RATE_D, ParamValue::Float(0.005)); 
+    params.set_by_id(ParamId::PARAM_PID_PITCH_RATE_D, ParamValue::Float(0.005));
 
     params.set_by_id(ParamId::PARAM_PID_YAW_RATE_P, ParamValue::Float(0.15));
     params.set_by_id(ParamId::PARAM_PID_YAW_RATE_I, ParamValue::Float(0.05));
-    params.set_by_id(ParamId::PARAM_PID_YAW_RATE_D, ParamValue::Float(0.005)); 
+    params.set_by_id(ParamId::PARAM_PID_YAW_RATE_D, ParamValue::Float(0.005));
 
     // Angle Parameters
     params.set_by_id(ParamId::PARAM_PID_ROLL_ANGLE_P, ParamValue::Float(6.0)); // The tuned value!
@@ -191,39 +248,42 @@ fn run_mixed_mode_simulation() -> Result<(), Box<dyn Error>> {
     let mut controller = QuadController::default();
 
     // Standard small quad inertia
-    let mut dynamics = QuadcopterDynamics::new(0.007, 0.007, 0.012); 
-    
+    let mut dynamics = QuadcopterDynamics::new(0.007, 0.007, 0.012);
+
     std::fs::create_dir_all("tests/controller")?;
     let output_path = "tests/controller/rust_controller_results.csv";
     let mut wtr = WriterBuilder::new().from_path(output_path)?;
-    println!("\nRunning Mixed Mode simulation (Rate -> Angle Sine -> Angle Square) and writing to '{}'...", output_path);
+    println!(
+        "\nRunning Mixed Mode simulation (Rate -> Angle Sine -> Angle Square) and writing to '{}'...",
+        output_path
+    );
 
     let num_steps = (SIMULATION_TIME / DT) as usize;
     let (_, mut last_mode) = get_commands(0.0f64);
 
     for i in 0..num_steps {
         let t = i as f64 * DT;
-        
+
         let (cmd_vec, mode) = get_commands(t);
-        
+
         let mut command = create_mock_command();
         command.qx.value = cmd_vec[0];
         command.qy.value = cmd_vec[1];
-        command.qz.value = cmd_vec[2]; 
-        command.fz.value = 0.5; 
-        
+        command.qz.value = cmd_vec[2];
+        command.fz.value = 0.5;
+
         command.qx.control_type = mode;
         command.qy.control_type = mode;
-        command.qz.control_type = ControlType::Rate; 
+        command.qz.control_type = ControlType::Rate;
 
         // This q_dot is correct for PHYSICS simulation (updating orientation)
         let omega_q = Quaternion::from_array([0.0, dynamics.p, dynamics.q, dynamics.r]);
         let q_dot = (dynamics.orientation * omega_q) * 0.5;
 
         // Initialize state with the new 'body_rates' field
-        let state = AttitudeState { 
-            q_hat: dynamics.orientation, 
-            q_dot: q_dot, 
+        let state = AttitudeState {
+            q_hat: dynamics.orientation,
+            q_dot: q_dot,
             b_hat: Vector::zeros(),
             // --- NEW: Pass the CLEAN rates directly from the physics simulation ---
             body_rate: Vector::from_array([dynamics.p, dynamics.q, dynamics.r]),
@@ -232,10 +292,10 @@ fn run_mixed_mode_simulation() -> Result<(), Box<dyn Error>> {
         };
 
         let mixer_input = controller.control(&state, &mut state_manager, &command, &params);
-        
+
         dynamics.update(&mixer_input.torques, DT);
-        
-        let euler = dynamics.orientation.to_euler_angles(); 
+
+        let euler = dynamics.orientation.to_euler_angles();
 
         wtr.serialize(SimulationRecord {
             time_s: t,

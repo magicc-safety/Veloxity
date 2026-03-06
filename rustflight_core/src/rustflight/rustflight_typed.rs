@@ -37,27 +37,30 @@
 // THIS CODE HAS NOT BEEN MADE SAFE YET
 //use crate::mavlink::dialects::rosflight::{self as rosflight_dialect};
 
+use crate::{
+    board::BoardTrait,
+    bodytype::BodyType,
+    comm_manager::{self, comm_link_trait::CommInterface},
+    comm_messages::{self, messages::HeartbeatMsg},
+    command_manager::{CommandManager, ControlType},
+    controller::Controller,
+    errors,
+    estimator::{
+        self, AttitudeStateTrait, Estimator,
+        quad_estimator::{AttitudeState, QuadEstimator},
+    },
+    hlist::*,
+    mixer::Mixer,
+    packets,
+    params2::{self, PARAM_DEFINITIONS, ParamId, ParamIter},
+    pwm::{self, PwmDriver},
+    rc::Rc,
+    rustflight::Configuration,
+    sensorprocessors::CalibrationFlags,
+    state_machine::{self, ErrorFlag, Event, StateManager},
+};
 use core::marker::PhantomData;
 use micro_algebra::stack::vector::Vector;
-use crate::{
-    board::BoardTrait, 
-    bodytype::BodyType,
-    comm_manager::{self, comm_link_trait::CommInterface}, 
-    comm_messages::{self, messages::HeartbeatMsg}, 
-    command_manager::{CommandManager, ControlType}, 
-    controller::Controller, 
-    errors, 
-    estimator::{self, AttitudeStateTrait, Estimator, quad_estimator::{AttitudeState, QuadEstimator}}, 
-    hlist::*, 
-    mixer::Mixer, 
-    packets, 
-    params2::{self, PARAM_DEFINITIONS, ParamId, ParamIter}, 
-    pwm::{self, PwmDriver}, 
-    rc::Rc, 
-    rustflight::Configuration, 
-    sensorprocessors::CalibrationFlags, 
-    state_machine::{self, ErrorFlag, Event, StateManager}
-};
 
 const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
 const ESTIMATOR_DT: f64 = 1.0 / 400.0; // Assume constant 400Hz for estimator
@@ -73,9 +76,8 @@ where
 {
     loop_time_us: u32,
     last_imu_seen: u64,
-    last_imu_time: u64,  // Track last IMU timestamp to detect new data
+    last_imu_time: u64, // Track last IMU timestamp to detect new data
     // dt: f64,  // Commented out - now using constant ESTIMATOR_DT instead of calculated dt
-
     pub board: B,
     params: params2::Params,
     params_iter: Option<ParamIter>,
@@ -107,25 +109,27 @@ where
     for<'a> B::RawSensorSet: HMappable<'a, B::ProcessorHList, Output = B::ProcessedSensorSet>,
     BT::RequiredSensors: Plucker<Option<packets::RcPacket>, C::RcPacketSculptedIndex>,
     BT::Estimator: Estimator<
-        Inputs = <BT::RequiredSensors as Plucker<Option<packets::RcPacket>, C::RcPacketSculptedIndex>>::Remainder,
+        Inputs = <BT::RequiredSensors as Plucker<
+            Option<packets::RcPacket>,
+            C::RcPacketSculptedIndex,
+        >>::Remainder,
     >,
     <BT::Estimator as Estimator>::State: AttitudeStateTrait,
     BT::Controller: Controller<State = <BT::Estimator as Estimator>::State>,
     BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
     <<BT as BodyType>::Mixer as Mixer>::ActuatorCommands: AsRef<[f64]>,
-
     // This tells Rust that the compiler *can* find a way to `get` these packet
     // types using the indices from the `Configuration`.
     B::ProcessedSensorSet: Clone + Sculptor<BT::RequiredSensors, C::SculptIndices>,
-    B::ProcessedSensorSet: HListGet<Option<packets::ImuPacket>, C::ImuPacketIndex> +
-                           HListGet<Option<packets::MagPacket>, C::MagPacketIndex> +
-                           HListGet<Option<packets::BaroPacket>, C::BaroPacketIndex> +
-                           HListGet<Option<packets::PitotPacket>, C::PitotPacketIndex> +
-                           HListGet<Option<packets::RangePacket>, C::RangePacketIndex> +
-                           HListGet<Option<packets::GNSSPacket>, C::GNSSPacketIndex> +
-                           HListGet<Option<packets::BatteryPacket>, C::BatteryPacketIndex> +
-                           HListGet<Option<packets::AttitudePacket>, C::AttitudePacketIndex> +
-                           HListGet<Option<packets::RcPacket>, C::RcPacketIndex>
+    B::ProcessedSensorSet: HListGet<Option<packets::ImuPacket>, C::ImuPacketIndex>
+        + HListGet<Option<packets::MagPacket>, C::MagPacketIndex>
+        + HListGet<Option<packets::BaroPacket>, C::BaroPacketIndex>
+        + HListGet<Option<packets::PitotPacket>, C::PitotPacketIndex>
+        + HListGet<Option<packets::RangePacket>, C::RangePacketIndex>
+        + HListGet<Option<packets::GNSSPacket>, C::GNSSPacketIndex>
+        + HListGet<Option<packets::BatteryPacket>, C::BatteryPacketIndex>
+        + HListGet<Option<packets::AttitudePacket>, C::AttitudePacketIndex>
+        + HListGet<Option<packets::RcPacket>, C::RcPacketIndex>,
 {
     pub fn init(
         loop_time_us: u32,
@@ -138,8 +142,7 @@ where
         mut mixer: BT::Mixer,
         _config: C, // zero-cost marker for deduction during "init" creation
         mut pwm_driver: PD,
-    ) -> Self { 
-
+    ) -> Self {
         state_manager.update(Event::INITIALIZED, &params);
         let mut rc_manager = Rc::new();
         rc_manager.init(&mut board, &params);
@@ -151,9 +154,8 @@ where
         Self {
             loop_time_us,
             last_imu_seen: now_us,
-            last_imu_time: 0,  // Initialize to 0
+            last_imu_time: 0, // Initialize to 0
             // dt: 0.0,  // Commented out - now using constant ESTIMATOR_DT
-
             board,
             params,
             params_iter: None,
@@ -174,7 +176,6 @@ where
     }
 
     pub fn run(&mut self) -> bool {
-
         ///*
         self.board.set_test_pin_2(true);
 
@@ -184,22 +185,18 @@ where
         // act on any received messages this loop
         self.comm_manager.process_incoming_messages(&mut self.board);
         let changed_param_id = self.comm_manager.act_on_messages(
-            &mut self.params_iter, 
-            &mut self.params, 
-            &mut self.cal_flags, 
+            &mut self.params_iter,
+            &mut self.params,
+            &mut self.cal_flags,
             &mut self.board,
             &mut self.command_manager,
         );
-        
 
-
-        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) 
-        {
+        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
             // this must mean that rc asked for arm, but calibration hadn't happened and needed to... go ahead and raise the calibration flag
             self.cal_flags.insert(CalibrationFlags::GYRO);
         }
         //*/
-
         // Data ingestion: let the board update the sensor data store
         // Data processing: run the map operation across HLists
         // This applies the 'ProcessorHList' to the 'RawSensorSet'
@@ -207,34 +204,43 @@ where
         // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
         self.board.update_sensors(&mut self.sensors);
         ///*
-        let processed_sensors = self.sensors.map(&mut self.processorhlist, &mut self.cal_flags, &mut self.params);
+        let processed_sensors = self.sensors.map(
+            &mut self.processorhlist,
+            &mut self.cal_flags,
+            &mut self.params,
+        );
 
-       // also check for imu: if it's been too long, add a flag for imu not responding...
+        // also check for imu: if it's been too long, add a flag for imu not responding...
         let imu_packet_option: &Option<packets::ImuPacket> = processed_sensors.get();
         if imu_packet_option.is_some() {
             //self.board.set_test_pin_1(true);
             // We got data! Reset the timer and clear the error.
             self.last_imu_seen = now_us;
-            self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING), &self.params);
+            self.state_manager.update(
+                Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING),
+                &self.params,
+            );
             //self.board.set_test_pin_1(false);
-
         } else {
             // No data this cycle. Check if the timer has expired.
             if now_us > self.last_imu_seen + IMU_TIMEOUT_US {
-                self.state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING), &self.params);
+                self.state_manager.update(
+                    Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING),
+                    &self.params,
+                );
             }
         }
 
-        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO)
-        {
+        if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
             // The processor has finished! (It removed the flag)
             // We can now send the event to complete the transition.
-            // defmt::info!("New Gyro parameters: {}, {}, {}", 
+            // defmt::info!("New Gyro parameters: {}, {}, {}",
             //     self.params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
             //     self.params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS),
             //     self.params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS)
             // );
-            self.state_manager.update(Event::CALIBRATION_COMPLETE, &self.params);
+            self.state_manager
+                .update(Event::CALIBRATION_COMPLETE, &self.params);
         }
 
         let (required_sensors, _remainder) = processed_sensors.clone().sculpt();
@@ -243,19 +249,18 @@ where
         // now run the RC unit and the command manager unit
         if let Some(rc_packet) = rc_packet_option {
             // defmt::info!("Received RC in rustflight_typed");
-            self.rc_manager.receive(
-                &rc_packet, 
-                &self.params,
-                &mut self.state_manager
-            );
+            self.rc_manager
+                .receive(&rc_packet, &self.params, &mut self.state_manager);
         }
 
-        self.rc_manager.run(now_ms, &self.params, &mut self.state_manager);
+        self.rc_manager
+            .run(now_ms, &self.params, &mut self.state_manager);
         self.command_manager.run(
             now_ms,
-            &self.params, 
-            &mut self.rc_manager, 
-            &mut self.state_manager);
+            &self.params,
+            &mut self.rc_manager,
+            &mut self.state_manager,
+        );
 
         // Update the state manager...
         self.state_manager.run(&self.params);
@@ -297,26 +302,41 @@ where
             let start_time_us = self.board.clock_micros();
 
             // Run the estimator with constant dt (assume 400Hz)
-            let state = self.estimator.estimate(&estimator_sensors, &self.params, ESTIMATOR_DT);
+            let state = self
+                .estimator
+                .estimate(&estimator_sensors, &self.params, ESTIMATOR_DT);
 
             // Health check
             if state.is_healthy() {
-                self.state_manager.update(Event::ERROR_CLEARED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
+                self.state_manager.update(
+                    Event::ERROR_CLEARED(ErrorFlag::UNHEALTHY_ESTIMATOR),
+                    &self.params,
+                );
             } else {
-                self.state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR), &self.params);
+                self.state_manager.update(
+                    Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR),
+                    &self.params,
+                );
             }
 
             // Get the final command from the manager
             let combined_command = self.command_manager.combined_control();
 
             // Run controller with same constant dt (assume 400Hz)
-            let controls = self.controller.control(&state, &mut self.state_manager, combined_command, &self.params, ESTIMATOR_DT);
+            let controls = self.controller.control(
+                &state,
+                &mut self.state_manager,
+                combined_command,
+                &self.params,
+                ESTIMATOR_DT,
+            );
 
             // Run mixer
             let actuator_commands = self.mixer.mix(&controls, &mut self.state_manager);
 
             // PWM command output
-            self.pwm_driver.send_commands(&mut self.board, actuator_commands.as_ref());
+            self.pwm_driver
+                .send_commands(&mut self.board, actuator_commands.as_ref());
 
             // Measure loop time for this control cycle
             self.loop_time_us = (self.board.clock_micros() - start_time_us) as u32;
@@ -330,7 +350,7 @@ where
                     self.comm_manager.send_statustext(
                         &mut self.board,
                         entry.severity,
-                        entry.message.as_str()
+                        entry.message.as_str(),
                     );
                     logs_processed += 1;
                 } else {
@@ -345,7 +365,7 @@ where
                 &self.state_manager,
                 &self.command_manager,
                 &self.params,
-                &state, // The estimator state we just calculated
+                &state,             // The estimator state we just calculated
                 &processed_sensors, // The full set of processed sensors
                 &actuator_commands, // The final motor commands
             );
@@ -356,24 +376,22 @@ where
         if let Some(param_id) = changed_param_id {
             // defmt::info!("Parameter change callback for {:?}", param_id);
             self.rc_manager.param_change_callback(
-                param_id, 
-                &mut self.board, 
-                &self.params, 
-                &mut self.comm_manager
+                param_id,
+                &mut self.board,
+                &self.params,
+                &mut self.comm_manager,
             );
 
             match param_id {
                 ParamId::PARAM_FAILSAFE_THROTTLE | ParamId::PARAM_FIXED_WING => {
-                    self.command_manager.update_failsafe_config(
-                        &self.params, 
-                        &mut self.state_manager
-                    );
+                    self.command_manager
+                        .update_failsafe_config(&self.params, &mut self.state_manager);
                 }
                 _ => {
                     // This param change doesn't affect the command manager
                 }
             }
-            
+
             // TODO: Add callbacks for other modules here if needed
             // self.controller.param_change_callback(param_id, &self.params);
             // self.estimator.param_change_callback(param_id, &self.params);
@@ -384,8 +402,7 @@ where
 
         self.board.set_test_pin_2(false);
 
-
-    //*/
+        //*/
         true
     }
 }

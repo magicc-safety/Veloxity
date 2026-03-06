@@ -34,10 +34,10 @@
 // *
 // ******************************************************************************
 // **/
-
 use std::time::Instant;
 
-use crate::ros_messages::{self, Header, Time, PwmOutput}; use rustflight_core::board::BoardTrait;
+use crate::ros_messages::{self, Header, PwmOutput, Time};
+use rustflight_core::board::BoardTrait;
 // Ensure OutputRaw is imported
 use rustflight_core::errors; // Assuming errors is in core
 use rustflight_core::packets; // Assuming packets is in core
@@ -45,11 +45,10 @@ use rustflight_core::pwm::{PwmDriver, PwmError}; // Import updated trait and err
 // Use the re-exported path from rustflight_core if needed by other parts of the file
 // use rustflight_core::micro_algebra::stack::vector::Vector;
 
-
 use cdr::{CdrLe, Infinite};
-use tokio::sync::mpsc;
-use tokio::net::UdpSocket;
 use tokio::io::ErrorKind;
+use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
 
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::handlers::FifoChannelHandler;
@@ -100,10 +99,10 @@ impl SimPwmDriver {
         });
 
         Self {
-             sender,
-             // Initialize all channels to the minimum value (disarmed/disabled state)
-             current_values: [1000u16; NUM_SIM_CHANNELS],
-             // enabled_mask: 0, // Initialize if using mask
+            sender,
+            // Initialize all channels to the minimum value (disarmed/disabled state)
+            current_values: [1000u16; NUM_SIM_CHANNELS],
+            // enabled_mask: 0, // Initialize if using mask
         }
     }
 
@@ -125,7 +124,7 @@ impl PwmDriver for SimPwmDriver {
         for i in 0..self.len() {
             self.enable(i)?;
         }
-        
+
         Ok(())
     }
 
@@ -144,7 +143,7 @@ impl PwmDriver for SimPwmDriver {
             return Err(PwmError::ChannelOutOfRange);
         }
         // Optional: Set to idle (1000us) on enable
-        // self.current_values[channel] = 1000.0; 
+        // self.current_values[channel] = 1000.0;
         //println!("SimPwmDriver: Enabled channel {}", channel);
         Ok(())
     }
@@ -163,11 +162,11 @@ impl PwmDriver for SimPwmDriver {
         if channel >= NUM_SIM_CHANNELS {
             return Err(PwmError::ChannelOutOfRange);
         }
-        
+
         // If something calls this with a u16 (0-65535), map it to 1000-2000us
         let normalized = (duty as f32) / (u16::MAX as f32);
         let pwm_us = 1000.0 + (normalized * 1000.0);
-        
+
         self.current_values[channel] = pwm_us as u16;
         Ok(())
     }
@@ -179,25 +178,28 @@ impl PwmDriver for SimPwmDriver {
 
         let msg = ros_messages::PwmOutput {
             header: ros_messages::Header {
-                stamp: ros_messages::Time { sec: now_sec, nanosec: now_nanosec },
+                stamp: ros_messages::Time {
+                    sec: now_sec,
+                    nanosec: now_nanosec,
+                },
                 frame_id: String::from(""),
             },
             values: self.current_values,
         };
-        
+
         let _ = self.sender.try_send(msg);
     }
 
     fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands_slice: &[f64]) {
         let num_channels_to_write = commands_slice.len().min(self.len());
-        
+
         for i in 0..num_channels_to_write {
             // 1. Clamp 0.0-1.0
             let cmd_norm = commands_slice[i].clamp(0.0, 1.0);
-            
+
             // 2. Scale to 1000-2000us
             let pwm_us = 1000.0 + (cmd_norm * 1000.0);
-            
+
             // 3. Store as u16
             self.current_values[i] = pwm_us as u16;
         }

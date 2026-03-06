@@ -34,12 +34,11 @@
 // *
 // ******************************************************************************
 // **/
-
-use core::marker::PhantomData;
-use bitflags::bitflags;
-use messages::*;
-use enums::*;
 use crate::state_machine::ErrorFlag;
+use bitflags::bitflags;
+use core::marker::PhantomData;
+use enums::*;
+use messages::*;
 
 #[derive(Default)]
 pub struct Messages {
@@ -80,15 +79,23 @@ macro_rules! impl_store {
 }
 
 // implemented for messages that will be received
-impl_store!(HeartbeatMsg,            heartbeat,        "heartbeat");
-impl_store!(ParamRequestReadMsg,     param_request_read, "param_request_read");
-impl_store!(ParamRequestListMsg,     param_request_list, "param_request_list");
-impl_store!(ParamSetMsg,             param_set,        "param_set");
-impl_store!(TimesyncMsg,             timesync,         "timesync");
-impl_store!(OffboardControlMsg,      offboard_control, "offboard_control");
-impl_store!(RosflightCmdMsg,         cmd,              "cmd");
-impl_store!(RosflightAuxCmdMsg,      aux_cmd,          "aux_cmd");
-impl_store!(ExternalAttitudeMsg,     external_attitude,"external_attitude");
+impl_store!(HeartbeatMsg, heartbeat, "heartbeat");
+impl_store!(
+    ParamRequestReadMsg,
+    param_request_read,
+    "param_request_read"
+);
+impl_store!(
+    ParamRequestListMsg,
+    param_request_list,
+    "param_request_list"
+);
+impl_store!(ParamSetMsg, param_set, "param_set");
+impl_store!(TimesyncMsg, timesync, "timesync");
+impl_store!(OffboardControlMsg, offboard_control, "offboard_control");
+impl_store!(RosflightCmdMsg, cmd, "cmd");
+impl_store!(RosflightAuxCmdMsg, aux_cmd, "aux_cmd");
+impl_store!(ExternalAttitudeMsg, external_attitude, "external_attitude");
 
 pub mod messages {
     use super::enums::*;
@@ -97,11 +104,11 @@ pub mod messages {
     // I don't think we need all these fields for the generic message but I'm leaving them for now
     #[derive(Debug, Clone, Copy)]
     pub struct HeartbeatMsg {
-        pub type_: u8, // MAV_TYPE
+        pub type_: u8,     // MAV_TYPE
         pub autopilot: u8, // MAV_AUTOPILOT (not found in xml...)
         pub base_mode: u8, // MAV_MODE_FLAG
         pub custom_mode: u32,
-        pub system_status: u8, // MAV_STATE
+        pub system_status: u8,   // MAV_STATE
         pub mavlink_version: u8, // V1
     }
 
@@ -111,13 +118,13 @@ pub mod messages {
     pub struct ParamRequestReadMsg {
         pub target_system: u8,
         pub target_component: u8,
-        pub param_identifier: ParamIdentifier
+        pub param_identifier: ParamIdentifier,
     }
 
     #[derive(Debug, Clone, Copy)]
     pub struct ParamRequestListMsg {
         pub target_system: u8,
-        pub target_component: u8
+        pub target_component: u8,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -139,13 +146,13 @@ pub mod messages {
     #[derive(Debug, Clone, Copy)]
     pub struct AttitudeQuaternionMsg {
         pub time_boot_ms: u32,
-        pub q1: f32, // w
-        pub q2: f32, // x
-        pub q3: f32, // y
-        pub q4: f32, // z
-        pub rollspeed: f32, // (rad/s)
+        pub q1: f32,         // w
+        pub q2: f32,         // x
+        pub q3: f32,         // y
+        pub q4: f32,         // z
+        pub rollspeed: f32,  // (rad/s)
         pub pitchspeed: f32, // (rad/s)
-        pub yawspeed: f32, // (rad/s)
+        pub yawspeed: f32,   // (rad/s)
     }
 
     // This could be handled differently... choosing this for now. Used RC packet for ref
@@ -183,7 +190,7 @@ pub mod messages {
         pub fy: f32,
         pub fz: f32,
     }
-    
+
     #[derive(Debug, Clone, Copy)]
     pub struct SmallImuMsg {
         pub time_boot_us: u64,
@@ -205,35 +212,35 @@ pub mod messages {
 
     #[derive(Debug, Clone, Copy)]
     pub struct SmallBaroMsg {
-        pub altitude: f32, // (m)
-        pub pressure: f32, // (Pa)
+        pub altitude: f32,    // (m)
+        pub pressure: f32,    // (Pa)
         pub temperature: f32, // (K)
     }
 
     #[derive(Debug, Clone, Copy)]
     pub struct DiffPressureMsg {
-        pub velocity: f32, // (m/s)
+        pub velocity: f32,      // (m/s)
         pub diff_pressure: f32, // (Pa)
-        pub temperature: f32, // (K)
+        pub temperature: f32,   // (K)
     }
 
     #[derive(Debug, Clone, Copy)]
     pub struct SmallRangeMsg {
         pub type_: RosflightRangeType,
-        pub range: f32, // (m)
+        pub range: f32,     // (m)
         pub max_range: f32, // (m)
         pub min_range: f32, // (m)
     }
 
     #[derive(Debug, Clone, Copy)]
     pub struct RosflightCmdMsg {
-        pub command: RosflightCmd
+        pub command: RosflightCmd,
     }
 
     #[derive(Debug, Clone, Copy)]
     pub struct RosflightCmdAckMsg {
         pub command: RosflightCmd,
-        pub success: RosflightCmdResponse
+        pub success: RosflightCmdResponse,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -287,15 +294,15 @@ pub mod messages {
         pub nanos: u32,
         pub fix_type: GNSSFixType,
         pub num_sat: u8,
-        pub lat: f64, // deg DDS format
-        pub lon: f64, // deg DDS format
-        pub height: f32, // (m)
-        pub vel_n: f32, // (m/s)
-        pub vel_e: f32, // (m/s)
-        pub vel_d: f32, // (m/s)
-        pub h_acc: f32, // (m)
-        pub v_acc: f32, // (m)
-        pub s_acc: f32, // (m)
+        pub lat: f64,                 // deg DDS format
+        pub lon: f64,                 // deg DDS format
+        pub height: f32,              // (m)
+        pub vel_n: f32,               // (m/s)
+        pub vel_e: f32,               // (m/s)
+        pub vel_d: f32,               // (m/s)
+        pub h_acc: f32,               // (m)
+        pub v_acc: f32,               // (m)
+        pub s_acc: f32,               // (m)
         pub rosflight_timestamp: u64, // us, estimated firmware timestamp for the time of validity of the gnss
     }
 
@@ -373,12 +380,12 @@ pub mod enums {
             const IGNORE_FZ = 1 << 5;
         }
     }
-    
+
     impl OffboardControlIgnore {
         pub fn is_ignoring_qx(&self) -> bool {
             self.intersects(Self::IGNORE_QX)
         }
-        
+
         pub fn is_ignoring_qy(&self) -> bool {
             self.intersects(Self::IGNORE_QY)
         }
@@ -399,7 +406,6 @@ pub mod enums {
             self.intersects(Self::IGNORE_FZ)
         }
     }
-
 
     #[derive(Debug, Clone, Copy)]
     pub enum GnssFixType {
@@ -427,16 +433,15 @@ pub mod enums {
 
     #[derive(Debug, Clone, Copy, Default)]
     pub enum LogLevel {
-    #[default]
-    Info,
-    Warn,
-    Error,
+        #[default]
+        Info,
+        Warn,
+        Error,
     }
 
     #[derive(Debug, Clone, Copy)]
     pub enum ParamIdentifier {
         ID([u8; 16]),
-        INDEX(i16)
+        INDEX(i16),
     }
 }
-

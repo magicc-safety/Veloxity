@@ -37,7 +37,7 @@
 // THIS CODE HAS BEEN MADE SAFE BUT SAFETY HAS NOT BEEN TESTED
 //use defmt::trace;
 use embassy_stm32::peripherals::{
-    TIM1, TIM12, TIM13, TIM14, TIM15, TIM16, TIM17, TIM2, TIM3, TIM4, TIM5, TIM8,
+    TIM1, TIM2, TIM3, TIM4, TIM5, TIM8, TIM12, TIM13, TIM14, TIM15, TIM16, TIM17,
 };
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 

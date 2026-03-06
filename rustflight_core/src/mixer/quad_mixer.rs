@@ -1,4 +1,3 @@
-
 // // /**
 // // ******************************************************************************
 // // * File     : quad_mixer.rs
@@ -39,12 +38,12 @@
 use crate::controller::quad_controller::MixerInput;
 use crate::mixer::Mixer;
 use crate::params2::{ParamId, ParamValue, Params};
+use crate::state_machine::StateManager;
+use libm::{cos, fabs, sin};
+use micro_algebra::linalg::pinv;
 use micro_algebra::stack::matrix::Matrix;
 use micro_algebra::stack::vector::Vector;
-use micro_algebra::linalg::pinv;
-use crate::state_machine::StateManager;
 use num_traits::Float;
-use libm::{sin, cos, fabs};
 
 // In no_std, we can use core::f64::consts or just hardcode constants.
 const FRAC_PI_4: f64 = 0.78539816339744830961; // 45 degrees in radians
@@ -67,19 +66,29 @@ pub struct QuadMixer {
 }
 
 impl QuadMixer {
-
     pub fn new(params: &Params) -> Self {
-        
         let mixer_params = MixerParams {
             num_motors: 4,
-            idle_throttle: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE) { v as f64 } else { 0.1 },
-            spin_when_armed: if let ParamValue::Bool(v) = params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) { v } else { true },
+            idle_throttle: if let ParamValue::Float(v) =
+                params.get_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE)
+            {
+                v as f64
+            } else {
+                0.1
+            },
+            spin_when_armed: if let ParamValue::Bool(v) =
+                params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED)
+            {
+                v
+            } else {
+                true
+            },
         };
 
         // degrees: 45, 135, 225, 315 degrees relative to forward x
         let theta = FRAC_PI_4; // 45 degrees
-        let s = sin(theta);   // ~0.707
-        let c = cos(theta);   // ~0.707
+        let s = sin(theta); // ~0.707
+        let c = cos(theta); // ~0.707
 
         // Gemini added a comment here helping describe what this m matrix is doing: hopefully this helps Tyler!
         // M maps Motor Throttles (delta) -> Body Wrench (u).
@@ -99,7 +108,7 @@ impl QuadMixer {
         // Note on Yaw (d_i):
         // CW motors (-1) create CCW reaction torque (Left/Negative).
         // CCW motors (+1) create CW reaction torque (Right/Positive).
-        
+
         #[rustfmt::skip]
         let m_data: [f64; 16] = [
             // M0 (FR)   M1 (RR)    M2 (RL)    M3 (FL)
@@ -122,9 +131,9 @@ impl QuadMixer {
         // directly from the geometry matrix.
         //
         // Max Authority = Sum of POSITIVE coefficients in the row.
-        // (i.e., The value we get if we saturate all contributing motors to 1.0 
+        // (i.e., The value we get if we saturate all contributing motors to 1.0
         // and set opposing motors to 0.0)
-        
+
         let mut scales = [0.0; 4];
         for row in 0..4 {
             let mut max_authority = 0.0;
@@ -150,8 +159,11 @@ impl Mixer for QuadMixer {
     type MixerInput = MixerInput;
     type ActuatorCommands = Vector<f64, 4>;
 
-    fn mix(&mut self, controls: &Self::MixerInput, state_manager: &StateManager) -> Self::ActuatorCommands {
-        
+    fn mix(
+        &mut self,
+        controls: &Self::MixerInput,
+        state_manager: &StateManager,
+    ) -> Self::ActuatorCommands {
         if !state_manager.is_armed() {
             return Vector::<f64, 4>::zeros();
         }
@@ -164,15 +176,14 @@ impl Mixer for QuadMixer {
         // We use the scales pre-calculated in `new()` for robustness.
 
         let input_vector = Vector::<f64, 4>::from_array([
-            controls.thrust     * self.input_scale[0],
-            controls.torques[0] * self.input_scale[1],  // Tx (Roll)
-            controls.torques[1] * self.input_scale[2],  // Ty (Pitch)
-            controls.torques[2] * self.input_scale[3],  // Tz (Yaw)
+            controls.thrust * self.input_scale[0],
+            controls.torques[0] * self.input_scale[1], // Tx (Roll)
+            controls.torques[1] * self.input_scale[2], // Ty (Pitch)
+            controls.torques[2] * self.input_scale[3], // Tz (Yaw)
         ]);
 
         // this is supposed to take the body wrench and map it back to outputs
         let mut outputs = self.allocation_matrix.vmul::<4>(&input_vector);
-
 
         // ====================================================================
         // SATURATION HANDLING (Proportional Scaling - matches C++ behavior)

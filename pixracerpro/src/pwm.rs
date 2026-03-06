@@ -109,10 +109,8 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
 
     fn enable_all(&mut self) -> Result<(), PwmError> {
         for i in 0..self.servos.len() {
-            self.servos
-                .enable(i)
-                .map_err(|_| PwmError::GenericError)?;
-        };
+            self.servos.enable(i).map_err(|_| PwmError::GenericError)?;
+        }
         Ok(())
     }
 

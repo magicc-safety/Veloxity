@@ -740,7 +740,7 @@ impl Bmi08xSensor {
 
         loop {
             self.drdy_g.wait_for_rising_edge().await;
-            
+
             self.jumper.set_high();
             Timer::after_micros(60).await;
             self.jumper.set_low();

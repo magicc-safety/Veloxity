@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-
 use crate::hlist::*;
 use crate::params2::Params;
 pub mod quad_estimator;

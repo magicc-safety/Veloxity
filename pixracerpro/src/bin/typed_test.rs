@@ -39,6 +39,7 @@
 use cortex_m;
 use cortex_m_rt::entry;
 // use defmt;
+use panic_halt as _;
 use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
 use rustflight_core::{
@@ -59,7 +60,6 @@ use rustflight_core::{
     state_machine::StateManager,
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
-use panic_halt as _;
 
 // Tiny aliases for readability
 pub type I0 = Here;

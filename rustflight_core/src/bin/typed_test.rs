@@ -59,7 +59,7 @@
 // impl Configuration<DummyBoard, Quadrotor> for DummyQuadConfig {
 //     type SculptIndices = hlist_type![
 //         Here,
-//         Here, 
+//         Here,
 //         There<There<There<There<There<Here>>>>>
 //     ];
 
@@ -76,9 +76,7 @@
 //     type AttitudePacketIndex = There<There<There<There<There<There<There<There<Here>>>>>>>>;
 // }
 
-fn main() {
-
-}
+fn main() {}
 
 // fn main() {
 //     // board implementation

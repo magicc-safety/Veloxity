@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-
 // use rustflight_core::mixer::Mixer;
 // use rustflight_core::mixer::quad_mixer::{QuadMixer};
 // use rustflight_core::controller::quad_controller::MixerInput;
@@ -115,7 +114,7 @@
 //     };
 
 //     let motor_outputs = mixer.mix(&commands);
-    
+
 //     // To yaw right (CW), CCW motors (1, 3) speed up, CW motors (0, 2) slow down.
 //     assert!(motor_outputs[1] > 0.5, "Motor 1 should increase for yaw");
 //     assert!(motor_outputs[3] > 0.5, "Motor 3 should increase for yaw");
@@ -141,41 +140,44 @@
 //             max_val = motor_outputs[i];
 //         }
 //     }
-    
+
 //     // The core test: ensure that the mixer scaled the outputs correctly,
 //     // so the maximum output is exactly 1.0.
 //     assert_approx_eq(max_val, 1.0, 1e-6);
-    
+
 //     // Also check that no motor is below 0.0
 //     for i in 0..4 {
 //         assert!(motor_outputs[i] >= 0.0, "Motor output should not be negative");
 //     }
 // }
 
-use rustflight_core::mixer::quad_mixer::{QuadMixer, MixerParams};
-use rustflight_core::mixer::Mixer;
-use rustflight_core::params2::{Params, ParamValue, ParamId};
-use rustflight_core::controller::quad_controller::MixerInput;
 use micro_algebra::stack::vector::Vector;
+use rustflight_core::controller::quad_controller::MixerInput;
+use rustflight_core::mixer::Mixer;
+use rustflight_core::mixer::quad_mixer::{MixerParams, QuadMixer};
+use rustflight_core::params2::{ParamId, ParamValue, Params};
 
 /// Helper to create a Mixer with deterministic parameters for testing
 fn create_test_mixer() -> QuadMixer {
     let mut params = Params::default();
-    
+
     // --- REALISTIC PHYSICS CONSTANTS ---
     // k_t approx 1e-5 (Typical for 10-inch prop)
     // k_q approx 1e-6
     // This ensures that 20N of thrust requires ~700 rad/s (reasonable RPM),
     // which is ~70% throttle, well above the 5% idle.
-    params.set_by_id(ParamId::PARAM_PROP_CT, ParamValue::Float(1.0e-5)); 
+    params.set_by_id(ParamId::PARAM_PROP_CT, ParamValue::Float(1.0e-5));
     params.set_by_id(ParamId::PARAM_PROP_CQ, ParamValue::Float(1.0e-6));
-    
+
     params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.05));
-    params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Bool(true));
-    
+    params.set_by_id(
+        ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED,
+        ParamValue::Bool(true),
+    );
+
     // Default KV (900) + 12.6V -> Max RPM ~ 1000 rad/s.
     // This aligns with the physics above.
-    
+
     QuadMixer::new(&params)
 }
 
@@ -185,7 +187,7 @@ fn test_hover_condition() {
 
     // Command: 10N Thrust (approx 1kg hover)
     let input = MixerInput {
-        thrust: 10.0, 
+        thrust: 10.0,
         torques: Vector::from_array([0.0, 0.0, 0.0]),
     };
 
@@ -199,7 +201,7 @@ fn test_hover_condition() {
     assert!((outputs[2] - outputs[3]).abs() < 1e-6);
 
     // 2. Magnitude check: Should be significantly above idle
-    assert!(outputs[0] > 0.1); 
+    assert!(outputs[0] > 0.1);
 }
 
 #[test]
@@ -209,8 +211,8 @@ fn test_pure_roll_right() {
     // Command: Hover (10N) + Roll Torque (0.5 Nm)
     // 0.5 Nm is a reasonable control effort for a small quad
     let input = MixerInput {
-        thrust: 10.0, 
-        torques: Vector::from_array([0.5, 0.0, 0.0]), 
+        thrust: 10.0,
+        torques: Vector::from_array([0.5, 0.0, 0.0]),
     };
 
     let outputs = mixer.mix(&input);
@@ -221,8 +223,10 @@ fn test_pure_roll_right() {
     let left_motors_avg = (outputs[2] + outputs[3]) / 2.0;
 
     // Verify Left > Right for Positive Roll (Standard X Config)
-    assert!(left_motors_avg > right_motors_avg, 
-        "Left motors should spin faster than right motors for positive roll torque");
+    assert!(
+        left_motors_avg > right_motors_avg,
+        "Left motors should spin faster than right motors for positive roll torque"
+    );
 }
 
 #[test]
@@ -232,7 +236,7 @@ fn test_pure_pitch_down() {
     // Command: Hover + Pitch Torque
     let input = MixerInput {
         thrust: 10.0,
-        torques: Vector::from_array([0.0, 0.5, 0.0]), 
+        torques: Vector::from_array([0.0, 0.5, 0.0]),
     };
 
     let outputs = mixer.mix(&input);
@@ -240,11 +244,16 @@ fn test_pure_pitch_down() {
     let front_motors_avg = (outputs[0] + outputs[3]) / 2.0;
     let rear_motors_avg = (outputs[1] + outputs[2]) / 2.0;
 
-    println!("Pitch Outputs (Front: {}, Rear: {})", front_motors_avg, rear_motors_avg);
+    println!(
+        "Pitch Outputs (Front: {}, Rear: {})",
+        front_motors_avg, rear_motors_avg
+    );
 
     // Standard X Matrix: Positive Pitch Input -> Nose Down -> Rear Motors speed up
-    assert!(rear_motors_avg > front_motors_avg, 
-        "Rear motors should spin faster for positive pitch input");
+    assert!(
+        rear_motors_avg > front_motors_avg,
+        "Rear motors should spin faster for positive pitch input"
+    );
 }
 
 #[test]
@@ -254,7 +263,7 @@ fn test_pure_yaw_clockwise() {
     // Command: Hover + Yaw Torque (0.1 Nm - yaw is usually weaker)
     let input = MixerInput {
         thrust: 10.0,
-        torques: Vector::from_array([0.0, 0.0, 0.1]), 
+        torques: Vector::from_array([0.0, 0.0, 0.1]),
     };
 
     let outputs = mixer.mix(&input);
@@ -262,11 +271,16 @@ fn test_pure_yaw_clockwise() {
     let cw_motors_avg = (outputs[0] + outputs[2]) / 2.0;
     let ccw_motors_avg = (outputs[1] + outputs[3]) / 2.0;
 
-    println!("Yaw Outputs (CW: {}, CCW: {})", cw_motors_avg, ccw_motors_avg);
+    println!(
+        "Yaw Outputs (CW: {}, CCW: {})",
+        cw_motors_avg, ccw_motors_avg
+    );
 
     // To turn CW (positive Yaw), we increase CCW motors to create net reaction torque
-    assert!(ccw_motors_avg > cw_motors_avg, 
-        "CCW motors should spin faster to create CW body torque");
+    assert!(
+        ccw_motors_avg > cw_motors_avg,
+        "CCW motors should spin faster to create CW body torque"
+    );
 }
 
 #[test]
@@ -275,7 +289,7 @@ fn test_saturation_scaling() {
 
     // Command: Massive Thrust that definitely exceeds 40N (approx physical limit)
     let input = MixerInput {
-        thrust: 1000.0, 
+        thrust: 1000.0,
         torques: Vector::from_array([0.0, 0.0, 0.0]),
     };
 
@@ -285,9 +299,12 @@ fn test_saturation_scaling() {
 
     // Max output should be exactly 1.0
     let max_val = outputs[0].max(outputs[1]).max(outputs[2]).max(outputs[3]);
-    
-    assert!((max_val - 1.0).abs() < 1e-6, "Mixer did not clamp output to 1.0");
-    
+
+    assert!(
+        (max_val - 1.0).abs() < 1e-6,
+        "Mixer did not clamp output to 1.0"
+    );
+
     // All motors should be equal (pure thrust)
     assert!((outputs[0] - outputs[3]).abs() < 1e-6);
 }
@@ -299,7 +316,7 @@ fn test_saturation_preserves_ratio() {
     // Command: High Thrust + High Roll
     // Both inputs are large enough to saturate the mixer individually.
     let input = MixerInput {
-        thrust: 1000.0, 
+        thrust: 1000.0,
         torques: Vector::from_array([500.0, 0.0, 0.0]),
     };
 
@@ -312,6 +329,9 @@ fn test_saturation_preserves_ratio() {
     // Check that we still have differential thrust (Roll is active)
     let right_motors_avg = (outputs[0] + outputs[1]) / 2.0;
     let left_motors_avg = (outputs[2] + outputs[3]) / 2.0;
-    
-    assert!(left_motors_avg > right_motors_avg, "Differential thrust lost during saturation");
+
+    assert!(
+        left_motors_avg > right_motors_avg,
+        "Differential thrust lost during saturation"
+    );
 }

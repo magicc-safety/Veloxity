@@ -37,8 +37,8 @@
 /*
 Unit tests
 */
-use crate::state_machine::{StateManager, StateMachine, Event, ErrorFlag};
-use crate::params2::{ParamValue, Params, ParamId};
+use crate::params2::{ParamId, ParamValue, Params};
+use crate::state_machine::{ErrorFlag, Event, StateMachine, StateManager};
 
 fn setup_sm() -> (StateMachine, Params) {
     let params = Params::new();
@@ -120,15 +120,15 @@ fn test_set_and_clear_all_errors() {
         assert!(sm.is_armed() == false);
         assert!(sm.is_in_failsafe() == false);
         assert!(sm.get_errors() == ErrorFlag::empty());
-    };
+    }
 }
 
 #[test]
 fn test_set_and_clear_multiple_errors() {
     let (mut sm, params) = setup_sm();
-    let error =  ErrorFlag::IMU_NOT_RESPONDING |
-                            ErrorFlag::UNHEALTHY_ESTIMATOR |
-                            ErrorFlag::TIME_GOING_BACKWARDS;
+    let error = ErrorFlag::IMU_NOT_RESPONDING
+        | ErrorFlag::UNHEALTHY_ESTIMATOR
+        | ErrorFlag::TIME_GOING_BACKWARDS;
     sm.update(Event::ERROR_OCCURRED(error), &params);
     assert!(sm.is_armed() == false);
     assert!(sm.is_in_failsafe() == false);
@@ -145,9 +145,9 @@ fn test_set_and_clear_multiple_errors() {
 #[test]
 fn test_add_error_after_previous_error() {
     let (mut sm, params) = setup_sm();
-    let error =  ErrorFlag::IMU_NOT_RESPONDING |
-                            ErrorFlag::UNHEALTHY_ESTIMATOR |
-                            ErrorFlag::TIME_GOING_BACKWARDS;
+    let error = ErrorFlag::IMU_NOT_RESPONDING
+        | ErrorFlag::UNHEALTHY_ESTIMATOR
+        | ErrorFlag::TIME_GOING_BACKWARDS;
     sm.update(Event::ERROR_OCCURRED(error), &params);
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER), &params);
     assert!(sm.is_armed() == false);
@@ -160,11 +160,14 @@ fn test_add_error_after_previous_error() {
 #[test]
 fn test_clear_one_of_many_errors() {
     let (mut sm, params) = setup_sm();
-    let error =  ErrorFlag::IMU_NOT_RESPONDING |
-                            ErrorFlag::UNHEALTHY_ESTIMATOR |
-                            ErrorFlag::TIME_GOING_BACKWARDS;
+    let error = ErrorFlag::IMU_NOT_RESPONDING
+        | ErrorFlag::UNHEALTHY_ESTIMATOR
+        | ErrorFlag::TIME_GOING_BACKWARDS;
     sm.update(Event::ERROR_OCCURRED(error), &params);
-    sm.update(Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS), &params);
+    sm.update(
+        Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS),
+        &params,
+    );
     assert!(sm.is_armed() == false);
     assert!(sm.is_in_failsafe() == false);
     let remaining_errors = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::UNHEALTHY_ESTIMATOR;
@@ -198,7 +201,9 @@ fn test_arm_if_no_error() {
 #[test]
 fn test_clear_multiple_errors_at_once() {
     let (mut sm, params) = setup_sm();
-    let errors = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::TIME_GOING_BACKWARDS | ErrorFlag::UNCALIBRATED_IMU;
+    let errors = ErrorFlag::IMU_NOT_RESPONDING
+        | ErrorFlag::TIME_GOING_BACKWARDS
+        | ErrorFlag::UNCALIBRATED_IMU;
     sm.update(Event::ERROR_OCCURRED(errors), &params);
     assert_state!(sm, StateMachine::ErrorPresent);
 
@@ -214,7 +219,9 @@ fn test_clear_multiple_errors_at_once() {
 #[test]
 fn test_clear_all_errors() {
     let (mut sm, params) = setup_sm();
-    let errors = ErrorFlag::IMU_NOT_RESPONDING | ErrorFlag::TIME_GOING_BACKWARDS | ErrorFlag::UNCALIBRATED_IMU;
+    let errors = ErrorFlag::IMU_NOT_RESPONDING
+        | ErrorFlag::TIME_GOING_BACKWARDS
+        | ErrorFlag::UNCALIBRATED_IMU;
     sm.update(Event::ERROR_OCCURRED(errors), &params);
     sm.update(Event::ERROR_CLEARED(errors), &params);
 
@@ -255,7 +262,10 @@ fn test_arm_and_disarm() {
 fn test_wait_for_calibration_to_arm() {
     let (mut sm, mut params) = setup_sm();
     //params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
-    params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool((true)));
+    params.set_by_id(
+        ParamId::PARAM_CALIBRATE_GYRO_ON_ARM,
+        ParamValue::Bool((true)),
+    );
     sm.update(Event::REQUEST_ARM, &params);
     assert!(!sm.is_armed());
     assert!(!sm.is_in_failsafe());
@@ -320,7 +330,6 @@ fn test_clear_error_stay_disarmed() {
     // params.set_calibrate_gyro_on_arm(ParamValue::Bool(true));
     params.set_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM, ParamValue::Bool(true));
 
-
     sm.update(Event::REQUEST_ARM, &params);
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER), &params);
     assert!(!sm.is_armed());
@@ -359,7 +368,10 @@ fn test_set_errors_while_armed() {
     sm.update(Event::REQUEST_ARM, &params);
     assert!(sm.is_armed());
 
-    sm.update(Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS), &params);
+    sm.update(
+        Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS),
+        &params,
+    );
 
     assert!(sm.is_armed());
     assert!(!sm.is_in_failsafe());
@@ -371,7 +383,10 @@ fn test_set_errors_while_armed() {
 fn test_errors_persist_when_disarmed() {
     let (mut sm, params) = setup_sm();
     sm.update(Event::REQUEST_ARM, &params);
-    sm.update(Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS), &params);
+    sm.update(
+        Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS),
+        &params,
+    );
     sm.update(Event::REQUEST_DISARM, &params);
 
     assert!(!sm.is_armed());
@@ -384,7 +399,10 @@ fn test_errors_persist_when_disarmed() {
 fn test_unable_to_arm_with_persistent_errors() {
     let (mut sm, params) = setup_sm();
     sm.update(Event::REQUEST_ARM, &params);
-    sm.update(Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS), &params);
+    sm.update(
+        Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS),
+        &params,
+    );
     sm.update(Event::REQUEST_DISARM, &params);
 
     sm.update(Event::REQUEST_ARM, &params);
@@ -505,15 +523,15 @@ fn test_manager_controller_arm_and_disarm() {
 #[test]
 fn test_step_failsafe_recovery() {
     let (mut state_manager, params) = setup_state_manager();
-    
+
     let script = [
         (10, Event::REQUEST_ARM),
         (50, Event::ERROR_OCCURRED(ErrorFlag::RC_LOST)), // Failsafe should trigger
         (100, Event::ERROR_CLEARED(ErrorFlag::RC_LOST)), // RC signal recovered
     ];
-    
+
     let mut script_iter = script.iter().peekable();
-    
+
     // The main simulation loop
     for tick in 0..150 {
         state_manager.run(&params);
@@ -542,17 +560,17 @@ fn test_step_failsafe_recovery() {
 #[test]
 fn test_step_errors_during_failsafe_persist() {
     let (mut state_manager, params) = setup_state_manager();
-    
+
     let script = [
         (10, Event::REQUEST_ARM),
         (25, Event::ERROR_OCCURRED(ErrorFlag::RC_LOST)), // Failsafe should trigger
         (50, Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR)), // another error triggers
-        (75, Event::ERROR_CLEARED(ErrorFlag::RC_LOST)), // RC signal recovered
-        (100, Event::REQUEST_DISARM), // Should transition to error state
+        (75, Event::ERROR_CLEARED(ErrorFlag::RC_LOST)),  // RC signal recovered
+        (100, Event::REQUEST_DISARM),                    // Should transition to error state
     ];
-    
+
     let mut script_iter = script.iter().peekable();
-    
+
     // The main simulation loop
     for tick in 0..150 {
         state_manager.run(&params);
@@ -578,7 +596,9 @@ fn test_step_errors_during_failsafe_persist() {
         if tick == 51 {
             assert!(state_manager.is_armed());
             assert!(state_manager.is_in_failsafe());
-            assert!(state_manager.get_errors() == ErrorFlag::RC_LOST | ErrorFlag::UNHEALTHY_ESTIMATOR);
+            assert!(
+                state_manager.get_errors() == ErrorFlag::RC_LOST | ErrorFlag::UNHEALTHY_ESTIMATOR
+            );
         }
         // RC found
         if tick == 76 {

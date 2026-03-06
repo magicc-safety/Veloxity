@@ -41,9 +41,9 @@ use rustflight_core::packets;
 use rustflight_core::packets::BaroPacket;
 use rustflight_core::sensorprocessors;
 
+use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
 use stm_32::embassy_stm32::lptim::timer::Timer;
-use embassy_time::{Delay};
 use stm_32::peripherals;
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 use stm_32::*;
@@ -123,10 +123,10 @@ impl BoardTrait for Board {
         // Debug statements to check receiving sensor data
         if let Some(imu_packet) = sensors.0 {
             self.set_test_pin_1(true);
-            delay.delay_us(1u32);  
+            delay.delay_us(1u32);
             self.set_test_pin_1(false);
             // match imu_packet {
-                
+
             //     Ok(data) => defmt::info!(
             //         "IMU data: accel {:?} | gyro {:?} | temp {:?}",
             //         data.accel,
@@ -138,72 +138,72 @@ impl BoardTrait for Board {
             // // defmt::info!("Sensor IMU data received!");
         }
         //if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
-            // match gnss_packet {
-            //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
-            //     Err(e) => defmt::error!("Error reading GPS data"),
-            // }
-            // // defmt::info!("GPS data received!");
+        // match gnss_packet {
+        //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
+        //     Err(e) => defmt::error!("Error reading GPS data"),
+        // }
+        // // defmt::info!("GPS data received!");
         //}
         //if let Some(mag_packet) = sensors.1.0 {
-            // match mag_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Mag data: flux {:?} | temperature {:?}",
-            //         data.flux,
-            //         data.temperature
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Mag data"),
-            // }
-            // // defmt::info!("Sensor Magnetometer data received!");
+        // match mag_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Mag data: flux {:?} | temperature {:?}",
+        //         data.flux,
+        //         data.temperature
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Mag data"),
+        // }
+        // // defmt::info!("Sensor Magnetometer data received!");
         //}
         //if let Some(baro_packet) = sensors.1.1.0 {
-            // match baro_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Baro data: pressure {:?} | temperature {:?}",
-            //         data.pressure,
-            //         data.temperature
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Barometer data"),
-            // }
-            // // defmt::info!("Sensor Baro data received!");
+        // match baro_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Baro data: pressure {:?} | temperature {:?}",
+        //         data.pressure,
+        //         data.temperature
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Barometer data"),
+        // }
+        // // defmt::info!("Sensor Baro data received!");
         //}
         //if let Some(pitot_packet) = sensors.1.1.1.0 {
-            // match pitot_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Pitot data: diff_pressure {:?}",
-            //         data.differential_pressure,
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Pitot data"),
-            // }
-            // // defmt::info!("Sensor Pitot data received!");
+        // match pitot_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Pitot data: diff_pressure {:?}",
+        //         data.differential_pressure,
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Pitot data"),
+        // }
+        // // defmt::info!("Sensor Pitot data received!");
         //}
         //if let Some(range_packet) = sensors.1.1.1.1.0 {
-            // match pitot_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Pitot data: diff_pressure {:?}",
-            //         data.differential_pressure,
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Pitot data"),
-            // }
-            //defmt::info!("Sensor Range data received!");
+        // match pitot_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Pitot data: diff_pressure {:?}",
+        //         data.differential_pressure,
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Pitot data"),
+        // }
+        //defmt::info!("Sensor Range data received!");
         //}
         //if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
-            // match rc_packet_result {
-            //     Ok(data) => {
-            //         // This confirms the SBUS driver is working
-            //         // defmt::info!(
-            //         //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
-            //         //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
-            //         // );
-            //         // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
-            //         // defmt::info!(
-            //         //     "BOARD: RC Packet Received! Channels {}",
-            //         //     data.chan[..data.n_chan as usize]
-            //         // );
-            //     },
-            //     Err(_) => {
-            //         defmt::error!("BOARD: Error reading RC data");
-            //     }
-            // }
+        // match rc_packet_result {
+        //     Ok(data) => {
+        //         // This confirms the SBUS driver is working
+        //         // defmt::info!(
+        //         //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
+        //         //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
+        //         // );
+        //         // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
+        //         // defmt::info!(
+        //         //     "BOARD: RC Packet Received! Channels {}",
+        //         //     data.chan[..data.n_chan as usize]
+        //         // );
+        //     },
+        //     Err(_) => {
+        //         defmt::error!("BOARD: Error reading RC data");
+        //     }
+        // }
         //}
     }
 
@@ -211,13 +211,13 @@ impl BoardTrait for Board {
         match peripherals::telem::TELEM_RX.try_read(buf) {
             Ok(n) => {
                 // defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
-                return Some(Ok(n))
-            },
+                return Some(Ok(n));
+            }
             Err(embassy_sync::pipe::TryReadError::Empty) => {
                 // This is NORMAL. Do not log an error.
                 // Return Ok(0) to indicate "no bytes right now" without erroring.
-                return Some(Ok(0)); 
-            },
+                return Some(Ok(0));
+            }
             Err(error) => {
                 // defmt::info!("Error reading from Serial: {}", error);
                 return Some(Err(errors::TelemError::GenericTelemError(
@@ -225,7 +225,7 @@ impl BoardTrait for Board {
                 )));
             }
         }
-    }   
+    }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         let mut n = 0;
         //let len = byte_count;
@@ -537,7 +537,7 @@ impl Board {
         // P2 Priority Task for Gyros
         interrupt::SAI2.set_priority(Priority::P2);
         let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
-        
+
         // P2 VCP Task (Telemetry alternate)
         spawner2.spawn(peripherals::vcp::task(vcp)).unwrap();
         spawner2.spawn(peripherals::telem::task_rx(telem3_rx));
@@ -559,7 +559,9 @@ impl Board {
             .unwrap();
         spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
-        spawner3.spawn(peripherals::llv3hp::task(llv3hp_sensor)).unwrap();
+        spawner3
+            .spawn(peripherals::llv3hp::task(llv3hp_sensor))
+            .unwrap();
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);
@@ -609,7 +611,7 @@ impl Board {
             Some(tim2_ch1_pin),
             None,
             None,
-            None,           // Some(ch9_pin),
+            None, // Some(ch9_pin),
             Hertz::hz(400),
             Default::default(),
         );
@@ -647,6 +649,14 @@ impl Board {
             Output::new(p.PG14, Level::Low, Speed::Low),
             // Output::new(p.PG0, Level::Low, Speed::Low), // unknown
         ];
-        (Board { probe, start_time, test_pin_1, test_pin_2 }, servos)
+        (
+            Board {
+                probe,
+                start_time,
+                test_pin_1,
+                test_pin_2,
+            },
+            servos,
+        )
     }
 }

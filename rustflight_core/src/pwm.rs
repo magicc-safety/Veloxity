@@ -39,7 +39,7 @@ use crate::board::BoardTrait;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PwmError {
     ChannelOutOfRange,
-    GenericError
+    GenericError,
 }
 
 pub trait PwmDriver {

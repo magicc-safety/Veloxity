@@ -34,15 +34,14 @@
 // *
 // ******************************************************************************
 // **/
-
-use embassy_stm32::usb::{Driver, Instance};
-use embassy_stm32::peripherals::USB_OTG_FS;
 use embassy_futures::join::join;
-use embassy_futures::select::{select, Either};
-use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-use embassy_usb::Builder;
+use embassy_futures::select::{Either, select};
+use embassy_stm32::peripherals::USB_OTG_FS;
+use embassy_stm32::usb::{Driver, Instance};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
+use embassy_usb::Builder;
+use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use rustflight_core::comm_manager::comm_link_trait::EmbeddedComInterface;
 use rustflight_core::errors::SensorError;
 // use defmt;
@@ -67,8 +66,7 @@ pub struct Vcp<ECI: EmbeddedComInterface> {
 }
 
 impl<ECI: EmbeddedComInterface> Vcp<ECI> {
-
-    pub async fn run(mut self){
+    pub async fn run(mut self) {
         // Adapted from Embassy STM32H7 examples
 
         let driver = self.driver;

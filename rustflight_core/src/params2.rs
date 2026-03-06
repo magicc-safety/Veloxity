@@ -136,7 +136,6 @@ macro_rules! declare_params {
     };
 }
 
-
 //=================================================================================
 // 3. Parameter Definitions
 //=================================================================================
@@ -420,7 +419,6 @@ impl ParamIter {
     }
 }
 
-
 //=================================================================================
 // 5. Unit Tests
 //=================================================================================
@@ -439,10 +437,22 @@ mod tests {
     #[test]
     fn test_new_and_defaults() {
         let p = Params::new();
-        assert_eq!(p.get_by_id(ParamId::PARAM_BAUD_RATE), ParamValue::Int(921600));
-        assert_eq!(p.get_by_id(ParamId::PARAM_PID_ROLL_RATE_P), ParamValue::Float(0.070));
-        assert_eq!(p.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED), ParamValue::Bool(true));
-        assert_eq!(p.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM), ParamValue::Bool(false));
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_BAUD_RATE),
+            ParamValue::Int(921600)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_PID_ROLL_RATE_P),
+            ParamValue::Float(0.070)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED),
+            ParamValue::Bool(true)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM),
+            ParamValue::Bool(false)
+        );
     }
 
     #[test]
@@ -451,7 +461,10 @@ mod tests {
         p.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
         assert_eq!(p.get_by_id(ParamId::PARAM_SYSTEM_ID), ParamValue::Int(42));
         p.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Bool(true));
-        assert_eq!(p.get_by_id(ParamId::PARAM_FIXED_WING), ParamValue::Bool(true));
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_FIXED_WING),
+            ParamValue::Bool(true)
+        );
     }
 
     #[test]

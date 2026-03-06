@@ -34,76 +34,94 @@
 // *
 // ******************************************************************************
 // **/
-
-use std::error::Error;
-use std::fs::File;
 use csv::{ReaderBuilder, WriterBuilder};
 use serde::{Deserialize, Serialize};
+use std::error::Error;
+use std::fs::File;
 
 // Import the necessary items from your actual library crate
 use rustflight_core::{
     estimator::Estimator,
-    estimator::quad_estimator::QuadEstimator,
     estimator::quad_estimator::AttitudeState,
+    estimator::quad_estimator::QuadEstimator,
+    hlist::{HCons, HNil},
+    // You'll also need to make your Quaternion and Vector structs public
+    // and import them, e.g., from `rustflight_core::algebra::...`
+    hlist_type,
     packets::ImuPacket,
     packets::MagPacket,
     params2::Params,
-    hlist_type,
-    hlist::{
-        HCons, HNil
-    },
-    // You'll also need to make your Quaternion and Vector structs public
-    // and import them, e.g., from `rustflight_core::algebra::...`
 };
 
-type Inputs = hlist_type![
-    Option<ImuPacket>,
-    Option<MagPacket>
-];
+type Inputs = hlist_type![Option<ImuPacket>, Option<MagPacket>];
 
-use micro_algebra::stack::{
-    quaternion::Quaternion,
-    vector::Vector,
-};
+use micro_algebra::stack::{quaternion::Quaternion, vector::Vector};
 
 // Struct to deserialize a row from the input CSV (with truth values)
 #[derive(Debug, Deserialize)]
 struct ImuRecord {
     time: f64,
-    accel_x: f64, accel_y: f64, accel_z: f64,
-    gyro_x: f64, gyro_y: f64, gyro_z: f64,
-    true_quat_w: f64, true_quat_x: f64, true_quat_y: f64, true_quat_z: f64,
-    true_bias_x: f64, true_bias_y: f64, true_bias_z: f64,
-    true_omega_x: f64, true_omega_y: f64, true_omega_z: f64,
+    accel_x: f64,
+    accel_y: f64,
+    accel_z: f64,
+    gyro_x: f64,
+    gyro_y: f64,
+    gyro_z: f64,
+    true_quat_w: f64,
+    true_quat_x: f64,
+    true_quat_y: f64,
+    true_quat_z: f64,
+    true_bias_x: f64,
+    true_bias_y: f64,
+    true_bias_z: f64,
+    true_omega_x: f64,
+    true_omega_y: f64,
+    true_omega_z: f64,
 }
 
 // Struct to serialize a row to the output CSV (with truth values passed through)
 #[derive(Debug, Serialize)]
 struct OutputRecord {
     time: f64,
-    est_roll_rad: f64, est_pitch_rad: f64, est_yaw_rad: f64,
-    est_bias_x: f64, est_bias_y: f64, est_bias_z: f64,
-    meas_gyro_x: f64, meas_gyro_y: f64, meas_gyro_z: f64,
-    true_quat_w: f64, true_quat_x: f64, true_quat_y: f64, true_quat_z: f64,
-    true_bias_x: f64, true_bias_y: f64, true_bias_z: f64,
-    true_omega_x: f64, true_omega_y: f64, true_omega_z: f64,
+    est_roll_rad: f64,
+    est_pitch_rad: f64,
+    est_yaw_rad: f64,
+    est_bias_x: f64,
+    est_bias_y: f64,
+    est_bias_z: f64,
+    meas_gyro_x: f64,
+    meas_gyro_y: f64,
+    meas_gyro_z: f64,
+    true_quat_w: f64,
+    true_quat_x: f64,
+    true_quat_y: f64,
+    true_quat_z: f64,
+    true_bias_x: f64,
+    true_bias_y: f64,
+    true_bias_z: f64,
+    true_omega_x: f64,
+    true_omega_y: f64,
+    true_omega_z: f64,
 }
 
 #[test]
 fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
     // --- Setup ---
     let mut estimator = QuadEstimator::default();
-    let params = Params::new();  // Create default parameters for test
+    let params = Params::new(); // Create default parameters for test
 
     // Cargo runs tests from the project root, so paths are relative to that.
     let input_path = "tests/estimator/imu_sensor_data.csv";
     let output_path = "tests/estimator/rust_estimator_results.csv";
-    
+
     let file = File::open(input_path)?;
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);
     let mut wtr = WriterBuilder::new().from_path(output_path)?;
 
-    println!("\nReading from '{}' and writing to '{}'...", input_path, output_path);
+    println!(
+        "\nReading from '{}' and writing to '{}'...",
+        input_path, output_path
+    );
 
     // --- Processing Loop ---
     for result in rdr.deserialize() {
@@ -115,7 +133,7 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
             // Add any other fields your ImuPacket needs, e.g., a header.
             ..ImuPacket::default()
         };
-        
+
         // We call the estimator's method directly.
         let inputs = HCons(Some(imu_packet), HCons(None, HNil));
 
@@ -134,15 +152,19 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
             meas_gyro_x: record.gyro_x,
             meas_gyro_y: record.gyro_y,
             meas_gyro_z: record.gyro_z,
-            true_quat_w: record.true_quat_w, true_quat_x: record.true_quat_x,
-            true_quat_y: record.true_quat_y, true_quat_z: record.true_quat_z,
-            true_bias_x: record.true_bias_x, true_bias_y: record.true_bias_y,
+            true_quat_w: record.true_quat_w,
+            true_quat_x: record.true_quat_x,
+            true_quat_y: record.true_quat_y,
+            true_quat_z: record.true_quat_z,
+            true_bias_x: record.true_bias_x,
+            true_bias_y: record.true_bias_y,
             true_bias_z: record.true_bias_z,
-            true_omega_x: record.true_omega_x, true_omega_y: record.true_omega_y,
+            true_omega_x: record.true_omega_x,
+            true_omega_y: record.true_omega_y,
             true_omega_z: record.true_omega_z,
         })?;
     }
-    
+
     wtr.flush()?;
     println!("Processing complete.");
 

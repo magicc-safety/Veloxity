@@ -32,13 +32,13 @@
 // * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // *
 // ******************************************************************************
-use core::fmt;
 use core::cell::RefCell;
+use core::fmt;
 
 // WARNING: Critical Section forces interrupts to wait while processing
 use critical_section::Mutex;
 
-use crate::comm_messages::enums::Severity; 
+use crate::comm_messages::enums::Severity;
 
 // --- Configuration ---
 const LOG_QUEUE_SIZE: usize = 16;
@@ -55,7 +55,10 @@ pub struct LogString {
 
 impl LogString {
     pub const fn new() -> Self {
-        Self { buffer: [0; MAX_LOG_LEN], len: 0 }
+        Self {
+            buffer: [0; MAX_LOG_LEN],
+            len: 0,
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -69,11 +72,11 @@ impl fmt::Write for LogString {
         let bytes = s.as_bytes();
         let remaining = MAX_LOG_LEN - self.len;
         let copy_len = bytes.len().min(remaining);
-        
+
         // Copy data
         self.buffer[self.len..self.len + copy_len].copy_from_slice(&bytes[..copy_len]);
         self.len += copy_len;
-        
+
         if bytes.len() > remaining {
             return Err(fmt::Error); // Indicate truncation
         }
@@ -90,10 +93,13 @@ pub struct LogEntry {
 
 impl LogEntry {
     pub const fn empty() -> Self {
-        Self { 
+        Self {
             // FIXED: Updated to match your comm_messages.rs definition
-            severity: Severity::Info, 
-            message: LogString { buffer: [0; MAX_LOG_LEN], len: 0 } 
+            severity: Severity::Info,
+            message: LogString {
+                buffer: [0; MAX_LOG_LEN],
+                len: 0,
+            },
         }
     }
 }
@@ -119,12 +125,12 @@ impl LogQueue {
     fn push(&mut self, entry: LogEntry) {
         self.storage[self.head] = entry;
         self.head = (self.head + 1) % LOG_QUEUE_SIZE;
-        
+
         if self.full {
             // If full, head bumped into tail, so move tail (overwrite oldest)
             self.tail = (self.tail + 1) % LOG_QUEUE_SIZE;
         }
-        
+
         self.full = self.head == self.tail;
     }
 
@@ -152,37 +158,43 @@ impl Logger {
     pub fn log(severity: Severity, args: fmt::Arguments) {
         critical_section::with(|cs| {
             let mut queue = LOG_QUEUE.borrow_ref_mut(cs);
-            
+
             let mut entry = LogEntry::empty();
             entry.severity = severity;
-            
+
             // Write the formatted string into our buffer
             // We ignore errors (truncation) to ensure we always log something
             let _ = fmt::Write::write_fmt(&mut entry.message, args);
-            
+
             queue.push(entry);
         });
     }
 
     // FIXED: Updated variants to match comm_messages.rs
-    pub fn info(args: fmt::Arguments) { Self::log(Severity::Info, args); }
-    pub fn warn(args: fmt::Arguments) { Self::log(Severity::Warning, args); }
-    pub fn error(args: fmt::Arguments) { Self::log(Severity::Error, args); }
-    pub fn debug(args: fmt::Arguments) { Self::log(Severity::Debug, args); }
+    pub fn info(args: fmt::Arguments) {
+        Self::log(Severity::Info, args);
+    }
+    pub fn warn(args: fmt::Arguments) {
+        Self::log(Severity::Warning, args);
+    }
+    pub fn error(args: fmt::Arguments) {
+        Self::log(Severity::Error, args);
+    }
+    pub fn debug(args: fmt::Arguments) {
+        Self::log(Severity::Debug, args);
+    }
 
     /// Called by Main Loop to drain queue
     pub fn pop() -> Option<LogEntry> {
-        critical_section::with(|cs| {
-            LOG_QUEUE.borrow_ref_mut(cs).pop()
-        })
+        critical_section::with(|cs| LOG_QUEUE.borrow_ref_mut(cs).pop())
     }
 }
 
 // --- Macros ---
 // These allow you to use log_info!("val: {}", x) anywhere in your code.
-// The Macros can generally be used either by placing 
-//  `use crate::log_<info, warn, error, or debug>;` 
-// at the top of the crate, then using `log_<info, warn, error, or debug>!("{}", var);`, 
+// The Macros can generally be used either by placing
+//  `use crate::log_<info, warn, error, or debug>;`
+// at the top of the crate, then using `log_<info, warn, error, or debug>!("{}", var);`,
 // or by using `crate::log_<info, warn, error, or debug>!("{}", var);` directly.
 
 // EXAMPLES:

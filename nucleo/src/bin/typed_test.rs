@@ -82,7 +82,16 @@ fn main() -> ! {
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, mavlink, state_manager, estimator, controller, mixer, config);
+    let mut rosflight = ROSFlight::init(
+        1000,
+        board,
+        mavlink,
+        state_manager,
+        estimator,
+        controller,
+        mixer,
+        config,
+    );
 
     loop {
         // defmt::debug!("One Loop");

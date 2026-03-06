@@ -47,7 +47,6 @@ include!("../../stm_32/stm32h7x3_common.rs");
 
 // we need a way of passing RcPacket from it's ROS definition to a "packet" form that we can process
 
-
 pub struct Board {
     probe: [Output<'static>; 4],
     servos: peripherals::pwm::ServoMonstrosity,
@@ -331,12 +330,12 @@ impl Board {
         let mut config = embassy_stm32::usb::Config::default();
         config.vbus_detection = true;
         let driver = Driver::new_fs(
-            p.USB_OTG_FS, 
-            Irqs, 
-            p.PA12, 
-            p.PA11, 
-            EP_BUF_CELL.init([0u8; 256]), 
-            config
+            p.USB_OTG_FS,
+            Irqs,
+            p.PA12,
+            p.PA11,
+            EP_BUF_CELL.init([0u8; 256]),
+            config,
         );
         let vcp = peripherals::vcp::Vcp {
             driver,
@@ -348,9 +347,7 @@ impl Board {
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
         spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
         // TODO: What priority should VCP be?
-        spawner1
-            .spawn(peripherals::vcp::task(vcp))
-            .unwrap();
+        spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
         //GPS USART7
         let mut uart7config = usart::Config::default();
