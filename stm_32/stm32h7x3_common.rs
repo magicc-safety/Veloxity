@@ -43,7 +43,7 @@ use core::option::Option::Some;
 use embassy_stm32::{Config, rcc};
 
 use cortex_m_rt::entry;
-use defmt::*;
+//use defmt::*;
 
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
@@ -80,7 +80,7 @@ use embassy_time::Duration;
 use embassy_time::Instant;
 use embedded_io_async::BufRead;
 use static_cell::StaticCell;
-use {defmt_rtt as _, panic_probe as _};
+//use {defmt_rtt as _, panic_probe as _};
 
 use embedded_hal_async::spi::SpiDevice as _;
 
@@ -233,7 +233,7 @@ pub fn clock_config(mhz: u32) -> Config {
         } else if (mhz == 64) {
             hsi_prediv = PllPreDiv::DIV32;
         } else {
-            self::panic!("HSI OSC MHz value");
+            //self::panic!("HSI OSC MHz value");
         }
 
         config.rcc.pll1 = Some(Pll {

@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-
 use serde::{Deserialize, Serialize};
 
 // ============ Standard ROS Types ============
@@ -75,7 +74,6 @@ pub struct Quaternion {
     pub w: f64,
 }
 
-
 // ============================ WORKING RosFlight Sensors =================================
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -107,7 +105,7 @@ pub struct Barometer {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GNSS {
     pub header: Header,
-    pub fix_type: u8, 
+    pub fix_type: u8,
     pub num_sat: u8,
     pub lat: f64,
     pub lon: f64,
@@ -120,61 +118,6 @@ pub struct GNSS {
     pub speed_accuracy: f32,
     pub rosflight_timestamp: f64,
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // ============================ BIG WORK IN PROGRESS DONT USE ANYTHING BELOW HERE IT DOESNT WORK =================================
 // ============ ROSflight Messages ============
@@ -252,13 +195,11 @@ pub struct Error {
     pub rearm: bool,
 }
 
-// OutputRaw.msg
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct OutputRaw {
+pub struct PwmOutput {
     pub header: Header,
-    pub values: [f32; 14]
+    pub values: [u16; 14], // Correct type for the simulator!
 }
-
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RCRaw {

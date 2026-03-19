@@ -37,7 +37,7 @@
 // THIS CODE HAS BEEN MADE SAFE BUT SAFETY HAS NOT BEEN TESTED
 //use defmt::trace;
 use embassy_stm32::peripherals::{
-    TIM1, TIM12, TIM13, TIM14, TIM15, TIM16, TIM17, TIM2, TIM3, TIM4, TIM5, TIM8,
+    TIM1, TIM2, TIM3, TIM4, TIM5, TIM8, TIM12, TIM13, TIM14, TIM15, TIM16, TIM17,
 };
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 
@@ -70,8 +70,8 @@ impl ServoMonstrosity {
 }
 
 pub struct PixRacerProServoMonstrosity {
-    pub timers: [TimerEnum; 4],
-    pub chan_list: [(usize, TimerChannel); 8],
+    pub timers: [TimerEnum; 3],
+    pub chan_list: [(usize, TimerChannel); 7],
 }
 
 impl PixRacerProServoMonstrosity {
@@ -94,6 +94,11 @@ impl PixRacerProServoMonstrosity {
     pub fn set_duty_cycle(&mut self, ch: usize, duty: u16) -> Result<(), TimerError> {
         let (ix, chan) = self.chan_list[ch];
         self.timers[ix].set_duty_cycle(chan, duty)
+    }
+
+    pub fn max_duty_cycle(&self, ch: usize) -> u16 {
+        let (ix, _chan) = self.chan_list[ch];
+        self.timers[ix].max_duty_cycle()
     }
 }
 
@@ -449,6 +454,23 @@ impl TimerEnum {
                 }
                 _ => Err(TimerError::ChanNotSupported),
             },
+        }
+    }
+
+    pub fn max_duty_cycle(&self) -> u16 {
+        match self {
+            TimerEnum::TIM1(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM2(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM3(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM4(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM5(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM8(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM12(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM13(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM14(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM15(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM16(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM17(timer) => timer.max_duty_cycle(),
         }
     }
 

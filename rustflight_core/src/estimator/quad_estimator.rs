@@ -35,25 +35,27 @@
 // ******************************************************************************
 // **
 
+use super::AttitudeStateTrait;
+use super::Estimator;
 use crate::hlist::*;
 use crate::hlist_type;
 use crate::packets;
-use super::Estimator;
-use super::AttitudeStateTrait;
+use crate::params2::{ParamId, ParamValue, Params};
 
-use micro_algebra::stack::{
-    quaternion::Quaternion,
-    vector::Vector,
-};
+use micro_algebra::stack::{quaternion::Quaternion, vector::Vector};
 
-const DT: f64 = 1.0/400.0f64;
+// Removed hardcoded DT - now using actual timestamps
+// const DT: f64 = 1.0/400.0f64;
+
+const G: f64 = 9.80665; // Gravity in m/s^2
 
 #[derive(Debug, Clone, Copy)]
 pub struct AttitudeState {
     pub q_hat: Quaternion<f64>,
     pub q_dot: Quaternion<f64>,
+    pub body_rate: Vector<f64, 3>,
     pub b_hat: Vector<f64, 3>,
-    is_healthy: bool,
+    pub is_healthy: bool,
 }
 
 impl AttitudeStateTrait for AttitudeState {
@@ -65,7 +67,7 @@ impl AttitudeStateTrait for AttitudeState {
             self.q_hat.get_z() as f32,
         ]
     }
-    
+
     fn q_dot(&self) -> [f32; 4] {
         [
             self.q_dot.get_w() as f32,
@@ -93,11 +95,30 @@ impl<'a> From<&'a AttitudeState> for Vector<f64, 3> {
 }
 
 pub struct QuadEstimator {
-     k_p: f64,
-     k_i: f64,
-     q_hat: Quaternion<f64>,
-     q_dot: Quaternion<f64>,
-     b_hat: Vector<f64, 3>,
+    k_p: f64,
+    k_i: f64,
+    q_hat: Quaternion<f64>,
+    q_dot: Quaternion<f64>,
+    body_rate: Vector<f64, 3>,
+    b_hat: Vector<f64, 3>,
+    last_imu_time: u64,   // Track last IMU timestamp (microseconds)
+    is_initialized: bool, // Track if we've received first IMU packet
+
+    // Low-pass filter state
+    accel_lpf: Vector<f64, 3>, // Filtered accelerometer
+    gyro_lpf: Vector<f64, 3>,  // Filtered gyroscope
+
+    // LPF parameters (EMA alpha values) - matching C defaults
+    alpha_acc: f64,     // PARAM_ACC_ALPHA = 0.5 in C
+    alpha_gyro_xy: f64, // PARAM_GYRO_XY_ALPHA = 0.3 in C
+    alpha_gyro_z: f64,  // PARAM_GYRO_Z_ALPHA = 0.3 in C
+
+    // Accelerometer gating
+    accel_margin: f64, // PARAM_FILTER_ACCEL_MARGIN = 0.1 in C
+
+    // Adaptive gains during initialization
+    init_time_us: u64,   // PARAM_INIT_TIME = 3000ms = 3,000,000 μs in C
+    first_imu_time: u64, // Track when first IMU arrived
 }
 
 impl QuadEstimator {
@@ -106,8 +127,60 @@ impl QuadEstimator {
             k_p,
             k_i,
             q_hat: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
-            q_dot: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
+            q_dot: Quaternion::from_array([0.0, 0.0, 0.0, 0.0]),
+            body_rate: Vector::from_array([0.0, 0.0, 0.0]),
             b_hat: Vector::from_array([0.0, 0.0, 0.0]),
+            last_imu_time: 0,
+            is_initialized: false,
+
+            // Initialize LPF state - accel starts at gravity pointing down (NED frame)
+            accel_lpf: Vector::from_array([0.0, 0.0, -G]),
+            gyro_lpf: Vector::from_array([0.0, 0.0, 0.0]),
+
+            // LPF parameters matching C defaults
+            alpha_acc: 0.5,
+            alpha_gyro_xy: 0.3,
+            alpha_gyro_z: 0.3,
+
+            // Accelerometer gating - ±10% around 1g
+            accel_margin: 0.1,
+
+            // Adaptive gains - 3 second initialization period
+            init_time_us: 3_000_000,
+            first_imu_time: 0,
+        }
+    }
+
+    /// Update parameters from the parameter server.
+    /// Call this every loop to read fresh parameter values.
+    pub fn update_params(&mut self, params: &Params) {
+        // Read base gains (not the 10× boosted values)
+        if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_FILTER_KP_ACC) {
+            self.k_p = v as f64;
+        }
+        if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_FILTER_KI) {
+            self.k_i = v as f64;
+        }
+
+        // Read LPF alpha values
+        if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_ALPHA) {
+            self.alpha_acc = v as f64;
+        }
+        if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_GYRO_XY_ALPHA) {
+            self.alpha_gyro_xy = v as f64;
+        }
+        if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_GYRO_Z_ALPHA) {
+            self.alpha_gyro_z = v as f64;
+        }
+
+        // Read accelerometer gating margin
+        if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_FILTER_ACCEL_MARGIN) {
+            self.accel_margin = v as f64;
+        }
+
+        // Read initialization time (convert milliseconds to microseconds)
+        if let ParamValue::Int(v) = params.get_by_id(ParamId::PARAM_INIT_TIME) {
+            self.init_time_us = (v as u64) * 1000;
         }
     }
 }
@@ -119,73 +192,149 @@ impl Default for QuadEstimator {
 }
 
 impl Estimator for QuadEstimator {
-    type Inputs = hlist_type![
-        Option<packets::ImuPacket>,
-        Option<packets::MagPacket>
-    ];
+    type Inputs = hlist_type![Option<packets::ImuPacket>, Option<packets::MagPacket>];
 
     type State = AttitudeState;
 
-    fn estimate(&mut self, inputs: &Self::Inputs) -> Self::State {
+    fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State {
+        // Update parameters from parameter server (matches C behavior)
+        self.update_params(params);
+
+        // Sanity check dt (reject if > 0.1s or <= 0)
+        if dt <= 0.0 || dt > 0.1 {
+            return AttitudeState {
+                q_hat: self.q_hat,
+                q_dot: self.q_dot,
+                body_rate: self.body_rate,
+                b_hat: self.b_hat,
+                is_healthy: false,
+            };
+        }
 
         if let Some(imu_packet) = inputs.0 {
-            
-            // normalize accelerometer measurement 
-            let mut v_a = Vector::from_array(imu_packet.accel);
+            // Get current timestamp for initialization tracking
+            let current_time = imu_packet.header.timestamp; // microseconds
 
-            // FIX: Check for zero vector before normalizing
-            if v_a.norm_2() > 1e-9 { // Or some other small epsilon
-                v_a.normalize_fill();
-            } else {
-                // Handle the zero-vector case. Maybe skip this update?
-                // Or return the current state without updating.
-                // For now, let's just skip the update logic.
+            // On first call, just initialize timestamp and skip update
+            if !self.is_initialized {
+                self.first_imu_time = current_time;
+                self.is_initialized = true;
                 return AttitudeState {
                     q_hat: self.q_hat,
                     q_dot: self.q_dot,
+                    body_rate: self.body_rate,
                     b_hat: self.b_hat,
                     is_healthy: true,
                 };
             }
-            
-            // predict gravity in body frame using our latest estimate of q_hat
-            let g_intertial_q = Quaternion::from_array([0.0f64, 0.0f64, 0.0f64, 1.0f64]);
-            let q_conj = self.q_hat.conjugate();
-            let tmp = q_conj * g_intertial_q;
-            let gravity_in_body_q = tmp * self.q_hat;
-            let v_hat = Vector::from_array([gravity_in_body_q.get_x(), gravity_in_body_q.get_y(), gravity_in_body_q.get_z()]);
 
-            // vector error (predicted x measured)
-            let e = v_hat.cross3(&v_a);
+            // Apply low-pass filter to raw measurements (EMA filter)
+            let raw_accel = Vector::from_array(imu_packet.accel);
+            self.accel_lpf[0] =
+                (1.0 - self.alpha_acc) * raw_accel[0] + self.alpha_acc * self.accel_lpf[0];
+            self.accel_lpf[1] =
+                (1.0 - self.alpha_acc) * raw_accel[1] + self.alpha_acc * self.accel_lpf[1];
+            self.accel_lpf[2] =
+                (1.0 - self.alpha_acc) * raw_accel[2] + self.alpha_acc * self.accel_lpf[2];
 
-            // integral (bias) update
-            let b_dot = -self.k_i * e;
-            self.b_hat = self.b_hat + b_dot * DT;
+            let raw_gyro = Vector::from_array(imu_packet.gyro);
+            self.gyro_lpf[0] =
+                (1.0 - self.alpha_gyro_xy) * raw_gyro[0] + self.alpha_gyro_xy * self.gyro_lpf[0];
+            self.gyro_lpf[1] =
+                (1.0 - self.alpha_gyro_xy) * raw_gyro[1] + self.alpha_gyro_xy * self.gyro_lpf[1];
+            self.gyro_lpf[2] =
+                (1.0 - self.alpha_gyro_z) * raw_gyro[2] + self.alpha_gyro_z * self.gyro_lpf[2];
 
-            // corrected angular rate (body frame)
-            // if signs are opposite in your convention, change +self.k_p*e to -self.k_p*e
-            let omega_corr = Vector::from_array(imu_packet.gyro) - self.b_hat + self.k_p * e;
+            // Check if accelerometer magnitude is near 1g (gating)
+            let accel_sqrd_norm = self.accel_lpf[0] * self.accel_lpf[0]
+                + self.accel_lpf[1] * self.accel_lpf[1]
+                + self.accel_lpf[2] * self.accel_lpf[2];
 
-            // quaternion derivative
-            let omega_q = Quaternion::from_array([0.0, omega_corr[0], omega_corr[1], omega_corr[2]]);
+            let margin = self.accel_margin;
+            let lowerbound = (1.0 - margin) * (1.0 - margin) * G * G;
+            let upperbound = (1.0 + margin) * (1.0 + margin) * G * G;
+            let can_use_accel = accel_sqrd_norm > lowerbound && accel_sqrd_norm < upperbound;
+
+            // Calculate adaptive gains (10× during initialization)
+            let time_since_init = current_time - self.first_imu_time;
+            let (kp_base, ki_base) = if time_since_init < self.init_time_us {
+                // First 3 seconds: 10× gains for fast convergence
+                (self.k_p * 10.0, self.k_i * 10.0)
+            } else {
+                // After 3 seconds: normal gains for steady-state
+                (self.k_p, self.k_i)
+            };
+
+            // Compute accelerometer correction (if gating passes)
+            let (kp, e) = if can_use_accel {
+                // Use filtered accelerometer for correction
+                let mut v_a = self.accel_lpf;
+
+                // Check for zero vector before normalizing
+                let accel_norm = v_a.norm_2();
+                if accel_norm > 1e-9 {
+                    v_a.normalize_fill();
+
+                    // Predict gravity in body frame using our latest estimate of q_hat
+                    let g_intertial_q = Quaternion::from_array([0.0, 0.0, 0.0, -1.0]);
+                    let q_conj = self.q_hat.conjugate();
+                    let tmp = q_conj * g_intertial_q;
+                    let gravity_in_body_q = tmp * self.q_hat;
+                    let v_hat = Vector::from_array([
+                        gravity_in_body_q.get_x(),
+                        gravity_in_body_q.get_y(),
+                        gravity_in_body_q.get_z(),
+                    ]);
+
+                    // Vector error (predicted x measured)
+                    let error = v_hat.cross3(&v_a);
+                    (kp_base, error)
+                } else {
+                    // Zero acceleration - skip accel correction
+                    (0.0, Vector::from_array([0.0, 0.0, 0.0]))
+                }
+            } else {
+                // Accel gating failed (high-g maneuver) - skip accel correction, use gyro only
+                (0.0, Vector::from_array([0.0, 0.0, 0.0]))
+            };
+
+            // Bias integration (continues even when accel is gated)
+            let b_dot = -ki_base * e;
+            self.b_hat = self.b_hat + b_dot * dt;
+
+            // Corrected angular rate using filtered gyro
+            let body_rate = self.gyro_lpf - self.b_hat;
+            let omega_corr = body_rate + kp * e;
+
+            // Quaternion derivative
+            let omega_q =
+                Quaternion::from_array([0.0, omega_corr[0], omega_corr[1], omega_corr[2]]);
             self.q_dot = 0.5 * (self.q_hat * omega_q);
 
-            self.q_hat = self.q_hat + self.q_dot * DT;
+            // Quaternion integration
+            self.q_hat = self.q_hat + self.q_dot * dt;
             self.q_hat.normalize_fill();
+
+            // Store the bias-corrected body rate for the controller
+            self.body_rate = body_rate;
         }
 
         let q = self.q_hat;
-        let is_healthy = 
-            !(q.get_w().is_nan() || q.get_w().is_infinite() ||
-              q.get_x().is_nan() || q.get_x().is_infinite() ||
-              q.get_y().is_nan() || q.get_y().is_infinite() ||
-              q.get_z().is_nan() || q.get_z().is_infinite());
+        let is_healthy = !(q.get_w().is_nan()
+            || q.get_w().is_infinite()
+            || q.get_x().is_nan()
+            || q.get_x().is_infinite()
+            || q.get_y().is_nan()
+            || q.get_y().is_infinite()
+            || q.get_z().is_nan()
+            || q.get_z().is_infinite());
 
         AttitudeState {
             q_hat: self.q_hat,
             q_dot: self.q_dot,
+            body_rate: self.body_rate,
             b_hat: self.b_hat,
-            is_healthy: is_healthy
+            is_healthy: is_healthy,
         }
     }
 }

@@ -1,184 +1,238 @@
-
-// /**
-// ******************************************************************************
-// * File     : quad_mixer.rs
-// * Date     : May 8, 2025
-// ******************************************************************************
-// *
-// * Copyright (c) 2023, AeroVironment, Inc.
-// * All rights reserved.
-// *
-// * Redistribution and use in source and binary forms, with or without
-// * modification, are permitted provided that the following conditions are met:
-// *
-// * 1.Redistributions of source code must retain the above copyright notice, this
-// * list of conditions and the following disclaimer.
-// *
-// * 2.Redistributions in binary form must reproduce the above copyright notice,
-// * this list of conditions and the following disclaimer in the documentation
-// * and/or other materials provided with the distribution.
-// *
-// * 3.Neither the name of the copyright holder nor the names of its
-// * contributors may be used to endorse or promote products derived from
-// * this software without specific prior written permission.
-// *
-// * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-// * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-// * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-// * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-// * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-// *
-// ******************************************************************************
-// **
+// // /**
+// // ******************************************************************************
+// // * File     : quad_mixer.rs
+// // * Date     : May 8, 2025
+// // ******************************************************************************
+// // *
+// // * Copyright (c) 2023, AeroVironment, Inc.
+// // * All rights reserved.
+// // *
+// // * Redistribution and use in source and binary forms, with or without
+// // * modification, are permitted provided that the following conditions are met:
+// // *
+// // * 1.Redistributions of source code must retain the above copyright notice, this
+// // * list of conditions and the following disclaimer.
+// // *
+// // * 2.Redistributions in binary form must reproduce the above copyright notice,
+// // * this list of conditions and the following disclaimer in the documentation
+// // * and/or other materials provided with the distribution.
+// // *
+// // * 3.Neither the name of the copyright holder nor the names of its
+// // * contributors may be used to endorse or promote products derived from
+// // * this software without specific prior written permission.
+// // *
+// // * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// // * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// // * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// // * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// // * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// // * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// // * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// // * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// // * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// // * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// // *
+// // ******************************************************************************
+// // **
 
 use crate::controller::quad_controller::MixerInput;
 use crate::mixer::Mixer;
 use crate::params2::{ParamId, ParamValue, Params};
+use crate::state_machine::StateManager;
+use libm::{cos, fabs, sin};
+use micro_algebra::linalg::pinv;
 use micro_algebra::stack::matrix::Matrix;
 use micro_algebra::stack::vector::Vector;
-
 use num_traits::Float;
+
+// In no_std, we can use core::f64::consts or just hardcode constants.
+const FRAC_PI_4: f64 = 0.78539816339744830961; // 45 degrees in radians
 
 #[derive(Debug, Clone, Copy)]
 pub struct MixerParams {
-    // Motor physics parameters
-    resistance: f64,
-    kv: f64,
-    no_load_current: f64,
-    prop_diameter: f64,
-    prop_ct: f64,
-    prop_cq: f64,
-    max_voltage: f64,
-    // Mixer settings
-    num_motors: usize,
-    idle_throttle: f64,
-    spin_when_armed: bool,
+    // Safety / limits
+    pub idle_throttle: f64,
+    pub spin_when_armed: bool,
+    pub num_motors: usize,
 }
 
 pub struct QuadMixer {
-    mixing_matrix: Matrix<f64, 4, 16>,
+    // 4 Inputs (Fz, Tx, Ty, Tz) -> 4 Outputs (Motors)
+    // Matrix Size: 4x4, Flattened: 16
+    allocation_matrix: Matrix<f64, 4, 16>,
     params: MixerParams,
-    use_motor_params: bool,
+    // Stores the calculated max physical authority for each axis (Thrust, Roll, Pitch, Yaw)
+    input_scale: Vector<f64, 4>,
 }
 
 impl QuadMixer {
-    /// Creates a new mixer, configured from the parameter server.
     pub fn new(params: &Params) -> Self {
-        let use_motor_params =
-            if let ParamValue::Bool(val) = params.get_by_id(ParamId::PARAM_USE_MOTOR_PARAMETERS) {
-                val
-            } else {
-                false
-            };
-
-        // This is a simplified version of the C++ init_mixing logic.
-        // For now, we are hard-coding the QuadX mixer. A full implementation
-        // would read `PARAM_PRIMARY_MIXER` and choose the matrix accordingly.
-        let data: [f64; 16] = [
-            // Thrust,  Roll,   Pitch,   Yaw
-            1.0, -1.0, -1.0, -1.0, // Motor 0 (FR, CW)
-            1.0, -1.0, 1.0, 1.0, // Motor 1 (RR, CCW)
-            1.0, 1.0, 1.0, -1.0, // Motor 2 (RL, CW)
-            1.0, 1.0, -1.0, 1.0, // Motor 3 (FL, CCW)
-        ];
-        let mixing_matrix = Matrix::from_array(data);
-
-        // Safely load all required parameters with defaults.
         let mixer_params = MixerParams {
-            resistance: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MOTOR_RESISTANCE) { v as f64 } else { 0.042 },
-            kv: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MOTOR_KV) { v as f64 } else { 0.01706 },
-            no_load_current: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_NO_LOAD_CURRENT) { v as f64 } else { 1.5 },
-            prop_diameter: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_PROP_DIAMETER) { v as f64 } else { 0.381 },
-            prop_ct: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_PROP_CT) { v as f64 } else { 0.075 },
-            prop_cq: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_PROP_CQ) { v as f64 } else { 0.0045 },
-            max_voltage: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_VOLT_MAX) { v as f64 } else { 25.0 },
-            num_motors: if let ParamValue::Int(v) = params.get_by_id(ParamId::PARAM_NUM_MOTORS) { v as usize } else { 4 },
-            idle_throttle: if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE) { v as f64 } else { 0.1 },
-            spin_when_armed: if let ParamValue::Bool(v) = params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) { v } else { true },
+            num_motors: 4,
+            idle_throttle: if let ParamValue::Float(v) =
+                params.get_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE)
+            {
+                v as f64
+            } else {
+                0.1
+            },
+            spin_when_armed: if let ParamValue::Bool(v) =
+                params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED)
+            {
+                v
+            } else {
+                true
+            },
         };
 
+        // degrees: 45, 135, 225, 315 degrees relative to forward x
+        let theta = FRAC_PI_4; // 45 degrees
+        let s = sin(theta); // ~0.707
+        let c = cos(theta); // ~0.707
+
+        // Gemini added a comment here helping describe what this m matrix is doing: hopefully this helps Tyler!
+        // M maps Motor Throttles (delta) -> Body Wrench (u).
+        // u = M * delta
+        //
+        // Derived from ROSflight Eq (8):
+        // Column i = [0, 0, 1, -sin(theta), cos(theta), d_i]^T
+        //
+        // We select the relevant rows for u = [Fz, Tx, Ty, Tz]^T
+        //
+        // Motor Configuration (Standard X):
+        // M0: Front-Right (Theta=45),  CW  (d=-1) -> [-sin(45),  cos(45)]
+        // M1: Rear-Right  (Theta=135), CCW (d=1)  -> [-sin(135), cos(135)] -> [-s, -c]
+        // M2: Rear-Left   (Theta=225), CW  (d=-1) -> [-sin(225), cos(225)] -> [ s, -c]
+        // M3: Front-Left  (Theta=315), CCW (d=1)  -> [-sin(315), cos(315)] -> [ s,  c]
+        //
+        // Note on Yaw (d_i):
+        // CW motors (-1) create CCW reaction torque (Left/Negative).
+        // CCW motors (+1) create CW reaction torque (Right/Positive).
+
+        #[rustfmt::skip]
+        let m_data: [f64; 16] = [
+            // M0 (FR)   M1 (RR)    M2 (RL)    M3 (FL)
+            // ---------------------------------------
+             1.0,       1.0,       1.0,       1.0,     // Fz (Thrust)
+            -s,        -s,         s,         s,       // Tx (Roll)  = -sin(theta)
+             c,        -c,        -c,         c,       // Ty (Pitch) = cos(theta)
+            -1.0,       1.0,      -1.0,       1.0      // Tz (Yaw)   = d_i
+        ];
+
+        let matrix_m = Matrix::<f64, 4, 16>::from_array(m_data);
+
+        // This is my attempt at the (Pseudoinverse). The function has been tested on the other library as of a while ago
+        let allocation_matrix = pinv::<4, 4, 16, 16>(&matrix_m, 1e-12, 100);
+
+        // ====================================================================
+        // DYNAMIC SCALING CALCULATION
+        // ====================================================================
+        // Instead of hardcoding "4.0" or "2.0 * s", we calculate the max authority
+        // directly from the geometry matrix.
+        //
+        // Max Authority = Sum of POSITIVE coefficients in the row.
+        // (i.e., The value we get if we saturate all contributing motors to 1.0
+        // and set opposing motors to 0.0)
+
+        let mut scales = [0.0; 4];
+        for row in 0..4 {
+            let mut max_authority = 0.0;
+            for col in 0..4 {
+                // Access flattened array: row * 4 + col
+                let val = m_data[row * 4 + col];
+                if val > 0.0 {
+                    max_authority += val;
+                }
+            }
+            scales[row] = max_authority;
+        }
+
         Self {
-            mixing_matrix,
+            allocation_matrix,
             params: mixer_params,
-            use_motor_params,
+            input_scale: Vector::<f64, 4>::from_array(scales),
         }
-    }
-
-    /// Private helper for simple matrix multiplication mixing.
-    fn mix_without_motor_params(&self, controls: &MixerInput) -> Vector<f64, 4> {
-        let command_vector = Vector::from_array([
-            controls.thrust,
-            controls.torques[0], // Roll
-            controls.torques[1], // Pitch
-            controls.torques[2], // Yaw
-        ]);
-        self.mixing_matrix.vmul(&command_vector)
-    }
-
-    /// Private helper for physics-based mixing.
-    fn mix_with_motor_params(&self, controls: &MixerInput, rho: f64) -> Vector<f64, 4> {
-        let mut outputs = Vector::<f64, 4>::zeros();
-        let p = self.params;
-
-        // In this mode, the mixer matrix converts desired F/T into required omega^2 for each motor
-        let omega_sq_vector = self.mix_without_motor_params(controls);
-
-        for i in 0..p.num_motors {
-            let omega_sq = if omega_sq_vector[i] < 0.0 { 0.0 } else { omega_sq_vector[i] };
-            let omega = omega_sq.sqrt();
-            
-            let v_in = (rho * p.prop_diameter.powi(5) / (4.0 * core::f64::consts::PI.powi(2)))
-                * omega_sq * p.prop_cq * p.resistance / p.kv
-                + p.resistance * p.no_load_current + p.kv * omega;
-                
-            outputs[i] = v_in / p.max_voltage;
-        }
-        outputs
     }
 }
 
 impl Mixer for QuadMixer {
     type MixerInput = MixerInput;
-    type ActuatorCommands = Vector<f64, 4>; // Output for 4 motors
+    type ActuatorCommands = Vector<f64, 4>;
 
-    fn mix(&mut self, controls: &Self::MixerInput) -> Self::ActuatorCommands {
-        // Decide which mixing algorithm to use based on the parameter.
-        // For now, rho (air density) is hardcoded. A full implementation would get this from sensors.
-        let mut motor_outputs = if self.use_motor_params {
-            self.mix_with_motor_params(controls, 1.225)
-        } else {
-            self.mix_without_motor_params(controls)
-        };
-        
-        // --- Handle Saturation and Clamping (from C++ `mix_output`) ---
+    fn mix(
+        &mut self,
+        controls: &Self::MixerInput,
+        state_manager: &StateManager,
+    ) -> Self::ActuatorCommands {
+        if !state_manager.is_armed() {
+            return Vector::<f64, 4>::zeros();
+        }
+
+        // ====================================================================
+        // SCALING FACTORS (Fix for 1.0 Input != 1.0 Output)
+        // ====================================================================
+        // The mixer matrix expects physical units. Since our inputs are normalized (0..1),
+        // we must scale them by the maximum physical authority of the frame.
+        // We use the scales pre-calculated in `new()` for robustness.
+
+        let input_vector = Vector::<f64, 4>::from_array([
+            controls.thrust * self.input_scale[0],
+            controls.torques[0] * self.input_scale[1], // Tx (Roll)
+            controls.torques[1] * self.input_scale[2], // Ty (Pitch)
+            controls.torques[2] * self.input_scale[3], // Tz (Yaw)
+        ]);
+
+        // this is supposed to take the body wrench and map it back to outputs
+        let mut outputs = self.allocation_matrix.vmul::<4>(&input_vector);
+
+        // ====================================================================
+        // SATURATION HANDLING (Proportional Scaling - matches C++ behavior)
+        // ====================================================================
+        // We use the C++ ROSflight approach: if any motor exceeds 1.0, scale ALL
+        // motors proportionally. This preserves the RATIO between motors while
+        // reducing overall thrust to maintain controllability.
+        //
+        // Reference: rosflight_firmware/src/mixer.cpp:498-508
+
+        // 1. Find the maximum absolute motor output value
         let mut max_output = 1.0;
-        for i in 0..self.params.num_motors {
-            if motor_outputs[i].abs() > max_output {
-                max_output = motor_outputs[i].abs();
+        for i in 0..4 {
+            if outputs[i].abs() > max_output {
+                max_output = outputs[i].abs();
             }
         }
 
-        // If any motor is commanded above 100%, scale all motor commands down.
-        if max_output > 1.0 {
-            for i in 0..self.params.num_motors {
-                motor_outputs[i] /= max_output;
+        // 2. Calculate proportional scale factor
+        // If max_output > 1.0, we need to scale everything down
+        let scale_factor = if max_output > 1.0 {
+            1.0 / max_output
+        } else {
+            1.0
+        };
+
+        // 3. Apply proportional scaling and enforce constraints
+        for i in 0..4 {
+            // Scale all motor outputs proportionally
+            outputs[i] *= scale_factor;
+
+            // After scaling, apply idle throttle constraint if armed
+            if self.params.spin_when_armed {
+                if outputs[i] < self.params.idle_throttle {
+                    outputs[i] = self.params.idle_throttle;
+                }
             }
-        }
-        
-        // Enforce idle throttle and clamp final outputs.
-        // Assumes the vehicle is armed. A full implementation would check the state_manager.
-        for i in 0..self.params.num_motors {
-            if self.params.spin_when_armed && motor_outputs[i] < self.params.idle_throttle {
-                motor_outputs[i] = self.params.idle_throttle;
+
+            // Final safety clamp to [0.0, 1.0]
+            if outputs[i] > 1.0 {
+                outputs[i] = 1.0;
+            } else if outputs[i] < 0.0 {
+                outputs[i] = 0.0;
             }
-            motor_outputs[i] = motor_outputs[i].clamp(0.0, 1.0);
         }
 
-        motor_outputs
+        // // Mixer debug output
+        // crate::log_info!("Motor outputs with params: {:.3?} {:.3?} {:.3?} {:.3?}", outputs[0], outputs[1], outputs[2], outputs[3]);
+
+        outputs
     }
 }

@@ -41,10 +41,10 @@ pub mod rustflight_typed;
 pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {
     // --- Existing Indices ---
     type SculptIndices: crate::hlist::HList; // For estimator
-    
+
     type RcPacketIndex;
     type RcPacketSculptedIndex;
-    
+
     type ImuPacketIndex;
     type MagPacketIndex;
     type BaroPacketIndex;

@@ -35,5 +35,5 @@
 // ******************************************************************************
 // **/
 pub mod board;
-pub mod ros_messages;
 pub mod pwm;
+pub mod ros_messages;

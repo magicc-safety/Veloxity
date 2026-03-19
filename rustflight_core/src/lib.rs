@@ -47,13 +47,13 @@ pub mod hlist;
 pub mod mixer;
 pub mod packets;
 //pub mod params;
+pub mod command_manager;
 pub mod params2;
+pub mod pwm;
+pub mod rc;
 pub mod rustflight;
 pub mod sensorprocessors;
 pub mod state_machine;
-pub mod command_manager;
-pub mod rc;
-pub mod pwm;
 //pub(crate) mod units;
 
 pub use micro_algebra;
@@ -62,3 +62,5 @@ pub use micro_algebra;
 pub mod mavlink {
     include!(concat!(env!("OUT_DIR"), "/mavlink_generated/mod.rs"));
 }
+
+pub mod logger; // make the logging macros public

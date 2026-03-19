@@ -39,9 +39,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bitflags = "2.6.0"
-#micro_algebra = { git = "ssh://git@github.com/magicc-safety/micro_algebra.git", branch = "main" }
-micro_algebra = { version = "0.1.0", path = "../../micro_algebra" }
+# bitflags = "2.6.0"
+bitflags = { version = "2.6.0", default-features = false}
+micro_algebra = { git = "ssh://git@github.com/magicc-safety/micro_algebra.git", branch = "main" }
+#micro_algebra = { version = "0.1.0", path = "../../micro_algebra" }
 
 # For .sqrt(), .powf() and .powi() traits for f64s
 num-traits = { version = "0.2", default-features = false, features = ["libm"] }
@@ -54,7 +55,10 @@ mavio = { version = "0.5.5", default-features = false, features = [
 mavspec = { version = "0.6.4", default-features = false, features = ["rust"] }
 
 # for debugging stm32 devices:
-defmt = { version = "0.3" }
+# defmt = { version = "0.3" }
+
+# For safe logging mutex:
+critical-section = { version = "1.2.0" }
 
 # for testing the estimator
 [dev-dependencies]

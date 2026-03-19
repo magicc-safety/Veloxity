@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-
 use crate::ros_messages;
 use rustflight_core::board::BoardTrait;
 use rustflight_core::comm_manager;
@@ -44,20 +43,20 @@ use rustflight_core::packets::{self, RC_PACKET_CHANNELS};
 use rustflight_core::sensorprocessors;
 
 use cdr::{CdrLe, Infinite};
+use chrono::{Datelike, TimeZone, Timelike, Utc};
 use tokio::io::Empty;
-use tokio::sync::mpsc;
-use tokio::net::UdpSocket;
 use tokio::io::ErrorKind;
+use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 use zenoh::Config;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::handlers::FifoChannelHandler;
+use zenoh::handlers::RingChannel;
 use zenoh::handlers::RingChannelHandler;
 use zenoh::pubsub::{Publisher, Subscriber};
 use zenoh::sample::Sample;
 use zenoh::session::Session;
-use zenoh::handlers::RingChannel;
-use chrono::{Datelike, Timelike, Utc, TimeZone};
 
 impl From<ros_messages::RCRaw> for packets::RcPacket {
     fn from(msg: ros_messages::RCRaw) -> Self {
@@ -65,20 +64,21 @@ impl From<ros_messages::RCRaw> for packets::RcPacket {
 
         // Now iterate over the fixed-size array `msg.values`
         for (i, &value) in msg.values.iter().enumerate() {
-                // Ensure we don't write past the end of the `channels` buffer
-                if i < RC_PACKET_CHANNELS {
-                    // FIX: Normalize 1000-2000us to 0.0-1.0
-                    let normalized = (value as f32 - 1000.0) / 1000.0;
-                    channels[i] = normalized.clamp(0.0, 1.0);
-                } else {
-                     break;
-                }
+            // Ensure we don't write past the end of the `channels` buffer
+            if i < RC_PACKET_CHANNELS {
+                // FIX: Normalize 1000-2000us to 0.0-1.0
+                let normalized = (value as f32 - 1000.0) / 1000.0;
+                channels[i] = normalized.clamp(0.0, 1.0);
+            } else {
+                break;
             }
+        }
 
         // --- Rest of the implementation remains the same ---
         Self {
             header: packets::RosflightPacketHeader {
-                timestamp: (msg.header.stamp.sec as u64 * 1_000_000) + (msg.header.stamp.nanosec as u64 / 1000),
+                timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
+                    + (msg.header.stamp.nanosec as u64 / 1000),
                 status: 0x00,
             },
             // Use the fixed size from the array
@@ -93,29 +93,50 @@ impl From<ros_messages::MagneticField> for packets::MagPacket {
     fn from(msg: ros_messages::MagneticField) -> Self {
         Self {
             header: packets::RosflightPacketHeader {
-                // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
                     + (msg.header.stamp.nanosec as u64 / 1000),
-
-                // The status field is not present in the ROS MagneticField message, so we default to 0.
                 status: 0,
             },
 
-            // Map the magnetic_field vector (f64) to the flux array (f32).
-            // 'magnetic_field' (Tesla) and 'flux' (magnetic flux density, Tesla)
-            // represent the same physical quantity here.
+            // FIX: Convert ENU (ROS) to NED (RustFlight)
             flux: [
                 msg.magnetic_field.x as f32,
-                msg.magnetic_field.y as f32,
-                msg.magnetic_field.z as f32,
+                -msg.magnetic_field.y as f32, // <--- Invert Y
+                -msg.magnetic_field.z as f32, // <--- Invert Z
             ],
 
-            // NOTE: The standard ROS sensor_msgs/MagneticField does not contain a temperature field.
-            // We are setting a default value (e.g., 25.0 C), just like in the ImuPacket.
             temperature: 25.0,
         }
     }
 }
+
+// impl From<ros_messages::MagneticField> for packets::MagPacket {
+//     fn from(msg: ros_messages::MagneticField) -> Self {
+//         Self {
+//             header: packets::RosflightPacketHeader {
+//                 // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
+//                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
+//                     + (msg.header.stamp.nanosec as u64 / 1000),
+
+//                 // The status field is not present in the ROS MagneticField message, so we default to 0.
+//                 status: 0,
+//             },
+
+//             // Map the magnetic_field vector (f64) to the flux array (f32).
+//             // 'magnetic_field' (Tesla) and 'flux' (magnetic flux density, Tesla)
+//             // represent the same physical quantity here.
+//             flux: [
+//                 msg.magnetic_field.x as f32,
+//                 msg.magnetic_field.y as f32,
+//                 msg.magnetic_field.z as f32,
+//             ],
+
+//             // NOTE: The standard ROS sensor_msgs/MagneticField does not contain a temperature field.
+//             // We are setting a default value (e.g., 25.0 C), just like in the ImuPacket.
+//             temperature: 25.0,
+//         }
+//     }
+// }
 
 impl From<ros_messages::Barometer> for packets::BaroPacket {
     fn from(msg: ros_messages::Barometer) -> Self {
@@ -149,7 +170,8 @@ impl From<ros_messages::GNSS> for packets::GNSSPacket {
         // The ROS message header.stamp (sec, nanosec) is a UTC timestamp.
         // We convert it to a DateTime object to extract year, month, day, etc.
         // FIX: Use .latest() to resolve the LocalResult to an Option, then unwrap_or_default.
-        let dt = Utc.timestamp_opt(msg.header.stamp.sec as i64, msg.header.stamp.nanosec)
+        let dt = Utc
+            .timestamp_opt(msg.header.stamp.sec as i64, msg.header.stamp.nanosec)
             .latest()
             .unwrap_or_default();
 
@@ -183,10 +205,10 @@ impl From<ros_messages::GNSS> for packets::GNSSPacket {
 
             // --- Extract time from the ROS header.stamp ---
             // Packet comment specifies 0-11
-            month: dt.month0() as u8, 
+            month: dt.month0() as u8,
             year: dt.year() as u16,
             // Packet comment specifies 0-31, dt.day() is 1-31
-            day: dt.day() as u8, 
+            day: dt.day() as u8,
             hour: dt.hour() as u8,
             min: dt.minute() as u8,
             sec: dt.second() as u8,
@@ -195,7 +217,7 @@ impl From<ros_messages::GNSS> for packets::GNSSPacket {
             // Use the provided helper function to convert the fix type
             // Assumes GNSSFixType::from_u8 is available in the packets module
             fix_type: packets::GNSSFixType::from_u8(msg.fix_type),
-            
+
             num_sats: msg.num_sat,
 
             // NOTE: The ROS message does not contain magnetic declination.
@@ -209,47 +231,77 @@ impl From<ros_messages::GNSS> for packets::GNSSPacket {
     }
 }
 
-
 impl From<ros_messages::ImuData> for packets::ImuPacket {
     fn from(msg: ros_messages::ImuData) -> Self {
         Self {
             header: packets::RosflightPacketHeader {
-                // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
                     + (msg.header.stamp.nanosec as u64 / 1000),
-                
-                // The status field is not present in the ROS Imu message, so we default to 0.
                 status: 0,
             },
-            
-            // Map the linear_acceleration vector to the accel array.
+
+            // FIX: Convert ENU (ROS) to NED (RustFlight)
+            // X -> X
+            // Y -> -Y
+            // Z -> -Z
             accel: [
                 msg.linear_acceleration.x,
-                msg.linear_acceleration.y,
-                msg.linear_acceleration.z,
+                -msg.linear_acceleration.y, // <--- Invert Y
+                -msg.linear_acceleration.z, // <--- Invert Z
             ],
-            
-            // Map the angular_velocity vector to the gyro array.
+
             gyro: [
                 msg.angular_velocity.x,
-                msg.angular_velocity.y,
-                msg.angular_velocity.z,
+                -msg.angular_velocity.y, // <--- Invert Y
+                -msg.angular_velocity.z, // <--- Invert Z
             ],
 
-            // NOTE: The standard ROS sensor_msgs/Imu does not contain a temperature field.
-            // We are setting a default value of 25.0 C.
             temperature: 25.0,
-
-            // NOTE: The ROS 2 std_msgs/Header does not have a sequence number ('seq').
-            // We are setting a default value of 0.
             seq: 0,
         }
     }
 }
 
+// impl From<ros_messages::ImuData> for packets::ImuPacket {
+//     fn from(msg: ros_messages::ImuData) -> Self {
+//         Self {
+//             header: packets::RosflightPacketHeader {
+//                 // Convert the ROS timestamp (sec, nanosec) to a single microsecond value.
+//                 timestamp: (msg.header.stamp.sec as u64 * 1_000_000)
+//                     + (msg.header.stamp.nanosec as u64 / 1000),
+
+//                 // The status field is not present in the ROS Imu message, so we default to 0.
+//                 status: 0,
+//             },
+
+//             // Map the linear_acceleration vector to the accel array.
+//             accel: [
+//                 msg.linear_acceleration.x,
+//                 msg.linear_acceleration.y,
+//                 msg.linear_acceleration.z,
+//             ],
+
+//             // Map the angular_velocity vector to the gyro array.
+//             gyro: [
+//                 msg.angular_velocity.x,
+//                 msg.angular_velocity.y,
+//                 msg.angular_velocity.z,
+//             ],
+
+//             // NOTE: The standard ROS sensor_msgs/Imu does not contain a temperature field.
+//             // We are setting a default value of 25.0 C.
+//             temperature: 25.0,
+
+//             // NOTE: The ROS 2 std_msgs/Header does not have a sequence number ('seq').
+//             // We are setting a default value of 0.
+//             seq: 0,
+//         }
+//     }
+// }
+
 pub struct Board {
     pub start_time: Instant,
-    mavlink_socket: UdpSocket, 
+    mavlink_socket: UdpSocket,
     pub zenoh_session: Session,
     imu_data_chan: mpsc::Receiver<ros_messages::ImuData>,
     mag_chan: mpsc::Receiver<ros_messages::MagneticField>,
@@ -334,7 +386,6 @@ impl BoardTrait for Board {
                 ))),
             },
         };
-;
         sensors.1.1.1.1.1.1.0 = None;
         sensors.1.1.1.1.1.1.1.0 = match self.rc_chan.try_recv() {
             Ok(rc) => Some(Ok(rc.into())),
@@ -371,8 +422,8 @@ impl BoardTrait for Board {
         match self.mavlink_socket.try_send(bytes) {
             Ok(n) => Some(Ok(n)), // Successfully wrote n bytes
             Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                 // OS buffer is full, treat as a transient error
-                 Some(Err(errors::TelemError::GenericTelemError(
+                // OS buffer is full, treat as a transient error
+                Some(Err(errors::TelemError::GenericTelemError(
                     "MAVLink UDP Socket Send Buffer Full",
                 )))
             }
@@ -388,7 +439,6 @@ impl BoardTrait for Board {
     fn clock_millis(&self) -> u32 {
         //(self.current_time_us / 1000) as u32
         self.start_time.elapsed().as_millis() as u32
-
     }
 
     /// Returns the current dummy time in microseconds.
@@ -400,7 +450,6 @@ impl BoardTrait for Board {
 
 impl Board {
     pub async fn new() -> Board {
-
         let start_time = Instant::now();
 
         let mut zenoh_config = Config::default();
@@ -414,35 +463,36 @@ impl Board {
         println!("Zenoh sessions opened!");
 
         // Establish all channels for sub
-        let (chan_send_imu_data, mut chan_recv_imu_data) = mpsc::channel::<ros_messages::ImuData>(1);
+        let (chan_send_imu_data, mut chan_recv_imu_data) =
+            mpsc::channel::<ros_messages::ImuData>(50);
         let (chan_send_mag, mut chan_recv_mag) = mpsc::channel::<ros_messages::MagneticField>(1);
         let (chan_send_baro, mut chan_recv_baro) = mpsc::channel::<ros_messages::Barometer>(1);
         let (chan_send_gnss, mut chan_recv_gnss) = mpsc::channel::<ros_messages::GNSS>(1);
-        let (chan_send_rc, mut chan_recv_rc) = mpsc::channel::<ros_messages::RCRaw>(1);
+        let (chan_send_rc, mut chan_recv_rc) = mpsc::channel::<ros_messages::RCRaw>(50);
 
         let sub_imu_data = zenoh_session
             .declare_subscriber("simulated_sensors/imu/data")
-            .with(zenoh::handlers::RingChannel::new(2))            
+            .with(zenoh::handlers::RingChannel::new(50))
             .await
             .unwrap();
         let sub_mag = zenoh_session
             .declare_subscriber("simulated_sensors/mag")
-            .with(zenoh::handlers::RingChannel::new(2))            
+            .with(zenoh::handlers::RingChannel::new(2))
             .await
             .unwrap();
         let sub_baro = zenoh_session
             .declare_subscriber("simulated_sensors/baro")
-            .with(zenoh::handlers::RingChannel::new(2))            
+            .with(zenoh::handlers::RingChannel::new(2))
             .await
             .unwrap();
         let sub_gnss = zenoh_session
             .declare_subscriber("simulated_sensors/gnss")
-            .with(zenoh::handlers::RingChannel::new(2))            
+            .with(zenoh::handlers::RingChannel::new(2))
             .await
             .unwrap();
         let sub_rc = zenoh_session
             .declare_subscriber("sim/RC")
-            .with(zenoh::handlers::RingChannel::new(2))            
+            .with(zenoh::handlers::RingChannel::new(50))
             .await
             .unwrap();
 
@@ -472,7 +522,6 @@ impl Board {
         tokio::spawn(capture_baro(sub_baro, chan_send_baro));
         tokio::spawn(capture_gnss(sub_gnss, chan_send_gnss));
         tokio::spawn(capture_rc(sub_rc, chan_send_rc));
-
 
         println!("Zenoh spawns finished");
 
@@ -515,7 +564,6 @@ async fn capture_mag(
         }
     }
 }
-
 
 async fn capture_baro(
     sub: Subscriber<RingChannelHandler<Sample>>,

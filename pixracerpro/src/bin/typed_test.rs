@@ -39,6 +39,7 @@
 use cortex_m;
 use cortex_m_rt::entry;
 // use defmt;
+use panic_halt as _;
 use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
 use rustflight_core::{

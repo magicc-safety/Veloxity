@@ -36,14 +36,18 @@
 // *
 // ******************************************************************************
 // **/
-
 #[cfg(test)]
 mod tests;
 
+use crate::{
+    board::BoardTrait,
+    comm_manager::CommManager,
+    params2::{ParamId, ParamValue, Params},
+};
 use bitflags::bitflags;
-use crate::{board::BoardTrait, comm_manager::CommManager, params2::{ParamValue, Params, ParamId}};
 use core::{error, mem::take};
 // use std::default;
+// use defmt::println; // do we want to print logs when running on embedded targets? We may need to build-gate this import
 
 // Events that trigger state transitions
 #[derive(Debug, Clone, Copy)]
@@ -79,7 +83,7 @@ pub struct State<S> {
 }
 
 // Holds FSM as its type changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)] 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateMachine {
     Init(State<Init>),
     Preflight(State<Preflight>),
@@ -134,7 +138,7 @@ impl StateMachine {
             StateMachine::ErrorPresent(sm) => sm.state.on_event(sm, event, params),
         }
     }
-    
+
     pub fn get_errors(&self) -> ErrorFlag {
         match self {
             StateMachine::Init(sm) => sm.error_flags,
@@ -145,7 +149,7 @@ impl StateMachine {
             StateMachine::ErrorPresent(sm) => sm.error_flags,
         }
     }
-    
+
     pub fn is_armed(&self) -> bool {
         matches!(self, StateMachine::Armed(_) | StateMachine::Failsafe(_))
     }
@@ -166,17 +170,17 @@ impl Default for StateMachine {
 }
 
 // State structs
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Init;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Preflight;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Calibrating;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Armed;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Failsafe;
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)] 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ErrorPresent;
 
 // State transition logic
@@ -197,53 +201,65 @@ impl Preflight {
         match event {
             Event::REQUEST_ARM => {
                 //if let ParamValue::Bool(true) = Params::get_calibrate_gyro_on_arm(params) {
-                if let ParamValue::Bool(true) = params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM) {
+                if let ParamValue::Bool(true) =
+                    params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM)
+                {
                     let mut error_flags = sm.error_flags;
                     error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
-                    StateMachine::Calibrating(State { state: Calibrating, error_flags: error_flags })
+                    StateMachine::Calibrating(State {
+                        state: Calibrating,
+                        error_flags: error_flags,
+                    })
                 } else {
-
                     let is_calibrated = {
                         let x_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                // println!("Error: PARAM_GYRO_X_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // defmt::info!("Error: PARAM_GYRO_X_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
                         let y_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                // println!("Error: PARAM_GYRO_Y_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // defmt::info!("Error: PARAM_GYRO_Y_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
                         let z_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
                             other => {
-                                // println!("Error: PARAM_GYRO_Z_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
+                                // defmt::info!("Error: PARAM_GYRO_Z_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
                                 false
                             }
                         };
-                        
+
                         x_calibrated || y_calibrated || z_calibrated
                     };
 
                     if is_calibrated {
                         // We are calibrated! Go to Armed.
-                        StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags })
+                        StateMachine::Armed(State {
+                            state: Armed,
+                            error_flags: sm.error_flags,
+                        })
                     } else {
                         // We are not calibrated, and we are not set to calibrate.
                         // This is an error. Set the flag. The `state_manager.run()`
                         // function will see this flag and move to ErrorPresent.
                         let mut error_flags = sm.error_flags;
                         error_flags.insert(ErrorFlag::UNCALIBRATED_IMU);
-                        StateMachine::Preflight(State { state: Preflight, error_flags: error_flags })
+                        StateMachine::Preflight(State {
+                            state: Preflight,
+                            error_flags: error_flags,
+                        })
                     }
-                    
                 }
-            },
-            Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
+            }
+            Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State {
+                state: ErrorPresent,
+                error_flags: sm.error_flags,
+            }),
             _ => StateMachine::Preflight(sm),
         }
     }
@@ -255,10 +271,19 @@ impl Calibrating {
             Event::CALIBRATION_COMPLETE => {
                 let mut error_flags = sm.error_flags;
                 error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
-                StateMachine::Armed(State { state: Armed, error_flags: error_flags })
-            },
-            Event::CALIBRATION_FAILED => StateMachine::Preflight(State { state: Preflight, error_flags: sm.error_flags }),
-            Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
+                StateMachine::Armed(State {
+                    state: Armed,
+                    error_flags: error_flags,
+                })
+            }
+            Event::CALIBRATION_FAILED => StateMachine::Preflight(State {
+                state: Preflight,
+                error_flags: sm.error_flags,
+            }),
+            Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State {
+                state: ErrorPresent,
+                error_flags: sm.error_flags,
+            }),
             _ => StateMachine::Calibrating(sm),
         }
     }
@@ -269,12 +294,21 @@ impl Armed {
         match event {
             Event::REQUEST_DISARM => {
                 if !sm.error_flags.is_empty() {
-                    StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags })
+                    StateMachine::ErrorPresent(State {
+                        state: ErrorPresent,
+                        error_flags: sm.error_flags,
+                    })
                 } else {
-                    StateMachine::Preflight(State { state: Preflight, error_flags: sm.error_flags })
+                    StateMachine::Preflight(State {
+                        state: Preflight,
+                        error_flags: sm.error_flags,
+                    })
                 }
-            },
-            Event::ERROR_OCCURRED(ErrorFlag::RC_LOST) => StateMachine::Failsafe(State { state: Failsafe, error_flags: sm.error_flags }),
+            }
+            Event::ERROR_OCCURRED(ErrorFlag::RC_LOST) => StateMachine::Failsafe(State {
+                state: Failsafe,
+                error_flags: sm.error_flags,
+            }),
             _ => StateMachine::Armed(sm),
         }
     }
@@ -283,8 +317,14 @@ impl Armed {
 impl Failsafe {
     fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
         match event {
-            Event::ERROR_CLEARED(ErrorFlag::RC_LOST) => StateMachine::Armed(State { state: Armed, error_flags: sm.error_flags }),
-            Event::REQUEST_DISARM => StateMachine::ErrorPresent(State { state: ErrorPresent, error_flags: sm.error_flags }),
+            Event::ERROR_CLEARED(ErrorFlag::RC_LOST) => StateMachine::Armed(State {
+                state: Armed,
+                error_flags: sm.error_flags,
+            }),
+            Event::REQUEST_DISARM => StateMachine::ErrorPresent(State {
+                state: ErrorPresent,
+                error_flags: sm.error_flags,
+            }),
             _ => StateMachine::Failsafe(sm),
         }
     }
@@ -295,12 +335,15 @@ impl ErrorPresent {
         match event {
             Event::ERROR_CLEARED(_) => {
                 if sm.error_flags.is_empty() {
-                    StateMachine::Preflight(State { state: Preflight, error_flags: sm.error_flags })
+                    StateMachine::Preflight(State {
+                        state: Preflight,
+                        error_flags: sm.error_flags,
+                    })
                 } else {
                     StateMachine::ErrorPresent(sm)
                 }
-            },
-            _ => StateMachine::ErrorPresent(sm)
+            }
+            _ => StateMachine::ErrorPresent(sm),
         }
     }
 }
@@ -312,7 +355,9 @@ pub struct StateManager {
 
 impl StateManager {
     pub fn new() -> Self {
-        StateManager { machine: StateMachine::new(), }
+        StateManager {
+            machine: StateMachine::new(),
+        }
     }
 
     pub fn is_calibrating(&self) -> bool {
@@ -324,7 +369,7 @@ impl StateManager {
         let start_state = self.machine;
         self.machine.update(event, params);
         if start_state != self.machine {
-            // defmt::info!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {:b}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
+            // println!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {:b}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
         }
     }
 

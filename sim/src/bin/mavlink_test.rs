@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-
 use cdr::{CdrLe, Infinite};
 use serde::{Deserialize, Serialize};
 use sim::board;
@@ -42,17 +41,17 @@ use zenoh::bytes::ZBytes;
 
 use rustflight_core::{
     board::BoardTrait,
-    bodytype::{quadrotor::Quadrotor, BodyType},
-    comm_manager::comm_link_trait::{mavlink::MavlinkInterface, CommInterface},
+    bodytype::{BodyType, quadrotor::Quadrotor},
+    comm_manager::comm_link_trait::{CommInterface, mavlink::MavlinkInterface},
     controller::{Controller, quad_controller::QuadController},
     estimator::{Estimator, quad_estimator::QuadEstimator},
-    params2::Params,
-    pwm::PwmDriver,
-    state_machine::StateManager,
     hlist::{Here, There},
     hlist_type,
-    mixer::{Mixer, quad_mixer::{QuadMixer}},
-    rustflight::{rustflight_typed::ROSFlight, Configuration},
+    mixer::{Mixer, quad_mixer::QuadMixer},
+    params2::Params,
+    pwm::PwmDriver,
+    rustflight::{Configuration, rustflight_typed::ROSFlight},
+    state_machine::StateManager,
 };
 use sim::pwm::SimPwmDriver;
 
@@ -66,23 +65,23 @@ struct SimpleBoolResponse {
 pub struct SimQuadConfig;
 impl Configuration<board::Board, Quadrotor> for SimQuadConfig {
     type SculptIndices = hlist_type![
-        Here, // Imu for Estimator
-        Here,  // Mag for Estimator
-        There<There<There<There<There<Here>>>>> // RC Index
+        Here,                                    // Imu for Estimator
+        Here,                                    // Mag for Estimator
+        There<There<There<There<There<Here>>>>>  // RC Index
     ];
 
     type RcPacketSculptedIndex = There<There<Here>>; // RC Index from Sculpted Set
 
     // --- IMPLEMENT TELEMETRY INDICES ---
-    type ImuPacketIndex       = Here;                                                         // index 0
-    type MagPacketIndex       = There<Here>;                                                  // index 1
-    type BaroPacketIndex      = There<There<Here>>;                                           // index 2
-    type PitotPacketIndex     = There<There<There<Here>>>;                                    // index 3
-    type RangePacketIndex     = There<There<There<There<Here>>>>;                             // index 4
-    type GNSSPacketIndex      = There<There<There<There<There<Here>>>>>;                      // index 5
-    type BatteryPacketIndex   = There<There<There<There<There<There<Here>>>>>>;               // index 6
-    type RcPacketIndex        = There<There<There<There<There<There<There<Here>>>>>>>;        // index 7
-    type AttitudePacketIndex  = There<There<There<There<There<There<There<There<Here>>>>>>>>; // index 8
+    type ImuPacketIndex = Here; // index 0
+    type MagPacketIndex = There<Here>; // index 1
+    type BaroPacketIndex = There<There<Here>>; // index 2
+    type PitotPacketIndex = There<There<There<Here>>>; // index 3
+    type RangePacketIndex = There<There<There<There<Here>>>>; // index 4
+    type GNSSPacketIndex = There<There<There<There<There<Here>>>>>; // index 5
+    type BatteryPacketIndex = There<There<There<There<There<There<Here>>>>>>; // index 6
+    type RcPacketIndex = There<There<There<There<There<There<There<Here>>>>>>>; // index 7
+    type AttitudePacketIndex = There<There<There<There<There<There<There<There<Here>>>>>>>>; // index 8
 }
 
 #[tokio::main]
@@ -97,8 +96,8 @@ async fn main() {
     }
 
     let mut params = Params::new();
-    
-    // initialize the timing of the highest level loop through a tick callback 
+
+    // initialize the timing of the highest level loop through a tick callback
     let tick_handler = board
         .zenoh_session
         .declare_subscriber("rust/tick")
@@ -118,18 +117,28 @@ async fn main() {
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, params, mavlink, state_manager, estimator, controller, mixer, config, pwm_driver);
+    let mut rosflight = ROSFlight::init(
+        1000,
+        board,
+        params,
+        mavlink,
+        state_manager,
+        estimator,
+        controller,
+        mixer,
+        config,
+        pwm_driver,
+    );
 
     //let mut x: u64 = 0;
 
     while let Ok(_tick) = tick_handler.recv_async().await {
-        //println!("tick: {}", x);
+        //println!("tick {}", x);
         //x += 1;
 
         rosflight.run();
 
         let response = SimpleBoolResponse { result: true };
         let zb = ZBytes::from(cdr::serialize::<_, _, CdrLe>(&response, Infinite).unwrap());
-
     }
 }

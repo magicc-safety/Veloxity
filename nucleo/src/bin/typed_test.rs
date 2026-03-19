@@ -37,7 +37,7 @@
 // ******************************************************************************
 // **/
 use cortex_m_rt::entry;
-use defmt;
+//use defmt;
 use nucleo::*;
 use rustflight_core::{
     board::BoardTrait,
@@ -82,7 +82,16 @@ fn main() -> ! {
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::init(1000, board, mavlink, state_manager, estimator, controller, mixer, config);
+    let mut rosflight = ROSFlight::init(
+        1000,
+        board,
+        mavlink,
+        state_manager,
+        estimator,
+        controller,
+        mixer,
+        config,
+    );
 
     loop {
         // defmt::debug!("One Loop");

@@ -33,17 +33,19 @@
 // *
 // ******************************************************************************
 // **/
-
 use crate::board::BoardTrait;
-use crate::params2::{ParamId, Params, ParamValue};
 use crate::comm_manager::{CommManager, comm_link_trait::CommInterface};
-use crate::state_machine::{Event, StateManager, ErrorFlag};
 use crate::packets::RcPacket;
+use crate::params2::{ParamId, ParamValue, Params};
+use crate::state_machine::{ErrorFlag, Event, StateManager};
+use crate::{log_info, log_warn};
 
 // --- Constants ---
 pub const STICKS_COUNT: usize = 4;
 pub const SWITCHES_COUNT: usize = 4;
 pub const RC_STRUCT_CHANNELS: usize = 16; // A common max channel count
+
+const RC_TIMEOUT_US: u64 = 500_000;
 
 // --- Enums ---
 
@@ -150,7 +152,6 @@ impl Rc {
 
     // Maps stick parameters to internal config
     fn init_sticks(&mut self, params: &Params) {
-        
         // --- REFACTORED: Stick::X ---
         self.sticks[Stick::X as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_X_CHANNEL) {
@@ -213,7 +214,6 @@ impl Rc {
     }
 
     fn update_switch_mappings(&mut self, params: &Params) {
-        
         // --- REFACTORED: PARAM_RC_NUM_CHANNELS ---
         let rc_num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
             ParamValue::Int(val) => val,
@@ -228,15 +228,18 @@ impl Rc {
             // Using Option<ParamId> to handle the "INVALID" case safely
             let (channel_name, channel_param_id) = match i {
                 i if i == Switch::Arm as usize => ("ARM", Some(ParamId::PARAM_RC_ARM_CHANNEL)),
-                i if i == Switch::AttOverride as usize => {
-                    ("ATTITUDE OVERRIDE", Some(ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL))
-                }
-                i if i == Switch::ThrottleOverride as usize => {
-                    ("THROTTLE OVERRIDE", Some(ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL))
-                }
-                i if i == Switch::AttType as usize => {
-                    ("ATTITUDE TYPE", Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL))
-                }
+                i if i == Switch::AttOverride as usize => (
+                    "ATTITUDE OVERRIDE",
+                    Some(ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL),
+                ),
+                i if i == Switch::ThrottleOverride as usize => (
+                    "THROTTLE OVERRIDE",
+                    Some(ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL),
+                ),
+                i if i == Switch::AttType as usize => (
+                    "ATTITUDE TYPE",
+                    Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL),
+                ),
                 _ => ("INVALID", None),
             };
 
@@ -256,12 +259,12 @@ impl Rc {
             self.switches[i].channel = channel_num;
             self.switches[i].mapped = channel_num > 3 && channel_num < rc_num_channels;
 
-            // debugging code to see if we mapped it or not...
-            if self.switches[i].mapped {
-                // println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
-            } else {
-                // println!("Switch \"{}\" will not be mapped.", channel_name);
-            }
+            // // debugging code to see if we mapped it or not...
+            // if self.switches[i].mapped {
+            //     defmt::println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
+            // } else {
+            //     defmt::println!("Switch \"{}\" will not be mapped.", channel_name);
+            // }
 
             let direction_param_id = match channel_num {
                 4 => Some(ParamId::PARAM_RC_SWITCH_5_DIRECTION),
@@ -294,13 +297,24 @@ impl Rc {
         for i in 0..SWITCHES_COUNT {
             let (channel_name, _) = match i {
                 i if i == Switch::Arm as usize => ("ARM", Some(ParamId::PARAM_RC_ARM_CHANNEL)),
-                i if i == Switch::AttOverride as usize => ("ATTITUDE OVERRIDE", Some(ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL)),
-                i if i == Switch::ThrottleOverride as usize => ("THROTTLE OVERRIDE", Some(ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL)),
-                i if i == Switch::AttType as usize => ("ATTITUDE TYPE", Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL)),
+                i if i == Switch::AttOverride as usize => (
+                    "ATTITUDE OVERRIDE",
+                    Some(ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL),
+                ),
+                i if i == Switch::ThrottleOverride as usize => (
+                    "THROTTLE OVERRIDE",
+                    Some(ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL),
+                ),
+                i if i == Switch::AttType as usize => (
+                    "ATTITUDE TYPE",
+                    Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL),
+                ),
                 _ => ("INVALID", None),
             };
 
-            if channel_name == "INVALID" { continue; }
+            if channel_name == "INVALID" {
+                continue;
+            }
 
             if self.switches[i].mapped {
                 // TODO: Re-enable this when your CommManager has a log method
@@ -308,46 +322,49 @@ impl Rc {
                 //     LogSeverity::LOG_INFO,
                 //     &format!("{} switch mapped to RC channel {}", channel_name, self.switches[i].channel)
                 // );
+                log_info!(
+                    "{} switch mapped to RC Channel {}",
+                    channel_name,
+                    self.switches[i].channel
+                );
             } else {
                 // comm_manager.log(
                 //     LogSeverity::LOG_INFO,
                 //     &format!("{} switch not mapped", channel_name)
                 // );
+                log_info!("{} switch not mapped", channel_name);
             }
         }
     }
 
-
-
-    pub fn param_change_callback<B, T>( // <-- Add generic T
+    pub fn param_change_callback<B, T>(
+        // <-- Add generic T
         &mut self,
         param_id: ParamId,
         board: &mut B,
         params: &Params,
         comm_manager: &mut CommManager<B, T>, // <-- Use full generic type
-    )
-    where
+    ) where
         B: BoardTrait,
         T: CommInterface<B>, // <-- Add bound for T
     {
         match param_id {
             // ... (PARAM_RC_TYPE case is removed)
-
-            ParamId::PARAM_RC_X_CHANNEL |
-            ParamId::PARAM_RC_Y_CHANNEL |
-            ParamId::PARAM_RC_Z_CHANNEL |
-            ParamId::PARAM_RC_F_CHANNEL => {
+            ParamId::PARAM_RC_X_CHANNEL
+            | ParamId::PARAM_RC_Y_CHANNEL
+            | ParamId::PARAM_RC_Z_CHANNEL
+            | ParamId::PARAM_RC_F_CHANNEL => {
                 self.init_sticks(params);
             }
-            ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL |
-            ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL |
-            ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL |
-            ParamId::PARAM_RC_ARM_CHANNEL |
-            ParamId::PARAM_RC_SWITCH_5_DIRECTION |
-            ParamId::PARAM_RC_SWITCH_6_DIRECTION |
-            ParamId::PARAM_RC_SWITCH_7_DIRECTION |
-            ParamId::PARAM_RC_SWITCH_8_DIRECTION => {
-                self.update_switch_mappings(params);   // <-- 1. Update mappings
+            ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL
+            | ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL
+            | ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL
+            | ParamId::PARAM_RC_ARM_CHANNEL
+            | ParamId::PARAM_RC_SWITCH_5_DIRECTION
+            | ParamId::PARAM_RC_SWITCH_6_DIRECTION
+            | ParamId::PARAM_RC_SWITCH_7_DIRECTION
+            | ParamId::PARAM_RC_SWITCH_8_DIRECTION => {
+                self.update_switch_mappings(params); // <-- 1. Update mappings
                 self.log_switch_mappings(comm_manager); // <-- 2. Log the changes
             }
             _ => {
@@ -362,39 +379,36 @@ impl Rc {
         params: &Params,
         state_manager: &mut StateManager,
     ) {
-        // 1. Normalize and Copy data from the packet into the internal rc_struct
+        // 1. Copy data from the packet into the internal rc_struct: We assume it has been normalized before this point
         // Get the number of channels
         let len = (packet.n_chan as usize).min(self.rc.chan.len());
         self.rc.chan[..len].copy_from_slice(&packet.chan[..len]);
 
         self.rc.header.timestamp = packet.header.timestamp;
         self.rc.header.status = packet.header.status;
+        self.rc.num_channels = len;
 
-        // Unpack frame_lost and failsafe from the status bitfield.
-        // We'll assume the standard convention:
-        // Bit 0 (value 1) = Frame Lost
-        // Bit 1 (value 2) = Failsafe Activated
         let status = packet.header.status;
         self.rc.frame_lost = (status & 1) != 0;
         self.rc.failsafe_activated = (status & 2) != 0;
-        self.rc.num_channels = len;
 
-        if self.check_rc_lost(params, state_manager) {
-            // defmt::info!("RC is Lost!!!");
-            // If RC is lost, we're done. Don't process sticks/switches.
-            return;
-        }
+        self.process_sticks_and_switches();
+        self.new_command = true;
+    }
 
-        // 3. Process stick values (moved from old `run`)
-        // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
+    fn process_sticks_and_switches(&mut self) {
+        // TODO add back in check for rc lost... no need to process switches if rc lost...
+
+        // STICKS
         for channel in 0..STICKS_COUNT {
             let config = &self.sticks[channel];
             if config.channel < 0 || (config.channel as usize) >= self.rc.num_channels {
-                continue; 
+                continue;
             }
             let pwm = self.rc.chan[config.channel as usize]; // pwm is 0.0 to 1.0
 
-            if config.one_sided { // generally only F
+            if config.one_sided {
+                // generally only F
                 self.stick_values[channel] = pwm;
             } else {
                 // Converts [0.0, 1.0] to [-1.0, 1.0]
@@ -403,7 +417,8 @@ impl Rc {
             // defmt::info!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
-        // 4. Process switch values (moved from old `run`)
+        // SWITCHES
+
         for channel in 0..SWITCHES_COUNT {
             let config = &self.switches[channel];
             if config.mapped {
@@ -411,7 +426,7 @@ impl Rc {
                     self.switch_values[channel] = false;
                     continue;
                 }
-            
+
                 let pwm = self.rc.chan[config.channel as usize]; // pwm is 0.0 to 1.0
 
                 if config.direction < 0 {
@@ -425,9 +440,30 @@ impl Rc {
 
             // defmt::info!("Switch {}: {}",channel, self.switch_values[channel]);
         }
+    }
 
-        // 5. Signal to the mux (moved from old `run`)
-        self.new_command = true;
+    pub fn check_rc_health(&self, now_us: u64, params: &Params) -> bool {
+        if now_us > self.rc.header.timestamp + RC_TIMEOUT_US {
+            return false;
+        }
+
+        if self.rc.frame_lost || self.rc.failsafe_activated {
+            return false;
+        }
+
+        let num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
+            ParamValue::Int(val) => val as usize,
+            _ => 6,
+        };
+        let channels_to_check = num_channels.min(self.rc.num_channels);
+
+        for i in 0..channels_to_check {
+            let val = self.rc.chan[i];
+            if val < -0.25 || val > 1.25 {
+                return false;
+            }
+        }
+        return true;
     }
 
     pub fn run(
@@ -436,8 +472,18 @@ impl Rc {
         params: &Params,
         state_manager: &mut StateManager, // Use the concrete StateManager
     ) {
-        // This function now just calls the arming logic check
-        self.look_for_arm_disarm_signal(now_ms, params, state_manager);
+        let now_us = (now_ms as u64) * 1000;
+
+        if self.check_rc_health(now_us, params) {
+            state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
+            //println!("RC is Healthy!");
+
+            // only run arming logic if rc is healthy
+            self.look_for_arm_disarm_signal(now_ms, params, state_manager);
+        } else {
+            //println!("RC is Lost!");
+            state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
+        }
     }
 
     /// Checks for stick or switch arming/disarming
@@ -459,7 +505,7 @@ impl Rc {
         };
 
         //println!("Arm Threshold is: {}", arm_threshold);
-    
+
         // Use the correct public method from StateManager
         let is_armed = state_manager.is_armed();
 
@@ -469,11 +515,13 @@ impl Rc {
             let f_stick = self.stick(Stick::F);
             let z_stick = self.stick(Stick::Z);
 
-            if !is_armed { // DISARMED
+            if !is_armed {
+                // DISARMED
                 // if left stick is down and to the right
                 if f_stick < arm_threshold && z_stick > (1.0 - arm_threshold) {
-                    self.time_sticks_have_been_in_arming_position_ms = 
-                        self.time_sticks_have_been_in_arming_position_ms.saturating_add(dt);
+                    self.time_sticks_have_been_in_arming_position_ms = self
+                        .time_sticks_have_been_in_arming_position_ms
+                        .saturating_add(dt);
                     // println!("Starting Arming Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
@@ -484,12 +532,14 @@ impl Rc {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
-            } else { // ARMED
+            } else {
+                // ARMED
                 // if left stick is down and to the left
                 if f_stick < arm_threshold && z_stick < -(1.0 - arm_threshold) {
-                    self.time_sticks_have_been_in_arming_position_ms = 
-                        self.time_sticks_have_been_in_arming_position_ms.saturating_add(dt);
-                        // println!("Starting Disarm Process");
+                    self.time_sticks_have_been_in_arming_position_ms = self
+                        .time_sticks_have_been_in_arming_position_ms
+                        .saturating_add(dt);
+                    // println!("Starting Disarm Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
                 }
@@ -501,67 +551,29 @@ impl Rc {
                     // defmt::info!("Requesting Disarm!")
                 }
             }
-        } else { // Switch arming
+        } else {
+            // Switch arming
             //println!("The arm switch is mapped!!!");
             let f_stick = self.stick(Stick::F);
             if self.switch_on(Switch::Arm) {
+                // defmt::info!("is_armed: {} f_stick: {} arm_threshold: {}", is_armed, f_stick, arm_threshold);
                 if !is_armed && (f_stick < arm_threshold) {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
             } else {
-                // Use update() with params
-                state_manager.update(Event::REQUEST_DISARM, params);
+                if is_armed {
+                    // Use update() with params
+                    state_manager.update(Event::REQUEST_DISARM, params);
+                }
             }
         }
     }
 
-    fn check_rc_lost(
-        &self,
-        params: &Params,
-        state_manager: &mut StateManager, // <-- Use the concrete StateManager
-    ) -> bool {
-        let mut failsafe = false;
-
-        if self.rc.frame_lost || self.rc.failsafe_activated {
-            failsafe = true;
-        } else {
-            
-            let num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
-                ParamValue::Int(val) => val as usize,
-                other => {
-                    // println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
-                    6 // Default C++ value
-                }
-            };
-
-            // Clamp to the actual number of channels received
-            let channels_to_check = num_channels.min(self.rc.num_channels);
-
-            for i in 0..channels_to_check {
-                let pwm = self.rc.chan[i];
-                // Check if C++ logic for "invalid" RC command is needed
-                if pwm < -0.25 || pwm > 1.25 { 
-                    failsafe = true;
-                    break;
-                }
-            }
-        }
-
-        if failsafe {
-            // Use update() with params and the correct ErrorFlag
-            state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
-        } else {
-            // Use update() with params and the correct ErrorFlag
-            state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
-        }
-        failsafe
-    }
-    
     // -----------------------------------------------------------------
     // Public Getters
     // -----------------------------------------------------------------
-    
+
     /// Returns true if a new command has been processed
     pub fn new_command(&mut self) -> bool {
         if self.new_command {
@@ -571,7 +583,7 @@ impl Rc {
             false
         }
     }
-    
+
     /// Gets the processed stick value (-1.0 to 1.0, or 0.0 to 1.0 for F)
     pub fn stick(&self, channel: Stick) -> f32 {
         self.stick_values[channel as usize]
@@ -581,7 +593,7 @@ impl Rc {
     pub fn switch_on(&self, channel: Switch) -> bool {
         self.switch_values[channel as usize]
     }
-    
+
     /// Checks if a switch is mapped to a channel
     pub fn switch_mapped(&self, channel: Switch) -> bool {
         self.switches[channel as usize].mapped
@@ -591,7 +603,7 @@ impl Rc {
     pub fn get_rc_struct(&self) -> &RcStruct {
         &self.rc
     }
-    
+
     /// Reads a raw, normalized (0.0 to 1.0) channel value
     pub fn read_raw_chan(&self, chan_idx: usize) -> f32 {
         if chan_idx < self.rc.num_channels {

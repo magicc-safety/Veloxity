@@ -328,7 +328,12 @@ impl UbloxSensor {
 
         // Expected ack packet [0xB5u8, 0x62u8, 0x05u8, 0x01u8, 0x02u8, 0x00u8, 0x06u8, 0x00u8, 0x0Eu8, 0x37u8,]
         // Read data block with 2 second timeout
-        match with_timeout(Duration::from_secs(2), self.uart.read_until_idle(&mut buffer)).await {
+        match with_timeout(
+            Duration::from_secs(2),
+            self.uart.read_until_idle(&mut buffer),
+        )
+        .await
+        {
             Ok(Ok(size)) => {
                 // info!("Looking for ACK, received {} bytes: {:x}", size, buffer[0..size]);
                 for subarray in buffer.windows(ack.len()) {

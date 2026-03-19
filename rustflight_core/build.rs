@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-
 use mavspec::rust::r#gen::BuildHelper; // Corrected import path for Edition 2024
 use std::env;
 use std::fs;
@@ -47,9 +46,11 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let definitions_dir = manifest_dir.join("mavlink_definitions");
 
-    let sources_paths_str: Vec<&str> = vec![definitions_dir
-        .to_str()
-        .expect("Definitions dir path is not valid UTF-8")];
+    let sources_paths_str: Vec<&str> = vec![
+        definitions_dir
+            .to_str()
+            .expect("Definitions dir path is not valid UTF-8"),
+    ];
 
     let out_dir_path_str = env::var("OUT_DIR").unwrap();
     let out_dir = PathBuf::from(out_dir_path_str.clone()); // For checking existence
@@ -76,7 +77,7 @@ fn main() {
         .set_sources(&sources_paths_str)
         .generate()
         .expect("BuildHelper::generate() failed inside build.rs"); // More specific expect
-                                                                   //println!("cargo:warning=MAVLink code generation reported OK by BuildHelper::generate().");
+    //println!("cargo:warning=MAVLink code generation reported OK by BuildHelper::generate().");
 
     // Check if the main mod.rs was actually created
     let expected_mod_file = generation_destination.join("mod.rs");

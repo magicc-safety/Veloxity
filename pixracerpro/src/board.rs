@@ -41,6 +41,9 @@ use rustflight_core::packets;
 use rustflight_core::packets::BaroPacket;
 use rustflight_core::sensorprocessors;
 
+use embassy_time::Delay;
+use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
+use stm_32::embassy_stm32::lptim::timer::Timer;
 use stm_32::peripherals;
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 use stm_32::*;
@@ -50,6 +53,8 @@ include!("../../stm_32/stm32h7x3_common.rs");
 pub struct Board {
     probe: [Output<'static>; 3], // We only have 3 from ROSFlight
     pub start_time: embassy_time::Instant,
+    test_pin_1: Output<'static>,
+    test_pin_2: Output<'static>,
 }
 
 impl BoardTrait for Board {
@@ -78,8 +83,8 @@ impl BoardTrait for Board {
     ];
 
     type ProcessorHList = hlist_type![
-        sensorprocessors::PassthroughImuProcessor,
-        sensorprocessors::PassthroughMagProcessor,
+        sensorprocessors::ImuProcessor,
+        sensorprocessors::MagProcessor,
         sensorprocessors::PassthroughBaroProcessor,
         sensorprocessors::PassthroughPitotProcessor,
         sensorprocessors::PassthroughRangeProcessor,
@@ -89,6 +94,22 @@ impl BoardTrait for Board {
         sensorprocessors::PassthroughAttitudeProcessor
     ];
 
+    fn set_test_pin_1(&mut self, high: bool) {
+        if high {
+            self.test_pin_1.set_high();
+        } else {
+            self.test_pin_1.set_low();
+        }
+    }
+
+    fn set_test_pin_2(&mut self, high: bool) {
+        if high {
+            self.test_pin_2.set_high();
+        } else {
+            self.test_pin_2.set_low();
+        }
+    }
+
     fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
         sensors.0 = peripherals::bmi08x::IMU_SIGNAL.try_take();
         sensors.1.0 = peripherals::ist8308::MAG_SIGNAL.try_take();
@@ -97,10 +118,15 @@ impl BoardTrait for Board {
         sensors.1.1.1.1.0 = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.1.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+        let mut delay = Delay;
 
         // Debug statements to check receiving sensor data
         if let Some(imu_packet) = sensors.0 {
+            self.set_test_pin_1(true);
+            delay.delay_us(1u32);
+            self.set_test_pin_1(false);
             // match imu_packet {
+
             //     Ok(data) => defmt::info!(
             //         "IMU data: accel {:?} | gyro {:?} | temp {:?}",
             //         data.accel,
@@ -109,66 +135,91 @@ impl BoardTrait for Board {
             //     ),
             //     Err(e) => defmt::error!("Error reading IMU data"),
             // }
-            // defmt::info!("Sensor IMU data received!");
+            // // defmt::info!("Sensor IMU data received!");
         }
-        if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
-            // match gnss_packet {
-            //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
-            //     Err(e) => defmt::error!("Error reading IMU data"),
-            // }
-            // defmt::info!("GPS data received!");
-        }
-        if let Some(mag_packet) = sensors.1.0 {
-            // match mag_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Mag data: flux {:?} | temperature {:?}",
-            //         data.flux,
-            //         data.temperature
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Mag data"),
-            // }
-            // defmt::info!("Sensor Magnetometer data received!");
-        }
-        if let Some(baro_packet) = sensors.1.1.0 {
-            // match baro_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Baro data: pressure {:?} | temperature {:?}",
-            //         data.pressure,
-            //         data.temperature
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Barometer data"),
-            // }
-            // defmt::info!("Sensor Baro data received!");
-        }
-        if let Some(pitot_packet) = sensors.1.1.1.0 {
-            // match pitot_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Pitot data: diff_pressure {:?}",
-            //         data.differential_pressure,
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Pitot data"),
-            // }
-            // defmt::info!("Sensor Pitot data received!");
-        }
-        if let Some(range_packet) = sensors.1.1.1.1.0 {
-            // match pitot_packet {
-            //     Ok(data) => defmt::info!(
-            //         "Pitot data: diff_pressure {:?}",
-            //         data.differential_pressure,
-            //     ),
-            //     Err(e) => defmt::error!("Error reading Pitot data"),
-            // }
-            //defmt::info!("Sensor Range data received!");
-        }
-        if sensors.1.1.1.1.1.1.1.0.is_some() {
-            // defmt::info!("Sensor RC data received!");
-        }
+        //if let Some(gnss_packet) = sensors.1.1.1.1.1.0 {
+        // match gnss_packet {
+        //     Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
+        //     Err(e) => defmt::error!("Error reading GPS data"),
+        // }
+        // // defmt::info!("GPS data received!");
+        //}
+        //if let Some(mag_packet) = sensors.1.0 {
+        // match mag_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Mag data: flux {:?} | temperature {:?}",
+        //         data.flux,
+        //         data.temperature
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Mag data"),
+        // }
+        // // defmt::info!("Sensor Magnetometer data received!");
+        //}
+        //if let Some(baro_packet) = sensors.1.1.0 {
+        // match baro_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Baro data: pressure {:?} | temperature {:?}",
+        //         data.pressure,
+        //         data.temperature
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Barometer data"),
+        // }
+        // // defmt::info!("Sensor Baro data received!");
+        //}
+        //if let Some(pitot_packet) = sensors.1.1.1.0 {
+        // match pitot_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Pitot data: diff_pressure {:?}",
+        //         data.differential_pressure,
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Pitot data"),
+        // }
+        // // defmt::info!("Sensor Pitot data received!");
+        //}
+        //if let Some(range_packet) = sensors.1.1.1.1.0 {
+        // match pitot_packet {
+        //     Ok(data) => defmt::info!(
+        //         "Pitot data: diff_pressure {:?}",
+        //         data.differential_pressure,
+        //     ),
+        //     Err(e) => defmt::error!("Error reading Pitot data"),
+        // }
+        //defmt::info!("Sensor Range data received!");
+        //}
+        //if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
+        // match rc_packet_result {
+        //     Ok(data) => {
+        //         // This confirms the SBUS driver is working
+        //         // defmt::info!(
+        //         //     "BOARD: RC Packet Received! Channels (0-3): {}, {}, {}, {}",
+        //         //     data.chan[0], data.chan[1], data.chan[2], data.chan[3]
+        //         // );
+        //         // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
+        //         // defmt::info!(
+        //         //     "BOARD: RC Packet Received! Channels {}",
+        //         //     data.chan[..data.n_chan as usize]
+        //         // );
+        //     },
+        //     Err(_) => {
+        //         defmt::error!("BOARD: Error reading RC data");
+        //     }
+        // }
+        //}
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        match peripherals::vcp::VCP_RX.try_read(buf) {
-            Ok(n) => return Some(Ok(n)),
-            Err(_) => {
+        match peripherals::telem::TELEM_RX.try_read(buf) {
+            Ok(n) => {
+                // defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
+                return Some(Ok(n));
+            }
+            Err(embassy_sync::pipe::TryReadError::Empty) => {
+                // This is NORMAL. Do not log an error.
+                // Return Ok(0) to indicate "no bytes right now" without erroring.
+                return Some(Ok(0));
+            }
+            Err(error) => {
+                // defmt::info!("Error reading from Serial: {}", error);
                 return Some(Err(errors::TelemError::GenericTelemError(
                     "Error Reading Telem Packet",
                 )));
@@ -179,9 +230,9 @@ impl BoardTrait for Board {
         let mut n = 0;
         //let len = byte_count;
         let len = bytes.len();
-
+        // defmt::info!("Writing to Serial");
         loop {
-            match peripherals::vcp::VCP_TX.try_write(&bytes[n..len]) {
+            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
                     if wrote == (len - n) {
                         break;
@@ -190,13 +241,15 @@ impl BoardTrait for Board {
                     }
                 }
                 Err(_) => {
+                    //defmt::info!("Error writing to Serial");
                     return Some(Err(errors::TelemError::GenericTelemError(
                         "Error Writing Telem Packet!",
                     )));
                 }
             }
         }
-        Some(Ok(n))
+        //Some(Ok(n))
+        Some(Ok(len))
     }
 
     fn clock_millis(&self) -> u32 {
@@ -214,7 +267,7 @@ impl Board {
     }
 
     fn probe_lo(&mut self, id: usize) {
-        self.probe[id].set_high(); // so we can see something on the logic analyzer.
+        self.probe[id].set_low(); // so we can see something on the logic analyzer.
     }
 
     fn probe_tog(&mut self, id: usize) {
@@ -304,27 +357,51 @@ impl Board {
             dev: I2cDevice::new(i2c1_bus),
         };
 
-        // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
-        let mut uart2config = usart::Config::default();
-        uart2config.baudrate = 921600; //230400? This may very well need to be updated
-        let mut uart2 = Uart::new(
-            p.USART2,
-            p.PD6,
-            p.PD5,
-            Usart2Irqs,
+        // // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
+        // UART2 is currently not in use. We use UART3 for our Mavlink Serial connection to ROS2.
+        // let mut uart2config = usart::Config::default();
+        // uart2config.baudrate = 921600;
+        // let mut uart2 = Uart::new(
+        //     p.USART2,
+        //     p.PD6,
+        //     p.PD5,
+        //     Usart2Irqs,
+        //     p.DMA2_CH4,
+        //     p.DMA2_CH5,
+        //     uart2config,
+        // )
+        // .unwrap();
+        // let (mut uart2_tx, mut uart2_rx) = uart2.split();
+
+        // let telem2_rx = peripherals::telem::TelemRx {
+        //     uart_rx: uart2_rx,
+        //     byte_processor: stm_32::peripherals::telem::BasicProcessor {},
+        // };
+
+        // let telem2_tx = peripherals::telem::TelemTx { uart_tx: uart2_tx };
+
+        // Companion Computer UART - Austin's documentation references uart3 instead of 2 for companion computer
+        let mut uart3config = usart::Config::default();
+        uart3config.rx_pull = Pull::Up;
+        uart3config.baudrate = 921600;
+        let mut uart3 = Uart::new(
+            p.USART3,
+            p.PD9,
+            p.PD8,
+            Usart3Irqs,
             p.DMA2_CH4,
             p.DMA2_CH5,
-            uart2config,
+            uart3config,
         )
         .unwrap();
-        let (mut uart2_tx, mut uart2_rx) = uart2.split();
+        let (mut uart3_tx, mut uart3_rx) = uart3.split();
 
-        let telem2_rx = peripherals::telem::TelemRx {
-            uart_rx: uart2_rx,
+        let telem3_rx = peripherals::telem::TelemRx {
+            uart_rx: uart3_rx,
             byte_processor: stm_32::peripherals::telem::BasicProcessor {},
         };
 
-        let telem2_tx = peripherals::telem::TelemTx { uart_tx: uart2_tx };
+        let telem3_tx = peripherals::telem::TelemTx { uart_tx: uart3_tx };
 
         // VCP
         static EP_BUF_CELL: StaticCell<[u8; 256]> = StaticCell::new();
@@ -342,12 +419,6 @@ impl Board {
             driver,
             byte_processor: stm_32::peripherals::vcp::BasicProcessor {},
         };
-
-        // P1 Priority Task for Rx Tememetry
-        interrupt::SAI1.set_priority(Priority::P1);
-        let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
-        spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
         // USART4 (external GPS)
         let mut uart4config = usart::Config::default();
@@ -371,7 +442,7 @@ impl Board {
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PD12, p.EXTI12, Pull::Down);
+        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down);
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART6
@@ -449,19 +520,27 @@ impl Board {
             sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
         };
 
-        // P2 Priority Task for Gyros
-        interrupt::SAI2.set_priority(Priority::P2);
-        let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
-        spawner2
-            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
-            .unwrap();
-
         // Detect GPIO input.
         let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None); // PG3 is not connected
         let usd_card = peripherals::sd_card::SdCard {
             sdmmc: sdmmc1,
             detect: usd_detect,
         };
+
+        // P1 Priority Task for Rx Telemetry
+        interrupt::SAI1.set_priority(Priority::P0);
+        let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
+        spawner1
+            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
+            .unwrap();
+
+        // P2 Priority Task for Gyros
+        interrupt::SAI2.set_priority(Priority::P2);
+        let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
+
+        // P2 VCP Task (Telemetry alternate)
+        spawner2.spawn(peripherals::vcp::task(vcp)).unwrap();
+        spawner2.spawn(peripherals::telem::task_rx(telem3_rx));
 
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);
@@ -480,20 +559,22 @@ impl Board {
             .unwrap();
         spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
         spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
-        spawner3.spawn(peripherals::llv3hp::task(llv3hp_sensor)).unwrap();
+        spawner3
+            .spawn(peripherals::llv3hp::task(llv3hp_sensor))
+            .unwrap();
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);
         let spawner4 = P4_EXECUTOR.start(interrupt::SAI4);
         spawner4
-            .spawn(peripherals::telem::task_tx(telem2_tx))
+            .spawn(peripherals::telem::task_tx(telem3_tx))
             .unwrap();
         spawner4
             .spawn(peripherals::sd_card::task(usd_card))
             .unwrap();
 
         // SERVOS + TIMERS
-        // There are only 8 Servo Channels on the PixRacer Pro
+        // There are only 7 available Servo Channels on the PixRacer Pro
         // TIM1
         let tim1_ch1_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
         let tim1_ch2_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
@@ -507,16 +588,13 @@ impl Board {
         // TIM2
         let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
 
-        // TIM3
-        let tim3_ch3_pin = PwmPin::new_ch3(p.PB0, OutputType::PushPull); // We may need to reserve this pin for RC input
-
         let mut timer1 = SimplePwm::new(
             p.TIM1,
             Some(tim1_ch1_pin),
             Some(tim1_ch2_pin),
             Some(tim1_ch3_pin),
             Some(tim1_ch4_pin),
-            Hertz::hz(400), // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
         let mut timer4 = SimplePwm::new(
@@ -525,7 +603,7 @@ impl Board {
             Some(tim4_ch2_pin),
             Some(tim4_ch3_pin), // Some(ch7_pin),
             None,               // Some(ch8_pin),
-            Hertz::hz(400),     // Should this be 100_000?
+            Hertz::hz(400),
             Default::default(),
         );
         let mut timer2 = SimplePwm::new(
@@ -533,26 +611,16 @@ impl Board {
             Some(tim2_ch1_pin),
             None,
             None,
-            None,           // Some(ch9_pin),
-            Hertz::hz(400), // Should this be 100_000?
-            Default::default(),
-        );
-        let mut timer3 = SimplePwm::new(
-            p.TIM3,
-            None, // Some(ch10_pin),
-            None,
-            Some(tim3_ch3_pin),
-            None,           // Some(ch11_pin),
-            Hertz::hz(400), // Should this be 100_000?
+            None, // Some(ch9_pin),
+            Hertz::hz(400),
             Default::default(),
         );
 
         let mut timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
         let mut timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
         let mut timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
-        let mut timer3 = peripherals::pwm::TimerEnum::TIM3(timer3);
 
-        let mut timers: [peripherals::pwm::TimerEnum; 4] = [timer1, timer2, timer3, timer4];
+        let mut timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4];
 
         let mut servos: peripherals::pwm::PixRacerProServoMonstrosity =
             peripherals::pwm::PixRacerProServoMonstrosity {
@@ -563,16 +631,16 @@ impl Board {
                     (0, peripherals::pwm::TimerChannel::Ch3), // -
                     (0, peripherals::pwm::TimerChannel::Ch4), // -
                     (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
-                    (2, peripherals::pwm::TimerChannel::Ch3), // TIM3, channel 3
-                    (3, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
-                    (3, peripherals::pwm::TimerChannel::Ch3), // -
+                    (2, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
+                    (2, peripherals::pwm::TimerChannel::Ch3), // -
                 ],
             };
 
-        // disable all channels at start
-        for i in 0..servos.len() {
-            servos.disable(i);
-        }
+        // Test PWM pins
+        let mut test_pin_1 = Output::new(p.PD11, Level::Low, Speed::VeryHigh);
+        test_pin_1.set_high();
+        let mut test_pin_2 = Output::new(p.PD12, Level::Low, Speed::VeryHigh);
+        test_pin_2.set_high();
 
         // Setup Probe GPIO's
         let probe = [
@@ -581,6 +649,14 @@ impl Board {
             Output::new(p.PG14, Level::Low, Speed::Low),
             // Output::new(p.PG0, Level::Low, Speed::Low), // unknown
         ];
-        (Board { probe, start_time }, servos)
+        (
+            Board {
+                probe,
+                start_time,
+                test_pin_1,
+                test_pin_2,
+            },
+            servos,
+        )
     }
 }

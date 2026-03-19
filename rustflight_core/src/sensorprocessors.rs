@@ -35,12 +35,14 @@
 // ******************************************************************************
 // **
 
+use core::default;
+
 use crate::errors;
 use crate::hlist::*;
+use crate::log_info;
 use crate::packets::*;
-use crate::params2::{Params, ParamId, ParamValue};
+use crate::params2::{ParamId, ParamValue, Params};
 use bitflags::bitflags;
-//use defmt;
 use num_traits::Float;
 
 bitflags! {
@@ -120,17 +122,26 @@ pub struct ImuCalibrationState {
     min_gyro: [f64; 3],
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct ImuProcessor {
     calibration_state: ImuCalibrationState,
 }
 
+impl Default for ImuProcessor {
+    fn default() -> Self {
+        ImuProcessor::new()
+    }
+}
+
 impl ImuProcessor {
     pub fn new() -> Self {
-        let mut new_self = Self::default();
-        new_self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
-        new_self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
-        new_self
+        Self {
+            calibration_state: ImuCalibrationState {
+                max_accel: [-1000.0, -1000.0, -1000.0],
+                min_accel: [1000.0, 1000.0, 1000.0],
+                ..Default::default()
+            },
+        }
     }
 }
 
@@ -147,95 +158,178 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
             let is_calibrating = flags.intersects(CalibrationFlags::IMU);
 
             if is_calibrating {
+                // defmt::info!("Gyro Cal Count at beginning: {}", self.calibration_state.gyro_calibration_count);
                 if flags.contains(CalibrationFlags::GYRO) {
+                    // defmt::info!("Calibrating Gyro...");
                     self.calibration_state.gyro_sum[0] += packet.gyro[0] as f64;
                     self.calibration_state.gyro_sum[1] += packet.gyro[1] as f64;
                     self.calibration_state.gyro_sum[2] += packet.gyro[2] as f64;
                     self.calibration_state.gyro_calibration_count += 1;
 
+                    // defmt::info!("Gyro Cal Count: {}", self.calibration_state.gyro_calibration_count);
                     if self.calibration_state.gyro_calibration_count > 1000 {
                         let count = self.calibration_state.gyro_calibration_count as f64;
                         let bias_x = self.calibration_state.gyro_sum[0] / count;
                         let bias_y = self.calibration_state.gyro_sum[1] / count;
                         let bias_z = self.calibration_state.gyro_sum[2] / count;
 
-                        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(bias_x as f32));
-                        params.set_by_id(ParamId::PARAM_GYRO_Y_BIAS, ParamValue::Float(bias_y as f32));
-                        params.set_by_id(ParamId::PARAM_GYRO_Z_BIAS, ParamValue::Float(bias_z as f32));
+                        params.set_by_id(
+                            ParamId::PARAM_GYRO_X_BIAS,
+                            ParamValue::Float(bias_x as f32),
+                        );
+                        params.set_by_id(
+                            ParamId::PARAM_GYRO_Y_BIAS,
+                            ParamValue::Float(bias_y as f32),
+                        );
+                        params.set_by_id(
+                            ParamId::PARAM_GYRO_Z_BIAS,
+                            ParamValue::Float(bias_z as f32),
+                        );
 
                         self.calibration_state.gyro_sum = [0.0; 3];
                         self.calibration_state.gyro_calibration_count = 0;
                         flags.remove(CalibrationFlags::GYRO);
+                        log_info!("Gyro Calibration complete!");
+                        //defmt::info!("Gyro calibration complete.")
                     }
                 }
 
                 if flags.contains(CalibrationFlags::ACCEL) {
+                    // defmt::info!("Calibrating Accel...");
                     const GRAVITY: f64 = 9.80665;
                     self.calibration_state.accel_sum[0] += packet.accel[0] as f64;
                     self.calibration_state.accel_sum[1] += packet.accel[1] as f64;
-                    self.calibration_state.accel_sum[2] += packet.accel[2] as f64 + GRAVITY;
+                    self.calibration_state.accel_sum[2] += packet.accel[2] as f64 - GRAVITY;
                     self.calibration_state.accel_temp_sum += packet.temperature as f64;
                     self.calibration_state.accel_calibration_count += 1;
 
-                    self.calibration_state.max_accel[0] = self.calibration_state.max_accel[0].max(packet.accel[0] as f64);
-                    self.calibration_state.min_accel[0] = self.calibration_state.min_accel[0].min(packet.accel[0] as f64);
-                    self.calibration_state.max_accel[1] = self.calibration_state.max_accel[1].max(packet.accel[1] as f64);
-                    self.calibration_state.min_accel[1] = self.calibration_state.min_accel[1].min(packet.accel[1] as f64);
-                    self.calibration_state.max_accel[2] = self.calibration_state.max_accel[2].max(packet.accel[2] as f64);
-                    self.calibration_state.min_accel[2] = self.calibration_state.min_accel[2].min(packet.accel[2] as f64);
+                    self.calibration_state.max_accel[0] =
+                        self.calibration_state.max_accel[0].max(packet.accel[0] as f64);
+                    self.calibration_state.min_accel[0] =
+                        self.calibration_state.min_accel[0].min(packet.accel[0] as f64);
+                    self.calibration_state.max_accel[1] =
+                        self.calibration_state.max_accel[1].max(packet.accel[1] as f64);
+                    self.calibration_state.min_accel[1] =
+                        self.calibration_state.min_accel[1].min(packet.accel[1] as f64);
+                    self.calibration_state.max_accel[2] =
+                        self.calibration_state.max_accel[2].max(packet.accel[2] as f64);
+                    self.calibration_state.min_accel[2] =
+                        self.calibration_state.min_accel[2].min(packet.accel[2] as f64);
 
+                    // defmt::info!("Accel Cal Count: {}", self.calibration_state.accel_calibration_count);
                     if self.calibration_state.accel_calibration_count > 1000 {
-                        let max_delta = ((self.calibration_state.max_accel[0] - self.calibration_state.min_accel[0]).powi(2)
-                                       + (self.calibration_state.max_accel[1] - self.calibration_state.min_accel[1]).powi(2)
-                                       + (self.calibration_state.max_accel[2] - self.calibration_state.min_accel[2]).powi(2)).sqrt();
-                        
+                        let max_delta = ((self.calibration_state.max_accel[0]
+                            - self.calibration_state.min_accel[0])
+                            .powi(2)
+                            + (self.calibration_state.max_accel[1]
+                                - self.calibration_state.min_accel[1])
+                                .powi(2)
+                            + (self.calibration_state.max_accel[2]
+                                - self.calibration_state.min_accel[2])
+                                .powi(2))
+                        .sqrt();
+
                         if max_delta < 1.0 {
                             let count = self.calibration_state.accel_calibration_count as f64;
-                            let temp_comp_x = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP) { v as f64 } else { 0.0 };
-                            let temp_comp_y = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP) { v as f64 } else { 0.0 };
-                            let temp_comp_z = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_Z_TEMP_COMP) { v as f64 } else { 0.0 };
+                            let temp_comp_x = if let ParamValue::Float(v) =
+                                params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP)
+                            {
+                                v as f64
+                            } else {
+                                0.0
+                            };
+                            let temp_comp_y = if let ParamValue::Float(v) =
+                                params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP)
+                            {
+                                v as f64
+                            } else {
+                                0.0
+                            };
+                            let temp_comp_z = if let ParamValue::Float(v) =
+                                params.get_by_id(ParamId::PARAM_ACC_Z_TEMP_COMP)
+                            {
+                                v as f64
+                            } else {
+                                0.0
+                            };
 
-                            let bias_x = (self.calibration_state.accel_sum[0] - temp_comp_x * self.calibration_state.accel_temp_sum) / count;
-                            let bias_y = (self.calibration_state.accel_sum[1] - temp_comp_y * self.calibration_state.accel_temp_sum) / count;
-                            let bias_z = (self.calibration_state.accel_sum[2] - temp_comp_z * self.calibration_state.accel_temp_sum) / count;
+                            let bias_x = (self.calibration_state.accel_sum[0]
+                                - temp_comp_x * self.calibration_state.accel_temp_sum)
+                                / count;
+                            let bias_y = (self.calibration_state.accel_sum[1]
+                                - temp_comp_y * self.calibration_state.accel_temp_sum)
+                                / count;
+                            let bias_z = (self.calibration_state.accel_sum[2]
+                                - temp_comp_z * self.calibration_state.accel_temp_sum)
+                                / count;
 
-                            params.set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(bias_x as f32));
-                            params.set_by_id(ParamId::PARAM_ACC_Y_BIAS, ParamValue::Float(bias_y as f32));
-                            params.set_by_id(ParamId::PARAM_ACC_Z_BIAS, ParamValue::Float(bias_z as f32));
+                            params.set_by_id(
+                                ParamId::PARAM_ACC_X_BIAS,
+                                ParamValue::Float(bias_x as f32),
+                            );
+                            params.set_by_id(
+                                ParamId::PARAM_ACC_Y_BIAS,
+                                ParamValue::Float(bias_y as f32),
+                            );
+                            params.set_by_id(
+                                ParamId::PARAM_ACC_Z_BIAS,
+                                ParamValue::Float(bias_z as f32),
+                            );
                         } else {
                             //defmt::warn!("Too much movement for IMU calibration.");
+                            // defmt::info!("Max Accel Delta: {}", max_delta);
                         }
-                        
+
                         self.calibration_state.accel_sum = [0.0; 3];
                         self.calibration_state.accel_calibration_count = 0;
                         self.calibration_state.accel_temp_sum = 0.0;
                         self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
                         self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
                         flags.remove(CalibrationFlags::ACCEL);
+                        log_info!("Accelerometer Calibration Complete!");
+                        //defmt::info!("IMU calibration complete.")
                     }
                 }
-                
-                return None;
+                // defmt::info!("Gyro Cal Count at end of cal: {}", self.calibration_state.gyro_calibration_count);
+                // defmt::info!("IMU data used for calibration.");
+                // return None; // Removed this so we don't get IMU errors while calibrating
             }
-
+            // defmt::info!("Did I make it to here?");
             // --- Correction Logic (Not Calibrating) ---
-            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) { packet.gyro[0] -= bias as f64; }
-            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) { packet.gyro[1] -= bias as f64; }
-            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) { packet.gyro[2] -= bias as f64; }
+            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) {
+                packet.gyro[0] -= bias as f64;
+            }
+            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) {
+                packet.gyro[1] -= bias as f64;
+            }
+            if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) {
+                packet.gyro[2] -= bias as f64;
+            }
 
             let temp = packet.temperature as f64;
-            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (params.get_by_id(ParamId::PARAM_ACC_X_BIAS), params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP)) {
+            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (
+                params.get_by_id(ParamId::PARAM_ACC_X_BIAS),
+                params.get_by_id(ParamId::PARAM_ACC_X_TEMP_COMP),
+            ) {
                 packet.accel[0] -= (comp as f64 * temp + bias as f64);
             }
-            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (params.get_by_id(ParamId::PARAM_ACC_Y_BIAS), params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP)) {
+            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (
+                params.get_by_id(ParamId::PARAM_ACC_Y_BIAS),
+                params.get_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP),
+            ) {
                 packet.accel[1] -= (comp as f64 * temp + bias as f64);
             }
-            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (params.get_by_id(ParamId::PARAM_ACC_Z_BIAS), params.get_by_id(ParamId::PARAM_ACC_Z_TEMP_COMP)) {
+            if let (ParamValue::Float(bias), ParamValue::Float(comp)) = (
+                params.get_by_id(ParamId::PARAM_ACC_Z_BIAS),
+                params.get_by_id(ParamId::PARAM_ACC_Z_TEMP_COMP),
+            ) {
                 packet.accel[2] -= (comp as f64 * temp + bias as f64);
             }
 
+            // defmt::info!("IMU data processed");
             Some(packet)
         } else {
+            // defmt::info!("No IMU data this cycle.");
             None
         }
     }
@@ -313,14 +407,20 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroP
                     // Finalize calibration
                     let variance = self.calibration_state.m2 / (SENSOR_CAL_CYCLES - 1) as f64;
                     if variance < BARO_MAX_CALIBRATION_VARIANCE {
-                        params.set_by_id(ParamId::PARAM_BARO_BIAS, ParamValue::Float(self.calibration_state.mean as f32));
+                        params.set_by_id(
+                            ParamId::PARAM_BARO_BIAS,
+                            ParamValue::Float(self.calibration_state.mean as f32),
+                        );
                         let ground_alt = pressure_to_altitude(self.calibration_state.mean);
-                        params.set_by_id(ParamId::PARAM_GROUND_LEVEL, ParamValue::Float(ground_alt as f32));
+                        params.set_by_id(
+                            ParamId::PARAM_GROUND_LEVEL,
+                            ParamValue::Float(ground_alt as f32),
+                        );
                         //defmt::info!("Barometer calibration successful!");
                     } else {
                         //defmt::warn!("Too much movement for barometer calibration.");
                     }
-                    
+
                     // Reset state and remove the flag to end the calibration process.
                     self.calibration_state = BaroCalibrationState::default();
                     flags.remove(CalibrationFlags::BARO);
@@ -332,7 +432,7 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroP
                     let delta2 = packet.pressure as f64 - self.calibration_state.mean;
                     self.calibration_state.m2 += delta * delta2;
                 }
-                
+
                 // We are calibrating, so don't return a packet with a value.
                 None
             } else {
@@ -376,7 +476,7 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>>
     }
 }
 
-const PITOT_MAX_CALIBRATION_VARIANCE: f64 = 100.0; 
+const PITOT_MAX_CALIBRATION_VARIANCE: f64 = 100.0;
 
 #[derive(Default, Copy, Clone)]
 pub struct PitotCalibrationState {
@@ -414,13 +514,16 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for Pito
                 if self.calibration_state.count > total_cycles {
                     let variance = self.calibration_state.m2 / (SENSOR_CAL_CYCLES - 1) as f64;
                     if variance < PITOT_MAX_CALIBRATION_VARIANCE {
-                        params.set_by_id(ParamId::PARAM_DIFF_PRESS_BIAS, ParamValue::Float(self.calibration_state.mean as f32));
+                        params.set_by_id(
+                            ParamId::PARAM_DIFF_PRESS_BIAS,
+                            ParamValue::Float(self.calibration_state.mean as f32),
+                        );
                         self.calibration_state.calibrated = true;
-                        defmt::info!("Airspeed calibration successful!");
+                        //defmt::info!("Airspeed calibration successful!");
                     } else {
-                        defmt::info!("Too much movement for diff pressure calibration.");
+                        //defmt::info!("Too much movement for diff pressure calibration.");
                     }
-                    
+
                     self.calibration_state = PitotCalibrationState::default();
                     flags.remove(CalibrationFlags::PITOT);
                 } else if self.calibration_state.count > SENSOR_CAL_DELAY_CYCLES {
@@ -435,11 +538,12 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for Pito
                 if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_DIFF_PRESS_BIAS) {
                     packet.differential_pressure -= bias;
                 }
-                
+
                 const RHO: f64 = 1.225;
                 let dp = packet.differential_pressure as f64;
-                packet.indicated_airspeed = (2.0 * dp.abs() / RHO).sqrt() as f32 * dp.signum() as f32;
-                
+                packet.indicated_airspeed =
+                    (2.0 * dp.abs() / RHO).sqrt() as f32 * dp.signum() as f32;
+
                 Some(packet)
             }
         } else {
@@ -486,26 +590,77 @@ impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for MagPro
     ) -> Self::Output {
         if let Some(Ok(mut packet)) = arg.take() {
             // Apply hard-iron biases from parameters
-            let mag_hard_x = packet.flux[0] - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_X_BIAS) { v } else { 0.0 };
-            let mag_hard_y = packet.flux[1] - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_Y_BIAS) { v } else { 0.0 };
-            let mag_hard_z = packet.flux[2] - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_Z_BIAS) { v } else { 0.0 };
+            let mag_hard_x = packet.flux[0]
+                - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_X_BIAS) {
+                    v
+                } else {
+                    0.0
+                };
+            let mag_hard_y = packet.flux[1]
+                - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_Y_BIAS) {
+                    v
+                } else {
+                    0.0
+                };
+            let mag_hard_z = packet.flux[2]
+                - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_Z_BIAS) {
+                    v
+                } else {
+                    0.0
+                };
 
             // Get soft-iron correction matrix parameters
-            let a11 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A11_COMP) { v } else { 1.0 };
-            let a12 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A12_COMP) { v } else { 0.0 };
-            let a13 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A13_COMP) { v } else { 0.0 };
-            let a21 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A21_COMP) { v } else { 0.0 };
-            let a22 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A22_COMP) { v } else { 1.0 };
-            let a23 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A23_COMP) { v } else { 0.0 };
-            let a31 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A31_COMP) { v } else { 0.0 };
-            let a32 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A32_COMP) { v } else { 0.0 };
-            let a33 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A33_COMP) { v } else { 1.0 };
+            let a11 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A11_COMP) {
+                v
+            } else {
+                1.0
+            };
+            let a12 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A12_COMP) {
+                v
+            } else {
+                0.0
+            };
+            let a13 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A13_COMP) {
+                v
+            } else {
+                0.0
+            };
+            let a21 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A21_COMP) {
+                v
+            } else {
+                0.0
+            };
+            let a22 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A22_COMP) {
+                v
+            } else {
+                1.0
+            };
+            let a23 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A23_COMP) {
+                v
+            } else {
+                0.0
+            };
+            let a31 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A31_COMP) {
+                v
+            } else {
+                0.0
+            };
+            let a32 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A32_COMP) {
+                v
+            } else {
+                0.0
+            };
+            let a33 = if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_A33_COMP) {
+                v
+            } else {
+                1.0
+            };
 
             // Apply soft-iron corrections (matrix multiplication)
             packet.flux[0] = a11 * mag_hard_x + a12 * mag_hard_y + a13 * mag_hard_z;
             packet.flux[1] = a21 * mag_hard_x + a22 * mag_hard_y + a23 * mag_hard_z;
             packet.flux[2] = a31 * mag_hard_x + a32 * mag_hard_y + a33 * mag_hard_z;
-            
+
             Some(packet)
         } else {
             None

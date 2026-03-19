@@ -39,13 +39,18 @@ use crate::board::BoardTrait;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PwmError {
     ChannelOutOfRange,
-    GenericError
+    GenericError,
 }
 
 pub trait PwmDriver {
     fn len(&self) -> usize;
+    fn is_enabled(&self) -> bool;
+
     fn enable(&mut self, channel: usize) -> Result<(), PwmError>;
     fn disable(&mut self, channel: usize) -> Result<(), PwmError>;
+
+    fn enable_all(&mut self) -> Result<(), PwmError>;
+    fn disable_all(&mut self);
 
     /// Sets the duty cycle for a specific channel.
     ///

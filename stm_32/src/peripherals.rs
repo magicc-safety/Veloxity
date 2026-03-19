@@ -34,18 +34,18 @@
 // *
 // ******************************************************************************
 // **/
+pub mod adis16500;
 pub mod bmi08x;
 pub mod dlhrl20g;
 pub mod dps310;
 pub mod iis2mdc;
+pub mod ist8308;
+pub mod llv3hp;
+pub mod ms4525;
 pub mod pps;
 pub mod pwm;
 pub mod sbus;
 pub mod sd_card;
 pub mod telem;
 pub mod ublox;
-pub mod adis16500;
 pub mod vcp;
-pub mod ms4525;
-pub mod ist8308;
-pub mod llv3hp;

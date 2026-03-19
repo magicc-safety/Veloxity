@@ -130,7 +130,7 @@ impl SdCard {
                 //defmt::trace!("uSD: SD card initialized.");
             }
             Err(e) => {
-                defmt::error!("uSD: Failed to get card details: {:?}", e);
+                //defmt::error!("uSD: Failed to get card details: {:?}", e);
             }
         }
         let block_size = card_size / card_blocks;
