@@ -50,8 +50,7 @@ use rustflight_core::{
     hlist::{Here, There},
     hlist_type,
     mixer::Mixer,
-    rustflight::Configuration,
-    rustflight::rustflight_typed::ROSFlight,
+    rosflight::{Configuration, ROSFlight},
     state_machine::StateManager,
 };
 use stm_32::*;

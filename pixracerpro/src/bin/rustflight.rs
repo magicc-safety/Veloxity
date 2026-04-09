@@ -55,8 +55,7 @@ use rustflight_core::{
     mixer::Mixer,
     params2::Params,
     pwm,
-    rustflight::Configuration,
-    rustflight::rustflight_typed::ROSFlight,
+    rosflight::{Configuration, ROSFlight},
     state_machine::StateManager,
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};

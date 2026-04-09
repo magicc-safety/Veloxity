@@ -51,7 +51,7 @@ pub mod command_manager;
 pub mod params2;
 pub mod pwm;
 pub mod rc;
-pub mod rustflight;
+pub mod rosflight;
 pub mod sensorprocessors;
 pub mod state_machine;
 //pub(crate) mod units;

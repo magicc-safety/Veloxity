@@ -50,7 +50,7 @@ use rustflight_core::{
     mixer::{Mixer, quad_mixer::QuadMixer},
     params2::Params,
     pwm::PwmDriver,
-    rustflight::{Configuration, rustflight_typed::ROSFlight},
+    rosflight::{Configuration, ROSFlight},
     state_machine::StateManager,
 };
 use sim::pwm::SimPwmDriver;

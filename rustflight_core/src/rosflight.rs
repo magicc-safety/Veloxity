@@ -1,6 +1,6 @@
-// /**
+// /*
 // ******************************************************************************
-// * File     : rustflight_typed.rs
+// * File     : rosflight.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,8 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-// THIS CODE HAS NOT BEEN MADE SAFE YET
-//use crate::mavlink::dialects::rosflight::{self as rosflight_dialect};
 
 use crate::{
     board::BoardTrait,
@@ -55,7 +53,6 @@ use crate::{
     params2::{self, PARAM_DEFINITIONS, ParamId, ParamIter},
     pwm::{self, PwmDriver},
     rc::Rc,
-    rustflight::Configuration,
     sensorprocessors::CalibrationFlags,
     state_machine::{self, ErrorFlag, Event, StateManager},
 };
@@ -64,6 +61,25 @@ use micro_algebra::stack::vector::Vector;
 
 const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
 const ESTIMATOR_DT: f64 = 1.0 / 400.0; // Assume constant 400Hz for estimator
+
+/// A "glue" trait that defines the "wiring diagram" (`SculptIndices`)
+/// for a specific combination of a Board and a BodyType.
+pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {
+    // --- Existing Indices ---
+    type SculptIndices: crate::hlist::HList; // For estimator
+
+    type RcPacketIndex;
+    type RcPacketSculptedIndex;
+
+    type ImuPacketIndex;
+    type MagPacketIndex;
+    type BaroPacketIndex;
+    type PitotPacketIndex;
+    type RangePacketIndex;
+    type GNSSPacketIndex;
+    type BatteryPacketIndex;
+    type AttitudePacketIndex;
+}
 
 pub struct ROSFlight<B, BT, C, CI, PD>
 //pub struct ROSFlight<B, BT, C, CI>
