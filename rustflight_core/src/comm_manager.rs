@@ -46,7 +46,7 @@ use crate::packets::{self, RC_PACKET_CHANNELS};
 use crate::params2::{
     PARAM_DEFINITIONS, PARAMS_COUNT, ParamDefinition, ParamId, ParamIter, ParamValue, Params,
 };
-use crate::rustflight::Configuration;
+use crate::rosflight::Configuration;
 use crate::sensorprocessors::CalibrationFlags;
 use crate::state_machine::StateManager;
 use crate::{board, log_info};

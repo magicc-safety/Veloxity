@@ -1,28 +1,93 @@
 # RustFlight
 
-**RustFlight** is a Rust-based port of the **ROSFlight** project, bringing real-time, high-performance flight control to the Rust ecosystem. This project aims to leverage the safety and concurrency features of Rust to create a reliable and maintainable flight control software.
+**RustFlight** is a Rust-based port of the **ROSFlight** project, bringing real-time, high-performance flight control to the Rust ecosystem. This project leverages Rust's safety and concurrency features to create reliable, maintainable flight control firmware.
 
-To get started:
+## Workspace Structure
 
-1. Fork the repository.
-2. Create a new branch following the naming convention.
-3. Make your changes and ensure they are well-tested.
-4. Open a pull request with a detailed description of the changes.
+| Crate | Target | Purpose |
+|---|---|---|
+| `rustflight_core` | host | `no_std` algorithm library: traits, HList, estimator, controller, mixer, MAVLink |
+| `stm_32` | `thumbv7em-none-eabihf` | STM32/Embassy HAL and peripheral drivers |
+| `nucleo` | `thumbv7em-none-eabihf` | Binary — `BoardTrait` impl for the Nucleo-H753ZI dev board |
+| `pixracerpro` | `thumbv7em-none-eabihf` | Binary — `BoardTrait` impl for the Pixracer Pro flight controller |
+| `sim` | host | Binary — `BoardTrait` impl for host-side simulation via Zenoh |
+
+MAVLink message types are code-generated at build time by `rustflight_core/build.rs` from `mavlink_definitions/` using the `mavspec` crate. They are accessible as `rustflight_core::mavlink::*`.
+
+## Prerequisites
+
+- Rust toolchain with the `thumbv7em-none-eabihf` target:
+  ```bash
+  rustup target add thumbv7em-none-eabihf
+  ```
+- `probe-rs` for flashing and running on hardware:
+  ```bash
+  cargo install probe-rs-tools
+  ```
+- A debug probe connected to the target board (e.g., ST-Link on the Nucleo).
+
+## Building
+
+```bash
+
+# Build for the Pixracer Pro (embedded target)
+cargo build -p pixracerpro --target thumbv7em-none-eabihf
+
+# Build for the Nucleo-H753ZI (embedded target)
+cargo build -p nucleo --target thumbv7em-none-eabihf
+
+# Format code
+cargo fmt
+```
+
+## Flashing and Running
+
+The embedded runner is configured in `.cargo/config.toml`:
+
+```toml
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip STM32H743IIKx"
+```
+
+### Nucleo-H753ZI
+
+```bash
+cargo run -p nucleo --target thumbv7em-none-eabihf --bin rustflight
+```
+
+### Pixracer Pro
+
+```bash
+cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin rustflight
+```
+
+Both boards run the same `rustflight` binary entry point. The `Configuration` impl in each binary's `rustflight.rs` wires the board-specific sensor indices to the generic `ROSFlight` controller.
+
+### Sim
+
+```bash
+cargo run -p sim --bin rustflight
+```
+
+The sim board uses [Zenoh](https://zenoh.io/) for inter-process communication. It subscribes to a `rust/tick` topic to drive the main loop and publishes actuator commands over Zenoh topics. (**WIP**)
+
+## Debugging
+
+To enable defmt logging, uncomment the `defmt` dependency in the relevant crate's `Cargo.toml` and the `link-arg=-Tdefmt.x` line in `.cargo/config.toml`. Then uncomment `defmt::` calls in the source. defmt output is read via `probe-rs`.
+
+## MAVLink
+
+The MAVLink parser (`rustflight_core::comm_manager::mavlink_parser`) is board-agnostic. It operates on raw `&[u8]` bytes: `MavlinkParser::feed_byte` accumulates bytes and returns a frame once the start byte, length, and CRC all match. `process_mavlink_frame` decodes the frame into a typed `Rosflight` dialect message.
+
+`MavlinkInterface` (in `rustflight_core::comm_manager::comm_link_trait::mavlink`) implements the `CommInterface<B: BoardTrait>` trait and wires the parser into the main loop via `comm_manager`.
 
 ## Branching Strategy
 
-When creating new branches, please adhere to the following naming convention:
+Branch names follow the convention `[username]/[feature]`:
 
-[username]/[feature]
-
-- **[username]**: Your GitHub username or identifier.
-- **[feature]**: A concise description of the feature or issue you're working on.
-
-### Example:
-
-For a user named `johndoe` working on a parameter server feature, the branch name should be:
-
+```
 johndoe/param_server
+```
 
 ## License
 
@@ -30,21 +95,4 @@ This project is licensed under the [NO IDEA](LICENSE).
 
 ## Acknowledgments
 
-This project is a port of [ROSFlight](https://github.com/rosflight/rosflight), originally written in C++.
-
-## How to Build the Project:
-
-1. running "cargo build" builds all the Rustflight specific features
-2. running "cargo b_nucleo" builds for the nucleo board (stm32 architecture target: see .cargo/config.toml for details). This build includes all the embedded code, peripherals, and embassy specific code.
-
-## How to Run The Project:
-Tests have been created so far for the nucleo board. These are inside the src/bin directory. Shortcuts have been generated for running a test that only includes sensors, and a test for sending/receiving heartbeats:
-
-1. running "cargo r_nucleo_sensors" will start the nucleo board, spinning up tasks for each sensor, and processing them with the sensors module
-2. running "cargo r_nucleo_mavlink" will start the nucleo board, spin up the tasks for each sensor, and use the comm_manager in the highest level loop to process incoming serial stream data and match on mavlink messages.
-
-Debug statements throughout the code can be uncommented for debugging/visualization.
-
-
-## Mavlink Specifics
-The mavlink parser is not nucleo specific. Rather, any implementation of the comm_link_trait that wishes to use mavlink should take advantage of the mavlink parser. The mavlink parser takes in raw bytes (&[u8]) and will return a frame once it matches on the start bytes, collects the message, and checks against the crc. It then returns the frame. There is also a function for processing mavlink frames and returning mavlink messages. Together, those two functions allow any implementation of the comm_link_trait to receive mavlink messages from a byte stream. 
+This project is a port of [ROSFlight](https://github.com/rosflight/rosflight), originally written in C++. See the [ROSFlight docs](https://docs.rosflight.org/latest/) for protocol and system context.

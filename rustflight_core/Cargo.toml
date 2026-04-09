@@ -71,7 +71,3 @@ mavspec = { version = "0.6.4", features = ["rust_gen"] }
 [lints]
 workspace = true
 
-[[bin]]
-name = "typed_test"
-test = false
-bench = false

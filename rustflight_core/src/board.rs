@@ -49,6 +49,6 @@ pub trait BoardTrait {
     fn clock_millis(&self) -> u32;
     fn clock_micros(&self) -> u64;
     //fn clock_delay(&mut self, ms: u32);
-    fn set_test_pin_1(&mut self, high: bool);
-    fn set_test_pin_2(&mut self, high: bool);
+    fn set_test_pin_1(&mut self, _high: bool) {}
+    fn set_test_pin_2(&mut self, _high: bool) {}
 }

@@ -2,3 +2,5 @@
 .gitconfig
 .vscode/
 Cargo.lock
+.claude/
+CLAUDE.md

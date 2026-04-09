@@ -1,6 +1,8 @@
-// /*
+#![no_std]
+#![no_main]
+// /**
 // ******************************************************************************
-// * File     : rustflight.rs
+// * File     : typed_test.rs
 // * Date     : May 8, 2025
 // ******************************************************************************
 // *
@@ -34,23 +36,64 @@
 // *
 // ******************************************************************************
 // **/
-pub mod rustflight_typed;
+use cortex_m_rt::entry;
+//use defmt;
+use nucleo::*;
+use rustflight_core::{
+    board::BoardTrait,
+    board::dummy::DummyBoard,
+    bodytype::BodyType,
+    bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
+    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
+    controller::Controller,
+    estimator::Estimator,
+    hlist::{Here, There},
+    hlist_type,
+    mixer::Mixer,
+    rosflight::{Configuration, ROSFlight},
+    state_machine::StateManager,
+};
+use stm_32::*;
 
-/// NEW: A "glue" trait that defines the "wiring diagram" (`SculptIndices`)
-/// for a specific combination of a Board and a BodyType.
-pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {
-    // --- Existing Indices ---
-    type SculptIndices: crate::hlist::HList; // For estimator
+// define the wiring diagram
+#[derive(Default)]
+pub struct NucleoQuadConfig;
+impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {
+    // needs IMU, Baro, Mag, GNSS
+    type SculptIndices = hlist_type![Here, Here, Here, There<Here>];
+}
 
-    type RcPacketIndex;
-    type RcPacketSculptedIndex;
+#[entry]
+fn main() -> ! {
+    // board implementation
+    let mut board = board::Board::new();
 
-    type ImuPacketIndex;
-    type MagPacketIndex;
-    type BaroPacketIndex;
-    type PitotPacketIndex;
-    type RangePacketIndex;
-    type GNSSPacketIndex;
-    type BatteryPacketIndex;
-    type AttitudePacketIndex;
+    // body type instantiations
+    let estimator = QuadEstimator::default();
+    let controller = QuadController::default();
+    let mixer = QuadMixer::default();
+
+    // zero-sized configuration marker (necessary)
+    let config = NucleoQuadConfig::default();
+
+    // comm_link implementation
+    let mavlink = MavlinkInterface::new();
+
+    let state_manager = StateManager::new();
+
+    let mut rosflight = ROSFlight::init(
+        1000,
+        board,
+        mavlink,
+        state_manager,
+        estimator,
+        controller,
+        mixer,
+        config,
+    );
+
+    loop {
+        // defmt::debug!("One Loop");
+        rosflight.run();
+    }
 }
