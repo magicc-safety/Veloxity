@@ -46,6 +46,6 @@ rustflight_core = { workspace = true }
 workspace = true
 
 [[bin]]
-name = "typed_test"
+name = "rustflight"
 test = false
 bench = false

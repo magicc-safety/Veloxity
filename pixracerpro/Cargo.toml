@@ -51,6 +51,6 @@ panic-halt = "1.0.0"
 workspace = true
 
 [[bin]]
-name = "typed_test"
+name = "rustflight"
 test = false
 bench = false
