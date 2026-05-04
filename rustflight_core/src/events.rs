@@ -119,6 +119,11 @@ pub struct OffboardControlRequested {
     pub msg: OffboardControlMsg,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamDefaultsRequested {
+    pub command: RosflightCmd,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum CommResponse {
     ParamValue(ParamValueMsg),
@@ -129,6 +134,7 @@ pub const PARAM_CHANGED_QUEUE_CAPACITY: usize = 8;
 pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = 8;
 pub const CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY: usize = 4;
+pub const PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY: usize = 2;
 
 #[derive(Default)]
 pub struct ParamEventQueues {
@@ -142,6 +148,8 @@ pub struct CommandEventQueues {
     pub calibration_requests: EventQueue<CalibrationRequested, CALIBRATION_REQUEST_QUEUE_CAPACITY>,
     pub offboard_control_requests:
         EventQueue<OffboardControlRequested, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY>,
+    pub param_defaults_requests:
+        EventQueue<ParamDefaultsRequested, PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY>,
 }
 
 impl ParamEventQueues {

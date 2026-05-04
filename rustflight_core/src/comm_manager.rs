@@ -41,7 +41,7 @@ use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
     CalibrationRequested, CommandEventQueues, CommResponse, OffboardControlRequested,
-    ParamEventQueues, ParamSetRequested,
+    ParamDefaultsRequested, ParamEventQueues, ParamSetRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -126,6 +126,7 @@ where
     comm_link: T,
     pub msgs: comm_messages::Messages,
     pending_calibration_ack: Option<RosflightCmd>,
+    pending_param_defaults_ack: Option<RosflightCmd>,
     _board_marker: PhantomData<B>,
 }
 
@@ -152,6 +153,7 @@ where
             comm_link,
             msgs: comm_messages::Messages::default(),
             pending_calibration_ack: None,
+            pending_param_defaults_ack: None,
             _board_marker: PhantomData,
         }
     }
@@ -637,6 +639,31 @@ where
         }
     }
 
+    pub fn send_completed_param_defaults_ack(
+        &mut self,
+        board: &mut B,
+        command: Option<RosflightCmd>,
+    ) -> bool {
+        let Some(pending) = self.pending_param_defaults_ack else {
+            return false;
+        };
+
+        if command == Some(pending) {
+            self.comm_link.send_cmd_ack(
+                board,
+                self.sysid,
+                RosflightCmdAckMsg {
+                    command: pending,
+                    success: RosflightCmdResponse::RosflightCmdSuccess,
+                },
+            );
+            self.pending_param_defaults_ack = None;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn act_on_messages(
         &mut self,
         params_iter: &mut Option<ParamIter>,
@@ -797,8 +824,16 @@ where
                 }
                 RosflightCmd::SetParamDefaults => {
                     //defmt::info!("Setting parameters to defaults.");
-                    params.set_defaults();
-                    success = RosflightCmdResponse::RosflightCmdSuccess;
+                    if command_events
+                        .param_defaults_requests
+                        .push(ParamDefaultsRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        self.pending_param_defaults_ack = Some(msg.command);
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::Reboot => {
                     // Placeholder: Need BoardTrait method for reboot
@@ -1218,5 +1253,53 @@ mod tests {
         assert_eq!(request.msg.mode, OffboardControlMode::ModeRollPitchYawrateThrottle);
         assert!(request.msg.ignore.contains(OffboardControlIgnore::IGNORE_FY));
         assert_eq!(request.msg.qx, 0.1);
+    }
+
+    #[test]
+    fn set_param_defaults_emits_request_and_defers_ack() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let mut params_iter = None;
+        let mut param_events = ParamEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::SetParamDefaults,
+        });
+
+        manager.act_on_messages(
+            &mut params_iter,
+            &mut params,
+            &mut param_events,
+            &mut command_events,
+            &mut board,
+        );
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(42)
+        );
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+
+        let applied = command_system::apply_param_defaults_requests(command_system::ParamDefaultsCtx {
+            requests: EventDrainPort::new(&mut command_events.param_defaults_requests),
+            params: &mut params,
+        });
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(1)
+        );
+        assert!(manager.send_completed_param_defaults_ack(&mut board, applied));
+        assert_eq!(manager.comm_link().cmd_ack_count, 1);
+
+        let ack = manager.comm_link().last_cmd_ack.unwrap();
+        assert!(matches!(ack.command, RosflightCmd::SetParamDefaults));
+        assert!(matches!(
+            ack.success,
+            RosflightCmdResponse::RosflightCmdSuccess
+        ));
     }
 }

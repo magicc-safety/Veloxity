@@ -5,7 +5,7 @@ use crate::{
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
     command_manager::CommandManager,
-    command_system::{self, CalibrationRequestCtx, OffboardControlCtx},
+    command_system::{self, CalibrationRequestCtx, OffboardControlCtx, ParamDefaultsCtx},
     controller::Controller,
     events::{CommandEventQueues, ParamEventQueues},
     estimator::{AttitudeStateTrait, NamedEstimator},
@@ -154,6 +154,12 @@ where
             command: &mut self.command,
             params: &self.params,
         });
+        let applied_defaults = command_system::apply_param_defaults_requests(ParamDefaultsCtx {
+            requests: EventDrainPort::new(&mut self.command_events.param_defaults_requests),
+            params: &mut self.params,
+        });
+        self.comm
+            .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
 
         param_system::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut self.params),
@@ -686,6 +692,47 @@ mod tests {
 
         assert!(world.command.is_offboard_active());
         assert!(world.command_events.offboard_control_requests.is_empty());
+    }
+
+    #[test]
+    fn world_applies_param_defaults_and_sends_ack_after_apply() {
+        let board = TestBoard::default();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::SetParamDefaults,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert_eq!(
+            world.params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(1)
+        );
+        assert!(world.command_events.param_defaults_requests.is_empty());
+        assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
+
+        let ack = world.comm.comm_link().last_cmd_ack.unwrap();
+        assert!(matches!(ack.command, RosflightCmd::SetParamDefaults));
+        assert!(matches!(
+            ack.success,
+            RosflightCmdResponse::RosflightCmdSuccess
+        ));
     }
 
 }

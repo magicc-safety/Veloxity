@@ -1560,6 +1560,54 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Compile-Time Checkability Status
+
+Current assessment:
+
+- The remake is moving in the intended compile-time-checkable direction.
+- The most important improvement is narrowing who can mutate each resource.
+- `World` owns resources explicitly.
+- Systems receive narrow resource/context structs instead of `&mut World`.
+- Event queues carry requests between systems.
+- Domain systems mutate domain resources.
+- Completion/response systems send responses after work is actually complete.
+
+Compile-time boundaries already improved:
+
+- `World` uses `BoardIo`, not the HList-bearing `BoardTrait`.
+- The new sim board implements `BoardIo` directly and has no HList scaffolding.
+- `CommManager::act_on_messages` no longer receives `&mut CommandManager`.
+- Therefore comms cannot directly mutate command state.
+- Calibration commands now emit `CalibrationRequested`.
+- Therefore comms no longer directly sets `CalibrationFlags`.
+- Offboard control messages now emit `OffboardControlRequested`.
+- Therefore comms no longer directly calls `CommandManager::set_new_offboard_command`.
+- Parameter set requests emit `ParamSetRequested`.
+- Therefore comms no longer mutates params for `PARAM_SET`.
+- PWM enable/disable is handled by `pwm_system::sync_pwm_output_state`.
+- PWM command writes are handled by `pwm_system::write_pwm_commands`.
+- Therefore control computes actuator commands, while PWM output policy is owned by the PWM system.
+
+Still not final:
+
+- `CommandEventQueues` is still a shared queue bundle.
+- Later we may split queues into narrower ports per system when the shape stabilizes.
+- `CalibrationFlags` is still a compact active-calibration resource.
+- It is acceptable for now because sensor processors need a persistent active state across many samples.
+- Later this should likely become a richer `CalibrationState` with request/active/completed/failed fields.
+- `CommManager::act_on_messages` still receives `&mut Params`.
+- Some command paths still mutate params directly.
+- The current in-progress target is `SetParamDefaults`, which should become an event and deferred ACK.
+- The old HList `ROSFlight` path still exists for reference and compatibility.
+- The new `World` path is increasingly independent, but deletion of HList should wait until parity is proven.
+
+Current compile-time goal:
+
+- If a module should not mutate a resource, its system function should not receive `&mut` access to that resource.
+- If a module should only request work, it should receive an event emit port or event queue, not the target resource.
+- If a response depends on completed work, the response should be emitted after the completing system runs.
+- Tests should cover each component system and the scheduler handoff through `World`.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.
@@ -1576,3 +1624,71 @@ Validation:
 - `cargo test -p rustflight_core comm_manager::tests --lib` passes.
 - `cargo test -p rustflight_core param_reactions::tests --lib` passes.
 - `cargo check -p sim` passes.
+
+## Param Defaults Command Event Progress
+
+Reason for this change:
+
+- `SetParamDefaults` is a ROSflight command path, so it should preserve ROSflight wire compatibility.
+- The old shape mutated params inside comms and immediately reported command success.
+- That is the same category of shortcut as the earlier parameter-set and calibration problems.
+- The new rule is that comms records intent, the owning system performs the mutation, and the success ACK is sent only after that mutation has completed.
+
+Design now implemented:
+
+- `CommManager` emits `ParamDefaultsRequested`.
+- `CommManager` no longer calls `Params::set_defaults` from the command parser.
+- `command_system::apply_param_defaults_requests` drains the request queue and calls `Params::set_defaults`.
+- The command system returns the applied command so the response stage can prove that the command was actually handled.
+- `CommManager::send_completed_param_defaults_ack` sends the ROSflight `RosflightCmdAckMsg` only after the apply stage reports completion.
+- The ACK remains ROSflight-compatible: it still uses `RosflightCmd::SetParamDefaults` and `RosflightCmdSuccess`.
+
+Compile-time boundary improvement:
+
+- Comms still needs read/query access to params for MAVLink parameter messages.
+- Comms no longer has authority over the default-reset mutation path.
+- The reset mutation belongs to the command-system stage, which receives a narrow `ParamDefaultsCtx`.
+- This matches the broader ports pattern: request port into a fixed-size queue, narrow mutable resource access in the owning system, response after completion.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `ParamDefaultsRequested`.
+  - Adds a fixed-capacity param-defaults request queue to `CommandEventQueues`.
+- `rustflight_core/src/command_system.rs`
+  - Adds `ParamDefaultsCtx`.
+  - Adds `apply_param_defaults_requests`.
+  - Adds component coverage for default reset application.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits `ParamDefaultsRequested` for `RosflightCmd::SetParamDefaults`.
+  - Stores a pending defaults ACK.
+  - Sends the ACK after the scheduler confirms that defaults were applied.
+- `rustflight_core/src/world.rs`
+  - Schedules default-reset request application in the World comm/param/sensor stage.
+  - Sends the deferred defaults ACK after the apply stage.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the same scheduling step in the legacy compatibility path.
+
+Tests added:
+
+- `command_system::tests::apply_param_defaults_requests_resets_params_and_reports_command`
+  - Proves the command system owns the reset mutation.
+- `comm_manager::tests::set_param_defaults_emits_request_and_defers_ack`
+  - Proves comms emits a request, does not reset params immediately, and sends ACK only after completion.
+- `world::tests::world_applies_param_defaults_and_sends_ack_after_apply`
+  - Proves the scheduler drains the request, resets params, and sends the ROSflight-compatible success ACK.
+
+Validation:
+
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Continue removing direct mutation shortcuts from command and communication handling.
+- Prioritize paths where ROSflight expects a command response or externally visible behavior after completed work.
+- Keep each new step independently tested at the component level and through `World`.

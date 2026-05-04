@@ -1,7 +1,7 @@
 use crate::{
     comm_messages::enums::RosflightCmd,
     command_manager::CommandManager,
-    events::{CalibrationRequested, OffboardControlRequested},
+    events::{CalibrationRequested, OffboardControlRequested, ParamDefaultsRequested},
     params2::Params,
     ports::EventDrainPort,
     sensorprocessors::CalibrationFlags,
@@ -37,6 +37,22 @@ pub fn apply_offboard_control_requests<const N: usize>(mut ctx: OffboardControlC
     }
 }
 
+pub struct ParamDefaultsCtx<'a, const N: usize> {
+    pub requests: EventDrainPort<'a, ParamDefaultsRequested, N>,
+    pub params: &'a mut Params,
+}
+
+pub fn apply_param_defaults_requests<const N: usize>(
+    mut ctx: ParamDefaultsCtx<'_, N>,
+) -> Option<RosflightCmd> {
+    let mut applied = None;
+    while let Some(request) = ctx.requests.next() {
+        ctx.params.set_defaults();
+        applied = Some(request.command);
+    }
+    applied
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,7 +63,9 @@ mod tests {
         },
         events::{
             CALIBRATION_REQUEST_QUEUE_CAPACITY, EventQueue, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY,
+            PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY,
         },
+        params2::{ParamId, ParamValue},
     };
 
     #[test]
@@ -101,6 +119,27 @@ mod tests {
         });
 
         assert!(command.is_offboard_active());
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn apply_param_defaults_requests_resets_params_and_reports_command() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let mut requests =
+            EventQueue::<ParamDefaultsRequested, PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(ParamDefaultsRequested {
+            command: RosflightCmd::SetParamDefaults,
+        });
+
+        let applied = apply_param_defaults_requests(ParamDefaultsCtx {
+            requests: EventDrainPort::new(&mut requests),
+            params: &mut params,
+        });
+
+        assert!(matches!(applied, Some(RosflightCmd::SetParamDefaults)));
+        assert_eq!(params.get_by_id(ParamId::PARAM_SYSTEM_ID), ParamValue::Int(1));
         assert!(requests.is_empty());
     }
 }
