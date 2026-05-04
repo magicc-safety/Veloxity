@@ -863,3 +863,124 @@ Validation:
 Next sim step:
 
 - After core has a scheduler path that uses `SensorBus` and `process_sensor_bus`, switch `sim` execution from the HList path to the named sensor path.
+
+## Scheduler Strategy Decision
+
+Decision: build a parallel `World`/scheduler implementation beside the existing `ROSFlight` loop.
+
+Rationale:
+
+- The old HList-based loop works and provides a behavioral reference.
+- Rewriting the old loop in place would create a mixed architecture and make regressions harder to isolate.
+- A parallel path lets the new design grow with tests before it replaces flight behavior.
+- Once the new path is stable, the duplicated old HList path can be deleted deliberately.
+
+The new path must follow these rules:
+
+- `World` owns resources.
+- Scheduler methods borrow resources from `World`.
+- Systems receive ports/context structs.
+- Events connect modules.
+- No HLists in the new scheduler path.
+- No `&mut World` passed to systems.
+- No hidden subscriber registry.
+
+Migration shape:
+
+1. Add `world` module in `rustflight_core`.
+2. Add a parallel `World<B, BT, CI, PD>` type.
+3. Reuse existing modules where possible:
+   - `Params`
+   - `CommManager`
+   - `Rc`
+   - `CommandManager`
+   - `StateManager`
+   - estimator/controller/mixer/PWM fields, even before all stages use them
+4. Use named resources in the new path:
+   - `SensorBus`
+   - `ProcessedSensors`
+   - `SensorProcessorSet`
+   - `ParamEventQueues`
+5. Keep old `ROSFlight::run` intact while the new scheduler matures.
+6. Add tests against the new scheduler.
+7. Migrate `sim` to instantiate/use the new scheduler first.
+8. Migrate `pixracerpro` after `sim` proves the new path.
+9. Delete HList-based path only after the replacement is proven.
+
+Initial scheduler scope:
+
+- comm receive
+- message handling into events
+- parameter apply
+- parameter reactions
+- deferred comm responses
+- named sensor bus ingestion
+- named sensor processing
+
+Initial scheduler non-goals:
+
+- Do not wire estimator/controller/mixer yet.
+- Do not change telemetry source yet.
+- Do not delete HList code yet.
+- Do not change runtime behavior of existing `ROSFlight::run`.
+
+Acceptance criteria for first `World` slice:
+
+- `rustflight_core` library checks.
+- focused `world` tests pass.
+- existing focused parameter/sensor tests still pass.
+- old `ROSFlight` path remains available.
+
+## World Scheduler Progress
+
+`rustflight_core/src/world.rs`
+
+- Adds parallel `World<B, BT, CI, PD>`.
+- This is separate from the existing `ROSFlight` type.
+- `World` owns:
+  - board
+  - params
+  - param event queues
+  - comm manager
+  - named raw sensor bus
+  - named processed sensors
+  - named sensor processor set
+  - RC
+  - command manager
+  - state manager
+  - calibration flags
+  - estimator/controller/mixer/PWM fields for future stages
+- Adds `World::init`.
+- Adds `World::run_comm_param_sensor_stages`.
+- The first scheduler method runs only:
+  - comm receive
+  - old message decode into events
+  - param apply
+  - parameter reactions
+  - deferred comm responses
+  - `BoardTrait::update_sensor_bus`
+  - `process_sensor_bus`
+- It does not run estimator/controller/mixer yet.
+- It does not change the existing `ROSFlight::run` path.
+
+Test support:
+
+- Adds `TestPwm` inside `world` tests.
+- Adds `world_scheduler_runs_deferred_param_pipeline`.
+- The test proves the new world scheduler can process `PARAM_SET` through the deferred event path and update `SYS_ID`.
+
+Testing detail:
+
+- Running `world::tests` pulled in RC logging, which uses `critical-section`.
+- Host tests need a critical-section implementation.
+- Added `critical-section = { version = "1.2.0", features = ["std"] }` under `rustflight_core` dev-dependencies.
+- This is test-only support for host tests and does not change the embedded library check.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core param_reactions::tests --lib` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo check -p sim` passes.

@@ -60,6 +60,7 @@ pub mod sensors;
 pub mod sensor_systems;
 pub mod sensorprocessors;
 pub mod state_machine;
+pub mod world;
 //pub(crate) mod units;
 
 pub use micro_algebra;
