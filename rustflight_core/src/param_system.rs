@@ -175,6 +175,7 @@ mod tests {
                 assert_eq!(response.param_index, ParamId::PARAM_SYSTEM_ID as u16);
                 assert_eq!(response.param_value, ParamValue::Int(42));
             }
+            _ => panic!("expected param value response"),
         }
     }
 
@@ -200,6 +201,7 @@ mod tests {
                 assert_eq!(response.param_index, ParamId::PARAM_BAUD_RATE as u16);
                 assert_eq!(response.param_value, ParamValue::Int(921600));
             }
+            _ => panic!("expected param value response"),
         }
         assert!(state.is_active());
 
@@ -214,6 +216,7 @@ mod tests {
             CommResponse::ParamValue(response) => {
                 assert_eq!(response.param_index, ParamId::PARAM_SERIAL_DEVICE as u16);
             }
+            _ => panic!("expected param value response"),
         }
     }
 
@@ -243,6 +246,7 @@ mod tests {
                 assert_eq!(response.param_index, ParamId::PARAM_BAUD_RATE as u16);
                 assert_eq!(response.param_value, ParamValue::Int(921600));
             }
+            _ => panic!("expected param value response"),
         }
 
         match responses.pop().unwrap() {
@@ -250,6 +254,7 @@ mod tests {
                 assert_eq!(response.param_index, ParamId::PARAM_SYSTEM_ID as u16);
                 assert_eq!(response.param_value, ParamValue::Int(42));
             }
+            _ => panic!("expected param value response"),
         }
     }
 }

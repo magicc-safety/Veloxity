@@ -824,7 +824,9 @@ where
                     let version_msg = RosflightVersionMsg {
                         version: version_bytes,
                     };
-                    self.comm_link.send_version(board, self.sysid, version_msg);
+                    let _ = param_events
+                        .comm_responses
+                        .push(CommResponse::Version(version_msg));
                     success = RosflightCmdResponse::RosflightCmdSuccess;
                 }
                 RosflightCmd::ResetOrigin => {
@@ -845,7 +847,7 @@ where
                     command: msg.command,
                     success,
                 };
-                self.comm_link.send_cmd_ack(board, self.sysid, ack_msg);
+                let _ = param_events.comm_responses.push(CommResponse::CmdAck(ack_msg));
             }
         } // end if let Some(msg)
 
@@ -865,6 +867,12 @@ where
                         }
                     }
                     self.comm_link.send_named_value(board, self.sysid, msg);
+                }
+                CommResponse::CmdAck(msg) => {
+                    self.comm_link.send_cmd_ack(board, self.sysid, msg);
+                }
+                CommResponse::Version(msg) => {
+                    self.comm_link.send_version(board, self.sysid, msg);
                 }
             }
         }
@@ -1084,6 +1092,63 @@ mod tests {
         assert_eq!(sent.param_id, *b"SYS_ID\0\0\0\0\0\0\0\0\0\0");
         assert_eq!(sent.param_value, ParamValue::Int(42));
         assert!(param_events.comm_responses.is_empty());
+    }
+
+    #[test]
+    fn send_comm_responses_sends_command_ack_and_version() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+
+        let _ = param_events
+            .comm_responses
+            .push(CommResponse::Version(RosflightVersionMsg {
+                version: [7; 50],
+            }));
+        let _ = param_events
+            .comm_responses
+            .push(CommResponse::CmdAck(RosflightCmdAckMsg {
+                command: RosflightCmd::SendVersion,
+                success: RosflightCmdResponse::RosflightCmdSuccess,
+            }));
+
+        manager.send_comm_responses(&mut board, &mut param_events);
+
+        assert_eq!(manager.comm_link().version_count, 1);
+        assert_eq!(manager.comm_link().last_version.unwrap().version, [7; 50]);
+        assert_eq!(manager.comm_link().cmd_ack_count, 1);
+        assert!(matches!(
+            manager.comm_link().last_cmd_ack.unwrap().command,
+            RosflightCmd::SendVersion
+        ));
+        assert!(param_events.comm_responses.is_empty());
+    }
+
+    #[test]
+    fn send_version_command_enqueues_version_and_ack_responses() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::SendVersion,
+        });
+
+        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+
+        assert_eq!(manager.comm_link().version_count, 0);
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+        assert_eq!(param_events.comm_responses.len(), 2);
+
+        manager.send_comm_responses(&mut board, &mut param_events);
+
+        assert_eq!(manager.comm_link().version_count, 1);
+        assert_eq!(manager.comm_link().cmd_ack_count, 1);
+        assert!(matches!(
+            manager.comm_link().last_cmd_ack.unwrap().success,
+            RosflightCmdResponse::RosflightCmdSuccess
+        ));
     }
 
     #[test]

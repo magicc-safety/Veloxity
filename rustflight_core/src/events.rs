@@ -1,7 +1,7 @@
 use crate::{
     comm_messages::{
         enums::{ParamIdentifier, RosflightCmd},
-        messages::{OffboardControlMsg, ParamValueMsg},
+        messages::{OffboardControlMsg, ParamValueMsg, RosflightCmdAckMsg, RosflightVersionMsg},
     },
     params2::{ParamId, ParamValue},
 };
@@ -134,6 +134,8 @@ pub struct ParamDefaultsRequested {
 #[derive(Debug, Clone, Copy)]
 pub enum CommResponse {
     ParamValue(ParamValueMsg),
+    CmdAck(RosflightCmdAckMsg),
+    Version(RosflightVersionMsg),
 }
 
 pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = 4;

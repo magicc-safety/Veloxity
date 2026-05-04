@@ -1801,6 +1801,64 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Command Response Queue Progress
+
+Reason for this change:
+
+- `CommManager::act_on_messages` still sent some wire responses directly while parsing inbound commands.
+- Direct sends make parsing, decision-making, and wire output happen in one function.
+- The new architecture is easier to diagnose when parsing emits response intent and a later response stage owns actual transmission.
+
+Design now implemented:
+
+- `CommResponse` now supports:
+  - `ParamValue`,
+  - `CmdAck`,
+  - `Version`.
+- `RosflightCmd::SendVersion` now enqueues a version response.
+- Immediate command ACKs now enqueue `CommResponse::CmdAck`.
+- `CommManager::send_comm_responses` sends command ACKs and version messages in addition to parameter values.
+
+ROSflight compatibility:
+
+- `RosflightCmd::SendVersion` still produces a `ROSFLIGHT_VERSION` message and a successful `ROSFLIGHT_CMD_ACK`.
+- The response order is preserved by the fixed-capacity FIFO response queue.
+- The wire message types and payloads remain unchanged.
+
+Compile-time boundary improvement:
+
+- Command parsing no longer directly performs these wire writes.
+- The response queue is now the boundary between parsing decisions and comm-link output.
+- This keeps response causality inspectable: command parser emits response events, response stage transmits them.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `CommResponse::CmdAck`.
+  - Adds `CommResponse::Version`.
+- `rustflight_core/src/comm_manager.rs`
+  - Enqueues version and immediate command ACK responses.
+  - Sends the new response variants from `send_comm_responses`.
+- `rustflight_core/src/test_support.rs`
+  - Records version messages for tests.
+- `rustflight_core/src/param_system.rs`
+  - Updates tests to handle the expanded response enum.
+
+Tests added:
+
+- `comm_manager::tests::send_comm_responses_sends_command_ack_and_version`
+  - Proves the response stage sends queued ACK and version messages.
+- `comm_manager::tests::send_version_command_enqueues_version_and_ack_responses`
+  - Proves command parsing queues responses and does not send directly.
+
+Validation:
+
+- `cargo test -p rustflight_core param_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 ## Param Set Name Resolution Progress
 
 Reason for this change:
