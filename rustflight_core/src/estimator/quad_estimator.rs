@@ -36,11 +36,12 @@
 // **
 
 use super::AttitudeStateTrait;
-use super::Estimator;
+use super::{Estimator, NamedEstimator};
 use crate::hlist::*;
 use crate::hlist_type;
 use crate::packets;
 use crate::params2::{ParamId, ParamValue, Params};
+use crate::sensors::ProcessedSensors;
 
 use micro_algebra::stack::{quaternion::Quaternion, vector::Vector};
 
@@ -56,6 +57,18 @@ pub struct AttitudeState {
     pub body_rate: Vector<f64, 3>,
     pub b_hat: Vector<f64, 3>,
     pub is_healthy: bool,
+}
+
+impl Default for AttitudeState {
+    fn default() -> Self {
+        Self {
+            q_hat: Quaternion::from_array([1.0, 0.0, 0.0, 0.0]),
+            q_dot: Quaternion::from_array([0.0, 0.0, 0.0, 0.0]),
+            body_rate: Vector::from_array([0.0, 0.0, 0.0]),
+            b_hat: Vector::from_array([0.0, 0.0, 0.0]),
+            is_healthy: false,
+        }
+    }
 }
 
 impl AttitudeStateTrait for AttitudeState {
@@ -336,5 +349,19 @@ impl Estimator for QuadEstimator {
             b_hat: self.b_hat,
             is_healthy: is_healthy,
         }
+    }
+}
+
+impl NamedEstimator for QuadEstimator {
+    type State = AttitudeState;
+
+    fn estimate_named(
+        &mut self,
+        sensors: &ProcessedSensors,
+        params: &Params,
+        dt: f64,
+    ) -> Self::State {
+        let inputs = HCons(sensors.imu, HCons(sensors.mag, HNil));
+        self.estimate(&inputs, params, dt)
     }
 }

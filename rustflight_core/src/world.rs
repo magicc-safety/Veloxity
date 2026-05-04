@@ -5,7 +5,10 @@ use crate::{
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
     command_manager::CommandManager,
+    controller::Controller,
     events::ParamEventQueues,
+    estimator::{AttitudeStateTrait, NamedEstimator},
+    mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     param_system::{self, ParamApplyCtx},
     params2::{ParamIter, Params},
@@ -22,6 +25,11 @@ pub struct World<B, BT, CI, PD>
 where
     B: BoardTrait,
     BT: BodyType,
+    BT::Estimator: NamedEstimator,
+    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State>,
+    BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
+    <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
+    <BT::Estimator as NamedEstimator>::State: Copy + Default,
     CI: CommInterface<B>,
     PD: PwmDriver,
 {
@@ -40,7 +48,10 @@ where
     pub estimator: BT::Estimator,
     pub controller: BT::Controller,
     pub mixer: BT::Mixer,
+    pub latest_state: <BT::Estimator as NamedEstimator>::State,
+    pub latest_actuator_commands: Option<<BT::Mixer as crate::mixer::Mixer>::ActuatorCommands>,
     pub pwm: PD,
+    last_imu_time: u64,
     _body_type: PhantomData<BT>,
 }
 
@@ -48,9 +59,16 @@ impl<B, BT, CI, PD> World<B, BT, CI, PD>
 where
     B: BoardTrait,
     BT: BodyType,
+    BT::Estimator: NamedEstimator,
+    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State>,
+    BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
+    <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
+    <BT::Estimator as NamedEstimator>::State: Copy + Default,
     CI: CommInterface<B>,
     PD: PwmDriver,
 {
+    const ESTIMATOR_DT: f64 = 1.0 / 400.0;
+
     pub fn init(
         mut board: B,
         mut params: Params,
@@ -88,7 +106,10 @@ where
             estimator,
             controller,
             mixer,
+            latest_state: Default::default(),
+            latest_actuator_commands: None,
             pwm,
+            last_imu_time: 0,
             _body_type: PhantomData,
         }
     }
@@ -96,6 +117,7 @@ where
     pub fn run_comm_param_sensor_stages(&mut self) -> bool {
         self.run_comm_param_sensor_stages_only();
         self.run_rc_command_state_stages();
+        self.run_control_stages_if_new_imu();
         true
     }
 
@@ -156,6 +178,53 @@ where
             .run(now_ms, &self.params, &mut self.rc, &mut self.state);
         self.state.run(&self.params);
     }
+
+    pub fn run_control_stages_if_new_imu(&mut self) -> bool {
+        let Some(imu_packet) = self.processed_sensors.imu else {
+            return false;
+        };
+
+        let current_time = imu_packet.header.timestamp;
+        if current_time == self.last_imu_time {
+            return false;
+        }
+        self.last_imu_time = current_time;
+
+        let state =
+            self.estimator
+                .estimate_named(&self.processed_sensors, &self.params, Self::ESTIMATOR_DT);
+
+        if state.is_healthy() {
+            self.state.update(
+                crate::state_machine::Event::ERROR_CLEARED(
+                    crate::state_machine::ErrorFlag::UNHEALTHY_ESTIMATOR,
+                ),
+                &self.params,
+            );
+        } else {
+            self.state.update(
+                crate::state_machine::Event::ERROR_OCCURRED(
+                    crate::state_machine::ErrorFlag::UNHEALTHY_ESTIMATOR,
+                ),
+                &self.params,
+            );
+        }
+
+        let controls = self.controller.control(
+            &state,
+            &mut self.state,
+            self.command.combined_control(),
+            &self.params,
+            Self::ESTIMATOR_DT,
+        );
+        let actuator_commands = self.mixer.mix(&controls, &self.state);
+        self.pwm
+            .send_commands(&mut self.board, actuator_commands.as_ref());
+
+        self.latest_state = state;
+        self.latest_actuator_commands = Some(actuator_commands);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -171,11 +240,19 @@ mod tests {
 
     pub struct TestPwm {
         enabled: bool,
+        send_count: usize,
+        last_commands: [f64; 8],
+        last_command_len: usize,
     }
 
     impl TestPwm {
         fn new() -> Self {
-            Self { enabled: false }
+            Self {
+                enabled: false,
+                send_count: 0,
+                last_commands: [0.0; 8],
+                last_command_len: 0,
+            }
         }
     }
 
@@ -213,7 +290,12 @@ mod tests {
 
         fn flush<Board: BoardTrait>(&mut self, _board: &mut Board) {}
 
-        fn send_commands<Board: BoardTrait>(&mut self, _board: &mut Board, _commands: &[f64]) {}
+        fn send_commands<Board: BoardTrait>(&mut self, _board: &mut Board, commands: &[f64]) {
+            self.send_count += 1;
+            self.last_command_len = commands.len().min(self.last_commands.len());
+            self.last_commands[..self.last_command_len]
+                .copy_from_slice(&commands[..self.last_command_len]);
+        }
     }
 
     #[test]
@@ -285,5 +367,48 @@ mod tests {
         world.run_rc_command_state_stages();
 
         assert!(!world.state.get_errors().contains(crate::state_machine::ErrorFlag::RC_LOST));
+    }
+
+    #[test]
+    fn world_control_stage_runs_once_per_imu_timestamp() {
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        assert!(world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.send_count, 1);
+        assert!(world.latest_actuator_commands.is_some());
+
+        assert!(!world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.send_count, 1);
+
+        world.processed_sensors.imu.as_mut().unwrap().header.timestamp = 2;
+
+        assert!(world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.send_count, 2);
     }
 }

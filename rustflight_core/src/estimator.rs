@@ -34,14 +34,23 @@
 // *
 // ******************************************************************************
 // **/
-use crate::hlist::*;
-use crate::params2::Params;
+use crate::{hlist::*, params2::Params, sensors::ProcessedSensors};
 pub mod quad_estimator;
 
 pub trait Estimator {
     type Inputs: HList;
     type State: AttitudeStateTrait;
     fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State;
+}
+
+pub trait NamedEstimator {
+    type State: AttitudeStateTrait;
+    fn estimate_named(
+        &mut self,
+        sensors: &ProcessedSensors,
+        params: &Params,
+        dt: f64,
+    ) -> Self::State;
 }
 
 pub trait AttitudeStateTrait {

@@ -965,7 +965,6 @@ Initial scheduler scope:
 
 Initial scheduler non-goals:
 
-- Do not wire estimator/controller/mixer yet.
 - Do not change telemetry source yet.
 - Do not delete HList code yet.
 - Do not change runtime behavior of existing `ROSFlight::run`.
@@ -976,6 +975,14 @@ Acceptance criteria for first `World` slice:
 - focused `world` tests pass.
 - existing focused parameter/sensor tests still pass.
 - old `ROSFlight` path remains available.
+
+Acceptance criteria for each additional scheduler/component slice:
+
+- Each newly added component path needs focused tests before that slice is considered complete.
+- Tests should exercise the component in isolation where possible.
+- Tests should also exercise the component through the new `World` scheduler when the scheduler is responsible for connecting it to other modules.
+- Documentation must list which tests were added or run for the slice.
+- A slice should not advance to the next stack layer until its focused tests pass, unless a legacy test blocker is explicitly documented.
 
 ## World Scheduler Progress
 
@@ -1000,6 +1007,7 @@ Acceptance criteria for first `World` slice:
 - Adds `World::run_comm_param_sensor_stages`.
 - Adds `World::run_comm_param_sensor_stages_only`.
 - Adds `World::run_rc_command_state_stages`.
+- Adds `World::run_control_stages_if_new_imu`.
 - The first scheduler method runs only:
   - comm receive
   - old message decode into events
@@ -1012,16 +1020,44 @@ Acceptance criteria for first `World` slice:
   - RC manager run
   - command manager run
   - state manager run
-- It does not run estimator/controller/mixer yet.
+  - estimator update when a new named IMU packet is available
+  - estimator health propagation into the state manager
+  - controller update from the current command/state/params
+  - mixer update
+  - PWM command output
 - It does not change the existing `ROSFlight::run` path.
+
+`rustflight_core/src/estimator.rs`
+
+- Adds `NamedEstimator`.
+- This adapts estimators away from HList inputs in the new scheduler path.
+- The trait takes `ProcessedSensors`, `Params`, and `dt`.
+- It returns the estimator state type.
+
+`rustflight_core/src/estimator/quad_estimator.rs`
+
+- Implements `NamedEstimator` for `QuadEstimator`.
+- The current implementation adapts `ProcessedSensors::{imu, mag}` back into the existing estimator input HList internally.
+- This keeps estimator math behavior intact while moving the scheduler boundary to named resources.
+- Adds `Default` for `AttitudeState` so `World` can own a last-known state before the first estimator update.
 
 Test support:
 
 - Adds `TestPwm` inside `world` tests.
+- `TestPwm` records send count and last command payload length for scheduler verification.
 - Adds `world_scheduler_runs_deferred_param_pipeline`.
 - The test proves the new world scheduler can process `PARAM_SET` through the deferred event path and update `SYS_ID`.
 - Adds `world_scheduler_processes_named_rc_packet`.
 - The test proves a named `ProcessedSensors::rc` packet can flow through the RC/command/state scheduler stage without raising `RC_LOST`.
+- Adds `world_control_stage_runs_once_per_imu_timestamp`.
+- The test proves the estimator/controller/mixer/PWM stage runs on a new IMU timestamp, does not repeat for the same timestamp, stores actuator output, and calls PWM exactly once per new IMU sample.
+
+New testing requirement:
+
+- For each component added in the next part of the stack, add or run a focused test before moving to the next component.
+- Component tests should cover the local system behavior.
+- Scheduler tests should cover the handoff between components.
+- This applies to telemetry, PWM publishing, board IO adapters, sim transport, and later pixracerpro migration.
 
 Testing detail:
 
@@ -1034,7 +1070,8 @@ Validation:
 
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core param_system::tests --lib` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
 - `cargo test -p rustflight_core comm_manager::tests --lib` passes.
 - `cargo test -p rustflight_core param_reactions::tests --lib` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
 - `cargo check -p sim` passes.
