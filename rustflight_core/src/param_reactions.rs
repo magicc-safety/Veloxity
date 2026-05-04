@@ -1,6 +1,4 @@
 use crate::{
-    board::BoardTrait,
-    comm_manager::{CommManager, comm_link_trait::CommInterface},
     command_manager::CommandManager,
     events::{PARAM_CHANGED_QUEUE_CAPACITY, ParamChanged},
     params2::ParamId,
@@ -9,26 +7,15 @@ use crate::{
     state_machine::StateManager,
 };
 
-pub struct RcParamChangedCtx<'a, B, CI>
-where
-    B: BoardTrait,
-    CI: CommInterface<B>,
-{
+pub struct RcParamChangedCtx<'a> {
     pub rc: &'a mut Rc,
-    pub board: &'a mut B,
     pub params: ParamsReadPort<'a>,
-    pub comm: &'a mut CommManager<B, CI>,
     pub changes: EventReadPort<'a, ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>,
 }
 
-pub fn rc_on_param_changed<B, CI>(mut ctx: RcParamChangedCtx<'_, B, CI>)
-where
-    B: BoardTrait,
-    CI: CommInterface<B>,
-{
+pub fn rc_on_param_changed(ctx: RcParamChangedCtx<'_>) {
     for change in ctx.changes.iter() {
-        ctx.rc
-            .param_change_callback(change.id, ctx.board, ctx.params.raw(), ctx.comm);
+        ctx.rc.param_change_callback(change.id, ctx.params.raw());
     }
 }
 

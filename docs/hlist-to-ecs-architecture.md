@@ -667,6 +667,14 @@ This is the first concrete use of the ports/events model.
 - `command_on_param_changed` preserves the existing failsafe-config update behavior for `PARAM_FAILSAFE_THROTTLE` and `PARAM_FIXED_WING`.
 - Adds focused coverage for command-manager reaction filtering.
 
+`rustflight_core/src/rc.rs`
+
+- `Rc::param_change_callback` no longer takes `Board` or `CommManager`.
+- `Rc::log_switch_mappings` no longer takes `CommManager`.
+- This removes unnecessary peer-module access from the RC parameter reaction path.
+- RC mapping behavior is preserved.
+- Logging still goes through the existing global `log_info!` path for now.
+
 ### Validation Status
 
 `cargo check -p rustflight_core --lib` passes after the initial parameter-path rewrite.
@@ -741,7 +749,7 @@ This is the first step toward replacing the old test infrastructure with small, 
 
 1. Commit the dummy-board test-support slice and this updated implementation log.
 2. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
-3. Replace the remaining direct `Rc::param_change_callback` dependency on `CommManager` with a `LogPort` or log event path.
+3. Add a proper `LogPort` or log event path and migrate global logging usage toward it.
 4. Install `rustfmt` or run formatting in an environment where it is available.
 5. Continue replacing direct callback blocks with named systems and ports.
 

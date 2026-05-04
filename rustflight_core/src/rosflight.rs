@@ -223,9 +223,7 @@ where
 
         param_reactions::rc_on_param_changed(RcParamChangedCtx {
             rc: &mut self.rc_manager,
-            board: &mut self.board,
             params: ParamsReadPort::new(&self.params),
-            comm: &mut self.comm_manager,
             changes: EventReadPort::new(&self.param_events.changes),
         });
 

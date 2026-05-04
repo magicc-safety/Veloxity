@@ -34,7 +34,6 @@
 // ******************************************************************************
 // **/
 use crate::board::BoardTrait;
-use crate::comm_manager::{CommManager, comm_link_trait::CommInterface};
 use crate::packets::RcPacket;
 use crate::params2::{ParamId, ParamValue, Params};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
@@ -289,11 +288,7 @@ impl Rc {
         }
     }
 
-    fn log_switch_mappings<B, T>(&self, comm_manager: &mut CommManager<B, T>)
-    where
-        B: BoardTrait,
-        T: CommInterface<B>,
-    {
+    fn log_switch_mappings(&self) {
         for i in 0..SWITCHES_COUNT {
             let (channel_name, _) = match i {
                 i if i == Switch::Arm as usize => ("ARM", Some(ParamId::PARAM_RC_ARM_CHANNEL)),
@@ -337,17 +332,11 @@ impl Rc {
         }
     }
 
-    pub fn param_change_callback<B, T>(
-        // <-- Add generic T
+    pub fn param_change_callback(
         &mut self,
         param_id: ParamId,
-        board: &mut B,
         params: &Params,
-        comm_manager: &mut CommManager<B, T>, // <-- Use full generic type
-    ) where
-        B: BoardTrait,
-        T: CommInterface<B>, // <-- Add bound for T
-    {
+    ) {
         match param_id {
             // ... (PARAM_RC_TYPE case is removed)
             ParamId::PARAM_RC_X_CHANNEL
@@ -365,7 +354,7 @@ impl Rc {
             | ParamId::PARAM_RC_SWITCH_7_DIRECTION
             | ParamId::PARAM_RC_SWITCH_8_DIRECTION => {
                 self.update_switch_mappings(params); // <-- 1. Update mappings
-                self.log_switch_mappings(comm_manager); // <-- 2. Log the changes
+                self.log_switch_mappings(); // <-- 2. Log the changes
             }
             _ => {
                 // do nothing
