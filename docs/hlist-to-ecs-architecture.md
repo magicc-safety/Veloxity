@@ -959,6 +959,9 @@ Initial scheduler scope:
 - deferred comm responses
 - named sensor bus ingestion
 - named sensor processing
+- RC receive/run
+- command manager run
+- state manager run
 
 Initial scheduler non-goals:
 
@@ -995,6 +998,8 @@ Acceptance criteria for first `World` slice:
   - estimator/controller/mixer/PWM fields for future stages
 - Adds `World::init`.
 - Adds `World::run_comm_param_sensor_stages`.
+- Adds `World::run_comm_param_sensor_stages_only`.
+- Adds `World::run_rc_command_state_stages`.
 - The first scheduler method runs only:
   - comm receive
   - old message decode into events
@@ -1003,6 +1008,10 @@ Acceptance criteria for first `World` slice:
   - deferred comm responses
   - `BoardTrait::update_sensor_bus`
   - `process_sensor_bus`
+  - named RC packet handoff into `Rc`
+  - RC manager run
+  - command manager run
+  - state manager run
 - It does not run estimator/controller/mixer yet.
 - It does not change the existing `ROSFlight::run` path.
 
@@ -1011,6 +1020,8 @@ Test support:
 - Adds `TestPwm` inside `world` tests.
 - Adds `world_scheduler_runs_deferred_param_pipeline`.
 - The test proves the new world scheduler can process `PARAM_SET` through the deferred event path and update `SYS_ID`.
+- Adds `world_scheduler_processes_named_rc_packet`.
+- The test proves a named `ProcessedSensors::rc` packet can flow through the RC/command/state scheduler stage without raising `RC_LOST`.
 
 Testing detail:
 

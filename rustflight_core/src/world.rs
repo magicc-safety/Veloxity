@@ -94,6 +94,12 @@ where
     }
 
     pub fn run_comm_param_sensor_stages(&mut self) -> bool {
+        self.run_comm_param_sensor_stages_only();
+        self.run_rc_command_state_stages();
+        true
+    }
+
+    pub fn run_comm_param_sensor_stages_only(&mut self) {
         self.comm.process_incoming_messages(&mut self.board);
         self.comm.act_on_messages(
             &mut self.params_iter,
@@ -136,8 +142,19 @@ where
             &mut self.cal_flags,
             &mut self.params,
         );
+    }
 
-        true
+    pub fn run_rc_command_state_stages(&mut self) {
+        let now_ms = self.board.clock_millis();
+
+        if let Some(rc_packet) = self.processed_sensors.rc {
+            self.rc.receive(&rc_packet, &self.params, &mut self.state);
+        }
+
+        self.rc.run(now_ms, &self.params, &mut self.state);
+        self.command
+            .run(now_ms, &self.params, &mut self.rc, &mut self.state);
+        self.state.run(&self.params);
     }
 }
 
@@ -232,5 +249,41 @@ mod tests {
             ParamValue::Int(42)
         );
         assert_eq!(world.comm.sysid, 42);
+    }
+
+    #[test]
+    fn world_scheduler_processes_named_rc_packet() {
+        let board = TestBoard::default();
+        let mut params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.processed_sensors.rc = Some(crate::packets::RcPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 0,
+                status: 0,
+            },
+            n_chan: 1,
+            chan: [0.5; crate::packets::RC_PACKET_CHANNELS],
+            lol: false,
+        });
+
+        world.run_rc_command_state_stages();
+
+        assert!(!world.state.get_errors().contains(crate::state_machine::ErrorFlag::RC_LOST));
     }
 }
