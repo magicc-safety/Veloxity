@@ -40,6 +40,7 @@ use rustflight_core::comm_manager;
 use rustflight_core::errors;
 use rustflight_core::hlist_type;
 use rustflight_core::packets::{self, RC_PACKET_CHANNELS};
+use rustflight_core::sensors::SensorBus;
 use rustflight_core::sensorprocessors;
 
 use cdr::{CdrLe, Infinite};
@@ -397,6 +398,58 @@ impl BoardTrait for Board {
             },
         };
         sensors.1.1.1.1.1.1.1.1.0 = None;
+    }
+
+    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        sensors.imu = match self.imu_data_chan.try_recv() {
+            Ok(imu) => Some(Ok(imu.into())),
+            Err(e) => match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => None,
+                _ => Some(Err(errors::SensorError::GenericSensorError(
+                    "generic imu error",
+                ))),
+            },
+        };
+        sensors.mag = match self.mag_chan.try_recv() {
+            Ok(mag) => Some(Ok(mag.into())),
+            Err(e) => match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => None,
+                _ => Some(Err(errors::SensorError::GenericSensorError(
+                    "generic mag error",
+                ))),
+            },
+        };
+        sensors.baro = match self.baro_chan.try_recv() {
+            Ok(baro) => Some(Ok(baro.into())),
+            Err(e) => match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => None,
+                _ => Some(Err(errors::SensorError::GenericSensorError(
+                    "generic baro error",
+                ))),
+            },
+        };
+        sensors.pitot = None;
+        sensors.range = None;
+        sensors.gnss = match self.gnss_chan.try_recv() {
+            Ok(gnss) => Some(Ok(gnss.into())),
+            Err(e) => match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => None,
+                _ => Some(Err(errors::SensorError::GenericSensorError(
+                    "generic gnss error",
+                ))),
+            },
+        };
+        sensors.battery = None;
+        sensors.rc = match self.rc_chan.try_recv() {
+            Ok(rc) => Some(Ok(rc.into())),
+            Err(e) => match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => None,
+                _ => Some(Err(errors::SensorError::GenericSensorError(
+                    "generic rc error",
+                ))),
+            },
+        };
+        sensors.attitude = None;
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {

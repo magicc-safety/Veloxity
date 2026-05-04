@@ -834,3 +834,32 @@ After the parameter path is stable and committed, proceed through core in this o
 5. `stm_32`
 
 The exact order after `pixracerpro` can change based on hardware priorities, but `core` must stabilize first.
+
+## Sim Migration Progress
+
+`sim/src/board.rs`
+
+- Adds an override for `BoardTrait::update_sensor_bus`.
+- The old `update_sensors` HList implementation remains intact.
+- The new method fills named `SensorBus` fields:
+  - `imu`
+  - `mag`
+  - `baro`
+  - `gnss`
+  - `rc`
+- The new method explicitly sets currently absent sim sources to `None`:
+  - `pitot`
+  - `range`
+  - `battery`
+  - `attitude`
+- This duplicates the current sim sensor ingestion behavior into the named resource path.
+- Runtime behavior is unchanged because `ROSFlight::run` still uses the HList path.
+
+Validation:
+
+- `cargo check -p sim` passes.
+- `cargo check -p rustflight_core --lib` passes.
+
+Next sim step:
+
+- After core has a scheduler path that uses `SensorBus` and `process_sensor_bus`, switch `sim` execution from the HList path to the named sensor path.
