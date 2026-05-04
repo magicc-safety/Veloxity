@@ -54,6 +54,7 @@ pub mod command_manager;
 pub mod params2;
 pub mod ports;
 pub mod pwm;
+pub mod pwm_system;
 pub mod rc;
 pub mod rosflight;
 pub mod sensors;

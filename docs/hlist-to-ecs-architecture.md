@@ -1293,6 +1293,51 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## PWM Output State Progress
+
+Design correction:
+
+- PWM enable/disable should not be a hidden loop shortcut.
+- PWM output state should follow explicit state-machine facts.
+- The scheduler should call a PWM output system after state updates.
+- The PWM system should only touch hardware/sim output when the desired output state changes.
+
+`rustflight_core/src/pwm_system.rs`
+
+- Adds `PwmOutputState`.
+- Adds `sync_pwm_output_state`.
+- `sync_pwm_output_state` reads `StateManager::is_armed`.
+- It enables PWM only on a transition from disabled to armed.
+- It disables PWM only on a transition from enabled to not armed.
+- On disable, it flushes the PWM driver so hardware/sim output receives the disabled state.
+- It returns `Ok(true)` only when it changed PWM output state.
+
+`rustflight_core/src/world.rs`
+
+- Adds `pwm_output: PwmOutputState` to `World`.
+- Initializes it from `pwm.is_enabled`.
+- Adds `World::run_pwm_output_stage`.
+- Schedules `run_pwm_output_stage` after RC, command, and state-manager updates.
+- This keeps the PWM side effect after the state facts are known.
+
+Tests added:
+
+- `pwm_system::tests::pwm_output_state_enables_and_disables_only_on_state_transitions`
+  - Proves no PWM call happens when desired state is unchanged.
+  - Proves arming enables once.
+  - Proves repeated sync while armed does not enable again.
+  - Proves disarming disables once and flushes once.
+- `world::tests::world_pwm_output_stage_follows_armed_state_transitions`
+  - Proves the World scheduler handoff follows real state-machine arm/disarm transitions.
+  - The test uses calibrated gyro params and valid failsafe throttle so arming is not forced around preflight rules.
+
+Validation:
+
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

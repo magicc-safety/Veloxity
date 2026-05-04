@@ -14,6 +14,7 @@ use crate::{
     params2::{ParamIter, Params},
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
+    pwm_system::{PwmOutputState, sync_pwm_output_state},
     rc::Rc,
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
@@ -52,6 +53,7 @@ where
     pub mixer: BT::Mixer,
     pub latest_state: <BT::Estimator as NamedEstimator>::State,
     pub latest_actuator_commands: Option<<BT::Mixer as crate::mixer::Mixer>::ActuatorCommands>,
+    pub pwm_output: PwmOutputState,
     pub pwm: PD,
     last_imu_time: u64,
     last_imu_seen: u64,
@@ -93,6 +95,8 @@ where
         let now_us = board.clock_micros();
         let comm = CommManager::new(comm_link, now_us);
 
+        let pwm_output = PwmOutputState::new(pwm.is_enabled());
+
         Self {
             board,
             params,
@@ -111,6 +115,7 @@ where
             mixer,
             latest_state: Default::default(),
             latest_actuator_commands: None,
+            pwm_output,
             pwm,
             last_imu_time: 0,
             last_imu_seen: now_us,
@@ -209,6 +214,17 @@ where
         self.command
             .run(now_ms, &self.params, &mut self.rc, &mut self.state);
         self.state.run(&self.params);
+        self.run_pwm_output_stage();
+    }
+
+    pub fn run_pwm_output_stage(&mut self) -> bool {
+        sync_pwm_output_state(
+            &mut self.board,
+            &mut self.pwm,
+            &mut self.pwm_output,
+            &self.state,
+        )
+        .unwrap_or(false)
     }
 
     pub fn run_control_stages_if_new_imu(&mut self) -> bool {
@@ -285,6 +301,9 @@ mod tests {
 
     pub struct TestPwm {
         enabled: bool,
+        enable_all_count: usize,
+        disable_all_count: usize,
+        flush_count: usize,
         send_count: usize,
         last_commands: [f64; 8],
         last_command_len: usize,
@@ -294,6 +313,9 @@ mod tests {
         fn new() -> Self {
             Self {
                 enabled: false,
+                enable_all_count: 0,
+                disable_all_count: 0,
+                flush_count: 0,
                 send_count: 0,
                 last_commands: [0.0; 8],
                 last_command_len: 0,
@@ -322,18 +344,22 @@ mod tests {
 
         fn enable_all(&mut self) -> Result<(), PwmError> {
             self.enabled = true;
+            self.enable_all_count += 1;
             Ok(())
         }
 
         fn disable_all(&mut self) {
             self.enabled = false;
+            self.disable_all_count += 1;
         }
 
         fn set_duty_cycle(&mut self, _channel: usize, _duty: u16) -> Result<(), PwmError> {
             Ok(())
         }
 
-        fn flush<Board: BoardIo>(&mut self, _board: &mut Board) {}
+        fn flush<Board: BoardIo>(&mut self, _board: &mut Board) {
+            self.flush_count += 1;
+        }
 
         fn send_commands<Board: BoardIo>(&mut self, _board: &mut Board, commands: &[f64]) {
             self.send_count += 1;
@@ -553,6 +579,52 @@ mod tests {
             ack.success,
             RosflightCmdResponse::RosflightCmdSuccess
         ));
+    }
+
+    #[test]
+    fn world_pwm_output_stage_follows_armed_state_transitions() {
+        let board = TestBoard::default();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        assert!(!world.run_pwm_output_stage());
+        assert_eq!(world.pwm.enable_all_count, 0);
+        assert_eq!(world.pwm.disable_all_count, 0);
+
+        world
+            .state
+            .update(crate::state_machine::Event::REQUEST_ARM, &world.params);
+
+        assert!(world.run_pwm_output_stage());
+        assert!(world.pwm_output.is_enabled());
+        assert_eq!(world.pwm.enable_all_count, 1);
+
+        assert!(!world.run_pwm_output_stage());
+        assert_eq!(world.pwm.enable_all_count, 1);
+
+        world
+            .state
+            .update(crate::state_machine::Event::REQUEST_DISARM, &world.params);
+
+        assert!(world.run_pwm_output_stage());
+        assert!(!world.pwm_output.is_enabled());
+        assert_eq!(world.pwm.disable_all_count, 1);
+        assert_eq!(world.pwm.flush_count, 1);
     }
 
 }
