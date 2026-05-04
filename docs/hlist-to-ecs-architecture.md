@@ -1216,6 +1216,31 @@ Validation:
 - `cargo test -p rustflight_core world::tests --lib` passes.
 - `cargo check -p sim` passes.
 
+## World Sensor Health Progress
+
+`rustflight_core/src/world.rs`
+
+- Adds IMU health tracking to the new `World` path.
+- Mirrors the legacy 100 ms `IMU_NOT_RESPONDING` timeout.
+- Records the last scheduler time at which a processed IMU packet was present.
+- Clears `IMU_NOT_RESPONDING` when processed IMU data is available.
+- Raises `IMU_NOT_RESPONDING` when no processed IMU has been seen for more than 100 ms.
+- Preserves the legacy calibration behavior:
+  - if the state machine is calibrating and gyro calibration is not active, insert `CalibrationFlags::GYRO`
+  - after sensor processing removes `CalibrationFlags::GYRO`, send `Event::CALIBRATION_COMPLETE`
+
+Tests added:
+
+- `world::tests::world_sensor_health_sets_and_clears_imu_timeout`
+  - Proves the new World path raises `IMU_NOT_RESPONDING` after the timeout.
+  - Proves the error clears when a processed IMU packet is present again.
+
+Validation:
+
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

@@ -18,8 +18,10 @@ use crate::{
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
-    state_machine::{Event, StateManager},
+    state_machine::{ErrorFlag, Event, StateManager},
 };
+
+const IMU_TIMEOUT_US: u64 = 100_000;
 
 pub struct World<B, BT, CI, PD>
 where
@@ -52,6 +54,7 @@ where
     pub latest_actuator_commands: Option<<BT::Mixer as crate::mixer::Mixer>::ActuatorCommands>,
     pub pwm: PD,
     last_imu_time: u64,
+    last_imu_seen: u64,
     _body_type: PhantomData<BT>,
 }
 
@@ -110,6 +113,7 @@ where
             latest_actuator_commands: None,
             pwm,
             last_imu_time: 0,
+            last_imu_seen: now_us,
             _body_type: PhantomData,
         }
     }
@@ -122,6 +126,8 @@ where
     }
 
     pub fn run_comm_param_sensor_stages_only(&mut self) {
+        let now_us = self.board.clock_micros();
+
         self.comm.process_incoming_messages(&mut self.board);
         self.comm.act_on_messages(
             &mut self.params_iter,
@@ -156,6 +162,10 @@ where
             .send_comm_responses(&mut self.board, &mut self.param_events);
         self.param_events.changes.clear();
 
+        if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
+            self.cal_flags.insert(CalibrationFlags::GYRO);
+        }
+
         self.board.update_sensor_bus(&mut self.raw_sensors);
         process_sensor_bus(
             &mut self.raw_sensors,
@@ -164,6 +174,26 @@ where
             &mut self.cal_flags,
             &mut self.params,
         );
+        self.update_sensor_health_and_calibration(now_us);
+    }
+
+    fn update_sensor_health_and_calibration(&mut self, now_us: u64) {
+        if self.processed_sensors.imu.is_some() {
+            self.last_imu_seen = now_us;
+            self.state.update(
+                Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING),
+                &self.params,
+            );
+        } else if now_us > self.last_imu_seen + IMU_TIMEOUT_US {
+            self.state.update(
+                Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING),
+                &self.params,
+            );
+        }
+
+        if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
+            self.state.update(Event::CALIBRATION_COMPLETE, &self.params);
+        }
     }
 
     pub fn run_rc_command_state_stages(&mut self) {
@@ -428,5 +458,55 @@ mod tests {
         assert!(world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 2);
         assert_eq!(world.comm.comm_link().output_raw_count, 2);
+    }
+
+    #[test]
+    fn world_sensor_health_sets_and_clears_imu_timeout() {
+        let mut board = TestBoard::default();
+        board.current_time_us = 0;
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.board.current_time_us = IMU_TIMEOUT_US + 1;
+        world.update_sensor_health_and_calibration(world.board.clock_micros());
+
+        assert!(
+            world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::IMU_NOT_RESPONDING)
+        );
+
+        world.processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: IMU_TIMEOUT_US + 2,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+        world.update_sensor_health_and_calibration(world.board.clock_micros());
+
+        assert!(
+            !world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::IMU_NOT_RESPONDING)
+        );
     }
 }
