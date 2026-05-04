@@ -675,6 +675,15 @@ This is the first concrete use of the ports/events model.
 - RC mapping behavior is preserved.
 - Logging still goes through the existing global `log_info!` path for now.
 
+`rustflight_core/src/sensors.rs`
+
+- Adds `SensorBus`.
+- Adds `ProcessedSensors`.
+- Both are named resource structs that mirror the current raw and processed HList sensor inventories.
+- This is non-behavior-changing scaffolding for the HList removal.
+- Both resources have `clear` helpers.
+- Adds focused coverage that default sensor resources are empty.
+
 ### Validation Status
 
 `cargo check -p rustflight_core --lib` passes after the initial parameter-path rewrite.
@@ -685,6 +694,7 @@ Focused unit checks for the new modules pass:
 - `cargo test -p rustflight_core param_system::tests --lib`
 - `cargo test -p rustflight_core comm_manager::tests --lib`
 - `cargo test -p rustflight_core param_reactions::tests --lib`
+- `cargo test -p rustflight_core sensors::tests --lib`
 
 Additional status:
 
@@ -751,7 +761,7 @@ This is the first step toward replacing the old test infrastructure with small, 
 2. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
 3. Add a proper `LogPort` or log event path and migrate global logging usage toward it.
 4. Install `rustfmt` or run formatting in an environment where it is available.
-5. Continue replacing direct callback blocks with named systems and ports.
+5. Start moving board sensor ingestion from HLists into `SensorBus`.
 
 ### Important Design Caveats In The Current Slice
 
