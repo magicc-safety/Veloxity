@@ -712,7 +712,9 @@ mod tests {
         command_manager::CommandManager,
         comm_messages::messages::ParamSetMsg,
         events::{CommResponse, ParamEventQueues},
+        param_system::{self, ParamApplyCtx},
         params2::{ParamId, ParamValue, Params},
+        ports::{EventDrainPort, EventEmitPort, ParamsWritePort},
         sensorprocessors::CalibrationFlags,
         test_support::{RecordingCommLink, TestBoard},
     };
@@ -778,6 +780,63 @@ mod tests {
         let sent = manager.comm_link.sent_param_values[0].unwrap();
         assert_eq!(sent.param_id, *b"SYS_ID\0\0\0\0\0\0\0\0\0\0");
         assert_eq!(sent.param_value, ParamValue::Int(42));
+        assert!(param_events.comm_responses.is_empty());
+    }
+
+    #[test]
+    fn param_set_pipeline_defers_ack_until_after_apply_stage() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut params = Params::new();
+        let mut params_iter = None;
+        let mut param_events = ParamEventQueues::default();
+        let mut cal_flags = CalibrationFlags::empty();
+        let mut command_manager = CommandManager::new();
+
+        manager.msgs.param_set = Some(ParamSetMsg {
+            target_system: 1,
+            target_component: 1,
+            param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+            param_value: ParamValue::Int(42),
+        });
+
+        manager.act_on_messages(
+            &mut params_iter,
+            &mut params,
+            &mut param_events,
+            &mut cal_flags,
+            &mut board,
+            &mut command_manager,
+        );
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(1)
+        );
+        assert_eq!(manager.comm_link.sent_param_value_count, 0);
+
+        param_system::apply_param_requests(ParamApplyCtx {
+            params: ParamsWritePort::new(&mut params),
+            requests: EventDrainPort::new(&mut param_events.set_requests),
+            changes: EventEmitPort::new(&mut param_events.changes),
+            responses: EventEmitPort::new(&mut param_events.comm_responses),
+        });
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(42)
+        );
+        assert_eq!(manager.comm_link.sent_param_value_count, 0);
+
+        let change = param_events.changes.iter().next().unwrap();
+        assert_eq!(change.id, ParamId::PARAM_SYSTEM_ID);
+        assert_eq!(change.old, ParamValue::Int(1));
+        assert_eq!(change.new, ParamValue::Int(42));
+
+        manager.send_comm_responses(&mut board, &mut param_events);
+
+        assert_eq!(manager.sysid, 42);
+        assert_eq!(manager.comm_link.sent_param_value_count, 1);
         assert!(param_events.comm_responses.is_empty());
     }
 }

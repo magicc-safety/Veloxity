@@ -713,14 +713,22 @@ New comm-manager tests:
   - calls `send_comm_responses`
   - verifies a param value response is sent
   - verifies `CommManager::sysid` updates for `PARAM_SYSTEM_ID`
+- `param_set_pipeline_defers_ack_until_after_apply_stage`
+  - composes the current core parameter pipeline in one test
+  - injects `PARAM_SET`
+  - verifies decode emits a request without mutating params or sending ack
+  - applies parameter requests through `param_system::apply_param_requests`
+  - verifies `Params` mutates and `ParamChanged` is emitted
+  - verifies the ack is still not sent until `send_comm_responses`
+  - verifies `send_comm_responses` sends `PARAM_VALUE` and updates `sysid`
 
 This is the first step toward replacing the old test infrastructure with small, targeted dummy-board fixtures.
 
 ### Immediate Next Steps
 
 1. Commit the dummy-board test-support slice and this updated implementation log.
-2. Add end-to-end core tests for the parameter path using `TestBoard` and `RecordingCommLink`.
-3. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
+2. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
+3. Extract the parameter reaction logic currently embedded in `ROSFlight::run` into named systems with typed contexts.
 4. Install `rustfmt` or run formatting in an environment where it is available.
 5. Continue replacing direct callback blocks with named systems and ports.
 
