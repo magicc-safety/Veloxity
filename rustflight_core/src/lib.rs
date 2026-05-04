@@ -57,6 +57,7 @@ pub mod pwm;
 pub mod rc;
 pub mod rosflight;
 pub mod sensors;
+pub mod sensor_systems;
 pub mod sensorprocessors;
 pub mod state_machine;
 //pub(crate) mod units;

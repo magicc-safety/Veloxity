@@ -684,6 +684,15 @@ This is the first concrete use of the ports/events model.
 - Both resources have `clear` helpers.
 - Adds focused coverage that default sensor resources are empty.
 
+`rustflight_core/src/sensor_systems.rs`
+
+- Adds `SensorProcessorSet`.
+- Adds `process_sensor_bus`.
+- This reuses the existing sensor processor objects but runs them over named `SensorBus` fields.
+- This is a bridge away from HList mapping, not a rewrite of calibration logic.
+- The default processor set uses the current real IMU and magnetometer processors plus passthrough processors for the remaining sensor types.
+- Tests show a raw RC packet moving into `ProcessedSensors::rc` and being consumed from `SensorBus::rc`.
+
 ### Validation Status
 
 `cargo check -p rustflight_core --lib` passes after the initial parameter-path rewrite.
@@ -695,6 +704,7 @@ Focused unit checks for the new modules pass:
 - `cargo test -p rustflight_core comm_manager::tests --lib`
 - `cargo test -p rustflight_core param_reactions::tests --lib`
 - `cargo test -p rustflight_core sensors::tests --lib`
+- `cargo test -p rustflight_core sensor_systems::tests --lib`
 
 Additional status:
 
@@ -761,7 +771,7 @@ This is the first step toward replacing the old test infrastructure with small, 
 2. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
 3. Add a proper `LogPort` or log event path and migrate global logging usage toward it.
 4. Install `rustfmt` or run formatting in an environment where it is available.
-5. Start moving board sensor ingestion from HLists into `SensorBus`.
+5. Start moving board sensor ingestion from HLists into `SensorBus`, with `sim` as the first application target after core stabilizes.
 
 ### Important Design Caveats In The Current Slice
 
