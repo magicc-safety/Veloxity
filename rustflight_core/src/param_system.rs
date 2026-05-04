@@ -1,12 +1,13 @@
 use crate::{
     comm_manager::str_to_fixed_bytes,
-    comm_messages::messages::ParamValueMsg,
+    comm_messages::{enums::ParamIdentifier, messages::ParamValueMsg},
     events::{
         CommResponse, COMM_RESPONSE_QUEUE_CAPACITY, PARAM_CHANGED_QUEUE_CAPACITY,
-        PARAM_LIST_REQUEST_QUEUE_CAPACITY, PARAM_SET_REQUEST_QUEUE_CAPACITY, ParamChanged,
-        ParamListRequested, ParamSetRequested,
+        PARAM_LIST_REQUEST_QUEUE_CAPACITY, PARAM_READ_REQUEST_QUEUE_CAPACITY,
+        PARAM_SET_REQUEST_QUEUE_CAPACITY, ParamChanged, ParamListRequested, ParamReadRequested,
+        ParamSetRequested,
     },
-    params2::{PARAMS_COUNT, PARAM_DEFINITIONS},
+    params2::{PARAMS_COUNT, PARAM_DEFINITIONS, ParamId},
     ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
 };
 
@@ -35,6 +36,12 @@ pub struct ParamListCtx<'a> {
     pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
 }
 
+pub struct ParamReadCtx<'a> {
+    pub params: ParamsReadPort<'a>,
+    pub requests: EventDrainPort<'a, ParamReadRequested, PARAM_READ_REQUEST_QUEUE_CAPACITY>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+}
+
 pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
     while let Some(req) = ctx.requests.next() {
         let old = ctx.params.get(req.id);
@@ -54,6 +61,22 @@ pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
             param_value: new,
             param_count: PARAMS_COUNT as u16,
             param_index: req.id as u16,
+        };
+        let _ = ctx.responses.emit(CommResponse::ParamValue(response));
+    }
+}
+
+pub fn service_param_read_requests(mut ctx: ParamReadCtx<'_>) {
+    while let Some(req) = ctx.requests.next() {
+        let Some(id) = param_id_from_identifier(req.identifier) else {
+            continue;
+        };
+        let def = &PARAM_DEFINITIONS[id as usize];
+        let response = ParamValueMsg {
+            param_id: str_to_fixed_bytes(def.name),
+            param_value: ctx.params.get(id),
+            param_count: PARAMS_COUNT as u16,
+            param_index: id as u16,
         };
         let _ = ctx.responses.emit(CommResponse::ParamValue(response));
     }
@@ -85,11 +108,28 @@ pub fn service_param_list_requests(mut ctx: ParamListCtx<'_>) {
     ctx.state.next_index = (next < PARAMS_COUNT).then_some(next);
 }
 
+fn param_id_from_identifier(identifier: ParamIdentifier) -> Option<ParamId> {
+    match identifier {
+        ParamIdentifier::INDEX(index) if index >= 0 => {
+            PARAM_DEFINITIONS.get(index as usize).map(|def| def.id)
+        }
+        ParamIdentifier::INDEX(_) => None,
+        ParamIdentifier::ID(bytes) => {
+            let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+            let name = core::str::from_utf8(&bytes[..len]).ok()?;
+            PARAM_DEFINITIONS
+                .iter()
+                .find(|def| def.name == name)
+                .map(|def| def.id)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        events::{EventQueue, ParamListRequested, ParamSetRequested},
+        events::{EventQueue, ParamListRequested, ParamReadRequested, ParamSetRequested},
         params2::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
     };
@@ -168,6 +208,42 @@ mod tests {
         match responses.pop().unwrap() {
             CommResponse::ParamValue(response) => {
                 assert_eq!(response.param_index, ParamId::PARAM_SERIAL_DEVICE as u16);
+            }
+        }
+    }
+
+    #[test]
+    fn service_param_read_requests_responds_by_index_and_id() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let mut requests =
+            EventQueue::<ParamReadRequested, PARAM_READ_REQUEST_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(ParamReadRequested {
+            identifier: ParamIdentifier::INDEX(0),
+        });
+        let _ = requests.push(ParamReadRequested {
+            identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
+        });
+
+        service_param_read_requests(ParamReadCtx {
+            params: ParamsReadPort::new(&params),
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+        });
+
+        match responses.pop().unwrap() {
+            CommResponse::ParamValue(response) => {
+                assert_eq!(response.param_index, ParamId::PARAM_BAUD_RATE as u16);
+                assert_eq!(response.param_value, ParamValue::Int(921600));
+            }
+        }
+
+        match responses.pop().unwrap() {
+            CommResponse::ParamValue(response) => {
+                assert_eq!(response.param_index, ParamId::PARAM_SYSTEM_ID as u16);
+                assert_eq!(response.param_value, ParamValue::Int(42));
             }
         }
     }

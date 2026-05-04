@@ -1807,3 +1807,67 @@ Current status after this slice:
 - `params_iter` is gone from legacy `ROSFlight`.
 - `params_iter` is gone from `CommManager`.
 - `Params::iter` and `ParamIter` still exist in `params2`; they are no longer part of the active comm scheduling path and can be removed later if no remaining use appears.
+
+## Param Request Read Event Progress
+
+Reason for this change:
+
+- `PARAM_REQUEST_READ` is part of the MAVLink parameter protocol expected by ROSflight tooling.
+- The message was stored by the parser but not serviced by `CommManager::act_on_messages`.
+- Implementing it through the new event path improves compatibility while preserving the architectural rule that comms should not own parameter lookup behavior.
+
+Design now implemented:
+
+- `CommManager` emits `ParamReadRequested` when a `PARAM_REQUEST_READ` message arrives.
+- `ParamReadRequested` carries the parsed `ParamIdentifier`.
+- `param_system::service_param_read_requests` resolves the request by index or by parameter name.
+- The parameter system emits `CommResponse::ParamValue`.
+- `CommManager::send_comm_responses` sends the ROSflight/MAVLink `PARAM_VALUE` message through the configured comm link.
+
+ROSflight compatibility:
+
+- Requests with `param_index >= 0` are resolved by index.
+- Requests with `param_index == -1` are resolved by the `param_id` bytes parsed into `ParamIdentifier::ID`.
+- Responses use the existing `ParamValueMsg` payload shape.
+- Invalid parameter identifiers currently produce no response, matching the conservative behavior of ignoring malformed or unknown parameter requests.
+
+Compile-time boundary improvement:
+
+- Parameter lookup now belongs to `param_system`.
+- Comms receives only the parameter request event queue, not broad mutable parameter access.
+- `service_param_read_requests` uses `ParamsReadPort`, so this path can read parameters but cannot mutate them.
+
+Files changed in this slice:
+
+- `rustflight_core/src/comm_messages.rs`
+  - Derives `PartialEq` for `ParamIdentifier` so request events can be compared in tests.
+- `rustflight_core/src/events.rs`
+  - Adds `ParamReadRequested`.
+  - Adds a fixed-capacity read request queue to `ParamEventQueues`.
+- `rustflight_core/src/param_system.rs`
+  - Adds `ParamReadCtx`.
+  - Adds `service_param_read_requests`.
+  - Adds parameter identifier resolution by index or name.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits read request events and does not directly read/send parameter values for this path.
+- `rustflight_core/src/world.rs`
+  - Schedules request-read servicing before comm responses are sent.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the same compatibility scheduling in the legacy path.
+
+Tests added:
+
+- `param_system::tests::service_param_read_requests_responds_by_index_and_id`
+  - Proves the parameter system resolves both MAVLink index and name forms.
+- `comm_manager::tests::param_request_read_emits_request_without_reading_from_comms`
+  - Proves comms only emits a request and does not send a value directly.
+- `world::tests::world_scheduler_answers_param_request_read_through_param_system`
+  - Proves the scheduler emits the ROSflight-compatible `PARAM_VALUE` response through the new path.
+
+Validation:
+
+- `cargo test -p rustflight_core param_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.

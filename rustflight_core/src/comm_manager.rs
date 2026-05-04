@@ -41,7 +41,8 @@ use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
     CalibrationRequested, CommandEventQueues, CommResponse, OffboardControlRequested,
-    ParamDefaultsRequested, ParamEventQueues, ParamListRequested, ParamSetRequested,
+    ParamDefaultsRequested, ParamEventQueues, ParamListRequested, ParamReadRequested,
+    ParamSetRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -671,6 +672,12 @@ where
         board: &mut B,
     ) {
         // first check the param_request_list
+        if let Some(msg) = self.msgs.param_request_read.take() {
+            let _ = param_events.read_requests.push(ParamReadRequested {
+                identifier: msg.param_identifier,
+            });
+        }
+
         if self.msgs.param_request_list.take().is_some() {
             let _ = param_events.list_requests.push(ParamListRequested);
         }
@@ -972,12 +979,13 @@ mod tests {
         command_system::{self, CalibrationRequestCtx},
         comm_messages::{
             enums::{
-                OffboardControlIgnore, OffboardControlMode, RosflightCmd, RosflightCmdResponse,
+                OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightCmd,
+                RosflightCmdResponse,
             },
-            messages::{OffboardControlMsg, ParamSetMsg, RosflightCmdMsg},
+            messages::{OffboardControlMsg, ParamRequestReadMsg, ParamSetMsg, RosflightCmdMsg},
         },
         events::{CommandEventQueues, CommResponse, ParamEventQueues},
-        param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState},
+        param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
         params2::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
         sensorprocessors::CalibrationFlags,
@@ -1046,6 +1054,40 @@ mod tests {
         let sent = manager.comm_link.sent_param_values[0].unwrap();
         assert_eq!(sent.param_index, ParamId::PARAM_BAUD_RATE as u16);
         assert_eq!(sent.param_value, ParamValue::Int(921600));
+    }
+
+    #[test]
+    fn param_request_read_emits_request_without_reading_from_comms() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let mut param_events = ParamEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.param_request_read = Some(ParamRequestReadMsg {
+            target_system: 1,
+            target_component: 1,
+            param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
+        });
+
+        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+
+        assert_eq!(manager.comm_link.sent_param_value_count, 0);
+        assert_eq!(param_events.read_requests.len(), 1);
+
+        param_system::service_param_read_requests(ParamReadCtx {
+            params: ParamsReadPort::new(&params),
+            requests: EventDrainPort::new(&mut param_events.read_requests),
+            responses: EventEmitPort::new(&mut param_events.comm_responses),
+        });
+
+        manager.send_comm_responses(&mut board, &mut param_events);
+
+        assert_eq!(manager.comm_link.sent_param_value_count, 1);
+        let sent = manager.comm_link.sent_param_values[0].unwrap();
+        assert_eq!(sent.param_index, ParamId::PARAM_SYSTEM_ID as u16);
+        assert_eq!(sent.param_value, ParamValue::Int(42));
     }
 
     #[test]

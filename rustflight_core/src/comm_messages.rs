@@ -439,7 +439,7 @@ pub mod enums {
         Error,
     }
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub enum ParamIdentifier {
         ID([u8; 16]),
         INDEX(i16),

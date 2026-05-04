@@ -1,6 +1,6 @@
 use crate::{
     comm_messages::{
-        enums::RosflightCmd,
+        enums::{ParamIdentifier, RosflightCmd},
         messages::{OffboardControlMsg, ParamValueMsg},
     },
     params2::{ParamId, ParamValue},
@@ -101,6 +101,11 @@ pub struct ParamSetRequested {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamReadRequested {
+    pub identifier: ParamIdentifier,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamChanged {
     pub id: ParamId,
     pub old: ParamValue,
@@ -133,6 +138,7 @@ pub enum CommResponse {
 }
 
 pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = 4;
+pub const PARAM_READ_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const PARAM_LIST_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const PARAM_CHANGED_QUEUE_CAPACITY: usize = 8;
 pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = 8;
@@ -143,6 +149,7 @@ pub const PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY: usize = 2;
 #[derive(Default)]
 pub struct ParamEventQueues {
     pub set_requests: EventQueue<ParamSetRequested, PARAM_SET_REQUEST_QUEUE_CAPACITY>,
+    pub read_requests: EventQueue<ParamReadRequested, PARAM_READ_REQUEST_QUEUE_CAPACITY>,
     pub list_requests: EventQueue<ParamListRequested, PARAM_LIST_REQUEST_QUEUE_CAPACITY>,
     pub changes: EventQueue<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>,
     pub comm_responses: EventQueue<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
@@ -160,6 +167,7 @@ pub struct CommandEventQueues {
 impl ParamEventQueues {
     pub fn clear_loop_events(&mut self) {
         self.set_requests.clear();
+        self.read_requests.clear();
         self.list_requests.clear();
         self.changes.clear();
         self.comm_responses.clear();

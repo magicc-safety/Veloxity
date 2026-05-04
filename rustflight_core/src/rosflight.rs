@@ -52,7 +52,7 @@ use crate::{
     mixer::Mixer,
     packets,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
-    param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState},
+    param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
     params2::{self, PARAM_DEFINITIONS, ParamId},
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::{self, PwmDriver},
@@ -229,6 +229,12 @@ where
         });
         self.comm_manager
             .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
+
+        param_system::service_param_read_requests(ParamReadCtx {
+            params: ParamsReadPort::new(&self.params),
+            requests: EventDrainPort::new(&mut self.param_events.read_requests),
+            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+        });
 
         param_system::service_param_list_requests(ParamListCtx {
             params: ParamsReadPort::new(&self.params),

@@ -11,7 +11,7 @@ use crate::{
     estimator::{AttitudeStateTrait, NamedEstimator},
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
-    param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState},
+    param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
     params2::Params,
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
@@ -158,6 +158,12 @@ where
         });
         self.comm
             .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
+
+        param_system::service_param_read_requests(ParamReadCtx {
+            params: ParamsReadPort::new(&self.params),
+            requests: EventDrainPort::new(&mut self.param_events.read_requests),
+            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+        });
 
         param_system::service_param_list_requests(ParamListCtx {
             params: ParamsReadPort::new(&self.params),
@@ -319,9 +325,13 @@ mod tests {
         bodytype::quadrotor::Quadrotor,
         comm_messages::{
             enums::{
-                OffboardControlIgnore, OffboardControlMode, RosflightCmd, RosflightCmdResponse,
+                OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightCmd,
+                RosflightCmdResponse,
             },
-            messages::{OffboardControlMsg, ParamRequestListMsg, ParamSetMsg, RosflightCmdMsg},
+            messages::{
+                OffboardControlMsg, ParamRequestListMsg, ParamRequestReadMsg, ParamSetMsg,
+                RosflightCmdMsg,
+            },
         },
         params2::{ParamId, ParamValue},
         pwm::{PwmDriver, PwmError},
@@ -471,6 +481,41 @@ mod tests {
         assert_eq!(world.comm.comm_link().sent_param_value_count, 2);
         let second = world.comm.comm_link().sent_param_values[1].unwrap();
         assert_eq!(second.param_index, ParamId::PARAM_SERIAL_DEVICE as u16);
+    }
+
+    #[test]
+    fn world_scheduler_answers_param_request_read_through_param_system() {
+        let board = TestBoard::default();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.param_request_read = Some(ParamRequestReadMsg {
+            target_system: 1,
+            target_component: 1,
+            param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert!(world.param_events.read_requests.is_empty());
+        assert_eq!(world.comm.comm_link().sent_param_value_count, 1);
+        let response = world.comm.comm_link().sent_param_values[0].unwrap();
+        assert_eq!(response.param_index, ParamId::PARAM_SYSTEM_ID as u16);
+        assert_eq!(response.param_value, ParamValue::Int(42));
     }
 
     #[test]
