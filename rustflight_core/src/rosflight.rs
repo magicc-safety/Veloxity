@@ -234,7 +234,7 @@ where
             params: &mut self.params,
         });
         self.comm_manager
-            .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
+            .queue_completed_param_defaults_ack(&mut self.comm_events, applied_defaults);
 
         command_system::apply_rc_trim_calibration_requests(command_system::RcTrimCalibrationCtx {
             requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
@@ -293,8 +293,6 @@ where
             changes: EventReadPort::new(&self.param_events.changes),
         });
 
-        self.comm_manager
-            .send_comm_responses(&mut self.board, &mut self.comm_events);
         self.param_events.changes.clear();
 
         if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
@@ -347,6 +345,11 @@ where
             self.state_manager
                 .update(Event::CALIBRATION_COMPLETE, &self.params);
         }
+
+        self.comm_manager
+            .queue_completed_calibration_ack(&mut self.comm_events, self.cal_flags);
+        self.comm_manager
+            .send_comm_responses(&mut self.board, &mut self.comm_events);
 
         let (required_sensors, _remainder) = processed_sensors.clone().sculpt();
         let (rc_packet_option, estimator_sensors) = required_sensors.pluck();

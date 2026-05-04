@@ -614,9 +614,9 @@ where
         self.send_rosflight_output_raw(board, RosflightOutputRawMsg { stamp: now_us, values });
     }
 
-    pub fn send_completed_calibration_ack(
+    pub fn queue_completed_calibration_ack(
         &mut self,
-        board: &mut B,
+        comm_events: &mut CommEventQueues,
         flags: CalibrationFlags,
     ) -> bool {
         let Some(command) = self.pending_calibration_ack else {
@@ -624,14 +624,16 @@ where
         };
 
         if calibration_command_is_complete(command, flags) {
-            self.comm_link.send_cmd_ack(
-                board,
-                self.sysid,
-                RosflightCmdAckMsg {
+            if comm_events
+                .responses
+                .push(CommResponse::CmdAck(RosflightCmdAckMsg {
                     command,
                     success: RosflightCmdResponse::RosflightCmdSuccess,
-                },
-            );
+                }))
+                .is_err()
+            {
+                return false;
+            }
             self.pending_calibration_ack = None;
             true
         } else {
@@ -639,9 +641,9 @@ where
         }
     }
 
-    pub fn send_completed_param_defaults_ack(
+    pub fn queue_completed_param_defaults_ack(
         &mut self,
-        board: &mut B,
+        comm_events: &mut CommEventQueues,
         command: Option<RosflightCmd>,
     ) -> bool {
         let Some(pending) = self.pending_param_defaults_ack else {
@@ -649,14 +651,16 @@ where
         };
 
         if command == Some(pending) {
-            self.comm_link.send_cmd_ack(
-                board,
-                self.sysid,
-                RosflightCmdAckMsg {
+            if comm_events
+                .responses
+                .push(CommResponse::CmdAck(RosflightCmdAckMsg {
                     command: pending,
                     success: RosflightCmdResponse::RosflightCmdSuccess,
-                },
-            );
+                }))
+                .is_err()
+            {
+                return false;
+            }
             self.pending_param_defaults_ack = None;
             true
         } else {
@@ -1341,7 +1345,9 @@ mod tests {
 
         cal_flags.remove(CalibrationFlags::GYRO);
 
-        assert!(manager.send_completed_calibration_ack(&mut board, cal_flags));
+        assert!(manager.queue_completed_calibration_ack(&mut comm_events, cal_flags));
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+        manager.send_comm_responses(&mut board, &mut comm_events);
         assert_eq!(manager.comm_link().cmd_ack_count, 1);
 
         let ack = manager.comm_link().last_cmd_ack.unwrap();
@@ -1424,7 +1430,9 @@ mod tests {
             params.get_by_id(ParamId::PARAM_SYSTEM_ID),
             ParamValue::Int(1)
         );
-        assert!(manager.send_completed_param_defaults_ack(&mut board, applied));
+        assert!(manager.queue_completed_param_defaults_ack(&mut comm_events, applied));
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+        manager.send_comm_responses(&mut board, &mut comm_events);
         assert_eq!(manager.comm_link().cmd_ack_count, 1);
 
         let ack = manager.comm_link().last_cmd_ack.unwrap();

@@ -1882,6 +1882,73 @@ Next planned migration target:
 - Inspect `CommManager::act_on_messages` again and confirm that command parsing now only emits request/response events, except for truly immediate protocol operations such as timesync.
 - Then move to the next compatibility gap: either implement a real origin-reset capability if ROSflight-main behavior and local estimator/navigation support make that possible, or start converting the next subsystem boundary where HList is still actively shaping the new path.
 
+## Completed ACK Response Queue Progress
+
+Reason for this change:
+
+- Most command responses now flow through `CommEventQueues::responses`.
+- Two completed-work ACK helpers still wrote directly to the comm link:
+  - calibration completion ACKs,
+  - parameter-default reset completion ACKs.
+- Direct writes meant there were still multiple wire-output points for command ACKs.
+- The response queue should be the single boundary between internal completion facts and external MAVLink transmission.
+
+Design now implemented:
+
+- Renamed `send_completed_calibration_ack` to `queue_completed_calibration_ack`.
+- Renamed `send_completed_param_defaults_ack` to `queue_completed_param_defaults_ack`.
+- Both helpers now push `CommResponse::CmdAck` instead of calling `comm_link.send_cmd_ack` directly.
+- The pending ACK slot is cleared only if queueing succeeds.
+- `World` now flushes `CommEventQueues` after sensor processing and calibration-completion observation.
+- Legacy `ROSFlight` mirrors this response ordering while it still exists.
+
+ROSflight compatibility:
+
+- The wire payload is unchanged: completed work still produces `ROSFLIGHT_CMD_ACK`.
+- Calibration success is still emitted only after the calibration flag clears.
+- Parameter-default success is still emitted only after params are reset.
+- The only internal difference is that ACK transmission is centralized through `CommManager::send_comm_responses`.
+
+Compile-time boundary improvement:
+
+- Completion helpers no longer need board access.
+- Completion helpers now emit response intent into the response queue.
+- Only `send_comm_responses` owns command ACK wire transmission for queued responses.
+- This makes response causality easier to inspect and keeps parser/completion/transport stages separate.
+
+Files changed in this slice:
+
+- `rustflight_core/src/comm_manager.rs`
+  - Changes completed-work ACK helpers to queue `CommResponse::CmdAck`.
+  - Updates tests to assert ACKs are not transmitted until `send_comm_responses`.
+- `rustflight_core/src/world.rs`
+  - Queues parameter-default ACKs.
+  - Queues calibration-completion ACKs.
+  - Moves the scheduler response flush after sensor processing so calibration completion ACKs can transmit in the same scheduler call.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors completed ACK queueing and later response flushing in the legacy loop.
+
+Tests updated:
+
+- `comm_manager::tests::calibration_command_ack_is_deferred_until_flag_clears`
+  - Now proves completion queues the ACK first and wire transmission happens only through `send_comm_responses`.
+- `comm_manager::tests::set_param_defaults_emits_request_and_defers_ack`
+  - Now proves default-reset completion queues the ACK first and wire transmission happens only through `send_comm_responses`.
+- `world::tests::world_sends_calibration_ack_after_calibration_flag_clears`
+  - Now reflects the response-queue boundary explicitly.
+
+Validation:
+
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Continue collapsing direct wire-output paths where they are not telemetry streams or truly immediate protocol responses.
+
 ## Dedicated Comm Response Queue Progress
 
 Reason for this change:

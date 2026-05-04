@@ -163,7 +163,7 @@ where
             params: &mut self.params,
         });
         self.comm
-            .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
+            .queue_completed_param_defaults_ack(&mut self.comm_events, applied_defaults);
 
         command_system::apply_rc_trim_calibration_requests(command_system::RcTrimCalibrationCtx {
             requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
@@ -222,8 +222,6 @@ where
             changes: EventReadPort::new(&self.param_events.changes),
         });
 
-        self.comm
-            .send_comm_responses(&mut self.board, &mut self.comm_events);
         self.param_events.changes.clear();
 
         if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
@@ -239,6 +237,8 @@ where
             &mut self.params,
         );
         self.update_sensor_health_and_calibration(now_us);
+        self.comm
+            .send_comm_responses(&mut self.board, &mut self.comm_events);
     }
 
     fn update_sensor_health_and_calibration(&mut self, now_us: u64) {
@@ -259,7 +259,7 @@ where
             self.state.update(Event::CALIBRATION_COMPLETE, &self.params);
         }
         self.comm
-            .send_completed_calibration_ack(&mut self.board, self.cal_flags);
+            .queue_completed_calibration_ack(&mut self.comm_events, self.cal_flags);
     }
 
     pub fn run_rc_command_state_stages(&mut self) {
@@ -722,6 +722,11 @@ mod tests {
 
         world.cal_flags.remove(CalibrationFlags::GYRO);
         world.update_sensor_health_and_calibration(world.board.clock_micros());
+
+        assert_eq!(world.comm.comm_link().cmd_ack_count, 0);
+        world
+            .comm
+            .send_comm_responses(&mut world.board, &mut world.comm_events);
 
         assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
         let ack = world.comm.comm_link().last_cmd_ack.unwrap();
