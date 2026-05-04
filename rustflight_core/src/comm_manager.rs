@@ -39,6 +39,7 @@ pub mod mavlink_parser;
 use crate::bodytype::BodyType;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
+use crate::events::{CommResponse, ParamEventQueues, ParamSetRequested};
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
 use crate::mavlink::dialects::Rosflight;
@@ -421,10 +422,11 @@ where
         &mut self,
         params_iter: &mut Option<ParamIter>,
         params: &mut Params,
+        param_events: &mut ParamEventQueues,
         cal_flags: &mut CalibrationFlags,
         board: &mut B,
         command_manager: &mut CommandManager,
-    ) -> Option<ParamId> {
+    ) {
         // first check the param_request_list
         if self.msgs.param_request_list.take().is_some() {
             if params_iter.is_none() {
@@ -464,65 +466,27 @@ where
             command_manager.set_new_offboard_command(now_us, &msg, &params);
         }
 
-        let msg_opt: Option<ParamSetMsg> = self.msgs.param_set.take();
-        if let Some(msg) = msg_opt {
-            // No need for `mut` if you only read from msg
-
-            // TODO: Add checking on target system and component ID here if needed
-            // if msg.target_system != self.sysid || msg.target_component != self.component_id {
-            //     return; // Or log an error, ignore message, etc.
-            // }
-
-            // Convert the incoming [u8; 16] param_id to a &str
+        if let Some(msg) = self.msgs.param_set.take() {
+            // TODO: Add checking on target system and component ID here if needed.
             let param_name_bytes = &msg.param_id;
-            // Find the position of the first null byte, or take the full length
             let len = param_name_bytes
                 .iter()
                 .position(|&b| b == 0)
                 .unwrap_or(param_name_bytes.len());
             let name_slice = &param_name_bytes[..len];
 
-            // Attempt to convert the byte slice to a UTF-8 &str
-            match core::str::from_utf8(name_slice) {
-                Ok(param_name_str) => {
-                    // Successfully converted, now set the parameter
-                    if params.set_by_name(param_name_str, msg.param_value) {
-                        // MAVLink spec requires acknowledging the change by sending PARAM_VALUE
-                        // Find the ParamDefinition to get the ID and count
-                        if let Some(def) =
-                            PARAM_DEFINITIONS.iter().find(|d| d.name == param_name_str)
-                        {
-                            if def.id == ParamId::PARAM_SYSTEM_ID {
-                                // ...update our internal sysid
-                                if let ParamValue::Int(new_sysid) = msg.param_value {
-                                    self.sysid = new_sysid as u8;
-                                    // println!("CommManager sysid updated to {}", self.sysid);
-                                }
-                            }
-
-                            let value_msg = ParamValueMsg {
-                                param_id: msg.param_id,       // Use the received ID bytes
-                                param_value: msg.param_value, // Use the value that was set
-                                param_count: PARAMS_COUNT as u16,
-                                param_index: def.id as u16,
-                            };
-                            // Assuming 'self.comm_link' and 'board' are accessible
-                            // Need system ID - retrieve from params or store in CommManager
-                            self.comm_link
-                                .send_named_value(board, self.sysid, value_msg);
-                            return Some(def.id);
-                        } else {
-                            //defmt::info!("Error: Could not find definition for '{}' after setting.", param_name_str);
-                        }
-                    } else {
-                        //defmt::info!("Failed to set parameter: Name '{}' not found.", param_name_str);
-                        // Optionally send a NACK or STATUSTEXT message here
-                    }
+            if let Ok(param_name_str) = core::str::from_utf8(name_slice) {
+                if let Some(def) = PARAM_DEFINITIONS.iter().find(|d| d.name == param_name_str) {
+                    let _ = param_events.set_requests.push(ParamSetRequested {
+                        id: def.id,
+                        value: msg.param_value,
+                        param_id_bytes: msg.param_id,
+                    });
+                } else {
+                    // Optionally emit a NACK or STATUSTEXT message here.
                 }
-                Err(e) => {
-                    // The received param_id was not valid UTF-8
-                    //defmt::info!("Received PARAM_SET with invalid UTF-8 name: {:?}", name_slice);
-                }
+            } else {
+                // The received param_id was not valid UTF-8.
             }
         }
 
@@ -638,7 +602,25 @@ where
             //defmt::info!("Sent ACK")
         } // end if let Some(msg)
 
-        None
+    }
+
+    pub fn send_comm_responses(
+        &mut self,
+        board: &mut B,
+        param_events: &mut ParamEventQueues,
+    ) {
+        while let Some(response) = param_events.comm_responses.pop() {
+            match response {
+                CommResponse::ParamValue(msg) => {
+                    if msg.param_index == ParamId::PARAM_SYSTEM_ID as u16 {
+                        if let ParamValue::Int(new_sysid) = msg.param_value {
+                            self.sysid = new_sysid as u8;
+                        }
+                    }
+                    self.comm_link.send_named_value(board, self.sysid, msg);
+                }
+            }
+        }
     }
 
     pub fn send_param_value(&mut self, def: &ParamDefinition, val: ParamValue, board: &mut B) {

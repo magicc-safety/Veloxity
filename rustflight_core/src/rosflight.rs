@@ -41,6 +41,7 @@ use crate::{
     comm_messages::{self, messages::HeartbeatMsg},
     command_manager::{CommandManager, ControlType},
     controller::Controller,
+    events::ParamEventQueues,
     errors,
     estimator::{
         self, AttitudeStateTrait, Estimator,
@@ -49,7 +50,9 @@ use crate::{
     hlist::*,
     mixer::Mixer,
     packets,
+    param_system::{self, ParamApplyCtx},
     params2::{self, PARAM_DEFINITIONS, ParamId, ParamIter},
+    ports::{EventDrainPort, EventEmitPort, ParamsWritePort},
     pwm::{self, PwmDriver},
     rc::Rc,
     sensorprocessors::CalibrationFlags,
@@ -96,6 +99,7 @@ where
     pub board: B,
     params: params2::Params,
     params_iter: Option<ParamIter>,
+    param_events: ParamEventQueues,
     comm_manager: comm_manager::CommManager<B, CI>,
     sensors: B::RawSensorSet,
     processorhlist: B::ProcessorHList,
@@ -174,6 +178,7 @@ where
             board,
             params,
             params_iter: None,
+            param_events: ParamEventQueues::default(),
             comm_manager,
             sensors: B::RawSensorSet::default(),
             processorhlist: B::ProcessorHList::default(),
@@ -199,13 +204,42 @@ where
 
         // act on any received messages this loop
         self.comm_manager.process_incoming_messages(&mut self.board);
-        let changed_param_id = self.comm_manager.act_on_messages(
+        self.comm_manager.act_on_messages(
             &mut self.params_iter,
             &mut self.params,
+            &mut self.param_events,
             &mut self.cal_flags,
             &mut self.board,
             &mut self.command_manager,
         );
+
+        param_system::apply_param_requests(ParamApplyCtx {
+            params: ParamsWritePort::new(&mut self.params),
+            requests: EventDrainPort::new(&mut self.param_events.set_requests),
+            changes: EventEmitPort::new(&mut self.param_events.changes),
+            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+        });
+
+        for change in self.param_events.changes.iter() {
+            self.rc_manager.param_change_callback(
+                change.id,
+                &mut self.board,
+                &self.params,
+                &mut self.comm_manager,
+            );
+
+            match change.id {
+                ParamId::PARAM_FAILSAFE_THROTTLE | ParamId::PARAM_FIXED_WING => {
+                    self.command_manager
+                        .update_failsafe_config(&self.params, &mut self.state_manager);
+                }
+                _ => {}
+            }
+        }
+
+        self.comm_manager
+            .send_comm_responses(&mut self.board, &mut self.param_events);
+        self.param_events.changes.clear();
 
         if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
             // this must mean that rc asked for arm, but calibration hadn't happened and needed to... go ahead and raise the calibration flag
@@ -386,31 +420,6 @@ where
             );
         }
         // End of got_new_imu conditional block
-
-        // (We do this *after* telemetry, so telemetry can log if needed)
-        if let Some(param_id) = changed_param_id {
-            // defmt::info!("Parameter change callback for {:?}", param_id);
-            self.rc_manager.param_change_callback(
-                param_id,
-                &mut self.board,
-                &self.params,
-                &mut self.comm_manager,
-            );
-
-            match param_id {
-                ParamId::PARAM_FAILSAFE_THROTTLE | ParamId::PARAM_FIXED_WING => {
-                    self.command_manager
-                        .update_failsafe_config(&self.params, &mut self.state_manager);
-                }
-                _ => {
-                    // This param change doesn't affect the command manager
-                }
-            }
-
-            // TODO: Add callbacks for other modules here if needed
-            // self.controller.param_change_callback(param_id, &self.params);
-            // self.estimator.param_change_callback(param_id, &self.params);
-        }
 
         // let the state_manager process it's errors
         self.state_manager.run(&self.params);

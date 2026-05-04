@@ -518,3 +518,224 @@ Schedule = causality
 ```
 
 Ports should be treated as the central abstraction for the restructuring effort.
+
+## Implementation Log
+
+This section records the current restructuring work so another engineer can resume without needing the conversation history.
+
+### Branch And Commit State
+
+- Working branch: `tmp_restructuring`.
+- Branch source: local `main`.
+- First local commit completed: `52cb537 Document HList to ECS restructuring plan`.
+- The first commit contains this architecture note.
+- Local commit author used for the first commit: `Codex <codex@local>`, because the repository did not have a Git author identity configured.
+
+### User Decisions So Far
+
+- The architecture document should be committed first. This is done.
+- The first implementation target is the parameter callback path.
+- Functionality inside existing modules should remain intact as much as possible.
+- A clean rewrite using the new ports/events methodology is preferred over preserving the old static callback shape.
+- Introducing a new `World` or scheduler type is acceptable.
+- The long-term direction is to remove HLists and the rigid wiring systems.
+- Event queues should be fixed-size ring buffers.
+- Existing core tests are considered poorly structured for this migration. The plan is to create a better dummy-board-based test suite for core.
+- After the core parameter path and core test infrastructure are stable, the next target is `sim`, then `pixracerpro`.
+
+### Question Clarification
+
+The earlier question "Should `sim` remain the proving ground while we restructure core, or should core tests use only dummy board/test fixtures until core is stable?" means:
+
+- Option A: during core refactors, test through a fake/dummy board and keep all tests inside `rustflight_core`.
+- Option B: during core refactors, also use the `sim` crate as an integration target to prove the migrated core works in a realistic application.
+
+The current user preference is to recreate the dummy board for tests first, then finish `sim` after this core work is done.
+
+## Current Parameter-Path Rewrite
+
+The first implementation slice replaces the old parameter callback path with an event-driven staged path.
+
+### Old Behavior
+
+Before this work:
+
+1. `CommManager::act_on_messages` decoded `PARAM_SET`.
+2. It mutated `Params` directly.
+3. It sent the MAVLink `PARAM_VALUE` acknowledgement immediately.
+4. It returned `Option<ParamId>`.
+5. `ROSFlight::run` later called `Rc::param_change_callback` and manually updated command-manager failsafe config.
+
+That meant RustFlight could acknowledge a parameter change before all interested modules had reacted to it.
+
+### New Intended Behavior
+
+The new path is:
+
+1. `CommManager::act_on_messages` decodes `PARAM_SET`.
+2. It emits `ParamSetRequested`.
+3. `param_system::apply_param_requests` mutates `Params`.
+4. It emits `ParamChanged`.
+5. Existing module reactions run from `ParamChanged`.
+6. It emits `CommResponse::ParamValue`.
+7. `CommManager::send_comm_responses` sends the MAVLink `PARAM_VALUE` acknowledgement after reactions have run.
+
+This is the first concrete use of the ports/events model.
+
+### Files Added
+
+`rustflight_core/src/events.rs`
+
+- Adds `EventQueue<T, const N: usize>`.
+- Uses a fixed-size ring buffer backed by `[Option<T>; N]`.
+- Provides `push`, `pop`, `iter`, `clear`, `len`, and `is_empty`.
+- Adds `EventQueueError::Full`.
+- Adds parameter-path event types:
+  - `ParamSetRequested`
+  - `ParamChanged`
+  - `CommResponse::ParamValue`
+- Adds queue capacities:
+  - `PARAM_SET_REQUEST_QUEUE_CAPACITY`
+  - `PARAM_CHANGED_QUEUE_CAPACITY`
+  - `COMM_RESPONSE_QUEUE_CAPACITY`
+- Adds `ParamEventQueues`.
+- Adds focused unit tests for FIFO order and non-draining iteration.
+
+`rustflight_core/src/ports.rs`
+
+- Adds initial port types:
+  - `ParamsReadPort`
+  - `ParamsWritePort`
+  - `EventEmitPort`
+  - `EventDrainPort`
+  - `EventReadPort`
+- These are intentionally narrow capability wrappers.
+- The scheduler or high-level orchestration code is expected to construct ports from world fields.
+
+`rustflight_core/src/param_system.rs`
+
+- Adds `ParamApplyCtx`.
+- Adds `apply_param_requests`.
+- This function drains `ParamSetRequested`, mutates params, emits `ParamChanged`, and emits deferred `CommResponse::ParamValue`.
+- Adds a focused unit test proving that a param request mutates params and queues the ack response instead of sending it immediately.
+
+### Files Modified
+
+`rustflight_core/src/lib.rs`
+
+- Exposes new modules:
+  - `events`
+  - `ports`
+  - `param_system`
+
+`rustflight_core/src/comm_manager.rs`
+
+- Imports `CommResponse`, `ParamEventQueues`, and `ParamSetRequested`.
+- Changes `act_on_messages` so it no longer returns `Option<ParamId>`.
+- Adds a `param_events: &mut ParamEventQueues` argument.
+- Keeps existing behavior for param-list streaming, timesync, offboard control, and ROSflight command handling.
+- Changes `PARAM_SET` handling:
+  - decodes the parameter name
+  - looks up the static param definition
+  - pushes `ParamSetRequested`
+  - does not mutate `Params`
+  - does not send `PARAM_VALUE` immediately
+- Adds `send_comm_responses`, which drains `CommResponse` events and sends `PARAM_VALUE`.
+- `send_comm_responses` also updates `CommManager::sysid` when the accepted response is for `PARAM_SYSTEM_ID`, preserving existing sysid behavior while moving it to the response stage.
+
+`rustflight_core/src/rosflight.rs`
+
+- Adds a `param_events: ParamEventQueues` field to `ROSFlight`.
+- Initializes it in `ROSFlight::init`.
+- After `comm_manager.act_on_messages`, calls `param_system::apply_param_requests` using ports.
+- Iterates `param_events.changes` and preserves existing module reactions:
+  - `Rc::param_change_callback`
+  - `CommandManager::update_failsafe_config` for `PARAM_FAILSAFE_THROTTLE` and `PARAM_FIXED_WING`
+- Calls `comm_manager.send_comm_responses` after reactions.
+- Clears `param_events.changes` after the stage.
+- Removes the old later `if let Some(param_id) = changed_param_id` callback block.
+
+### Validation Status
+
+`cargo check -p rustflight_core --lib` passes after the initial parameter-path rewrite.
+
+Focused unit checks for the new modules pass:
+
+- `cargo test -p rustflight_core events::tests --lib`
+- `cargo test -p rustflight_core param_system::tests --lib`
+
+Formatting status:
+
+- `cargo fmt` could not run because `cargo-fmt`/`rustfmt` is not installed for the current `stable-aarch64-unknown-linux-gnu` toolchain.
+- The command failed with: `error: 'cargo-fmt' is not installed for the toolchain 'stable-aarch64-unknown-linux-gnu'`.
+
+`cargo test -p rustflight_core` currently does not pass, but the failures are from legacy tests that already do not match current APIs:
+
+- mixer tests call `mixer.mix(&input)` but the current trait requires a state manager argument.
+- controller tests call `controller.control(...)` without the current `dt` argument.
+- estimator tests call `estimator.estimate(...)` without the current `dt` argument.
+
+The user has confirmed that the current testing infrastructure is not well written and should be replaced with a better dummy-board-based setup.
+
+### Immediate Next Steps
+
+1. Commit the parameter-path rewrite and this updated implementation log.
+2. Rebuild core test infrastructure around a recreated dummy board.
+3. Add end-to-end core tests for the parameter path.
+4. Install `rustfmt` or run formatting in an environment where it is available.
+5. Continue replacing direct callback blocks with named systems and ports.
+
+### Important Design Caveats In The Current Slice
+
+- `ROSFlight::run` still acts as the scheduler. A full `World`/scheduler type has not been introduced yet.
+- The current slice still calls existing callback-style functions from the `ParamChanged` stage. This is intentional to preserve behavior while changing ordering and communication shape.
+- `Rc::param_change_callback` still accepts `board` and `comm_manager` because it currently logs through the old logging pathway. This should later become a `LogPort`.
+- `CommandManager::update_failsafe_config` is still called directly. This should later become a command-manager parameter reaction system with a typed context.
+- Param request queue overflow is currently ignored with `let _ = ...`. A later pass should decide whether queue overflow sets an error, emits a statustext, drops newest, drops oldest, or increments diagnostics.
+- Invalid parameter names still do not produce a NACK or statustext. This matches the previous incomplete behavior but should be revisited.
+- `ParamSetRequested` currently carries both `ParamId` and raw `param_id_bytes` so the outgoing response can preserve the received MAVLink parameter id bytes.
+- `CommResponse::ParamValue` currently stores the complete outgoing `ParamValueMsg`. A later design could instead store a semantic response and let the comm response system build the MAVLink message.
+
+## Planned Core Migration After Parameter Path
+
+After the parameter path is stable and committed, proceed through core in this order:
+
+1. Rebuild dummy-board-based test infrastructure.
+2. Add tests around the parameter flow:
+   - `PARAM_SET` emits `ParamSetRequested`.
+   - applying request mutates `Params`.
+   - `ParamChanged` is visible to subscribers before `PARAM_VALUE` is sent.
+   - `PARAM_SYSTEM_ID` updates `CommManager::sysid` before or during response send.
+   - RC mapping params trigger RC remapping.
+   - failsafe params trigger command-manager failsafe config update.
+3. Introduce a clearer scheduler boundary around `ROSFlight::run`.
+4. Move parameter reaction blocks out of `ROSFlight::run` into named systems:
+   - `rc_on_param_changed`
+   - `command_on_param_changed`
+   - future estimator/controller/mixer reactions
+5. Introduce `LogPort` and stop passing `CommManager` into RC callbacks for logging.
+6. Introduce domain-specific event queues beyond params:
+   - comm requests/responses
+   - command events
+   - sensor events
+   - log events
+   - state events if needed
+7. Introduce named sensor resources:
+   - `SensorBus`
+   - `ProcessedSensors`
+8. Convert sensor processors from HList mapping to named systems.
+9. Convert telemetry to read from named sensor resources instead of `HListGet`.
+10. Convert estimator inputs away from HLists.
+11. Remove `Configuration::SculptIndices` and packet index associated types.
+12. Remove HList dependencies from board and bodytype traits.
+13. Delete `hlist.rs` only after no crates depend on it.
+
+## Planned Crate Order
+
+1. `rustflight_core`
+2. `sim`
+3. `pixracerpro`
+4. `nucleo`
+5. `stm_32`
+
+The exact order after `pixracerpro` can change based on hardware priorities, but `core` must stabilize first.
