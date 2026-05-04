@@ -1338,6 +1338,44 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## PWM Command Write Progress
+
+Design correction:
+
+- The control stage should compute actuator commands.
+- The PWM system should decide whether those commands reach PWM hardware/sim output.
+- Telemetry can still report computed actuator commands.
+- PWM command writes should be gated by explicit `PwmOutputState`.
+
+`rustflight_core/src/pwm_system.rs`
+
+- Adds `write_pwm_commands`.
+- `write_pwm_commands` sends commands only when `PwmOutputState` is enabled.
+- It returns `false` when output is disabled and no PWM driver write occurred.
+- It returns `true` after writing commands to the PWM driver.
+
+`rustflight_core/src/world.rs`
+
+- `run_control_stages_if_new_imu` now delegates PWM writes to `write_pwm_commands`.
+- The control stage still stores `latest_actuator_commands`.
+- The control stage still sends named telemetry with the computed actuator commands.
+- The control-stage test now arms through the real state-machine path before expecting PWM command writes.
+
+Tests added or extended:
+
+- `pwm_system::tests::write_pwm_commands_only_writes_when_output_enabled`
+  - Proves disabled output prevents PWM command writes.
+  - Proves enabled output writes exactly once.
+- `world::tests::world_control_stage_runs_once_per_imu_timestamp`
+  - Extended so PWM command writes are expected only after the World PWM output stage has enabled output through a real armed state.
+
+Validation:
+
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

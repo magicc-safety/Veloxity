@@ -14,7 +14,7 @@ use crate::{
     params2::{ParamIter, Params},
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
-    pwm_system::{PwmOutputState, sync_pwm_output_state},
+    pwm_system::{PwmOutputState, sync_pwm_output_state, write_pwm_commands},
     rc::Rc,
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
@@ -266,8 +266,12 @@ where
             Self::ESTIMATOR_DT,
         );
         let actuator_commands = self.mixer.mix(&controls, &self.state);
-        self.pwm
-            .send_commands(&mut self.board, actuator_commands.as_ref());
+        write_pwm_commands(
+            &mut self.board,
+            &mut self.pwm,
+            &self.pwm_output,
+            actuator_commands.as_ref(),
+        );
         let now_us = self.board.clock_micros();
         self.comm.send_named_telemetry_streams(
             &mut self.board,
@@ -443,7 +447,9 @@ mod tests {
     #[test]
     fn world_control_stage_runs_once_per_imu_timestamp() {
         let board = TestBoard::default();
-        let params = Params::new();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
         let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
@@ -458,6 +464,11 @@ mod tests {
             mixer,
             TestPwm::new(),
         );
+
+        world
+            .state
+            .update(crate::state_machine::Event::REQUEST_ARM, &world.params);
+        assert!(world.run_pwm_output_stage());
 
         world.board.current_time_us = 1_100_000;
         world.processed_sensors.imu = Some(crate::packets::ImuPacket {
