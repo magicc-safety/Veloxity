@@ -899,12 +899,11 @@ Validation:
 
 Next sim step:
 
-- Wire more of the new `World` scheduler into the sim path:
-  - RC handling
-  - command manager
-  - state manager
-  - estimator/controller/mixer
-  - PWM publishing
+- Continue wiring the new `World` scheduler into the sim path:
+  - telemetry
+  - richer PWM publication diagnostics
+  - explicit sim heartbeat/timing policy
+  - board IO adapter tests
 - Keep using UDP MAVLink for `rosflight_io` compatibility unless a serial/PTY requirement is confirmed.
 
 ## Scheduler Strategy Decision
@@ -1058,6 +1057,30 @@ New testing requirement:
 - Component tests should cover the local system behavior.
 - Scheduler tests should cover the handoff between components.
 - This applies to telemetry, PWM publishing, board IO adapters, sim transport, and later pixracerpro migration.
+
+## Sim PWM Output Progress
+
+`sim/src/pwm.rs`
+
+- The parallel sim already publishes PWM output to Zenoh on `sim/pwm_output`.
+- The `World` control stage now reaches this driver through `PwmDriver::send_commands`.
+- Added focused component tests for the sim PWM output mapping.
+- These tests instantiate the driver with an in-memory channel rather than a live Zenoh session.
+- This keeps the test deterministic and local to the component.
+
+Tests added:
+
+- `pwm::tests::send_commands_scales_clamps_and_publishes_pwm_output`
+  - Proves normalized commands clamp to `[0.0, 1.0]`.
+  - Proves commands map to the expected `1000..2000` microsecond output range.
+  - Proves `send_commands` queues a ROS-shaped `PwmOutput` message with the board timestamp.
+- `pwm::tests::disable_sets_channel_to_minimum_pwm`
+  - Proves disabling a channel sets that channel back to `1000`.
+
+Validation:
+
+- `cargo test -p sim pwm::tests --lib` passes.
+- `cargo check -p sim` passes.
 
 Testing detail:
 

@@ -207,3 +207,75 @@ impl PwmDriver for SimPwmDriver {
         self.flush(board);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustflight_core::{errors, hlist::HNil};
+    use std::time::Duration;
+
+    struct TestBoard {
+        elapsed_us: u64,
+    }
+
+    impl BoardTrait for TestBoard {
+        type RawSensorSet = HNil;
+        type ProcessedSensorSet = HNil;
+        type ProcessorHList = HNil;
+
+        fn update_sensors(&mut self, _sensors: &mut Self::RawSensorSet) {}
+
+        fn serial_rx_read(&mut self, _buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+            None
+        }
+
+        fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
+            Some(Ok(bytes.len()))
+        }
+
+        fn clock_millis(&self) -> u32 {
+            Duration::from_micros(self.elapsed_us).as_millis() as u32
+        }
+
+        fn clock_micros(&self) -> u64 {
+            self.elapsed_us
+        }
+    }
+
+    #[test]
+    fn send_commands_scales_clamps_and_publishes_pwm_output() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let mut driver = SimPwmDriver {
+            sender,
+            current_values: [1000u16; NUM_SIM_CHANNELS],
+        };
+        let mut board = TestBoard {
+            elapsed_us: 1_234_567,
+        };
+
+        driver.send_commands(&mut board, &[-0.25, 0.0, 0.5, 1.0, 1.25]);
+
+        let msg = receiver.try_recv().expect("PWM output should be queued");
+        assert_eq!(msg.header.stamp.sec, 1);
+        assert_eq!(msg.header.stamp.nanosec, 234_567_000);
+        assert_eq!(msg.values[0], 1000);
+        assert_eq!(msg.values[1], 1000);
+        assert_eq!(msg.values[2], 1500);
+        assert_eq!(msg.values[3], 2000);
+        assert_eq!(msg.values[4], 2000);
+        assert!(msg.values[5..].iter().all(|value| *value == 1000));
+    }
+
+    #[test]
+    fn disable_sets_channel_to_minimum_pwm() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut driver = SimPwmDriver {
+            sender,
+            current_values: [1500u16; NUM_SIM_CHANNELS],
+        };
+
+        driver.disable(3).unwrap();
+
+        assert_eq!(driver.current_values[3], 1000);
+    }
+}
