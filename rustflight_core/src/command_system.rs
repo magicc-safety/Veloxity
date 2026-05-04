@@ -1,9 +1,16 @@
 use crate::{
-    comm_messages::enums::RosflightCmd,
+    board::BoardIo,
+    comm_messages::{
+        enums::{RosflightCmd, RosflightCmdResponse},
+        messages::RosflightCmdAckMsg,
+    },
     command_manager::CommandManager,
-    events::{CalibrationRequested, OffboardControlRequested, ParamDefaultsRequested},
+    events::{
+        BoardCommandRequested, COMM_RESPONSE_QUEUE_CAPACITY, CalibrationRequested, CommResponse,
+        OffboardControlRequested, ParamDefaultsRequested,
+    },
     params2::Params,
-    ports::EventDrainPort,
+    ports::{EventDrainPort, EventEmitPort},
     sensorprocessors::CalibrationFlags,
 };
 
@@ -53,6 +60,41 @@ pub fn apply_param_defaults_requests<const N: usize>(
     applied
 }
 
+pub struct BoardCommandCtx<'a, B, const N: usize>
+where
+    B: BoardIo,
+{
+    pub requests: EventDrainPort<'a, BoardCommandRequested, N>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub board: &'a mut B,
+    pub params: &'a mut Params,
+}
+
+pub fn apply_board_command_requests<B, const N: usize>(mut ctx: BoardCommandCtx<'_, B, N>)
+where
+    B: BoardIo,
+{
+    while let Some(request) = ctx.requests.next() {
+        let completed = match request.command {
+            RosflightCmd::ReadParams => ctx.board.read_params(ctx.params),
+            RosflightCmd::WriteParams => ctx.board.write_params(ctx.params),
+            RosflightCmd::Reboot => ctx.board.reboot(),
+            RosflightCmd::RebootToBootloader => ctx.board.reboot_to_bootloader(),
+            _ => false,
+        };
+
+        let success = if completed {
+            RosflightCmdResponse::RosflightCmdSuccess
+        } else {
+            RosflightCmdResponse::RosflightCmdFailed
+        };
+        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
+            command: request.command,
+            success,
+        }));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,10 +104,12 @@ mod tests {
             messages::OffboardControlMsg,
         },
         events::{
-            CALIBRATION_REQUEST_QUEUE_CAPACITY, EventQueue, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY,
+            BOARD_COMMAND_REQUEST_QUEUE_CAPACITY, CALIBRATION_REQUEST_QUEUE_CAPACITY,
+            COMM_RESPONSE_QUEUE_CAPACITY, EventQueue, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY,
             PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY,
         },
         params2::{ParamId, ParamValue},
+        test_support::TestBoard,
     };
 
     #[test]
@@ -140,6 +184,38 @@ mod tests {
 
         assert!(matches!(applied, Some(RosflightCmd::SetParamDefaults)));
         assert_eq!(params.get_by_id(ParamId::PARAM_SYSTEM_ID), ParamValue::Int(1));
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn apply_board_command_requests_reports_unsupported_as_failed_ack() {
+        let mut board = TestBoard::default();
+        let mut params = Params::new();
+        let mut requests =
+            EventQueue::<BoardCommandRequested, BOARD_COMMAND_REQUEST_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(BoardCommandRequested {
+            command: RosflightCmd::WriteParams,
+        });
+
+        apply_board_command_requests(BoardCommandCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            board: &mut board,
+            params: &mut params,
+        });
+
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::WriteParams));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdFailed
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
         assert!(requests.is_empty());
     }
 }

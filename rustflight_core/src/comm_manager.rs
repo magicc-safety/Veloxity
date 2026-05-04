@@ -41,8 +41,8 @@ use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
     CalibrationRequested, CommEventQueues, CommandEventQueues, CommResponse,
-    OffboardControlRequested, ParamDefaultsRequested, ParamEventQueues, ParamListRequested,
-    ParamReadRequested, ParamSetRequested,
+    BoardCommandRequested, OffboardControlRequested, ParamDefaultsRequested, ParamEventQueues,
+    ParamListRequested, ParamReadRequested, ParamSetRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -776,18 +776,26 @@ where
                     }
                 }
                 RosflightCmd::ReadParams => {
-                    // Placeholder: Need BoardTrait method for reading from non-volatile memory
-                    //defmt::info!("Warning: ReadParams (from non-volatile) not implemented.");
-                    // if board.read_params_from_memory(params) {
-                    //     success = RosflightCmdResponse::RosflightCmdSuccess;
-                    // }
+                    if command_events
+                        .board_command_requests
+                        .push(BoardCommandRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::WriteParams => {
-                    // Placeholder: Need BoardTrait method for writing to non-volatile memory
-                    //defmt::info!("Warning: WriteParams (to non-volatile) not implemented.");
-                    // if board.write_params_to_memory(params) {
-                    //     success = RosflightCmdResponse::RosflightCmdSuccess;
-                    // }
+                    if command_events
+                        .board_command_requests
+                        .push(BoardCommandRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::SetParamDefaults => {
                     //defmt::info!("Setting parameters to defaults.");
@@ -803,16 +811,26 @@ where
                     }
                 }
                 RosflightCmd::Reboot => {
-                    // Placeholder: Need BoardTrait method for reboot
-                    //defmt::info!("Warning: Reboot command not implemented.");
-                    // board.reboot();
-                    // success = RosflightCmdResponse::RosflightCmdSuccess; // Won't actually send if reboot works!
+                    if command_events
+                        .board_command_requests
+                        .push(BoardCommandRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::RebootToBootloader => {
-                    // Placeholder: Need BoardTrait method for rebooting to bootloader
-                    //defmt::info!("Warning: RebootToBootloader command not implemented.");
-                    // board.reboot_to_bootloader();
-                    // success = RosflightCmdResponse::RosflightCmdSuccess; // Won't actually send if reboot works!
+                    if command_events
+                        .board_command_requests
+                        .push(BoardCommandRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::SendVersion => {
                     // Placeholder: Define version somewhere (e.g., compile-time const)
@@ -1400,5 +1418,31 @@ mod tests {
             ack.success,
             RosflightCmdResponse::RosflightCmdSuccess
         ));
+    }
+
+    #[test]
+    fn board_command_emits_request_and_defers_ack() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::WriteParams,
+        });
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
+
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+        assert!(comm_events.responses.is_empty());
+
+        let request = command_events.board_command_requests.pop().unwrap();
+        assert!(matches!(request.command, RosflightCmd::WriteParams));
     }
 }

@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{errors, hlist::*, sensors::SensorBus};
+use crate::{errors, hlist::*, params2::Params, sensors::SensorBus};
 pub mod dummy;
 
 pub trait BoardIo {
@@ -48,6 +48,18 @@ pub trait BoardIo {
     fn clock_micros(&self) -> u64;
     fn set_test_pin_1(&mut self, _high: bool) {}
     fn set_test_pin_2(&mut self, _high: bool) {}
+    fn read_params(&mut self, _params: &mut Params) -> bool {
+        false
+    }
+    fn write_params(&mut self, _params: &Params) -> bool {
+        false
+    }
+    fn reboot(&mut self) -> bool {
+        false
+    }
+    fn reboot_to_bootloader(&mut self) -> bool {
+        false
+    }
 }
 
 pub trait BoardTrait {
@@ -67,6 +79,18 @@ pub trait BoardTrait {
     //fn clock_delay(&mut self, ms: u32);
     fn set_test_pin_1(&mut self, _high: bool) {}
     fn set_test_pin_2(&mut self, _high: bool) {}
+    fn read_params(&mut self, _params: &mut Params) -> bool {
+        false
+    }
+    fn write_params(&mut self, _params: &Params) -> bool {
+        false
+    }
+    fn reboot(&mut self) -> bool {
+        false
+    }
+    fn reboot_to_bootloader(&mut self) -> bool {
+        false
+    }
 }
 
 impl<T> BoardIo for T
@@ -99,5 +123,21 @@ where
 
     fn set_test_pin_2(&mut self, high: bool) {
         BoardTrait::set_test_pin_2(self, high);
+    }
+
+    fn read_params(&mut self, params: &mut Params) -> bool {
+        BoardTrait::read_params(self, params)
+    }
+
+    fn write_params(&mut self, params: &Params) -> bool {
+        BoardTrait::write_params(self, params)
+    }
+
+    fn reboot(&mut self) -> bool {
+        BoardTrait::reboot(self)
+    }
+
+    fn reboot_to_bootloader(&mut self) -> bool {
+        BoardTrait::reboot_to_bootloader(self)
     }
 }

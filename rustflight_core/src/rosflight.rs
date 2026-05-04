@@ -40,7 +40,9 @@ use crate::{
     comm_manager::{self, comm_link_trait::CommInterface},
     comm_messages::{self, messages::HeartbeatMsg},
     command_manager::{CommandManager, ControlType},
-    command_system::{self, CalibrationRequestCtx, OffboardControlCtx, ParamDefaultsCtx},
+    command_system::{
+        self, BoardCommandCtx, CalibrationRequestCtx, OffboardControlCtx, ParamDefaultsCtx,
+    },
     controller::Controller,
     events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
     errors,
@@ -232,6 +234,13 @@ where
         });
         self.comm_manager
             .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
+
+        command_system::apply_board_command_requests(BoardCommandCtx {
+            requests: EventDrainPort::new(&mut self.command_events.board_command_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            board: &mut self.board,
+            params: &mut self.params,
+        });
 
         param_system::service_param_read_requests(ParamReadCtx {
             params: ParamsReadPort::new(&self.params),

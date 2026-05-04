@@ -1858,6 +1858,92 @@ Next planned migration target:
 - Initially these can return unsupported/failed if no board persistence or reboot hooks exist.
 - The important architectural step is that comms emits request intent and a board/system stage owns completion and ACK timing.
 
+## Board Command Event Progress
+
+Reason for this change:
+
+- `ReadParams`, `WriteParams`, `Reboot`, and `RebootToBootloader` were still inline placeholders inside command parsing.
+- The old behavior sent a failed ACK immediately because the commands were not implemented.
+- The new architecture should still report failure on unsupported boards, but the ACK should come from the system that owns board/persistence behavior.
+
+Design now implemented:
+
+- Added default board hooks to `BoardIo` and `BoardTrait`:
+  - `read_params`
+  - `write_params`
+  - `reboot`
+  - `reboot_to_bootloader`
+- The default implementation returns `false`, meaning unsupported or not completed.
+- Added `BoardCommandRequested`.
+- Added a fixed-capacity board command request queue to `CommandEventQueues`.
+- `CommManager` emits board command requests for:
+  - `RosflightCmd::ReadParams`
+  - `RosflightCmd::WriteParams`
+  - `RosflightCmd::Reboot`
+  - `RosflightCmd::RebootToBootloader`
+- `CommManager` no longer immediately ACKs those commands from the parser when a request is queued.
+- `command_system::apply_board_command_requests` owns calling the board hooks and emits `CommResponse::CmdAck`.
+- `World` schedules board command application before comm responses are sent.
+- Legacy `ROSFlight` mirrors the same scheduling step for compatibility.
+
+ROSflight compatibility:
+
+- Unsupported board commands still result in `RosflightCmdFailed`.
+- The wire ACK type remains `RosflightCmdAckMsg`.
+- The ACK timing is now after the board-command stage runs, which matches the architecture rule that success/failure should reflect completed work.
+- Future board implementations can override the hooks and return success only after the board operation has completed.
+
+Compile-time boundary improvement:
+
+- Comms can no longer be the place where board/persistence command behavior is implemented.
+- Board command completion belongs to a command-system stage with explicit access to:
+  - the board,
+  - params,
+  - board command request queue,
+  - comm response queue.
+- This keeps board mutation and response causality localized.
+
+Files changed in this slice:
+
+- `rustflight_core/src/board.rs`
+  - Adds default board command hooks to `BoardIo` and `BoardTrait`.
+  - Forwards hooks through the legacy `BoardTrait` to `BoardIo` blanket implementation.
+- `rustflight_core/src/events.rs`
+  - Adds `BoardCommandRequested`.
+  - Adds `board_command_requests` to `CommandEventQueues`.
+- `rustflight_core/src/command_system.rs`
+  - Adds `BoardCommandCtx`.
+  - Adds `apply_board_command_requests`.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits board command requests for the board/persistence command arms.
+  - Defers ACK when the request is queued.
+- `rustflight_core/src/world.rs`
+  - Schedules board command requests through the new command-system stage.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the same scheduling step in the legacy path.
+
+Tests added:
+
+- `command_system::tests::apply_board_command_requests_reports_unsupported_as_failed_ack`
+  - Proves unsupported board hooks become failed command ACK responses.
+- `comm_manager::tests::board_command_emits_request_and_defers_ack`
+  - Proves comms emits request intent and does not ACK immediately.
+- `world::tests::world_routes_board_command_and_acks_unsupported_after_apply_stage`
+  - Proves World drains the request and sends the failed ACK after the board-command stage.
+
+Validation:
+
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Decide whether to implement simulated board persistence for `ReadParams`/`WriteParams` or leave board hooks unsupported until the pixracerpro migration.
+- Move `RcCalibration` out of the inline command parser next, because it needs a persistent RC calibration state rather than a placeholder failed ACK.
+
 ## Command Response Queue Progress
 
 Reason for this change:
