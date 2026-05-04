@@ -693,6 +693,13 @@ This is the first concrete use of the ports/events model.
 - The default processor set uses the current real IMU and magnetometer processors plus passthrough processors for the remaining sensor types.
 - Tests show a raw RC packet moving into `ProcessedSensors::rc` and being consumed from `SensorBus::rc`.
 
+`rustflight_core/src/board.rs`
+
+- Adds default `BoardTrait::update_sensor_bus`.
+- The default implementation clears the named sensor bus.
+- Existing boards keep compiling because this method has a default implementation.
+- `sim` should be the first crate to override this method when moving board sensor ingestion off HLists.
+
 ### Validation Status
 
 `cargo check -p rustflight_core --lib` passes after the initial parameter-path rewrite.
@@ -771,7 +778,7 @@ This is the first step toward replacing the old test infrastructure with small, 
 2. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
 3. Add a proper `LogPort` or log event path and migrate global logging usage toward it.
 4. Install `rustfmt` or run formatting in an environment where it is available.
-5. Start moving board sensor ingestion from HLists into `SensorBus`, with `sim` as the first application target after core stabilizes.
+5. Start moving `sim` board sensor ingestion from `update_sensors`/HLists into `update_sensor_bus`/`SensorBus`.
 
 ### Important Design Caveats In The Current Slice
 

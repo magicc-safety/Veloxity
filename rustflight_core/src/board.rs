@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{errors, hlist::*, packets, params2::Params};
+use crate::{errors, hlist::*, sensors::SensorBus};
 pub mod dummy;
 
 pub trait BoardTrait {
@@ -43,6 +43,9 @@ pub trait BoardTrait {
     type ProcessorHList: PolyFunc;
 
     fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet);
+    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        sensors.clear();
+    }
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>>;
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>>;
 
