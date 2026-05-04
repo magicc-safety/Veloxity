@@ -703,3 +703,81 @@ where
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        board::BoardTrait,
+        command_manager::CommandManager,
+        comm_messages::messages::ParamSetMsg,
+        events::{CommResponse, ParamEventQueues},
+        params2::{ParamId, ParamValue, Params},
+        sensorprocessors::CalibrationFlags,
+        test_support::{RecordingCommLink, TestBoard},
+    };
+
+    #[test]
+    fn param_set_emits_request_without_mutating_or_acknowledging() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut params = Params::new();
+        let mut params_iter = None;
+        let mut param_events = ParamEventQueues::default();
+        let mut cal_flags = CalibrationFlags::empty();
+        let mut command_manager = CommandManager::new();
+
+        manager.msgs.param_set = Some(ParamSetMsg {
+            target_system: 1,
+            target_component: 1,
+            param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+            param_value: ParamValue::Int(42),
+        });
+
+        manager.act_on_messages(
+            &mut params_iter,
+            &mut params,
+            &mut param_events,
+            &mut cal_flags,
+            &mut board,
+            &mut command_manager,
+        );
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(1)
+        );
+        assert_eq!(manager.comm_link.sent_param_value_count, 0);
+
+        let request = param_events.set_requests.pop().unwrap();
+        assert_eq!(request.id, ParamId::PARAM_SYSTEM_ID);
+        assert_eq!(request.value, ParamValue::Int(42));
+        assert_eq!(request.param_id_bytes, *b"SYS_ID\0\0\0\0\0\0\0\0\0\0");
+    }
+
+    #[test]
+    fn send_comm_responses_sends_param_value_and_updates_sysid() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+
+        let _ = param_events
+            .comm_responses
+            .push(CommResponse::ParamValue(ParamValueMsg {
+                param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+                param_value: ParamValue::Int(42),
+                param_count: 1,
+                param_index: ParamId::PARAM_SYSTEM_ID as u16,
+            }));
+
+        manager.send_comm_responses(&mut board, &mut param_events);
+
+        assert_eq!(manager.sysid, 42);
+        assert_eq!(manager.comm_link.sent_param_value_count, 1);
+
+        let sent = manager.comm_link.sent_param_values[0].unwrap();
+        assert_eq!(sent.param_id, *b"SYS_ID\0\0\0\0\0\0\0\0\0\0");
+        assert_eq!(sent.param_value, ParamValue::Int(42));
+        assert!(param_events.comm_responses.is_empty());
+    }
+}

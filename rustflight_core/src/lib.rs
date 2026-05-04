@@ -61,6 +61,9 @@ pub mod state_machine;
 
 pub use micro_algebra;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 // MAVLINK Specific
 pub mod mavlink {
     include!(concat!(env!("OUT_DIR"), "/mavlink_generated/mod.rs"));

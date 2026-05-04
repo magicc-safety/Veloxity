@@ -1,0 +1,191 @@
+use crate::{
+    board::BoardTrait,
+    comm_manager::comm_link_trait::CommInterface,
+    comm_messages::{self, messages::*},
+    errors,
+    hlist::HNil,
+};
+
+#[derive(Default)]
+pub struct TestBoard {
+    pub current_time_us: u64,
+    pub tx_write_count: usize,
+}
+
+impl BoardTrait for TestBoard {
+    type RawSensorSet = HNil;
+    type ProcessedSensorSet = HNil;
+    type ProcessorHList = HNil;
+
+    fn update_sensors(&mut self, _sensors: &mut Self::RawSensorSet) {}
+
+    fn serial_rx_read(&mut self, _buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+        None
+    }
+
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
+        self.tx_write_count += 1;
+        Some(Ok(bytes.len()))
+    }
+
+    fn clock_millis(&self) -> u32 {
+        (self.current_time_us / 1000) as u32
+    }
+
+    fn clock_micros(&self) -> u64 {
+        self.current_time_us
+    }
+}
+
+pub struct RecordingCommLink {
+    pub sent_param_values: [Option<ParamValueMsg>; 8],
+    pub sent_param_value_count: usize,
+}
+
+impl RecordingCommLink {
+    pub fn new() -> Self {
+        Self {
+            sent_param_values: [None; 8],
+            sent_param_value_count: 0,
+        }
+    }
+
+    fn record_param_value(&mut self, msg: ParamValueMsg) {
+        if self.sent_param_value_count < self.sent_param_values.len() {
+            self.sent_param_values[self.sent_param_value_count] = Some(msg);
+        }
+        self.sent_param_value_count += 1;
+    }
+}
+
+impl Default for RecordingCommLink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CommInterface<TestBoard> for RecordingCommLink {
+    fn send_heartbeat(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: HeartbeatMsg,
+    ) -> bool {
+        true
+    }
+
+    fn send_named_value(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        msg: ParamValueMsg,
+    ) {
+        self.record_param_value(msg);
+    }
+
+    fn send_status(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: RosflightStatusMsg,
+    ) {
+    }
+
+    fn send_timesync(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: TimesyncMsg,
+    ) -> bool {
+        true
+    }
+
+    fn send_version(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: RosflightVersionMsg,
+    ) {
+    }
+
+    fn send_output_raw(
+        &mut self,
+        _baord: &mut TestBoard,
+        _system_id: u8,
+        _msg: RosflightOutputRawMsg,
+    ) {
+    }
+
+    fn send_attitude(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: AttitudeQuaternionMsg,
+    ) {
+    }
+
+    fn send_baro(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallBaroMsg) {}
+
+    fn send_diff_pressure(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: DiffPressureMsg,
+    ) {
+    }
+
+    fn send_imu(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallImuMsg) {}
+
+    fn send_mag(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallMagMsg) {}
+
+    fn send_rc_raw(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: RosflightOutputRawMsg,
+    ) {
+    }
+
+    fn send_range(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallRangeMsg) {}
+
+    fn send_gnss(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: RosflightGnssMsg) {}
+
+    fn send_cmd_ack(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: RosflightCmdAckMsg,
+    ) {
+    }
+
+    fn send_rc_channels(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: RcChannelsMsg,
+    ) {
+    }
+
+    fn send_battery_status(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: BatteryStatusMsg,
+    ) {
+    }
+
+    fn send_statustext(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        _msg: StatustextMsg,
+    ) {
+    }
+
+    fn handle_incoming_messages(
+        &mut self,
+        _board: &mut TestBoard,
+        _msgs: &mut comm_messages::Messages,
+    ) {
+    }
+}

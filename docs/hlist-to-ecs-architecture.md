@@ -663,6 +663,14 @@ Focused unit checks for the new modules pass:
 
 - `cargo test -p rustflight_core events::tests --lib`
 - `cargo test -p rustflight_core param_system::tests --lib`
+- `cargo test -p rustflight_core comm_manager::tests --lib`
+
+Additional status:
+
+- `cargo test -p rustflight_core --lib` currently runs 42 library tests.
+- 30 pass and 12 fail.
+- The failures are in existing `state_machine::tests`, mostly around arming and `UNCALIBRATED_IMU` expectations.
+- These failures are not introduced by the new parameter event path, but they confirm that the current test suite needs cleanup as part of the core test rebuild.
 
 Formatting status:
 
@@ -677,11 +685,42 @@ Formatting status:
 
 The user has confirmed that the current testing infrastructure is not well written and should be replaced with a better dummy-board-based setup.
 
+## Test Support Progress
+
+A new test-only support module has been started:
+
+`rustflight_core/src/test_support.rs`
+
+- Compiled only under `#[cfg(test)]`.
+- Adds `TestBoard`.
+- `TestBoard` implements `BoardTrait`.
+- It uses `HNil` for raw sensors, processed sensors, and processor list so communication/parameter tests do not depend on the old nested HList sensor fixture.
+- Adds `RecordingCommLink`.
+- `RecordingCommLink` implements `CommInterface<TestBoard>`.
+- It records outgoing `ParamValueMsg` responses for assertions.
+- Other comm send methods are no-op placeholders for now.
+
+New comm-manager tests:
+
+- `param_set_emits_request_without_mutating_or_acknowledging`
+  - injects a `ParamSetMsg` directly into `CommManager::msgs`
+  - calls `act_on_messages`
+  - verifies `Params` is not mutated at decode time
+  - verifies no `PARAM_VALUE` ack is sent at decode time
+  - verifies `ParamSetRequested` is emitted
+- `send_comm_responses_sends_param_value_and_updates_sysid`
+  - pushes a deferred `CommResponse::ParamValue`
+  - calls `send_comm_responses`
+  - verifies a param value response is sent
+  - verifies `CommManager::sysid` updates for `PARAM_SYSTEM_ID`
+
+This is the first step toward replacing the old test infrastructure with small, targeted dummy-board fixtures.
+
 ### Immediate Next Steps
 
-1. Commit the parameter-path rewrite and this updated implementation log.
-2. Rebuild core test infrastructure around a recreated dummy board.
-3. Add end-to-end core tests for the parameter path.
+1. Commit the dummy-board test-support slice and this updated implementation log.
+2. Add end-to-end core tests for the parameter path using `TestBoard` and `RecordingCommLink`.
+3. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
 4. Install `rustfmt` or run formatting in an environment where it is available.
 5. Continue replacing direct callback blocks with named systems and ports.
 
