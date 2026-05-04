@@ -1801,6 +1801,63 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Dedicated Comm Response Queue Progress
+
+Reason for this change:
+
+- `CommResponse` had grown beyond parameter acknowledgements.
+- It now carries parameter values, command ACKs, and version messages.
+- Keeping that response queue inside `ParamEventQueues` made the ownership boundary misleading.
+- Before adding board/persistence command responses, comm responses need their own resource.
+
+Design now implemented:
+
+- Added `CommEventQueues`.
+- Moved the fixed-capacity response queue to `CommEventQueues::responses`.
+- `ParamEventQueues` now owns only parameter requests and parameter change events.
+- `World` owns `comm_events` separately from `param_events`.
+- Legacy `ROSFlight` also owns `comm_events` separately for compatibility.
+- Parameter systems emit responses through `CommEventQueues`.
+- `CommManager::act_on_messages` queues immediate command responses through `CommEventQueues`.
+- `CommManager::send_comm_responses` drains `CommEventQueues`.
+
+Compile-time boundary improvement:
+
+- Parameter systems do not need mutable access to all parameter events to send responses.
+- Communication responses now have an explicit resource boundary.
+- This prepares the next board/persistence command work, where board systems can emit command ACKs without pretending they are parameter events.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `CommEventQueues`.
+  - Removes response storage from `ParamEventQueues`.
+- `rustflight_core/src/world.rs`
+  - Adds a `comm_events` resource.
+  - Wires parameter response emit ports to `comm_events.responses`.
+  - Sends responses from `comm_events`.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the same resource split in the legacy path.
+- `rustflight_core/src/comm_manager.rs`
+  - Accepts `CommEventQueues` in command parsing.
+  - Drains `CommEventQueues` in response sending.
+  - Updates tests to use the distinct queue.
+
+Validation:
+
+- `cargo test -p rustflight_core events::tests --lib` passes.
+- `cargo test -p rustflight_core param_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Add explicit board/persistence command request events for `ReadParams`, `WriteParams`, `Reboot`, and `RebootToBootloader`.
+- Initially these can return unsupported/failed if no board persistence or reboot hooks exist.
+- The important architectural step is that comms emits request intent and a board/system stage owns completion and ACK timing.
+
 ## Command Response Queue Progress
 
 Reason for this change:

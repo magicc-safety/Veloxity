@@ -40,9 +40,9 @@ use crate::bodytype::BodyType;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
-    CalibrationRequested, CommandEventQueues, CommResponse, OffboardControlRequested,
-    ParamDefaultsRequested, ParamEventQueues, ParamListRequested, ParamReadRequested,
-    ParamSetRequested,
+    CalibrationRequested, CommEventQueues, CommandEventQueues, CommResponse,
+    OffboardControlRequested, ParamDefaultsRequested, ParamEventQueues, ParamListRequested,
+    ParamReadRequested, ParamSetRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -666,6 +666,7 @@ where
     pub fn act_on_messages(
         &mut self,
         param_events: &mut ParamEventQueues,
+        comm_events: &mut CommEventQueues,
         command_events: &mut CommandEventQueues,
         board: &mut B,
     ) {
@@ -824,9 +825,7 @@ where
                     let version_msg = RosflightVersionMsg {
                         version: version_bytes,
                     };
-                    let _ = param_events
-                        .comm_responses
-                        .push(CommResponse::Version(version_msg));
+                    let _ = comm_events.responses.push(CommResponse::Version(version_msg));
                     success = RosflightCmdResponse::RosflightCmdSuccess;
                 }
                 RosflightCmd::ResetOrigin => {
@@ -847,7 +846,7 @@ where
                     command: msg.command,
                     success,
                 };
-                let _ = param_events.comm_responses.push(CommResponse::CmdAck(ack_msg));
+                let _ = comm_events.responses.push(CommResponse::CmdAck(ack_msg));
             }
         } // end if let Some(msg)
 
@@ -856,9 +855,9 @@ where
     pub fn send_comm_responses(
         &mut self,
         board: &mut B,
-        param_events: &mut ParamEventQueues,
+        comm_events: &mut CommEventQueues,
     ) {
-        while let Some(response) = param_events.comm_responses.pop() {
+        while let Some(response) = comm_events.responses.pop() {
             match response {
                 CommResponse::ParamValue(msg) => {
                     if msg.param_index == ParamId::PARAM_SYSTEM_ID as u16 {
@@ -963,7 +962,7 @@ mod tests {
             },
             messages::{OffboardControlMsg, ParamRequestReadMsg, ParamSetMsg, RosflightCmdMsg},
         },
-        events::{CommandEventQueues, CommResponse, ParamEventQueues},
+        events::{CommEventQueues, CommandEventQueues, CommResponse, ParamEventQueues},
         param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
         params2::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
@@ -978,6 +977,7 @@ mod tests {
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
         let mut params = Params::new();
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
         manager.msgs.param_set = Some(ParamSetMsg {
@@ -987,7 +987,12 @@ mod tests {
             param_value: ParamValue::Int(42),
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         assert_eq!(
             params.get_by_id(ParamId::PARAM_SYSTEM_ID),
@@ -1007,6 +1012,7 @@ mod tests {
         let params = Params::new();
         let mut param_list_state = ParamListState::default();
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
         manager.msgs.param_request_list = Some(ParamRequestListMsg {
@@ -1014,7 +1020,12 @@ mod tests {
             target_component: 1,
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
         assert_eq!(param_events.list_requests.len(), 1);
@@ -1023,10 +1034,10 @@ mod tests {
             params: ParamsReadPort::new(&params),
             state: &mut param_list_state,
             requests: EventDrainPort::new(&mut param_events.list_requests),
-            responses: EventEmitPort::new(&mut param_events.comm_responses),
+            responses: EventEmitPort::new(&mut comm_events.responses),
         });
 
-        manager.send_comm_responses(&mut board, &mut param_events);
+        manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.comm_link.sent_param_value_count, 1);
         let sent = manager.comm_link.sent_param_values[0].unwrap();
@@ -1041,6 +1052,7 @@ mod tests {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
         manager.msgs.param_request_read = Some(ParamRequestReadMsg {
@@ -1049,7 +1061,12 @@ mod tests {
             param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
         assert_eq!(param_events.read_requests.len(), 1);
@@ -1057,10 +1074,10 @@ mod tests {
         param_system::service_param_read_requests(ParamReadCtx {
             params: ParamsReadPort::new(&params),
             requests: EventDrainPort::new(&mut param_events.read_requests),
-            responses: EventEmitPort::new(&mut param_events.comm_responses),
+            responses: EventEmitPort::new(&mut comm_events.responses),
         });
 
-        manager.send_comm_responses(&mut board, &mut param_events);
+        manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.comm_link.sent_param_value_count, 1);
         let sent = manager.comm_link.sent_param_values[0].unwrap();
@@ -1072,10 +1089,10 @@ mod tests {
     fn send_comm_responses_sends_param_value_and_updates_sysid() {
         let mut board = TestBoard::default();
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
-        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
 
-        let _ = param_events
-            .comm_responses
+        let _ = comm_events
+            .responses
             .push(CommResponse::ParamValue(ParamValueMsg {
                 param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
                 param_value: ParamValue::Int(42),
@@ -1083,7 +1100,7 @@ mod tests {
                 param_index: ParamId::PARAM_SYSTEM_ID as u16,
             }));
 
-        manager.send_comm_responses(&mut board, &mut param_events);
+        manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.sysid, 42);
         assert_eq!(manager.comm_link.sent_param_value_count, 1);
@@ -1091,28 +1108,28 @@ mod tests {
         let sent = manager.comm_link.sent_param_values[0].unwrap();
         assert_eq!(sent.param_id, *b"SYS_ID\0\0\0\0\0\0\0\0\0\0");
         assert_eq!(sent.param_value, ParamValue::Int(42));
-        assert!(param_events.comm_responses.is_empty());
+        assert!(comm_events.responses.is_empty());
     }
 
     #[test]
     fn send_comm_responses_sends_command_ack_and_version() {
         let mut board = TestBoard::default();
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
-        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
 
-        let _ = param_events
-            .comm_responses
+        let _ = comm_events
+            .responses
             .push(CommResponse::Version(RosflightVersionMsg {
                 version: [7; 50],
             }));
-        let _ = param_events
-            .comm_responses
+        let _ = comm_events
+            .responses
             .push(CommResponse::CmdAck(RosflightCmdAckMsg {
                 command: RosflightCmd::SendVersion,
                 success: RosflightCmdResponse::RosflightCmdSuccess,
             }));
 
-        manager.send_comm_responses(&mut board, &mut param_events);
+        manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.comm_link().version_count, 1);
         assert_eq!(manager.comm_link().last_version.unwrap().version, [7; 50]);
@@ -1121,7 +1138,7 @@ mod tests {
             manager.comm_link().last_cmd_ack.unwrap().command,
             RosflightCmd::SendVersion
         ));
-        assert!(param_events.comm_responses.is_empty());
+        assert!(comm_events.responses.is_empty());
     }
 
     #[test]
@@ -1129,19 +1146,25 @@ mod tests {
         let mut board = TestBoard::default();
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
         manager.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::SendVersion,
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         assert_eq!(manager.comm_link().version_count, 0);
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
-        assert_eq!(param_events.comm_responses.len(), 2);
+        assert_eq!(comm_events.responses.len(), 2);
 
-        manager.send_comm_responses(&mut board, &mut param_events);
+        manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.comm_link().version_count, 1);
         assert_eq!(manager.comm_link().cmd_ack_count, 1);
@@ -1157,6 +1180,7 @@ mod tests {
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
         let mut params = Params::new();
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
         manager.msgs.param_set = Some(ParamSetMsg {
@@ -1166,7 +1190,12 @@ mod tests {
             param_value: ParamValue::Int(42),
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         assert_eq!(
             params.get_by_id(ParamId::PARAM_SYSTEM_ID),
@@ -1178,7 +1207,7 @@ mod tests {
             params: ParamsWritePort::new(&mut params),
             requests: EventDrainPort::new(&mut param_events.set_requests),
             changes: EventEmitPort::new(&mut param_events.changes),
-            responses: EventEmitPort::new(&mut param_events.comm_responses),
+            responses: EventEmitPort::new(&mut comm_events.responses),
         });
 
         assert_eq!(
@@ -1192,11 +1221,11 @@ mod tests {
         assert_eq!(change.old, ParamValue::Int(1));
         assert_eq!(change.new, ParamValue::Int(42));
 
-        manager.send_comm_responses(&mut board, &mut param_events);
+        manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.sysid, 42);
         assert_eq!(manager.comm_link.sent_param_value_count, 1);
-        assert!(param_events.comm_responses.is_empty());
+        assert!(comm_events.responses.is_empty());
     }
 
     #[test]
@@ -1253,6 +1282,7 @@ mod tests {
         let mut board = TestBoard::default();
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
         let mut cal_flags = CalibrationFlags::empty();
 
@@ -1260,7 +1290,12 @@ mod tests {
             command: RosflightCmd::GyroCalibration,
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         assert!(cal_flags.is_empty());
         command_system::apply_calibration_requests(CalibrationRequestCtx {
@@ -1292,6 +1327,7 @@ mod tests {
         };
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
         manager.msgs.offboard_control = Some(OffboardControlMsg {
@@ -1305,7 +1341,12 @@ mod tests {
             fz: 0.6,
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         let request = command_events.offboard_control_requests.pop().unwrap();
         assert_eq!(request.now_us, 55_000);
@@ -1321,13 +1362,19 @@ mod tests {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
         let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
         manager.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::SetParamDefaults,
         });
 
-        manager.act_on_messages(&mut param_events, &mut command_events, &mut board);
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
 
         assert_eq!(
             params.get_by_id(ParamId::PARAM_SYSTEM_ID),

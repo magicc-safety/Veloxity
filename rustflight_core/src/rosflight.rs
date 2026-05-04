@@ -42,7 +42,7 @@ use crate::{
     command_manager::{CommandManager, ControlType},
     command_system::{self, CalibrationRequestCtx, OffboardControlCtx, ParamDefaultsCtx},
     controller::Controller,
-    events::{CommandEventQueues, ParamEventQueues},
+    events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
     errors,
     estimator::{
         self, AttitudeStateTrait, Estimator,
@@ -102,6 +102,7 @@ where
     params: params2::Params,
     param_list_state: ParamListState,
     param_events: ParamEventQueues,
+    comm_events: CommEventQueues,
     command_events: CommandEventQueues,
     comm_manager: comm_manager::CommManager<B, CI>,
     sensors: B::RawSensorSet,
@@ -182,6 +183,7 @@ where
             params,
             param_list_state: ParamListState::default(),
             param_events: ParamEventQueues::default(),
+            comm_events: CommEventQueues::default(),
             command_events: CommandEventQueues::default(),
             comm_manager,
             sensors: B::RawSensorSet::default(),
@@ -210,6 +212,7 @@ where
         self.comm_manager.process_incoming_messages(&mut self.board);
         self.comm_manager.act_on_messages(
             &mut self.param_events,
+            &mut self.comm_events,
             &mut self.command_events,
             &mut self.board,
         );
@@ -233,21 +236,21 @@ where
         param_system::service_param_read_requests(ParamReadCtx {
             params: ParamsReadPort::new(&self.params),
             requests: EventDrainPort::new(&mut self.param_events.read_requests),
-            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
         param_system::service_param_list_requests(ParamListCtx {
             params: ParamsReadPort::new(&self.params),
             state: &mut self.param_list_state,
             requests: EventDrainPort::new(&mut self.param_events.list_requests),
-            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
         param_system::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut self.params),
             requests: EventDrainPort::new(&mut self.param_events.set_requests),
             changes: EventEmitPort::new(&mut self.param_events.changes),
-            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
         param_reactions::rc_on_param_changed(RcParamChangedCtx {
@@ -264,7 +267,7 @@ where
         });
 
         self.comm_manager
-            .send_comm_responses(&mut self.board, &mut self.param_events);
+            .send_comm_responses(&mut self.board, &mut self.comm_events);
         self.param_events.changes.clear();
 
         if self.state_manager.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
