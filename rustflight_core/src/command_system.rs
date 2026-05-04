@@ -2,27 +2,53 @@ use crate::{
     board::BoardIo,
     comm_messages::{
         enums::{RosflightCmd, RosflightCmdResponse},
-        messages::RosflightCmdAckMsg,
+        messages::{RosflightCmdAckMsg, RosflightVersionMsg},
     },
     command_manager::CommandManager,
     events::{
         BoardCommandRequested, COMM_RESPONSE_QUEUE_CAPACITY, CalibrationRequested, CommResponse,
         ConfigInfoRequested, OffboardControlRequested, ParamDefaultsRequested,
-        RcTrimCalibrationRequested, ResetOriginRequested,
+        RcTrimCalibrationRequested, ResetOriginRequested, VersionRequested,
     },
     params2::{ParamId, ParamValue, Params},
     ports::{EventDrainPort, EventEmitPort},
     rc::{Rc, Stick},
     sensorprocessors::CalibrationFlags,
+    state_machine::StateManager,
 };
+
+fn emit_cmd_ack<const N: usize>(
+    responses: &mut EventEmitPort<'_, CommResponse, N>,
+    command: RosflightCmd,
+    success: RosflightCmdResponse,
+) {
+    let _ = responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
+        command,
+        success,
+    }));
+}
 
 pub struct CalibrationRequestCtx<'a, const N: usize> {
     pub requests: EventDrainPort<'a, CalibrationRequested, N>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub state: &'a StateManager,
     pub flags: &'a mut CalibrationFlags,
 }
 
-pub fn apply_calibration_requests<const N: usize>(mut ctx: CalibrationRequestCtx<'_, N>) {
+pub fn apply_calibration_requests<const N: usize>(
+    mut ctx: CalibrationRequestCtx<'_, N>,
+) -> Option<RosflightCmd> {
+    let mut started = None;
     while let Some(request) = ctx.requests.next() {
+        if ctx.state.is_armed() {
+            emit_cmd_ack(
+                &mut ctx.responses,
+                request.command,
+                RosflightCmdResponse::RosflightCmdFailed,
+            );
+            continue;
+        }
+
         match request.command {
             RosflightCmd::AccelCalibration => ctx.flags.insert(CalibrationFlags::ACCEL),
             RosflightCmd::GyroCalibration => ctx.flags.insert(CalibrationFlags::GYRO),
@@ -30,7 +56,9 @@ pub fn apply_calibration_requests<const N: usize>(mut ctx: CalibrationRequestCtx
             RosflightCmd::AirspeedCalibration => ctx.flags.insert(CalibrationFlags::PITOT),
             _ => {}
         }
+        started = Some(request.command);
     }
+    started
 }
 
 pub struct OffboardControlCtx<'a, const N: usize> {
@@ -48,18 +76,21 @@ pub fn apply_offboard_control_requests<const N: usize>(mut ctx: OffboardControlC
 
 pub struct ParamDefaultsCtx<'a, const N: usize> {
     pub requests: EventDrainPort<'a, ParamDefaultsRequested, N>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub state: &'a StateManager,
     pub params: &'a mut Params,
 }
 
-pub fn apply_param_defaults_requests<const N: usize>(
-    mut ctx: ParamDefaultsCtx<'_, N>,
-) -> Option<RosflightCmd> {
-    let mut applied = None;
+pub fn apply_param_defaults_requests<const N: usize>(mut ctx: ParamDefaultsCtx<'_, N>) {
     while let Some(request) = ctx.requests.next() {
-        ctx.params.set_defaults();
-        applied = Some(request.command);
+        let success = if ctx.state.is_armed() {
+            RosflightCmdResponse::RosflightCmdFailed
+        } else {
+            ctx.params.set_defaults();
+            RosflightCmdResponse::RosflightCmdSuccess
+        };
+        emit_cmd_ack(&mut ctx.responses, request.command, success);
     }
-    applied
 }
 
 pub struct BoardCommandCtx<'a, B, const N: usize>
@@ -68,6 +99,7 @@ where
 {
     pub requests: EventDrainPort<'a, BoardCommandRequested, N>,
     pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub state: &'a StateManager,
     pub board: &'a mut B,
     pub params: &'a mut Params,
 }
@@ -77,12 +109,16 @@ where
     B: BoardIo,
 {
     while let Some(request) = ctx.requests.next() {
-        let completed = match request.command {
-            RosflightCmd::ReadParams => ctx.board.read_params(ctx.params),
-            RosflightCmd::WriteParams => ctx.board.write_params(ctx.params),
-            RosflightCmd::Reboot => ctx.board.reboot(),
-            RosflightCmd::RebootToBootloader => ctx.board.reboot_to_bootloader(),
-            _ => false,
+        let completed = if ctx.state.is_armed() {
+            false
+        } else {
+            match request.command {
+                RosflightCmd::ReadParams => ctx.board.read_params(ctx.params),
+                RosflightCmd::WriteParams => ctx.board.write_params(ctx.params),
+                RosflightCmd::Reboot => ctx.board.reboot(),
+                RosflightCmd::RebootToBootloader => ctx.board.reboot_to_bootloader(),
+                _ => false,
+            }
         };
 
         let success = if completed {
@@ -100,6 +136,7 @@ where
 pub struct RcTrimCalibrationCtx<'a, const N: usize> {
     pub requests: EventDrainPort<'a, RcTrimCalibrationRequested, N>,
     pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub state: &'a StateManager,
     pub rc: &'a Rc,
     pub params: &'a mut Params,
 }
@@ -108,7 +145,7 @@ pub fn apply_rc_trim_calibration_requests<const N: usize>(
     mut ctx: RcTrimCalibrationCtx<'_, N>,
 ) {
     while let Some(request) = ctx.requests.next() {
-        let has_rc = ctx.rc.get_rc_struct().num_channels > 0;
+        let has_rc = !ctx.state.is_armed() && ctx.rc.get_rc_struct().num_channels > 0;
         if has_rc {
             ctx.params.set_by_id(
                 ParamId::PARAM_X_EQ_TORQUE,
@@ -133,6 +170,38 @@ pub fn apply_rc_trim_calibration_requests<const N: usize>(
             command: request.command,
             success,
         }));
+    }
+}
+
+pub struct VersionRequestCtx<'a, const N: usize> {
+    pub requests: EventDrainPort<'a, VersionRequested, N>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub state: &'a StateManager,
+}
+
+pub fn apply_version_requests<const N: usize>(mut ctx: VersionRequestCtx<'_, N>) {
+    while let Some(request) = ctx.requests.next() {
+        if ctx.state.is_armed() {
+            emit_cmd_ack(
+                &mut ctx.responses,
+                request.command,
+                RosflightCmdResponse::RosflightCmdFailed,
+            );
+            continue;
+        }
+
+        let version_str = "RustFlight Alpha 0.1";
+        let mut version_bytes = [0u8; 50];
+        let len = version_str.len().min(version_bytes.len());
+        version_bytes[..len].copy_from_slice(version_str.as_bytes());
+        let _ = ctx.responses.emit(CommResponse::Version(RosflightVersionMsg {
+            version: version_bytes,
+        }));
+        emit_cmd_ack(
+            &mut ctx.responses,
+            request.command,
+            RosflightCmdResponse::RosflightCmdSuccess,
+        );
     }
 }
 
@@ -177,10 +246,28 @@ mod tests {
             COMM_RESPONSE_QUEUE_CAPACITY, CONFIG_INFO_REQUEST_QUEUE_CAPACITY, EventQueue,
             OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY, PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY,
             RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY, RESET_ORIGIN_REQUEST_QUEUE_CAPACITY,
+            VERSION_REQUEST_QUEUE_CAPACITY,
         },
         packets::{RcPacket, RosflightPacketHeader},
+        state_machine::{Event, StateManager},
         test_support::TestBoard,
     };
+
+    fn initialized_state() -> StateManager {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state
+    }
+
+    fn armed_state() -> StateManager {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        let mut state = initialized_state();
+        state.update(Event::REQUEST_ARM, &params);
+        assert!(state.is_armed());
+        state
+    }
 
     #[test]
     fn apply_calibration_requests_sets_requested_flags() {
@@ -194,14 +281,20 @@ mod tests {
         let _ = requests.push(CalibrationRequested {
             command: RosflightCmd::BaroCalibration,
         });
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+        let state = initialized_state();
 
-        apply_calibration_requests(CalibrationRequestCtx {
+        let started = apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &state,
             flags: &mut flags,
         });
 
+        assert!(matches!(started, Some(RosflightCmd::BaroCalibration)));
         assert!(flags.contains(CalibrationFlags::GYRO));
         assert!(flags.contains(CalibrationFlags::BARO));
+        assert!(responses.is_empty());
         assert!(requests.is_empty());
     }
 
@@ -246,14 +339,27 @@ mod tests {
         let _ = requests.push(ParamDefaultsRequested {
             command: RosflightCmd::SetParamDefaults,
         });
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+        let state = initialized_state();
 
-        let applied = apply_param_defaults_requests(ParamDefaultsCtx {
+        apply_param_defaults_requests(ParamDefaultsCtx {
             requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &state,
             params: &mut params,
         });
 
-        assert!(matches!(applied, Some(RosflightCmd::SetParamDefaults)));
         assert_eq!(params.get_by_id(ParamId::PARAM_SYSTEM_ID), ParamValue::Int(1));
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::SetParamDefaults));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdSuccess
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
         assert!(requests.is_empty());
     }
 
@@ -272,6 +378,7 @@ mod tests {
         apply_board_command_requests(BoardCommandCtx {
             requests: EventDrainPort::new(&mut requests),
             responses: EventEmitPort::new(&mut responses),
+            state: &initialized_state(),
             board: &mut board,
             params: &mut params,
         });
@@ -325,6 +432,7 @@ mod tests {
         apply_rc_trim_calibration_requests(RcTrimCalibrationCtx {
             requests: EventDrainPort::new(&mut requests),
             responses: EventEmitPort::new(&mut responses),
+            state: &initialized_state(),
             rc: &rc,
             params: &mut params,
         });
@@ -353,6 +461,121 @@ mod tests {
             _ => panic!("expected command ack response"),
         }
         assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn command_requests_fail_without_mutation_when_armed() {
+        let armed = armed_state();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+        let mut flags = CalibrationFlags::empty();
+        let mut calibration_requests =
+            EventQueue::<CalibrationRequested, CALIBRATION_REQUEST_QUEUE_CAPACITY>::new();
+        let _ = calibration_requests.push(CalibrationRequested {
+            command: RosflightCmd::GyroCalibration,
+        });
+
+        let started = apply_calibration_requests(CalibrationRequestCtx {
+            requests: EventDrainPort::new(&mut calibration_requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &armed,
+            flags: &mut flags,
+        });
+
+        assert!(started.is_none());
+        assert!(!flags.contains(CalibrationFlags::GYRO));
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::GyroCalibration));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdFailed
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
+
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let mut default_requests =
+            EventQueue::<ParamDefaultsRequested, PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY>::new();
+        let _ = default_requests.push(ParamDefaultsRequested {
+            command: RosflightCmd::SetParamDefaults,
+        });
+
+        apply_param_defaults_requests(ParamDefaultsCtx {
+            requests: EventDrainPort::new(&mut default_requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &armed,
+            params: &mut params,
+        });
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(42)
+        );
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::SetParamDefaults));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdFailed
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
+    }
+
+    #[test]
+    fn apply_version_requests_sends_version_only_when_disarmed() {
+        let state = initialized_state();
+        let mut requests = EventQueue::<VersionRequested, VERSION_REQUEST_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(VersionRequested {
+            command: RosflightCmd::SendVersion,
+        });
+
+        apply_version_requests(VersionRequestCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &state,
+        });
+
+        assert!(matches!(responses.pop(), Some(CommResponse::Version(_))));
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::SendVersion));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdSuccess
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
+
+        let armed = armed_state();
+        let mut requests = EventQueue::<VersionRequested, VERSION_REQUEST_QUEUE_CAPACITY>::new();
+        let _ = requests.push(VersionRequested {
+            command: RosflightCmd::SendVersion,
+        });
+
+        apply_version_requests(VersionRequestCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &armed,
+        });
+
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::SendVersion));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdFailed
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
+        assert!(responses.is_empty());
     }
 
     #[test]

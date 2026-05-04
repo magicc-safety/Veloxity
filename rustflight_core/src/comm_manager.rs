@@ -43,7 +43,7 @@ use crate::events::{
     BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
     CommandEventQueues, ConfigInfoRequested, OffboardControlRequested, ParamDefaultsRequested,
     ParamEventQueues, ParamListRequested, ParamReadRequested, ParamSetRequested,
-    RcTrimCalibrationRequested, ResetOriginRequested,
+    RcTrimCalibrationRequested, ResetOriginRequested, VersionRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -126,7 +126,6 @@ where
     comm_link: T,
     pub msgs: comm_messages::Messages,
     pending_calibration_ack: Option<RosflightCmd>,
-    pending_param_defaults_ack: Option<RosflightCmd>,
     _board_marker: PhantomData<B>,
 }
 
@@ -153,9 +152,12 @@ where
             comm_link,
             msgs: comm_messages::Messages::default(),
             pending_calibration_ack: None,
-            pending_param_defaults_ack: None,
             _board_marker: PhantomData,
         }
+    }
+
+    pub fn set_pending_calibration_ack(&mut self, command: Option<RosflightCmd>) {
+        self.pending_calibration_ack = command;
     }
 
     #[cfg(test)]
@@ -641,33 +643,6 @@ where
         }
     }
 
-    pub fn queue_completed_param_defaults_ack(
-        &mut self,
-        comm_events: &mut CommEventQueues,
-        command: Option<RosflightCmd>,
-    ) -> bool {
-        let Some(pending) = self.pending_param_defaults_ack else {
-            return false;
-        };
-
-        if command == Some(pending) {
-            if comm_events
-                .responses
-                .push(CommResponse::CmdAck(RosflightCmdAckMsg {
-                    command: pending,
-                    success: RosflightCmdResponse::RosflightCmdSuccess,
-                }))
-                .is_err()
-            {
-                return false;
-            }
-            self.pending_param_defaults_ack = None;
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn act_on_messages(
         &mut self,
         param_events: &mut ParamEventQueues,
@@ -740,7 +715,6 @@ where
                         })
                         .is_ok()
                     {
-                        self.pending_calibration_ack = Some(msg.command);
                         send_ack_now = false;
                     }
                 }
@@ -753,7 +727,6 @@ where
                         })
                         .is_ok()
                     {
-                        self.pending_calibration_ack = Some(msg.command);
                         send_ack_now = false;
                     }
                 }
@@ -766,7 +739,6 @@ where
                         })
                         .is_ok()
                     {
-                        self.pending_calibration_ack = Some(msg.command);
                         send_ack_now = false;
                     }
                 }
@@ -779,7 +751,6 @@ where
                         })
                         .is_ok()
                     {
-                        self.pending_calibration_ack = Some(msg.command);
                         send_ack_now = false;
                     }
                 }
@@ -814,7 +785,6 @@ where
                         })
                         .is_ok()
                     {
-                        self.pending_param_defaults_ack = Some(msg.command);
                         send_ack_now = false;
                     }
                 }
@@ -841,18 +811,15 @@ where
                     }
                 }
                 RosflightCmd::SendVersion => {
-                    // Placeholder: Define version somewhere (e.g., compile-time const)
-                    //defmt::info!("Sending Version Info (Not fully implemented)");
-                    let version_str = "RustFlight Alpha 0.1"; // Example version string
-                    let mut version_bytes = [0u8; 50];
-                    let len = version_str.len().min(version_bytes.len());
-                    version_bytes[..len].copy_from_slice(version_str.as_bytes());
-
-                    let version_msg = RosflightVersionMsg {
-                        version: version_bytes,
-                    };
-                    let _ = comm_events.responses.push(CommResponse::Version(version_msg));
-                    success = RosflightCmdResponse::RosflightCmdSuccess;
+                    if command_events
+                        .version_requests
+                        .push(VersionRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::ResetOrigin => {
                     if command_events
@@ -1005,8 +972,16 @@ mod tests {
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
         sensorprocessors::CalibrationFlags,
         sensors::ProcessedSensors,
+        state_machine::{Event, StateManager},
         test_support::{RecordingCommLink, TestBoard},
     };
+
+    fn initialized_state() -> StateManager {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state
+    }
 
     #[test]
     fn param_set_emits_request_without_mutating_or_acknowledging() {
@@ -1199,8 +1174,14 @@ mod tests {
 
         assert_eq!(manager.comm_link().version_count, 0);
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
-        assert_eq!(comm_events.responses.len(), 2);
+        assert!(comm_events.responses.is_empty());
+        assert_eq!(command_events.version_requests.len(), 1);
 
+        command_system::apply_version_requests(command_system::VersionRequestCtx {
+            requests: EventDrainPort::new(&mut command_events.version_requests),
+            responses: EventEmitPort::new(&mut comm_events.responses),
+            state: &initialized_state(),
+        });
         manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.comm_link().version_count, 1);
@@ -1335,10 +1316,13 @@ mod tests {
         );
 
         assert!(cal_flags.is_empty());
-        command_system::apply_calibration_requests(CalibrationRequestCtx {
+        let started = command_system::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut command_events.calibration_requests),
+            responses: EventEmitPort::new(&mut comm_events.responses),
+            state: &initialized_state(),
             flags: &mut cal_flags,
         });
+        manager.set_pending_calibration_ack(started);
 
         assert!(cal_flags.contains(CalibrationFlags::GYRO));
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
@@ -1421,8 +1405,10 @@ mod tests {
         );
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
 
-        let applied = command_system::apply_param_defaults_requests(command_system::ParamDefaultsCtx {
+        command_system::apply_param_defaults_requests(command_system::ParamDefaultsCtx {
             requests: EventDrainPort::new(&mut command_events.param_defaults_requests),
+            responses: EventEmitPort::new(&mut comm_events.responses),
+            state: &initialized_state(),
             params: &mut params,
         });
 
@@ -1430,7 +1416,6 @@ mod tests {
             params.get_by_id(ParamId::PARAM_SYSTEM_ID),
             ParamValue::Int(1)
         );
-        assert!(manager.queue_completed_param_defaults_ack(&mut comm_events, applied));
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
         manager.send_comm_responses(&mut board, &mut comm_events);
         assert_eq!(manager.comm_link().cmd_ack_count, 1);

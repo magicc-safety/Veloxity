@@ -1801,6 +1801,112 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Armed Command Compatibility Progress
+
+Upstream source findings:
+
+- We cloned current upstream sources into `/tmp` for this check:
+  - `https://github.com/rosflight/rosflight_firmware`
+  - `https://github.com/rosflight/rosflight_ros_pkgs`
+- `rosflight_io` documents and exposes user-facing services for parameter read/write, calibration, reboot, reboot-to-bootloader, and version/startup behavior.
+- Current upstream firmware maps these ROSflight command enum values into the internal `CommLinkInterface::Command` enum:
+  - read params,
+  - write params,
+  - set param defaults,
+  - accel/gyro/baro/airspeed calibration,
+  - RC trim calibration,
+  - reboot,
+  - reboot-to-bootloader,
+  - send version.
+- Current upstream firmware does not map `ROSFLIGHT_CMD_RESET_ORIGIN` or `ROSFLIGHT_CMD_SEND_ALL_CONFIG_INFOS` into the internal command enum.
+- Upstream MAVLink decode treats unmapped commands as unsupported and sends `ROSFLIGHT_CMD_FAILED`.
+- Therefore our current unsupported failure for `ResetOrigin` and `SendAllConfigInfos` is ROSflight-compatible externally, even though internally we route them through explicit command-system request queues.
+
+Important upstream behavior:
+
+- In upstream `CommManager::command_callback`, command actions are rejected while the vehicle is armed.
+- If armed, the command callback reports failure and does not perform the command action.
+- This applies to the mapped command actions, including version, parameter persistence/defaults, calibration, RC trim calibration, and reboot commands.
+
+Reason for this change:
+
+- RustFlight command systems were correctly routed through events, but they did not yet enforce the upstream "no command actions while armed" rule.
+- Enforcing this in `CommManager` would reintroduce parser authority over command semantics.
+- The correct place is the command-system stage, which can read state and decide whether the requested work is allowed.
+
+Design now implemented:
+
+- Added `VersionRequested`.
+- `CommManager` now emits `VersionRequested` for `RosflightCmd::SendVersion` instead of queueing version and ACK responses directly.
+- `command_system::apply_version_requests` owns version command completion:
+  - if disarmed, it queues the version response followed by a success ACK,
+  - if armed, it queues a failed ACK and does not send a version message.
+- `command_system::apply_calibration_requests` now reads `StateManager`.
+  - if armed, it queues a failed ACK and does not set calibration flags,
+  - if disarmed, it sets calibration flags and reports the started command so the scheduler can track the deferred completion ACK.
+- `command_system::apply_param_defaults_requests` now reads `StateManager`.
+  - if armed, it queues a failed ACK and does not reset params,
+  - if disarmed, it resets params and queues success.
+- `command_system::apply_board_command_requests` now reads `StateManager`.
+  - if armed, it fails without calling board hooks,
+  - if disarmed, it calls the board hook and ACKs based on completion.
+- `command_system::apply_rc_trim_calibration_requests` now reads `StateManager`.
+  - if armed, it fails without changing equilibrium torque params,
+  - if disarmed and RC input exists, it writes the torque params and ACKs success.
+- `World` and legacy `ROSFlight` now pass state read access into these command systems.
+
+Compile-time boundary improvement:
+
+- Command systems now have explicit read-only access to state where command permission depends on armed/disarmed status.
+- Comms still cannot mutate state, params, calibration flags, board persistence, or RC trim params.
+- The function signatures make the dependency clear: command systems that enforce the armed rule receive `&StateManager`.
+- Version is now consistent with the rest of the command architecture: parser emits request, command system decides, response stage transmits.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `VersionRequested`.
+  - Adds a fixed-capacity version request queue to `CommandEventQueues`.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits version requests instead of direct version/ACK responses.
+  - Removes the param-defaults pending ACK slot because the command system now owns default-reset success/failure ACKs directly.
+  - Keeps calibration pending ACK only for accepted calibration work whose success depends on later sensor-processing completion.
+- `rustflight_core/src/command_system.rs`
+  - Adds state-read gating to command actions.
+  - Adds version request handling.
+  - Adds tests for armed rejection and version behavior.
+- `rustflight_core/src/world.rs`
+  - Schedules version requests.
+  - Passes state read access into state-gated command systems.
+  - Adds a World test proving armed command rejection does not mutate params.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the state-gated command-system scheduling in the legacy loop.
+
+Tests added or updated:
+
+- `command_system::tests::command_requests_fail_without_mutation_when_armed`
+  - Proves armed calibration/default-reset requests fail without mutating resources.
+- `command_system::tests::apply_version_requests_sends_version_only_when_disarmed`
+  - Proves disarmed version requests send version plus success ACK, while armed version requests send failed ACK only.
+- `comm_manager::tests::send_version_command_enqueues_version_and_ack_responses`
+  - Updated so comms emits version request intent and the command system queues responses.
+- `world::tests::world_rejects_command_actions_while_armed`
+  - Proves the World scheduler rejects a command action while armed and does not reset params.
+
+Validation:
+
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Continue comparing command behavior to upstream ROSflight main:
+  - confirm whether param read/list/set behavior should be allowed while armed, because upstream's armed rejection is specific to ROSflight command messages, not MAVLink parameter messages,
+  - inspect reboot/write-param board hooks before pixracerpro migration so hardware side effects follow the same state-gated command-system rule.
+
 ## Remaining Placeholder Command Event Progress
 
 Reason for this change:

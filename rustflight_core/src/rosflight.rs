@@ -42,7 +42,7 @@ use crate::{
     command_manager::{CommandManager, ControlType},
     command_system::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
-        ParamDefaultsCtx, ResetOriginCtx,
+        ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
     controller::Controller,
     events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
@@ -220,25 +220,30 @@ where
             &mut self.board,
         );
 
-        command_system::apply_calibration_requests(CalibrationRequestCtx {
+        let started_calibration = command_system::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state_manager,
             flags: &mut self.cal_flags,
         });
+        self.comm_manager
+            .set_pending_calibration_ack(started_calibration);
         command_system::apply_offboard_control_requests(OffboardControlCtx {
             requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
             command: &mut self.command_manager,
             params: &self.params,
         });
-        let applied_defaults = command_system::apply_param_defaults_requests(ParamDefaultsCtx {
+        command_system::apply_param_defaults_requests(ParamDefaultsCtx {
             requests: EventDrainPort::new(&mut self.command_events.param_defaults_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state_manager,
             params: &mut self.params,
         });
-        self.comm_manager
-            .queue_completed_param_defaults_ack(&mut self.comm_events, applied_defaults);
 
         command_system::apply_rc_trim_calibration_requests(command_system::RcTrimCalibrationCtx {
             requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state_manager,
             rc: &self.rc_manager,
             params: &mut self.params,
         });
@@ -246,8 +251,15 @@ where
         command_system::apply_board_command_requests(BoardCommandCtx {
             requests: EventDrainPort::new(&mut self.command_events.board_command_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state_manager,
             board: &mut self.board,
             params: &mut self.params,
+        });
+
+        command_system::apply_version_requests(VersionRequestCtx {
+            requests: EventDrainPort::new(&mut self.command_events.version_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state_manager,
         });
 
         command_system::apply_reset_origin_requests(ResetOriginCtx {

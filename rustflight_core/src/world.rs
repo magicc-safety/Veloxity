@@ -7,7 +7,7 @@ use crate::{
     command_manager::CommandManager,
     command_system::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
-        ParamDefaultsCtx, ResetOriginCtx,
+        ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
     controller::Controller,
     events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
@@ -149,25 +149,29 @@ where
             &mut self.board,
         );
 
-        command_system::apply_calibration_requests(CalibrationRequestCtx {
+        let started_calibration = command_system::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state,
             flags: &mut self.cal_flags,
         });
+        self.comm.set_pending_calibration_ack(started_calibration);
         command_system::apply_offboard_control_requests(OffboardControlCtx {
             requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
             command: &mut self.command,
             params: &self.params,
         });
-        let applied_defaults = command_system::apply_param_defaults_requests(ParamDefaultsCtx {
+        command_system::apply_param_defaults_requests(ParamDefaultsCtx {
             requests: EventDrainPort::new(&mut self.command_events.param_defaults_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state,
             params: &mut self.params,
         });
-        self.comm
-            .queue_completed_param_defaults_ack(&mut self.comm_events, applied_defaults);
 
         command_system::apply_rc_trim_calibration_requests(command_system::RcTrimCalibrationCtx {
             requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state,
             rc: &self.rc,
             params: &mut self.params,
         });
@@ -175,8 +179,15 @@ where
         command_system::apply_board_command_requests(BoardCommandCtx {
             requests: EventDrainPort::new(&mut self.command_events.board_command_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state,
             board: &mut self.board,
             params: &mut self.params,
+        });
+
+        command_system::apply_version_requests(VersionRequestCtx {
+            requests: EventDrainPort::new(&mut self.command_events.version_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state,
         });
 
         command_system::apply_reset_origin_requests(ResetOriginCtx {
@@ -1024,6 +1035,49 @@ mod tests {
         assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
         let ack = world.comm.comm_link().last_cmd_ack.unwrap();
         assert!(matches!(ack.command, RosflightCmd::SendAllConfigInfos));
+        assert!(matches!(
+            ack.success,
+            RosflightCmdResponse::RosflightCmdFailed
+        ));
+    }
+
+    #[test]
+    fn world_rejects_command_actions_while_armed() {
+        let board = TestBoard::default();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let comm_link = RecordingCommLink::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update(Event::REQUEST_ARM, &params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        assert!(world.state.is_armed());
+
+        world.comm.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::SetParamDefaults,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert_eq!(
+            world.params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(42)
+        );
+        assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
+        let ack = world.comm.comm_link().last_cmd_ack.unwrap();
+        assert!(matches!(ack.command, RosflightCmd::SetParamDefaults));
         assert!(matches!(
             ack.success,
             RosflightCmdResponse::RosflightCmdFailed
