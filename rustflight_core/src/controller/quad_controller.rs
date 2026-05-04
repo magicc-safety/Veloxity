@@ -403,24 +403,28 @@ impl Controller for QuadController {
 
                 rate_setpoints[2] = command.qz.value as f64;
 
-                let torque_x = self.roll_rate_pid.run(
+                let mut torque_x = self.roll_rate_pid.run(
                     current_rates[0],
                     rate_setpoints[0],
                     dt,
                     enable_integrator,
                 );
-                let torque_y = self.pitch_rate_pid.run(
+                let mut torque_y = self.pitch_rate_pid.run(
                     current_rates[1],
                     rate_setpoints[1],
                     dt,
                     enable_integrator,
                 );
-                let torque_z = self.yaw_rate_pid.run(
+                let mut torque_z = self.yaw_rate_pid.run(
                     current_rates[2],
                     rate_setpoints[2],
                     dt,
                     enable_integrator,
                 );
+
+                torque_x += param_float(params, ParamId::PARAM_X_EQ_TORQUE) as f64;
+                torque_y += param_float(params, ParamId::PARAM_Y_EQ_TORQUE) as f64;
+                torque_z += param_float(params, ParamId::PARAM_Z_EQ_TORQUE) as f64;
 
                 // --- Step 5: Assemble and return the final output ---
                 MixerInput {
@@ -429,6 +433,13 @@ impl Controller for QuadController {
                 }
             }
         }
+    }
+}
+
+fn param_float(params: &Params, id: ParamId) -> f32 {
+    match params.get_by_id(id) {
+        ParamValue::Float(value) => value,
+        _ => 0.0,
     }
 }
 
@@ -462,4 +473,59 @@ pub fn get_yaw(q: Quaternion<f64>) -> f64 {
 
     // Use libm::atan2 instead of f64::atan2
     atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        command_manager::{CombinedControl, ControlChannel, ControlType},
+        state_machine::Event,
+    };
+
+    #[test]
+    fn controller_adds_equilibrium_torque_params_to_control_output() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_Y_EQ_TORQUE, ParamValue::Float(-0.2));
+        params.set_by_id(ParamId::PARAM_Z_EQ_TORQUE, ParamValue::Float(0.3));
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+
+        let mut state_manager = StateManager::new();
+        state_manager.update(Event::INITIALIZED, &params);
+        state_manager.update(Event::REQUEST_ARM, &params);
+
+        let mut controller = QuadController::default();
+        let state = AttitudeState::default();
+        let command = CombinedControl {
+            qx: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: 0.0,
+            },
+            qy: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: 0.0,
+            },
+            qz: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: 0.0,
+            },
+            fz: ControlChannel {
+                active: true,
+                control_type: ControlType::Throttle,
+                value: 0.4,
+            },
+            ..Default::default()
+        };
+
+        let output = controller.control(&state, &mut state_manager, &command, &params, 0.0025);
+
+        assert_eq!(output.torques[0], 0.10000000149011612);
+        assert_eq!(output.torques[1], -0.20000000298023224);
+        assert_eq!(output.torques[2], 0.30000001192092896);
+        assert_eq!(output.thrust, 0.4);
+    }
 }

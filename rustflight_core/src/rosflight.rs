@@ -235,6 +235,13 @@ where
         self.comm_manager
             .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
 
+        command_system::apply_rc_trim_calibration_requests(command_system::RcTrimCalibrationCtx {
+            requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            rc: &self.rc_manager,
+            params: &mut self.params,
+        });
+
         command_system::apply_board_command_requests(BoardCommandCtx {
             requests: EventDrainPort::new(&mut self.command_events.board_command_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),

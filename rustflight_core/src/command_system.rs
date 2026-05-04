@@ -7,10 +7,11 @@ use crate::{
     command_manager::CommandManager,
     events::{
         BoardCommandRequested, COMM_RESPONSE_QUEUE_CAPACITY, CalibrationRequested, CommResponse,
-        OffboardControlRequested, ParamDefaultsRequested,
+        OffboardControlRequested, ParamDefaultsRequested, RcTrimCalibrationRequested,
     },
-    params2::Params,
+    params2::{ParamId, ParamValue, Params},
     ports::{EventDrainPort, EventEmitPort},
+    rc::{Rc, Stick},
     sensorprocessors::CalibrationFlags,
 };
 
@@ -95,6 +96,45 @@ where
     }
 }
 
+pub struct RcTrimCalibrationCtx<'a, const N: usize> {
+    pub requests: EventDrainPort<'a, RcTrimCalibrationRequested, N>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub rc: &'a Rc,
+    pub params: &'a mut Params,
+}
+
+pub fn apply_rc_trim_calibration_requests<const N: usize>(
+    mut ctx: RcTrimCalibrationCtx<'_, N>,
+) {
+    while let Some(request) = ctx.requests.next() {
+        let has_rc = ctx.rc.get_rc_struct().num_channels > 0;
+        if has_rc {
+            ctx.params.set_by_id(
+                ParamId::PARAM_X_EQ_TORQUE,
+                ParamValue::Float(ctx.rc.stick(Stick::X)),
+            );
+            ctx.params.set_by_id(
+                ParamId::PARAM_Y_EQ_TORQUE,
+                ParamValue::Float(ctx.rc.stick(Stick::Y)),
+            );
+            ctx.params.set_by_id(
+                ParamId::PARAM_Z_EQ_TORQUE,
+                ParamValue::Float(ctx.rc.stick(Stick::Z)),
+            );
+        }
+
+        let success = if has_rc {
+            RosflightCmdResponse::RosflightCmdSuccess
+        } else {
+            RosflightCmdResponse::RosflightCmdFailed
+        };
+        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
+            command: request.command,
+            success,
+        }));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,9 +146,9 @@ mod tests {
         events::{
             BOARD_COMMAND_REQUEST_QUEUE_CAPACITY, CALIBRATION_REQUEST_QUEUE_CAPACITY,
             COMM_RESPONSE_QUEUE_CAPACITY, EventQueue, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY,
-            PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY,
+            PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY, RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY,
         },
-        params2::{ParamId, ParamValue},
+        packets::{RcPacket, RosflightPacketHeader},
         test_support::TestBoard,
     };
 
@@ -212,6 +252,72 @@ mod tests {
                 assert!(matches!(
                     ack.success,
                     RosflightCmdResponse::RosflightCmdFailed
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn apply_rc_trim_calibration_requests_sets_equilibrium_torques_and_acks() {
+        let mut params = Params::new();
+        let mut rc = Rc::new();
+        let mut state = crate::state_machine::StateManager::new();
+        rc.init(&mut (), &params);
+        let mut channels = [0.5; crate::packets::RC_PACKET_CHANNELS];
+        channels[0] = 0.55;
+        channels[1] = 0.45;
+        channels[3] = 0.60;
+        rc.receive(
+            &RcPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 1,
+                    status: 0,
+                },
+                n_chan: 4,
+                chan: channels,
+                lol: false,
+            },
+            &params,
+            &mut state,
+        );
+        let mut requests = EventQueue::<
+            RcTrimCalibrationRequested,
+            RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY,
+        >::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(RcTrimCalibrationRequested {
+            command: RosflightCmd::RcCalibration,
+        });
+
+        apply_rc_trim_calibration_requests(RcTrimCalibrationCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            rc: &rc,
+            params: &mut params,
+        });
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_X_EQ_TORQUE),
+            ParamValue::Float(0.100000024)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_Y_EQ_TORQUE),
+            ParamValue::Float(-0.100000024)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_Z_EQ_TORQUE),
+            ParamValue::Float(0.20000005)
+        );
+
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::RcCalibration));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdSuccess
                 ));
             }
             _ => panic!("expected command ack response"),

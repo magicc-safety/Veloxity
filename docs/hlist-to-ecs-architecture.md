@@ -1944,6 +1944,104 @@ Next planned migration target:
 - Decide whether to implement simulated board persistence for `ReadParams`/`WriteParams` or leave board hooks unsupported until the pixracerpro migration.
 - Move `RcCalibration` out of the inline command parser next, because it needs a persistent RC calibration state rather than a placeholder failed ACK.
 
+## RC Trim Calibration Event Progress
+
+Source-compatibility note:
+
+- Before implementing this slice, we checked ROSflight documentation for current main/git-main behavior.
+- ROSflight does not perform software calibration of RC transmitter endpoints.
+- ROSflight does expose `calibrate_rc_trim` through `rosflight_io`.
+- That service instructs firmware to calibrate RC trim values.
+- The documented behavior is to use current transmitter trim offsets to compute equilibrium/feed-forward torques.
+- Those torques are represented by `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE`.
+- Therefore RustFlight should not implement generic RC endpoint calibration for `RosflightCmd::RcCalibration`.
+- It should implement RC trim calibration.
+
+Reason for this change:
+
+- The starting RustFlight code had the `RcCalibration` command enum and MAVLink mapping, but the command arm was a placeholder that always failed.
+- `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE` existed but were not written by any RC trim calibration path.
+- The quad controller also was not consuming those equilibrium torque parameters.
+- To match ROSflight behavior, the command must set equilibrium torque params and those params must affect controller output.
+
+Design now implemented:
+
+- Added `RcTrimCalibrationRequested`.
+- Added a fixed-capacity RC trim calibration request queue to `CommandEventQueues`.
+- `CommManager` emits `RcTrimCalibrationRequested` for `RosflightCmd::RcCalibration`.
+- `CommManager` does not ACK the command immediately when the request is queued.
+- `command_system::apply_rc_trim_calibration_requests` owns the work:
+  - it reads current processed RC stick values,
+  - writes `PARAM_X_EQ_TORQUE`,
+  - writes `PARAM_Y_EQ_TORQUE`,
+  - writes `PARAM_Z_EQ_TORQUE`,
+  - emits `CommResponse::CmdAck`.
+- If no RC channels have been received, the command fails.
+- `World` schedules RC trim calibration after comm command parsing and before comm responses are sent.
+- Legacy `ROSFlight` mirrors the same scheduling step.
+- `QuadController` now adds the equilibrium torque params to the controller torque output while armed.
+
+ROSflight compatibility:
+
+- The ROSflight command slot remains `ROSFLIGHT_CMD_RC_CALIBRATION`.
+- In this architecture, that command is interpreted as RC trim calibration, matching `rosflight_io`'s `calibrate_rc_trim` service.
+- The command ACK is sent only after the RC trim calibration system has run.
+- The command succeeds only if there is current RC input available.
+- The calibrated values are stored in the same equilibrium torque params documented by ROSflight.
+
+Compile-time boundary improvement:
+
+- Comms only emits request intent.
+- The RC trim calibration system receives exactly the resources it needs:
+  - read access to `Rc`,
+  - mutable access to `Params`,
+  - request drain port,
+  - response emit port.
+- Controller consumption of equilibrium torques is localized to the controller.
+- This keeps parsing, RC-derived parameter mutation, response emission, and control use separate and testable.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `RcTrimCalibrationRequested`.
+  - Adds `rc_trim_calibration_requests` to `CommandEventQueues`.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits RC trim calibration requests for `RosflightCmd::RcCalibration`.
+- `rustflight_core/src/command_system.rs`
+  - Adds `RcTrimCalibrationCtx`.
+  - Adds `apply_rc_trim_calibration_requests`.
+- `rustflight_core/src/world.rs`
+  - Schedules RC trim calibration requests.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors scheduling in the legacy path.
+- `rustflight_core/src/controller/quad_controller.rs`
+  - Adds equilibrium torque params to armed controller output.
+
+Tests added:
+
+- `command_system::tests::apply_rc_trim_calibration_requests_sets_equilibrium_torques_and_acks`
+  - Proves the system writes `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE` from current RC stick offsets and emits success ACK.
+- `comm_manager::tests::rc_trim_calibration_emits_request_and_defers_ack`
+  - Proves comms emits request intent and does not ACK immediately.
+- `world::tests::world_routes_rc_trim_calibration_and_sets_equilibrium_torques`
+  - Proves the World scheduler drains the request, writes params, and sends success ACK.
+- `controller::quad_controller::tests::controller_adds_equilibrium_torque_params_to_control_output`
+  - Proves calibrated equilibrium torque params affect controller output.
+
+Validation:
+
+- `cargo test -p rustflight_core controller::quad_controller::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Remaining question:
+
+- The exact upstream ROSflight source formula should still be checked when the source is locally available.
+- The implemented behavior follows the documented contract: current RC trim offsets become equilibrium torque params that are added to future controller outputs.
+
 ## Command Response Queue Progress
 
 Reason for this change:

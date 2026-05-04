@@ -136,6 +136,11 @@ pub struct BoardCommandRequested {
     pub command: RosflightCmd,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RcTrimCalibrationRequested {
+    pub command: RosflightCmd,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum CommResponse {
     ParamValue(ParamValueMsg),
@@ -152,6 +157,7 @@ pub const CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const BOARD_COMMAND_REQUEST_QUEUE_CAPACITY: usize = 4;
+pub const RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 2;
 
 #[derive(Default)]
 pub struct ParamEventQueues {
@@ -175,6 +181,8 @@ pub struct CommandEventQueues {
         EventQueue<ParamDefaultsRequested, PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY>,
     pub board_command_requests:
         EventQueue<BoardCommandRequested, BOARD_COMMAND_REQUEST_QUEUE_CAPACITY>,
+    pub rc_trim_calibration_requests:
+        EventQueue<RcTrimCalibrationRequested, RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY>,
 }
 
 impl ParamEventQueues {

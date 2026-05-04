@@ -42,7 +42,7 @@ use crate::command_manager::CommandManager;
 use crate::events::{
     CalibrationRequested, CommEventQueues, CommandEventQueues, CommResponse,
     BoardCommandRequested, OffboardControlRequested, ParamDefaultsRequested, ParamEventQueues,
-    ParamListRequested, ParamReadRequested, ParamSetRequested,
+    ParamListRequested, ParamReadRequested, ParamSetRequested, RcTrimCalibrationRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -716,12 +716,15 @@ where
 
             match msg.command {
                 RosflightCmd::RcCalibration => {
-                    // Placeholder: Actual RC calibration logic would go here.
-                    // This often involves reading min/max/trim values from the RC
-                    // receiver over a period and storing them. This is complex
-                    // and might need interaction with an `Rc` struct/module.
-                    //defmt::info!("Warning: RC Calibration not implemented.");
-                    // success = RosflightCmdResponse::RosflightCmdSuccess; // Mark success if implemented
+                    if command_events
+                        .rc_trim_calibration_requests
+                        .push(RcTrimCalibrationRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::AccelCalibration => {
                     //defmt::info!("Starting Accelerometer Calibration.");
@@ -1444,5 +1447,31 @@ mod tests {
 
         let request = command_events.board_command_requests.pop().unwrap();
         assert!(matches!(request.command, RosflightCmd::WriteParams));
+    }
+
+    #[test]
+    fn rc_trim_calibration_emits_request_and_defers_ack() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::RcCalibration,
+        });
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
+
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+        assert!(comm_events.responses.is_empty());
+
+        let request = command_events.rc_trim_calibration_requests.pop().unwrap();
+        assert!(matches!(request.command, RosflightCmd::RcCalibration));
     }
 }
