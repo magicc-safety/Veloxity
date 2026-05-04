@@ -1082,6 +1082,49 @@ Validation:
 - `cargo test -p sim pwm::tests --lib` passes.
 - `cargo check -p sim` passes.
 
+## Named Telemetry Progress
+
+`rustflight_core/src/comm_manager.rs`
+
+- Adds `CommManager::send_named_telemetry_streams`.
+- This is the telemetry equivalent of the old HList-based `send_telemetry_streams`.
+- It accepts `ProcessedSensors` directly instead of a board-specific `ProcessedSensorSet` plus HList index configuration.
+- It keeps the same MAVLink-facing message types:
+  - heartbeat
+  - status
+  - small IMU
+  - attitude quaternion
+  - barometer
+  - magnetometer
+  - range
+  - battery status
+  - GNSS
+  - RC channels
+  - output raw
+- The old HList telemetry method remains in place as the behavioral reference.
+- The new method is now called from the `World` control stage after estimator/controller/mixer/PWM output.
+
+`rustflight_core/src/test_support.rs`
+
+- Extends `RecordingCommLink` to count telemetry messages.
+- Records the last output-raw message so telemetry payload mapping can be asserted in tests.
+- Adds a test-only `CommManager::comm_link` accessor to inspect the recording link without making the production field public.
+
+Tests added or extended:
+
+- `comm_manager::tests::named_telemetry_sends_sensor_state_and_output_messages`
+  - Proves named telemetry sends heartbeat, status, IMU, attitude, and output-raw messages.
+  - Proves output-raw telemetry preserves the scheduler timestamp and actuator command payload.
+- `world::tests::world_control_stage_runs_once_per_imu_timestamp`
+  - Extended to prove the `World` control stage hands actuator output into named telemetry exactly once per new IMU sample.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

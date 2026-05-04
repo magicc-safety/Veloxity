@@ -40,6 +40,12 @@ impl BoardTrait for TestBoard {
 pub struct RecordingCommLink {
     pub sent_param_values: [Option<ParamValueMsg>; 8],
     pub sent_param_value_count: usize,
+    pub heartbeat_count: usize,
+    pub status_count: usize,
+    pub imu_count: usize,
+    pub attitude_count: usize,
+    pub output_raw_count: usize,
+    pub last_output_raw: Option<RosflightOutputRawMsg>,
 }
 
 impl RecordingCommLink {
@@ -47,6 +53,12 @@ impl RecordingCommLink {
         Self {
             sent_param_values: [None; 8],
             sent_param_value_count: 0,
+            heartbeat_count: 0,
+            status_count: 0,
+            imu_count: 0,
+            attitude_count: 0,
+            output_raw_count: 0,
+            last_output_raw: None,
         }
     }
 
@@ -71,6 +83,7 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         _system_id: u8,
         _msg: HeartbeatMsg,
     ) -> bool {
+        self.heartbeat_count += 1;
         true
     }
 
@@ -89,6 +102,7 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         _system_id: u8,
         _msg: RosflightStatusMsg,
     ) {
+        self.status_count += 1;
     }
 
     fn send_timesync(
@@ -112,8 +126,10 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         &mut self,
         _baord: &mut TestBoard,
         _system_id: u8,
-        _msg: RosflightOutputRawMsg,
+        msg: RosflightOutputRawMsg,
     ) {
+        self.output_raw_count += 1;
+        self.last_output_raw = Some(msg);
     }
 
     fn send_attitude(
@@ -122,6 +138,7 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         _system_id: u8,
         _msg: AttitudeQuaternionMsg,
     ) {
+        self.attitude_count += 1;
     }
 
     fn send_baro(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallBaroMsg) {}
@@ -134,7 +151,9 @@ impl CommInterface<TestBoard> for RecordingCommLink {
     ) {
     }
 
-    fn send_imu(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallImuMsg) {}
+    fn send_imu(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallImuMsg) {
+        self.imu_count += 1;
+    }
 
     fn send_mag(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallMagMsg) {}
 

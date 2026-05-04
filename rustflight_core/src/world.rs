@@ -220,6 +220,16 @@ where
         let actuator_commands = self.mixer.mix(&controls, &self.state);
         self.pwm
             .send_commands(&mut self.board, actuator_commands.as_ref());
+        let now_us = self.board.clock_micros();
+        self.comm.send_named_telemetry_streams(
+            &mut self.board,
+            now_us,
+            &self.state,
+            &self.command,
+            &state,
+            &self.processed_sensors,
+            &actuator_commands,
+        );
 
         self.latest_state = state;
         self.latest_actuator_commands = Some(actuator_commands);
@@ -388,6 +398,7 @@ mod tests {
             TestPwm::new(),
         );
 
+        world.board.current_time_us = 1_100_000;
         world.processed_sensors.imu = Some(crate::packets::ImuPacket {
             header: crate::packets::RosflightPacketHeader {
                 timestamp: 1,
@@ -401,14 +412,21 @@ mod tests {
 
         assert!(world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 1);
+        assert_eq!(world.comm.comm_link().heartbeat_count, 1);
+        assert_eq!(world.comm.comm_link().status_count, 1);
+        assert_eq!(world.comm.comm_link().imu_count, 1);
+        assert_eq!(world.comm.comm_link().attitude_count, 1);
+        assert_eq!(world.comm.comm_link().output_raw_count, 1);
         assert!(world.latest_actuator_commands.is_some());
 
         assert!(!world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 1);
+        assert_eq!(world.comm.comm_link().output_raw_count, 1);
 
         world.processed_sensors.imu.as_mut().unwrap().header.timestamp = 2;
 
         assert!(world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 2);
+        assert_eq!(world.comm.comm_link().output_raw_count, 2);
     }
 }

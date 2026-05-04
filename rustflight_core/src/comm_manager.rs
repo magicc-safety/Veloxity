@@ -49,6 +49,7 @@ use crate::params2::{
 };
 use crate::rosflight::Configuration;
 use crate::sensorprocessors::CalibrationFlags;
+use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
 use crate::{board, log_info};
 use core::marker::PhantomData;
@@ -138,6 +139,11 @@ where
             msgs: comm_messages::Messages::default(),
             _board_marker: PhantomData,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn comm_link(&self) -> &T {
+        &self.comm_link
     }
 
     pub fn send_telemetry_streams<BT, C, A>(
@@ -416,6 +422,178 @@ where
     pub fn process_incoming_messages(&mut self, board: &mut B) {
         self.comm_link
             .handle_incoming_messages(board, &mut self.msgs);
+    }
+
+    pub fn send_named_telemetry_streams<S, A>(
+        &mut self,
+        board: &mut B,
+        now_us: u64,
+        state_manager: &StateManager,
+        command_manager: &CommandManager,
+        estimator_state: &S,
+        processed_sensors: &ProcessedSensors,
+        actuator_commands: &A,
+    ) where
+        S: AttitudeStateTrait,
+        A: AsRef<[f64]>,
+    {
+        if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US {
+            self.send_rosflight_heartbeat(
+                board,
+                HeartbeatMsg {
+                    autopilot: 0,
+                    base_mode: 0,
+                    custom_mode: 0,
+                    mavlink_version: 0,
+                    system_status: 0,
+                    type_: 0,
+                },
+            );
+            self.last_heartbeat_us = now_us;
+        }
+
+        if now_us >= self.last_status_send_us + STATUS_INTERVAL_US {
+            self.send_rosflight_status(
+                board,
+                RosflightStatusMsg {
+                    armed: state_manager.is_armed() as u8,
+                    failsafe: state_manager.is_in_failsafe() as u8,
+                    rc_override: 0,
+                    offboard: 0,
+                    error_code: state_manager.get_errors(),
+                    control_mode: command_manager.get_control_mode().into(),
+                    num_errors: state_manager.get_errors().bits().count_ones() as i16,
+                    loop_time_us: 0,
+                },
+            );
+            self.last_status_send_us = now_us;
+        }
+
+        if let Some(imu_packet) = processed_sensors.imu {
+            self.send_rosflight_small_imu(
+                board,
+                SmallImuMsg {
+                    temperature: 0.0,
+                    time_boot_us: imu_packet.header.timestamp,
+                    xacc: imu_packet.accel[0] as f32,
+                    yacc: imu_packet.accel[1] as f32,
+                    zacc: imu_packet.accel[2] as f32,
+                    xgyro: imu_packet.gyro[0] as f32,
+                    ygyro: imu_packet.gyro[1] as f32,
+                    zgyro: imu_packet.gyro[2] as f32,
+                },
+            );
+
+            let q = estimator_state.q();
+            let qd = estimator_state.q_dot();
+            let rollspeed = 2.0 * (q[0] * qd[1] - q[1] * qd[0] - q[2] * qd[3] + q[3] * qd[2]);
+            let pitchspeed = 2.0 * (q[0] * qd[2] - q[1] * qd[3] - q[2] * qd[0] + q[3] * qd[1]);
+            let yawspeed = 2.0 * (q[0] * qd[3] - q[1] * qd[2] - q[2] * qd[1] + q[3] * qd[0]);
+
+            self.send_rosflight_attitude_quaternion(
+                board,
+                AttitudeQuaternionMsg {
+                    time_boot_ms: (imu_packet.header.timestamp / 1000) as u32,
+                    q1: q[0],
+                    q2: q[1],
+                    q3: q[2],
+                    q4: q[3],
+                    rollspeed,
+                    pitchspeed,
+                    yawspeed,
+                },
+            );
+        }
+
+        if let Some(packet) = processed_sensors.baro {
+            self.send_rosflight_small_baro(
+                board,
+                SmallBaroMsg {
+                    altitude: 0.0,
+                    pressure: packet.pressure,
+                    temperature: packet.temperature,
+                },
+            );
+        }
+
+        if let Some(packet) = processed_sensors.mag {
+            self.send_rosflight_small_mag(
+                board,
+                SmallMagMsg {
+                    xmag: packet.flux[0],
+                    ymag: packet.flux[1],
+                    zmag: packet.flux[2],
+                },
+            );
+        }
+
+        if let Some(packet) = processed_sensors.range {
+            self.send_rosflight_small_range(
+                board,
+                SmallRangeMsg {
+                    type_: RosflightRangeType::RosflightRangeSonar,
+                    range: packet.range,
+                    max_range: 0.0,
+                    min_range: 0.0,
+                },
+            );
+        }
+
+        if let Some(packet) = processed_sensors.battery {
+            self.send_rosflight_battery_status(
+                board,
+                BatteryStatusMsg {
+                    battery_voltage: packet.voltage,
+                    battery_current: packet.current,
+                },
+            );
+        }
+
+        if let Some(packet) = processed_sensors.gnss {
+            self.send_rosflight_gnss(
+                board,
+                RosflightGnssMsg {
+                    rosflight_timestamp: packet.header.timestamp,
+                    seconds: packet.sec as u64,
+                    nanos: packet.nano as u32,
+                    fix_type: packet.fix_type,
+                    num_sat: packet.num_sats,
+                    lat: packet.lat,
+                    lon: packet.lon,
+                    height: packet.height,
+                    vel_n: packet.vel_n,
+                    vel_e: packet.vel_e,
+                    vel_d: packet.vel_d,
+                    s_acc: packet.s_acc,
+                    h_acc: packet.h_acc,
+                    v_acc: packet.v_acc,
+                },
+            );
+        }
+
+        if let Some(packet) = processed_sensors.rc {
+            let mut channels = [0u16; RC_PACKET_CHANNELS];
+            let count = (packet.n_chan as usize).min(RC_PACKET_CHANNELS);
+            for (dst, src) in channels.iter_mut().zip(packet.chan.iter()).take(count) {
+                *dst = (*src * 1000.0 + 1000.0) as u16;
+            }
+
+            self.send_rosflight_rc_channels(
+                board,
+                RcChannelsMsg {
+                    time_boot_ms: (packet.header.timestamp / 1000) as u32,
+                    chancount: packet.n_chan as u8,
+                    channels,
+                    rssi: 255,
+                },
+            );
+        }
+
+        let mut values = [0.0f32; 14];
+        for (dst, src) in values.iter_mut().zip(actuator_commands.as_ref().iter()) {
+            *dst = *src as f32;
+        }
+        self.send_rosflight_output_raw(board, RosflightOutputRawMsg { stamp: now_us, values });
     }
 
     pub fn act_on_messages(
@@ -716,6 +894,7 @@ mod tests {
         params2::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsWritePort},
         sensorprocessors::CalibrationFlags,
+        sensors::ProcessedSensors,
         test_support::{RecordingCommLink, TestBoard},
     };
 
@@ -838,5 +1017,54 @@ mod tests {
         assert_eq!(manager.sysid, 42);
         assert_eq!(manager.comm_link.sent_param_value_count, 1);
         assert!(param_events.comm_responses.is_empty());
+    }
+
+    #[test]
+    fn named_telemetry_sends_sensor_state_and_output_messages() {
+        let mut board = TestBoard {
+            current_time_us: 1_100_000,
+            tx_write_count: 0,
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
+        let actuator_commands = [0.1, 0.2, 0.3, 0.4];
+        let mut processed_sensors = ProcessedSensors::default();
+        processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 9_000,
+                status: 0,
+            },
+            accel: [1.0, 2.0, 3.0],
+            gyro: [4.0, 5.0, 6.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        let now_us = board.clock_micros();
+
+        manager.send_named_telemetry_streams(
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+        );
+
+        assert_eq!(manager.comm_link().heartbeat_count, 1);
+        assert_eq!(manager.comm_link().status_count, 1);
+        assert_eq!(manager.comm_link().imu_count, 1);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
+
+        let output = manager.comm_link().last_output_raw.unwrap();
+        assert_eq!(output.stamp, 1_100_000);
+        assert_eq!(output.values[0], 0.1);
+        assert_eq!(output.values[1], 0.2);
+        assert_eq!(output.values[2], 0.3);
+        assert_eq!(output.values[3], 0.4);
     }
 }
