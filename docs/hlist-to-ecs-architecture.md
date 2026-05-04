@@ -655,6 +655,18 @@ This is the first concrete use of the ports/events model.
 - Clears `param_events.changes` after the stage.
 - Removes the old later `if let Some(param_id) = changed_param_id` callback block.
 
+`rustflight_core/src/param_reactions.rs`
+
+- Adds named systems for parameter-change subscribers.
+- Adds `RcParamChangedCtx`.
+- Adds `rc_on_param_changed`.
+- Adds `CommandParamChangedCtx`.
+- Adds `command_on_param_changed`.
+- `ROSFlight::run` now calls these named systems instead of embedding the reaction loop directly.
+- `rc_on_param_changed` still calls the existing `Rc::param_change_callback` to preserve behavior.
+- `command_on_param_changed` preserves the existing failsafe-config update behavior for `PARAM_FAILSAFE_THROTTLE` and `PARAM_FIXED_WING`.
+- Adds focused coverage for command-manager reaction filtering.
+
 ### Validation Status
 
 `cargo check -p rustflight_core --lib` passes after the initial parameter-path rewrite.
@@ -664,6 +676,7 @@ Focused unit checks for the new modules pass:
 - `cargo test -p rustflight_core events::tests --lib`
 - `cargo test -p rustflight_core param_system::tests --lib`
 - `cargo test -p rustflight_core comm_manager::tests --lib`
+- `cargo test -p rustflight_core param_reactions::tests --lib`
 
 Additional status:
 
@@ -728,7 +741,7 @@ This is the first step toward replacing the old test infrastructure with small, 
 
 1. Commit the dummy-board test-support slice and this updated implementation log.
 2. Decide whether existing state-machine tests should be repaired, replaced, or temporarily isolated while the scheduler is being rewritten.
-3. Extract the parameter reaction logic currently embedded in `ROSFlight::run` into named systems with typed contexts.
+3. Replace the remaining direct `Rc::param_change_callback` dependency on `CommManager` with a `LogPort` or log event path.
 4. Install `rustfmt` or run formatting in an environment where it is available.
 5. Continue replacing direct callback blocks with named systems and ports.
 

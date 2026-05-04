@@ -50,9 +50,10 @@ use crate::{
     hlist::*,
     mixer::Mixer,
     packets,
+    param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     param_system::{self, ParamApplyCtx},
     params2::{self, PARAM_DEFINITIONS, ParamId, ParamIter},
-    ports::{EventDrainPort, EventEmitPort, ParamsWritePort},
+    ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::{self, PwmDriver},
     rc::Rc,
     sensorprocessors::CalibrationFlags,
@@ -220,22 +221,20 @@ where
             responses: EventEmitPort::new(&mut self.param_events.comm_responses),
         });
 
-        for change in self.param_events.changes.iter() {
-            self.rc_manager.param_change_callback(
-                change.id,
-                &mut self.board,
-                &self.params,
-                &mut self.comm_manager,
-            );
+        param_reactions::rc_on_param_changed(RcParamChangedCtx {
+            rc: &mut self.rc_manager,
+            board: &mut self.board,
+            params: ParamsReadPort::new(&self.params),
+            comm: &mut self.comm_manager,
+            changes: EventReadPort::new(&self.param_events.changes),
+        });
 
-            match change.id {
-                ParamId::PARAM_FAILSAFE_THROTTLE | ParamId::PARAM_FIXED_WING => {
-                    self.command_manager
-                        .update_failsafe_config(&self.params, &mut self.state_manager);
-                }
-                _ => {}
-            }
-        }
+        param_reactions::command_on_param_changed(CommandParamChangedCtx {
+            command: &mut self.command_manager,
+            state: &mut self.state_manager,
+            params: ParamsReadPort::new(&self.params),
+            changes: EventReadPort::new(&self.param_events.changes),
+        });
 
         self.comm_manager
             .send_comm_responses(&mut self.board, &mut self.param_events);

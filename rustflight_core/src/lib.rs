@@ -47,6 +47,7 @@ pub mod estimator;
 pub mod hlist;
 pub mod mixer;
 pub mod packets;
+pub mod param_reactions;
 pub mod param_system;
 //pub mod params;
 pub mod command_manager;
