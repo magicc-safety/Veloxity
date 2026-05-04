@@ -839,21 +839,58 @@ The exact order after `pixracerpro` can change based on hardware priorities, but
 
 `sim/src/board.rs`
 
-- Adds an override for `BoardTrait::update_sensor_bus`.
-- The old `update_sensors` HList implementation remains intact.
+- The old HList-oriented sim board has been deleted and replaced.
+- The replacement board implements `BoardTrait` with `HNil` associated sensor types for the old HList path.
+- `update_sensors` is now a no-op.
+- `update_sensor_bus` is the active board-layer sensor path.
 - The new method fills named `SensorBus` fields:
   - `imu`
   - `mag`
   - `baro`
   - `gnss`
   - `rc`
-- The new method explicitly sets currently absent sim sources to `None`:
+- Currently absent sim sources are left empty after `SensorBus::clear`:
   - `pitot`
   - `range`
   - `battery`
   - `attitude`
-- This duplicates the current sim sensor ingestion behavior into the named resource path.
-- Runtime behavior is unchanged because `ROSFlight::run` still uses the HList path.
+- MAVLink is exposed through UDP.
+- Default MAVLink bind address: `127.0.0.1:14557`.
+- Default MAVLink remote address: `127.0.0.1:14520`.
+- These can be changed with:
+  - `RUSTFLIGHT_MAVLINK_BIND`
+  - `RUSTFLIGHT_MAVLINK_REMOTE`
+- Zenoh is used as the board-layer bridge for ROS-shaped sensor messages.
+- Default Zenoh endpoint: `tcp/127.0.0.1:7447`.
+- This can be changed with `RUSTFLIGHT_ZENOH_ENDPOINT`.
+
+`sim/src/bin/rustflight.rs`
+
+- The old `ROSFlight`/HList sim binary has been deleted and replaced.
+- The replacement binary instantiates the new `World`.
+- It subscribes to `rust/tick` over Zenoh.
+- On each tick it runs `World::run_comm_param_sensor_stages`.
+- It does not instantiate `ROSFlight`.
+- It does not carry a `Configuration` implementation or HList packet indices.
+- The new sim currently exercises the safe scheduler subset:
+  - MAVLink receive/decode
+  - params/events/reactions/responses
+  - Zenoh-backed sensor ingestion
+  - named sensor processing
+- Estimator/controller/mixer execution is still not wired in this new sim path.
+
+ROSflight SIL reference findings:
+
+- ROSflight documentation describes the firmware as a core library plus board implementations.
+- In SIL, the same firmware core is used with a simulated board layer.
+- Hardware talks to `rosflight_io` over serial USB/UART.
+- ROSflight SIL talks to `rosflight_io` over UDP on localhost, simulating the serial link.
+- `rosflight_io` is the ROS 2 gateway and converts between ROS 2 interfaces and MAVLink.
+- The ROSflight docs explicitly describe running `rosflight_io` in simulation with `udp:=true`.
+- Therefore, this branch should treat UDP MAVLink as the first SIL transport.
+- A virtual USB/PTY transport can still be added later if a specific colcon/ROS integration requires a serial-looking device, but it is not the ROSflight default SIL path.
+- In this RustFlight design, a Zenoh bridge is assumed to provide ROS-shaped sensor messages into the board layer.
+- The board layer interprets those Zenoh payloads as ROS message structs and converts them into RustFlight packets.
 
 Validation:
 
@@ -862,7 +899,13 @@ Validation:
 
 Next sim step:
 
-- After core has a scheduler path that uses `SensorBus` and `process_sensor_bus`, switch `sim` execution from the HList path to the named sensor path.
+- Wire more of the new `World` scheduler into the sim path:
+  - RC handling
+  - command manager
+  - state manager
+  - estimator/controller/mixer
+  - PWM publishing
+- Keep using UDP MAVLink for `rosflight_io` compatibility unless a serial/PTY requirement is confirmed.
 
 ## Scheduler Strategy Decision
 
