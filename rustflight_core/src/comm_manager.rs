@@ -40,7 +40,8 @@ use crate::bodytype::BodyType;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
-    CalibrationRequested, CommandEventQueues, CommResponse, ParamEventQueues, ParamSetRequested,
+    CalibrationRequested, CommandEventQueues, CommResponse, OffboardControlRequested,
+    ParamEventQueues, ParamSetRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -643,7 +644,6 @@ where
         param_events: &mut ParamEventQueues,
         command_events: &mut CommandEventQueues,
         board: &mut B,
-        command_manager: &mut CommandManager,
     ) {
         // first check the param_request_list
         if self.msgs.param_request_list.take().is_some() {
@@ -678,10 +678,11 @@ where
             self.send_timesync(board, msg);
         }
 
-        // offboard control message received... pass to the command_manager
         if let Some(msg) = self.msgs.offboard_control.take() {
             let now_us = board.clock_micros();
-            command_manager.set_new_offboard_command(now_us, &msg, &params);
+            let _ = command_events
+                .offboard_control_requests
+                .push(OffboardControlRequested { now_us, msg });
         }
 
         if let Some(msg) = self.msgs.param_set.take() {
@@ -957,8 +958,10 @@ mod tests {
         command_manager::CommandManager,
         command_system::{self, CalibrationRequestCtx},
         comm_messages::{
-            enums::{RosflightCmd, RosflightCmdResponse},
-            messages::{ParamSetMsg, RosflightCmdMsg},
+            enums::{
+                OffboardControlIgnore, OffboardControlMode, RosflightCmd, RosflightCmdResponse,
+            },
+            messages::{OffboardControlMsg, ParamSetMsg, RosflightCmdMsg},
         },
         events::{CommandEventQueues, CommResponse, ParamEventQueues},
         param_system::{self, ParamApplyCtx},
@@ -977,7 +980,6 @@ mod tests {
         let mut params_iter = None;
         let mut param_events = ParamEventQueues::default();
         let mut command_events = CommandEventQueues::default();
-        let mut command_manager = CommandManager::new();
 
         manager.msgs.param_set = Some(ParamSetMsg {
             target_system: 1,
@@ -992,7 +994,6 @@ mod tests {
             &mut param_events,
             &mut command_events,
             &mut board,
-            &mut command_manager,
         );
 
         assert_eq!(
@@ -1041,7 +1042,6 @@ mod tests {
         let mut params_iter = None;
         let mut param_events = ParamEventQueues::default();
         let mut command_events = CommandEventQueues::default();
-        let mut command_manager = CommandManager::new();
 
         manager.msgs.param_set = Some(ParamSetMsg {
             target_system: 1,
@@ -1056,7 +1056,6 @@ mod tests {
             &mut param_events,
             &mut command_events,
             &mut board,
-            &mut command_manager,
         );
 
         assert_eq!(
@@ -1148,7 +1147,6 @@ mod tests {
         let mut param_events = ParamEventQueues::default();
         let mut command_events = CommandEventQueues::default();
         let mut cal_flags = CalibrationFlags::empty();
-        let mut command_manager = CommandManager::new();
 
         manager.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::GyroCalibration,
@@ -1160,7 +1158,6 @@ mod tests {
             &mut param_events,
             &mut command_events,
             &mut board,
-            &mut command_manager,
         );
 
         assert!(cal_flags.is_empty());
@@ -1183,5 +1180,43 @@ mod tests {
             ack.success,
             RosflightCmdResponse::RosflightCmdSuccess
         ));
+    }
+
+    #[test]
+    fn offboard_control_message_emits_command_event() {
+        let mut board = TestBoard {
+            current_time_us: 55_000,
+            tx_write_count: 0,
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut params = Params::new();
+        let mut params_iter = None;
+        let mut param_events = ParamEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.offboard_control = Some(OffboardControlMsg {
+            mode: OffboardControlMode::ModeRollPitchYawrateThrottle,
+            ignore: OffboardControlIgnore::IGNORE_FY,
+            qx: 0.1,
+            qy: 0.2,
+            qz: 0.3,
+            fx: 0.4,
+            fy: 0.5,
+            fz: 0.6,
+        });
+
+        manager.act_on_messages(
+            &mut params_iter,
+            &mut params,
+            &mut param_events,
+            &mut command_events,
+            &mut board,
+        );
+
+        let request = command_events.offboard_control_requests.pop().unwrap();
+        assert_eq!(request.now_us, 55_000);
+        assert_eq!(request.msg.mode, OffboardControlMode::ModeRollPitchYawrateThrottle);
+        assert!(request.msg.ignore.contains(OffboardControlIgnore::IGNORE_FY));
+        assert_eq!(request.msg.qx, 0.1);
     }
 }

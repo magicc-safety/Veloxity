@@ -1506,6 +1506,60 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Offboard Command Event Progress
+
+Design correction:
+
+- Offboard control messages should not mutate `CommandManager` directly from comms.
+- Comms should emit an offboard control request event with the receipt timestamp.
+- The command system should apply the request to `CommandManager`.
+- World should schedule that command system before RC/command/state/control stages use the command state.
+
+`rustflight_core/src/events.rs`
+
+- Adds `OffboardControlRequested`.
+- Adds fixed-capacity offboard control request queue storage to `CommandEventQueues`.
+
+`rustflight_core/src/command_system.rs`
+
+- Adds `OffboardControlCtx`.
+- Adds `apply_offboard_control_requests`.
+- This system drains offboard request events and calls `CommandManager::set_new_offboard_command`.
+
+`rustflight_core/src/comm_manager.rs`
+
+- `act_on_messages` now pushes `OffboardControlRequested` when an offboard control message is received.
+- It no longer calls `CommandManager::set_new_offboard_command` directly.
+- `act_on_messages` no longer receives `&mut CommandManager`.
+- This narrows comms access to the command subsystem and improves blame/diagnosis when command state changes.
+
+`rustflight_core/src/world.rs`
+
+- Schedules `apply_offboard_control_requests` in `run_comm_param_sensor_stages_only`.
+- The offboard command request is applied before later command/state/control stages consume command state.
+
+`rustflight_core/src/rosflight.rs`
+
+- Adds legacy compatibility scheduling for `apply_offboard_control_requests`.
+
+Tests added:
+
+- `command_system::tests::apply_offboard_control_requests_updates_command_manager`
+  - Proves the command system applies offboard request events to `CommandManager`.
+- `comm_manager::tests::offboard_control_message_emits_command_event`
+  - Proves comms emits an offboard event and does not directly activate offboard command state.
+- `world::tests::world_applies_offboard_control_command_event`
+  - Proves the World scheduler drains the event and updates command state.
+
+Validation:
+
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

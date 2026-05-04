@@ -5,7 +5,7 @@ use crate::{
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
     command_manager::CommandManager,
-    command_system::{self, CalibrationRequestCtx},
+    command_system::{self, CalibrationRequestCtx, OffboardControlCtx},
     controller::Controller,
     events::{CommandEventQueues, ParamEventQueues},
     estimator::{AttitudeStateTrait, NamedEstimator},
@@ -143,12 +143,16 @@ where
             &mut self.param_events,
             &mut self.command_events,
             &mut self.board,
-            &mut self.command,
         );
 
         command_system::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
             flags: &mut self.cal_flags,
+        });
+        command_system::apply_offboard_control_requests(OffboardControlCtx {
+            requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
+            command: &mut self.command,
+            params: &self.params,
         });
 
         param_system::apply_param_requests(ParamApplyCtx {
@@ -303,8 +307,10 @@ mod tests {
     use crate::{
         bodytype::quadrotor::Quadrotor,
         comm_messages::{
-            enums::{RosflightCmd, RosflightCmdResponse},
-            messages::{ParamSetMsg, RosflightCmdMsg},
+            enums::{
+                OffboardControlIgnore, OffboardControlMode, RosflightCmd, RosflightCmdResponse,
+            },
+            messages::{OffboardControlMsg, ParamSetMsg, RosflightCmdMsg},
         },
         params2::{ParamId, ParamValue},
         pwm::{PwmDriver, PwmError},
@@ -644,6 +650,42 @@ mod tests {
         assert!(!world.pwm_output.is_enabled());
         assert_eq!(world.pwm.disable_all_count, 1);
         assert_eq!(world.pwm.flush_count, 1);
+    }
+
+    #[test]
+    fn world_applies_offboard_control_command_event() {
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.offboard_control = Some(OffboardControlMsg {
+            mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+            ignore: OffboardControlIgnore::IGNORE_QY,
+            qx: 0.1,
+            qy: 0.2,
+            qz: 0.3,
+            fx: 0.4,
+            fy: 0.5,
+            fz: 0.6,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert!(world.command.is_offboard_active());
+        assert!(world.command_events.offboard_control_requests.is_empty());
     }
 
 }

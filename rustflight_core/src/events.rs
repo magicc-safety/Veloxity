@@ -1,5 +1,8 @@
 use crate::{
-    comm_messages::{enums::RosflightCmd, messages::ParamValueMsg},
+    comm_messages::{
+        enums::RosflightCmd,
+        messages::{OffboardControlMsg, ParamValueMsg},
+    },
     params2::{ParamId, ParamValue},
 };
 
@@ -111,6 +114,12 @@ pub struct CalibrationRequested {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct OffboardControlRequested {
+    pub now_us: u64,
+    pub msg: OffboardControlMsg,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum CommResponse {
     ParamValue(ParamValueMsg),
 }
@@ -119,6 +128,7 @@ pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const PARAM_CHANGED_QUEUE_CAPACITY: usize = 8;
 pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = 8;
 pub const CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 4;
+pub const OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY: usize = 4;
 
 #[derive(Default)]
 pub struct ParamEventQueues {
@@ -130,6 +140,8 @@ pub struct ParamEventQueues {
 #[derive(Default)]
 pub struct CommandEventQueues {
     pub calibration_requests: EventQueue<CalibrationRequested, CALIBRATION_REQUEST_QUEUE_CAPACITY>,
+    pub offboard_control_requests:
+        EventQueue<OffboardControlRequested, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY>,
 }
 
 impl ParamEventQueues {

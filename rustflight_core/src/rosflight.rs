@@ -40,7 +40,7 @@ use crate::{
     comm_manager::{self, comm_link_trait::CommInterface},
     comm_messages::{self, messages::HeartbeatMsg},
     command_manager::{CommandManager, ControlType},
-    command_system::{self, CalibrationRequestCtx},
+    command_system::{self, CalibrationRequestCtx, OffboardControlCtx},
     controller::Controller,
     events::{CommandEventQueues, ParamEventQueues},
     errors,
@@ -214,12 +214,16 @@ where
             &mut self.param_events,
             &mut self.command_events,
             &mut self.board,
-            &mut self.command_manager,
         );
 
         command_system::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
             flags: &mut self.cal_flags,
+        });
+        command_system::apply_offboard_control_requests(OffboardControlCtx {
+            requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
+            command: &mut self.command_manager,
+            params: &self.params,
         });
 
         param_system::apply_param_requests(ParamApplyCtx {
