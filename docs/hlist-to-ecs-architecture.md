@@ -1,5 +1,45 @@
 # Moving From HLists Toward Static ECS-Style Systems
 
+## Working Agreement
+
+This branch is experimental, but it should still be developed in small, inspectable steps.
+
+User requirements for ongoing work:
+
+- Work on the local branch `tmp_restructuring`.
+- Keep a dense local git history.
+- Commit frequently after each coherent, validated migration slice.
+- Prefer small commits that are easy to bisect over large accumulated rewrites.
+- Document the design intent, current progress, tests, and next steps as work proceeds.
+- Keep this markdown useful as a handoff record so another engineer can continue without reconstructing context from memory.
+- Mark each stage of the migration with what changed, why it changed, how it preserves ROSflight compatibility, and what remains.
+- Add tests for each new component or scheduler handoff introduced in the next part of the stack.
+- Run focused tests for each added component before moving on.
+- Also run broader validation checks, especially `cargo check -p rustflight_core --lib` and `cargo check -p sim`, before committing a completed slice.
+- Preserve ROSflight/rosflight_io wire behavior while improving internal causality.
+- Responses that imply completed work should be sent after the relevant owning system completes that work.
+- Avoid one-off patches that duplicate old shortcuts in the new architecture.
+- Continue building the new World/ports/events path in parallel with the legacy HList path until the new path is verified enough to delete the old path.
+
+Workflow notes for future agents:
+
+- Before editing, inspect the current tree with `git status --short`.
+- Use `rg` first for repository search.
+- Use `apply_patch` for manual edits.
+- Do not revert user changes.
+- Treat each migration as a narrow slice:
+  - add the event/resource/port shape,
+  - move ownership of mutation to the domain system,
+  - wire `World`,
+  - keep legacy `ROSFlight` compatibility wired where needed,
+  - add component tests,
+  - add World handoff tests when the scheduler path changes,
+  - update this document,
+  - validate,
+  - commit locally.
+- `cargo fmt` is currently unavailable in this environment because `cargo-fmt` is not installed.
+- If sandbox namespace errors occur on read-only shell commands, rerun the same command with the approved/escalated path rather than changing the workflow.
+
 ## Context
 
 RustFlight currently uses HLists to encode board sensor inventory, sensor processing pipelines, body-type sensor requirements, telemetry packet access, and compile-time compatibility between boards and vehicle bodies.
@@ -1692,3 +1732,78 @@ Next planned migration target:
 - Continue removing direct mutation shortcuts from command and communication handling.
 - Prioritize paths where ROSflight expects a command response or externally visible behavior after completed work.
 - Keep each new step independently tested at the component level and through `World`.
+
+## Param Request List Event Progress
+
+Reason for this change:
+
+- `PARAM_REQUEST_LIST` is a ROSflight/rosflight_io compatibility path.
+- The old implementation made `CommManager::act_on_messages` own the active parameter iterator and stream parameter values directly.
+- That forced the comm parser to receive `&mut Params` and a mutable `params_iter` even though comms should only recognize the inbound request.
+- The new architecture should keep communication parsing separate from parameter-list streaming.
+
+Design now implemented:
+
+- `CommManager` emits `ParamListRequested` when a `PARAM_REQUEST_LIST` message arrives.
+- `CommManager` no longer owns or advances a parameter iterator.
+- `CommManager::act_on_messages` no longer receives `&mut Params`.
+- `CommManager::act_on_messages` no longer receives `&mut Option<ParamIter>`.
+- `param_system::ParamListState` owns the active parameter-list stream state.
+- `param_system::service_param_list_requests` drains list requests, reads params through `ParamsReadPort`, and emits one `CommResponse::ParamValue` per scheduler call.
+- `CommManager::send_comm_responses` remains the wire-output stage that sends `PARAM_VALUE` messages through the configured comm link.
+
+ROSflight compatibility:
+
+- The external behavior remains a stream of `PARAM_VALUE` messages in response to `PARAM_REQUEST_LIST`.
+- The stream still sends one parameter value at a time across scheduler calls, matching the old incremental behavior.
+- The wire message type and parameter payload shape are unchanged.
+
+Compile-time boundary improvement:
+
+- Comms can no longer mutate params from `act_on_messages`.
+- Parameter-list streaming now belongs to the parameter system.
+- The parameter-list system receives only a read port to params and mutable access to its own `ParamListState`.
+- This moves another communication-driven behavior into the ports/events/scheduler pattern.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `ParamListRequested`.
+  - Adds a fixed-capacity list request queue to `ParamEventQueues`.
+- `rustflight_core/src/param_system.rs`
+  - Adds `ParamListState`.
+  - Adds `ParamListCtx`.
+  - Adds `service_param_list_requests`.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits list request events.
+  - Removes param iterator ownership from `act_on_messages`.
+  - Narrows the `act_on_messages` signature.
+- `rustflight_core/src/world.rs`
+  - Owns `ParamListState`.
+  - Schedules `service_param_list_requests` before comm responses are sent.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the same compatibility scheduling in the legacy path.
+
+Tests added:
+
+- `param_system::tests::service_param_list_requests_streams_one_param_per_call`
+  - Proves the parameter system owns the streaming state and emits one response per call.
+- `comm_manager::tests::param_request_list_emits_request_without_streaming_from_comms`
+  - Proves comms only emits the request and does not send parameter values directly.
+- `world::tests::world_scheduler_streams_param_request_list_through_param_system`
+  - Proves the World scheduler accepts the request, streams through the parameter system, and sends ROSflight-compatible parameter values.
+
+Validation:
+
+- `cargo test -p rustflight_core param_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Current status after this slice:
+
+- `params_iter` is gone from `World`.
+- `params_iter` is gone from legacy `ROSFlight`.
+- `params_iter` is gone from `CommManager`.
+- `Params::iter` and `ParamIter` still exist in `params2`; they are no longer part of the active comm scheduling path and can be removed later if no remaining use appears.

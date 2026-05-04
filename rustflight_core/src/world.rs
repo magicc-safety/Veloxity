@@ -11,8 +11,8 @@ use crate::{
     estimator::{AttitudeStateTrait, NamedEstimator},
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
-    param_system::{self, ParamApplyCtx},
-    params2::{ParamIter, Params},
+    param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState},
+    params2::Params,
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
     pwm_system::{PwmOutputState, sync_pwm_output_state, write_pwm_commands},
@@ -39,7 +39,7 @@ where
 {
     pub board: B,
     pub params: Params,
-    pub params_iter: Option<ParamIter>,
+    pub param_list_state: ParamListState,
     pub param_events: ParamEventQueues,
     pub command_events: CommandEventQueues,
     pub comm: CommManager<B, CI>,
@@ -102,7 +102,7 @@ where
         Self {
             board,
             params,
-            params_iter: None,
+            param_list_state: ParamListState::default(),
             param_events: ParamEventQueues::default(),
             command_events: CommandEventQueues::default(),
             comm,
@@ -138,8 +138,6 @@ where
 
         self.comm.process_incoming_messages(&mut self.board);
         self.comm.act_on_messages(
-            &mut self.params_iter,
-            &mut self.params,
             &mut self.param_events,
             &mut self.command_events,
             &mut self.board,
@@ -160,6 +158,13 @@ where
         });
         self.comm
             .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
+
+        param_system::service_param_list_requests(ParamListCtx {
+            params: ParamsReadPort::new(&self.params),
+            state: &mut self.param_list_state,
+            requests: EventDrainPort::new(&mut self.param_events.list_requests),
+            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+        });
 
         param_system::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut self.params),
@@ -316,7 +321,7 @@ mod tests {
             enums::{
                 OffboardControlIgnore, OffboardControlMode, RosflightCmd, RosflightCmdResponse,
             },
-            messages::{OffboardControlMsg, ParamSetMsg, RosflightCmdMsg},
+            messages::{OffboardControlMsg, ParamRequestListMsg, ParamSetMsg, RosflightCmdMsg},
         },
         params2::{ParamId, ParamValue},
         pwm::{PwmDriver, PwmError},
@@ -426,6 +431,46 @@ mod tests {
             ParamValue::Int(42)
         );
         assert_eq!(world.comm.sysid, 42);
+    }
+
+    #[test]
+    fn world_scheduler_streams_param_request_list_through_param_system() {
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.param_request_list = Some(ParamRequestListMsg {
+            target_system: 1,
+            target_component: 1,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert!(world.param_events.list_requests.is_empty());
+        assert!(world.param_list_state.is_active());
+        assert_eq!(world.comm.comm_link().sent_param_value_count, 1);
+        let first = world.comm.comm_link().sent_param_values[0].unwrap();
+        assert_eq!(first.param_index, ParamId::PARAM_BAUD_RATE as u16);
+        assert_eq!(first.param_value, ParamValue::Int(921600));
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert_eq!(world.comm.comm_link().sent_param_value_count, 2);
+        let second = world.comm.comm_link().sent_param_values[1].unwrap();
+        assert_eq!(second.param_index, ParamId::PARAM_SERIAL_DEVICE as u16);
     }
 
     #[test]

@@ -109,6 +109,9 @@ pub struct ParamChanged {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamListRequested;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CalibrationRequested {
     pub command: RosflightCmd,
 }
@@ -130,6 +133,7 @@ pub enum CommResponse {
 }
 
 pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = 4;
+pub const PARAM_LIST_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const PARAM_CHANGED_QUEUE_CAPACITY: usize = 8;
 pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = 8;
 pub const CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 4;
@@ -139,6 +143,7 @@ pub const PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY: usize = 2;
 #[derive(Default)]
 pub struct ParamEventQueues {
     pub set_requests: EventQueue<ParamSetRequested, PARAM_SET_REQUEST_QUEUE_CAPACITY>,
+    pub list_requests: EventQueue<ParamListRequested, PARAM_LIST_REQUEST_QUEUE_CAPACITY>,
     pub changes: EventQueue<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>,
     pub comm_responses: EventQueue<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
 }
@@ -155,6 +160,7 @@ pub struct CommandEventQueues {
 impl ParamEventQueues {
     pub fn clear_loop_events(&mut self) {
         self.set_requests.clear();
+        self.list_requests.clear();
         self.changes.clear();
         self.comm_responses.clear();
     }

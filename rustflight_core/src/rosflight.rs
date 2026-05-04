@@ -52,8 +52,8 @@ use crate::{
     mixer::Mixer,
     packets,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
-    param_system::{self, ParamApplyCtx},
-    params2::{self, PARAM_DEFINITIONS, ParamId, ParamIter},
+    param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState},
+    params2::{self, PARAM_DEFINITIONS, ParamId},
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::{self, PwmDriver},
     rc::Rc,
@@ -100,7 +100,7 @@ where
     // dt: f64,  // Commented out - now using constant ESTIMATOR_DT instead of calculated dt
     pub board: B,
     params: params2::Params,
-    params_iter: Option<ParamIter>,
+    param_list_state: ParamListState,
     param_events: ParamEventQueues,
     command_events: CommandEventQueues,
     comm_manager: comm_manager::CommManager<B, CI>,
@@ -180,7 +180,7 @@ where
             // dt: 0.0,  // Commented out - now using constant ESTIMATOR_DT
             board,
             params,
-            params_iter: None,
+            param_list_state: ParamListState::default(),
             param_events: ParamEventQueues::default(),
             command_events: CommandEventQueues::default(),
             comm_manager,
@@ -209,8 +209,6 @@ where
         // act on any received messages this loop
         self.comm_manager.process_incoming_messages(&mut self.board);
         self.comm_manager.act_on_messages(
-            &mut self.params_iter,
-            &mut self.params,
             &mut self.param_events,
             &mut self.command_events,
             &mut self.board,
@@ -231,6 +229,13 @@ where
         });
         self.comm_manager
             .send_completed_param_defaults_ack(&mut self.board, applied_defaults);
+
+        param_system::service_param_list_requests(ParamListCtx {
+            params: ParamsReadPort::new(&self.params),
+            state: &mut self.param_list_state,
+            requests: EventDrainPort::new(&mut self.param_events.list_requests),
+            responses: EventEmitPort::new(&mut self.param_events.comm_responses),
+        });
 
         param_system::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut self.params),
