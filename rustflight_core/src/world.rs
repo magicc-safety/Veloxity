@@ -194,6 +194,8 @@ where
         if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
             self.state.update(Event::CALIBRATION_COMPLETE, &self.params);
         }
+        self.comm
+            .send_completed_calibration_ack(&mut self.board, self.cal_flags);
     }
 
     pub fn run_rc_command_state_stages(&mut self) {
@@ -272,7 +274,10 @@ mod tests {
     use super::*;
     use crate::{
         bodytype::quadrotor::Quadrotor,
-        comm_messages::messages::ParamSetMsg,
+        comm_messages::{
+            enums::{RosflightCmd, RosflightCmdResponse},
+            messages::{ParamSetMsg, RosflightCmdMsg},
+        },
         params2::{ParamId, ParamValue},
         pwm::{PwmDriver, PwmError},
         test_support::{RecordingCommLink, TestBoard},
@@ -509,4 +514,45 @@ mod tests {
                 .contains(crate::state_machine::ErrorFlag::IMU_NOT_RESPONDING)
         );
     }
+
+    #[test]
+    fn world_sends_calibration_ack_after_calibration_flag_clears() {
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::GyroCalibration,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert!(world.cal_flags.contains(CalibrationFlags::GYRO));
+        assert_eq!(world.comm.comm_link().cmd_ack_count, 0);
+
+        world.cal_flags.remove(CalibrationFlags::GYRO);
+        world.update_sensor_health_and_calibration(world.board.clock_micros());
+
+        assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
+        let ack = world.comm.comm_link().last_cmd_ack.unwrap();
+        assert!(matches!(ack.command, RosflightCmd::GyroCalibration));
+        assert!(matches!(
+            ack.success,
+            RosflightCmdResponse::RosflightCmdSuccess
+        ));
+    }
+
 }

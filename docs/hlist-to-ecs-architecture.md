@@ -1241,6 +1241,58 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Calibration ACK Causality Progress
+
+Design correction:
+
+- Calibration command receipt must not report success.
+- Calibration command receipt starts calibration work.
+- The sensor/calibration system owns completion.
+- Communication ACK success is sent only after the relevant calibration flag has been cleared by processing.
+- This matches the broader plan: requests emit work, systems perform work, and responses are emitted after work completes.
+
+`rustflight_core/src/comm_manager.rs`
+
+- Adds a pending calibration ACK slot in `CommManager`.
+- Calibration commands now set the corresponding `CalibrationFlags` and store the pending command.
+- Calibration commands no longer send immediate success ACKs.
+- Adds `send_completed_calibration_ack`.
+- `send_completed_calibration_ack` sends `RosflightCmdSuccess` only when the pending command's flag is no longer active.
+- Non-calibration commands still use the immediate command ACK path.
+
+`rustflight_core/src/world.rs`
+
+- After sensor processing and sensor health/calibration updates, World calls `send_completed_calibration_ack`.
+- This places the success response after the stage that can observe calibration completion.
+
+`rustflight_core/src/test_support.rs`
+
+- `RecordingCommLink` now records command ACK count and last command ACK.
+
+Tests added:
+
+- `comm_manager::tests::calibration_command_ack_is_deferred_until_flag_clears`
+  - Proves a gyro calibration command sets the gyro calibration flag.
+  - Proves no ACK is sent at command receipt time.
+  - Proves success ACK is sent only after the gyro flag clears.
+- `world::tests::world_sends_calibration_ack_after_calibration_flag_clears`
+  - Proves the scheduler path preserves this deferred ACK behavior.
+
+PWM note:
+
+- A draft direct PWM enable/disable polling change was intentionally not kept.
+- PWM should follow the same design principle as calibration:
+  - state/command facts should cause scheduled output intent
+  - PWM hardware/sim output should react in its own stage
+  - tests should verify transition-driven behavior, not a loop shortcut
+
+Validation:
+
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

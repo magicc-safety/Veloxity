@@ -92,6 +92,16 @@ pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
     buffer
 }
 
+fn calibration_command_is_complete(command: RosflightCmd, flags: CalibrationFlags) -> bool {
+    match command {
+        RosflightCmd::AccelCalibration => !flags.contains(CalibrationFlags::ACCEL),
+        RosflightCmd::GyroCalibration => !flags.contains(CalibrationFlags::GYRO),
+        RosflightCmd::BaroCalibration => !flags.contains(CalibrationFlags::BARO),
+        RosflightCmd::AirspeedCalibration => !flags.contains(CalibrationFlags::PITOT),
+        _ => false,
+    }
+}
+
 pub struct CommManager<B, T>
 where
     B: board::BoardIo,
@@ -112,6 +122,7 @@ where
     pub sysid: u8,
     comm_link: T,
     pub msgs: comm_messages::Messages,
+    pending_calibration_ack: Option<RosflightCmd>,
     _board_marker: PhantomData<B>,
 }
 
@@ -137,6 +148,7 @@ where
             sysid: 0,
             comm_link,
             msgs: comm_messages::Messages::default(),
+            pending_calibration_ack: None,
             _board_marker: PhantomData,
         }
     }
@@ -597,6 +609,31 @@ where
         self.send_rosflight_output_raw(board, RosflightOutputRawMsg { stamp: now_us, values });
     }
 
+    pub fn send_completed_calibration_ack(
+        &mut self,
+        board: &mut B,
+        flags: CalibrationFlags,
+    ) -> bool {
+        let Some(command) = self.pending_calibration_ack else {
+            return false;
+        };
+
+        if calibration_command_is_complete(command, flags) {
+            self.comm_link.send_cmd_ack(
+                board,
+                self.sysid,
+                RosflightCmdAckMsg {
+                    command,
+                    success: RosflightCmdResponse::RosflightCmdSuccess,
+                },
+            );
+            self.pending_calibration_ack = None;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn act_on_messages(
         &mut self,
         params_iter: &mut Option<ParamIter>,
@@ -678,6 +715,7 @@ where
 
             // Assume failure unless explicitly set to success
             let mut success = RosflightCmdResponse::RosflightCmdFailed;
+            let mut send_ack_now = true;
 
             match msg.command {
                 RosflightCmd::RcCalibration => {
@@ -692,25 +730,29 @@ where
                     //defmt::info!("Starting Accelerometer Calibration.");
                     cal_flags.insert(CalibrationFlags::ACCEL); // Set the flag
                     // The actual calibration happens over time in ImuProcessor
-                    success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
+                    self.pending_calibration_ack = Some(msg.command);
+                    send_ack_now = false;
                 }
                 RosflightCmd::GyroCalibration => {
                     //defmt::info!("Starting Gyro Calibration.");
                     cal_flags.insert(CalibrationFlags::GYRO); // Set the flag
                     // The actual calibration happens over time in ImuProcessor
-                    success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
+                    self.pending_calibration_ack = Some(msg.command);
+                    send_ack_now = false;
                 }
                 RosflightCmd::BaroCalibration => {
                     //defmt::info!("Starting Baro Calibration.");
                     cal_flags.insert(CalibrationFlags::BARO); // Set the flag
                     // The actual calibration happens over time in BaroProcessor
-                    success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
+                    self.pending_calibration_ack = Some(msg.command);
+                    send_ack_now = false;
                 }
                 RosflightCmd::AirspeedCalibration => {
                     //defmt::info!("Starting Airspeed Calibration.");
                     cal_flags.insert(CalibrationFlags::PITOT); // Set the flag
                     // The actual calibration happens over time in PitotProcessor
-                    success = RosflightCmdResponse::RosflightCmdSuccess; // Acknowledge start
+                    self.pending_calibration_ack = Some(msg.command);
+                    send_ack_now = false;
                 }
                 RosflightCmd::ReadParams => {
                     // Placeholder: Need BoardTrait method for reading from non-volatile memory
@@ -770,15 +812,13 @@ where
                 }
             } // end match
 
-            // --- Send ROSFLIGHT_CMD_ACK ---
-            let ack_msg = RosflightCmdAckMsg {
-                command: msg.command, // Echo the command that was processed
-                success: success,     // Indicate success or failure
-            };
-            // Need to add send_cmd_ack to CommInterface and MavlinkInterface
-            self.comm_link.send_cmd_ack(board, self.sysid, ack_msg);
-            // println!("Sent ACK for command {:?} with status {:?}", ack_msg.command, ack_msg.success);
-            //defmt::info!("Sent ACK")
+            if send_ack_now {
+                let ack_msg = RosflightCmdAckMsg {
+                    command: msg.command,
+                    success,
+                };
+                self.comm_link.send_cmd_ack(board, self.sysid, ack_msg);
+            }
         } // end if let Some(msg)
 
     }
@@ -889,7 +929,10 @@ mod tests {
     use crate::{
         board::BoardTrait,
         command_manager::CommandManager,
-        comm_messages::messages::ParamSetMsg,
+        comm_messages::{
+            enums::{RosflightCmd, RosflightCmdResponse},
+            messages::{ParamSetMsg, RosflightCmdMsg},
+        },
         events::{CommResponse, ParamEventQueues},
         param_system::{self, ParamApplyCtx},
         params2::{ParamId, ParamValue, Params},
@@ -1067,5 +1110,44 @@ mod tests {
         assert_eq!(output.values[1], 0.2);
         assert_eq!(output.values[2], 0.3);
         assert_eq!(output.values[3], 0.4);
+    }
+
+    #[test]
+    fn calibration_command_ack_is_deferred_until_flag_clears() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut params = Params::new();
+        let mut params_iter = None;
+        let mut param_events = ParamEventQueues::default();
+        let mut cal_flags = CalibrationFlags::empty();
+        let mut command_manager = CommandManager::new();
+
+        manager.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::GyroCalibration,
+        });
+
+        manager.act_on_messages(
+            &mut params_iter,
+            &mut params,
+            &mut param_events,
+            &mut cal_flags,
+            &mut board,
+            &mut command_manager,
+        );
+
+        assert!(cal_flags.contains(CalibrationFlags::GYRO));
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+
+        cal_flags.remove(CalibrationFlags::GYRO);
+
+        assert!(manager.send_completed_calibration_ack(&mut board, cal_flags));
+        assert_eq!(manager.comm_link().cmd_ack_count, 1);
+
+        let ack = manager.comm_link().last_cmd_ack.unwrap();
+        assert!(matches!(ack.command, RosflightCmd::GyroCalibration));
+        assert!(matches!(
+            ack.success,
+            RosflightCmdResponse::RosflightCmdSuccess
+        ));
     }
 }

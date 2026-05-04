@@ -46,6 +46,8 @@ pub struct RecordingCommLink {
     pub attitude_count: usize,
     pub output_raw_count: usize,
     pub last_output_raw: Option<RosflightOutputRawMsg>,
+    pub cmd_ack_count: usize,
+    pub last_cmd_ack: Option<RosflightCmdAckMsg>,
 }
 
 impl RecordingCommLink {
@@ -59,6 +61,8 @@ impl RecordingCommLink {
             attitude_count: 0,
             output_raw_count: 0,
             last_output_raw: None,
+            cmd_ack_count: 0,
+            last_cmd_ack: None,
         }
     }
 
@@ -173,8 +177,10 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         &mut self,
         _board: &mut TestBoard,
         _system_id: u8,
-        _msg: RosflightCmdAckMsg,
+        msg: RosflightCmdAckMsg,
     ) {
+        self.cmd_ack_count += 1;
+        self.last_cmd_ack = Some(msg);
     }
 
     fn send_rc_channels(
