@@ -37,6 +37,19 @@
 use crate::{errors, hlist::*, sensors::SensorBus};
 pub mod dummy;
 
+pub trait BoardIo {
+    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        sensors.clear();
+    }
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>>;
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>>;
+
+    fn clock_millis(&self) -> u32;
+    fn clock_micros(&self) -> u64;
+    fn set_test_pin_1(&mut self, _high: bool) {}
+    fn set_test_pin_2(&mut self, _high: bool) {}
+}
+
 pub trait BoardTrait {
     type RawSensorSet: HList + Default;
     type ProcessedSensorSet: HList;
@@ -54,4 +67,37 @@ pub trait BoardTrait {
     //fn clock_delay(&mut self, ms: u32);
     fn set_test_pin_1(&mut self, _high: bool) {}
     fn set_test_pin_2(&mut self, _high: bool) {}
+}
+
+impl<T> BoardIo for T
+where
+    T: BoardTrait,
+{
+    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        BoardTrait::update_sensor_bus(self, sensors);
+    }
+
+    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+        BoardTrait::serial_rx_read(self, buf)
+    }
+
+    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
+        BoardTrait::serial_tx_write(self, bytes)
+    }
+
+    fn clock_millis(&self) -> u32 {
+        BoardTrait::clock_millis(self)
+    }
+
+    fn clock_micros(&self) -> u64 {
+        BoardTrait::clock_micros(self)
+    }
+
+    fn set_test_pin_1(&mut self, high: bool) {
+        BoardTrait::set_test_pin_1(self, high);
+    }
+
+    fn set_test_pin_2(&mut self, high: bool) {
+        BoardTrait::set_test_pin_2(self, high);
+    }
 }

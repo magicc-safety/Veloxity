@@ -94,7 +94,7 @@ pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
 
 pub struct CommManager<B, T>
 where
-    B: board::BoardTrait,
+    B: board::BoardIo,
     T: comm_link_trait::CommInterface<B>,
 {
     last_heartbeat_us: u64,
@@ -117,7 +117,7 @@ where
 
 impl<B, T> CommManager<B, T>
 where
-    B: board::BoardTrait,
+    B: board::BoardIo,
     T: comm_link_trait::CommInterface<B>,
 {
     pub fn new(comm_link: T, now_us: u64) -> Self {
@@ -157,6 +157,7 @@ where
         processed_sensors: &B::ProcessedSensorSet,
         actuator_commands: &A,
     ) where
+        B: board::BoardTrait,
         BT: BodyType,
         A: AsRef<[f64]>,
         C: Configuration<B, BT>,

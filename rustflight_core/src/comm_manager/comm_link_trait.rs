@@ -41,7 +41,7 @@ use crate::comm_messages::{self, messages::*};
 use crate::packets;
 use crate::params2;
 
-pub trait CommInterface<B: board::BoardTrait> {
+pub trait CommInterface<B: board::BoardIo> {
     fn send_heartbeat(&mut self, board: &mut B, system_id: u8, msg: HeartbeatMsg) -> bool;
     fn send_named_value(&mut self, board: &mut B, system_id: u8, msg: ParamValueMsg);
     fn send_status(&mut self, board: &mut B, system_id: u8, msg: RosflightStatusMsg);

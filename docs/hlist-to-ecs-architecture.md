@@ -1125,6 +1125,54 @@ Validation:
 - `cargo test -p rustflight_core world::tests --lib` passes.
 - `cargo check -p sim` passes.
 
+## Board Boundary Progress
+
+`rustflight_core/src/board.rs`
+
+- Adds `BoardIo`.
+- `BoardIo` is the smaller board-facing trait for the new `World` path.
+- It contains only named/runtime IO operations:
+  - `update_sensor_bus`
+  - serial receive/transmit
+  - clocks
+  - optional test pins
+- `BoardIo` has no HList-associated types.
+- Existing `BoardTrait` remains for the legacy HList path.
+- A blanket `impl<T: BoardTrait> BoardIo for T` keeps old boards working while the new path migrates.
+
+`rustflight_core/src/world.rs`
+
+- `World` now requires `B: BoardIo` instead of `B: BoardTrait`.
+- This removes HList-associated board types from the `World` type boundary.
+
+`rustflight_core/src/comm_manager.rs`
+
+- `CommManager` now requires `B: BoardIo`.
+- The legacy HList telemetry method keeps a local `B: BoardTrait` bound because it still accepts `B::ProcessedSensorSet`.
+- The named telemetry method uses `ProcessedSensors` and only needs `BoardIo`.
+
+`rustflight_core/src/pwm.rs`
+
+- `PwmDriver::flush` and `PwmDriver::send_commands` now accept `B: BoardIo`.
+- This lets the new scheduler output path use a board interface without HList-associated types.
+
+`rustflight_core/src/rc.rs`
+
+- Removes the unnecessary `BoardTrait` bound from `Rc::init`.
+- RC initialization currently reads params and does not need board access.
+
+`rustflight_core/src/comm_manager/comm_link_trait.rs`
+
+- `CommInterface` now accepts `B: BoardIo`.
+- The MAVLink implementation also now only requires `BoardIo`.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p sim pwm::tests --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

@@ -34,7 +34,7 @@
 // *
 // ********************************************************
 
-use crate::board::BoardTrait;
+use crate::board::BoardIo;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PwmError {
@@ -68,8 +68,8 @@ pub trait PwmDriver {
     ///
     /// # Arguments
     /// * `now_us` - The current flight controller time in microseconds for timestamping.
-    fn flush<B: BoardTrait>(&mut self, board: &mut B);
+    fn flush<B: BoardIo>(&mut self, board: &mut B);
 
     // actually loops over the channels (up to self.len()) and sends pwm commands via set_duty_cycle
-    fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands: &[f64]);
+    fn send_commands<B: BoardIo>(&mut self, board: &mut B, commands: &[f64]);
 }

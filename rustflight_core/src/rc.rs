@@ -33,7 +33,6 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::BoardTrait;
 use crate::packets::RcPacket;
 use crate::params2::{ParamId, ParamValue, Params};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
@@ -139,12 +138,12 @@ impl Rc {
     }
 
     /// Initializes RC hardware and internal mappings
-    pub fn init<B: BoardTrait>(&mut self, board: &mut B, params: &Params) {
+    pub fn init<B>(&mut self, board: &mut B, params: &Params) {
         self.init_rc(board, params);
         self.new_command = false;
     }
 
-    fn init_rc<B: BoardTrait>(&mut self, board: &mut B, params: &Params) {
+    fn init_rc<B>(&mut self, _board: &mut B, params: &Params) {
         self.init_sticks(params);
         self.update_switch_mappings(params);
     }

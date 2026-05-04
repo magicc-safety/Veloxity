@@ -37,7 +37,7 @@
 use std::time::Instant;
 
 use crate::ros_messages::{self, Header, PwmOutput, Time};
-use rustflight_core::board::BoardTrait;
+use rustflight_core::board::BoardIo;
 // Ensure OutputRaw is imported
 use rustflight_core::errors; // Assuming errors is in core
 use rustflight_core::packets; // Assuming packets is in core
@@ -171,7 +171,7 @@ impl PwmDriver for SimPwmDriver {
         Ok(())
     }
 
-    fn flush<B: BoardTrait>(&mut self, board: &mut B) {
+    fn flush<B: BoardIo>(&mut self, board: &mut B) {
         let now_us = board.clock_micros();
         let now_sec = (now_us / 1_000_000) as i32;
         let now_nanosec = ((now_us % 1_000_000) * 1000) as u32;
@@ -190,7 +190,7 @@ impl PwmDriver for SimPwmDriver {
         let _ = self.sender.try_send(msg);
     }
 
-    fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands_slice: &[f64]) {
+    fn send_commands<B: BoardIo>(&mut self, board: &mut B, commands_slice: &[f64]) {
         let num_channels_to_write = commands_slice.len().min(self.len());
 
         for i in 0..num_channels_to_write {
@@ -211,7 +211,7 @@ impl PwmDriver for SimPwmDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustflight_core::{errors, hlist::HNil};
+    use rustflight_core::{board::BoardTrait, errors, hlist::HNil};
     use std::time::Duration;
 
     struct TestBoard {

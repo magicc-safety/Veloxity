@@ -80,7 +80,7 @@ impl MavlinkInterface {
         Ok(frame)
     }
 
-    fn send_message<B: board::BoardTrait, T: Message>(
+    fn send_message<B: board::BoardIo, T: Message>(
         &mut self,
         board: &mut B,
         system_id: u8,
@@ -189,7 +189,7 @@ impl MavlinkInterface {
     }
 }
 
-impl<B: board::BoardTrait> CommInterface<B> for MavlinkInterface {
+impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
     fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut Messages) {
         let mut buf = [0u8; RX_BUFF_SIZE];
         match board.serial_rx_read(&mut buf) {

@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use crate::{
-    board::BoardTrait,
+    board::BoardIo,
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
     command_manager::CommandManager,
@@ -23,7 +23,7 @@ use crate::{
 
 pub struct World<B, BT, CI, PD>
 where
-    B: BoardTrait,
+    B: BoardIo,
     BT: BodyType,
     BT::Estimator: NamedEstimator,
     BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State>,
@@ -57,7 +57,7 @@ where
 
 impl<B, BT, CI, PD> World<B, BT, CI, PD>
 where
-    B: BoardTrait,
+    B: BoardIo,
     BT: BodyType,
     BT::Estimator: NamedEstimator,
     BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State>,
@@ -298,9 +298,9 @@ mod tests {
             Ok(())
         }
 
-        fn flush<Board: BoardTrait>(&mut self, _board: &mut Board) {}
+        fn flush<Board: BoardIo>(&mut self, _board: &mut Board) {}
 
-        fn send_commands<Board: BoardTrait>(&mut self, _board: &mut Board, commands: &[f64]) {
+        fn send_commands<Board: BoardIo>(&mut self, _board: &mut Board, commands: &[f64]) {
             self.send_count += 1;
             self.last_command_len = commands.len().min(self.last_commands.len());
             self.last_commands[..self.last_command_len]
