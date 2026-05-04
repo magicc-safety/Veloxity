@@ -7,7 +7,8 @@ use crate::{
     command_manager::CommandManager,
     events::{
         BoardCommandRequested, COMM_RESPONSE_QUEUE_CAPACITY, CalibrationRequested, CommResponse,
-        OffboardControlRequested, ParamDefaultsRequested, RcTrimCalibrationRequested,
+        ConfigInfoRequested, OffboardControlRequested, ParamDefaultsRequested,
+        RcTrimCalibrationRequested, ResetOriginRequested,
     },
     params2::{ParamId, ParamValue, Params},
     ports::{EventDrainPort, EventEmitPort},
@@ -135,6 +136,34 @@ pub fn apply_rc_trim_calibration_requests<const N: usize>(
     }
 }
 
+pub struct ResetOriginCtx<'a, const N: usize> {
+    pub requests: EventDrainPort<'a, ResetOriginRequested, N>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+}
+
+pub fn apply_reset_origin_requests<const N: usize>(mut ctx: ResetOriginCtx<'_, N>) {
+    while let Some(request) = ctx.requests.next() {
+        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
+            command: request.command,
+            success: RosflightCmdResponse::RosflightCmdFailed,
+        }));
+    }
+}
+
+pub struct ConfigInfoCtx<'a, const N: usize> {
+    pub requests: EventDrainPort<'a, ConfigInfoRequested, N>,
+    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+}
+
+pub fn apply_config_info_requests<const N: usize>(mut ctx: ConfigInfoCtx<'_, N>) {
+    while let Some(request) = ctx.requests.next() {
+        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
+            command: request.command,
+            success: RosflightCmdResponse::RosflightCmdFailed,
+        }));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,8 +174,9 @@ mod tests {
         },
         events::{
             BOARD_COMMAND_REQUEST_QUEUE_CAPACITY, CALIBRATION_REQUEST_QUEUE_CAPACITY,
-            COMM_RESPONSE_QUEUE_CAPACITY, EventQueue, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY,
-            PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY, RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY,
+            COMM_RESPONSE_QUEUE_CAPACITY, CONFIG_INFO_REQUEST_QUEUE_CAPACITY, EventQueue,
+            OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY, PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY,
+            RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY, RESET_ORIGIN_REQUEST_QUEUE_CAPACITY,
         },
         packets::{RcPacket, RosflightPacketHeader},
         test_support::TestBoard,
@@ -318,6 +348,62 @@ mod tests {
                 assert!(matches!(
                     ack.success,
                     RosflightCmdResponse::RosflightCmdSuccess
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn apply_reset_origin_requests_reports_unsupported_as_failed_ack() {
+        let mut requests =
+            EventQueue::<ResetOriginRequested, RESET_ORIGIN_REQUEST_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(ResetOriginRequested {
+            command: RosflightCmd::ResetOrigin,
+        });
+
+        apply_reset_origin_requests(ResetOriginCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+        });
+
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::ResetOrigin));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdFailed
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn apply_config_info_requests_reports_unsupported_as_failed_ack() {
+        let mut requests =
+            EventQueue::<ConfigInfoRequested, CONFIG_INFO_REQUEST_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(ConfigInfoRequested {
+            command: RosflightCmd::SendAllConfigInfos,
+        });
+
+        apply_config_info_requests(ConfigInfoCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+        });
+
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::SendAllConfigInfos));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdFailed
                 ));
             }
             _ => panic!("expected command ack response"),

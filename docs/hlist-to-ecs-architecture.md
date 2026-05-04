@@ -1801,6 +1801,87 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Remaining Placeholder Command Event Progress
+
+Reason for this change:
+
+- `ResetOrigin` and `SendAllConfigInfos` were the last obvious ROSflight command arms still handled as inline placeholders inside `CommManager::act_on_messages`.
+- Even though RustFlight does not yet implement origin reset or config-info streaming, the parser should not be the place that decides and sends the failure.
+- The parser should emit command intent.
+- A scheduled owning system should decide whether the command can be completed and should emit the ACK.
+
+ROSflight compatibility:
+
+- The ROSflight command enum values remain unchanged:
+  - `ROSFLIGHT_CMD_RESET_ORIGIN`
+  - `ROSFLIGHT_CMD_SEND_ALL_CONFIG_INFOS`
+- The wire response remains `ROSFLIGHT_CMD_ACK`.
+- Because there is no current origin/navigation resource or config-info message support in RustFlight, both commands still return `RosflightCmdFailed`.
+- The externally visible unsupported behavior is preserved, but the ACK is now produced after a command-system stage runs.
+
+Design now implemented:
+
+- Added `ResetOriginRequested`.
+- Added `ConfigInfoRequested`.
+- Added fixed-capacity request queues for both to `CommandEventQueues`.
+- `CommManager` emits these requests and defers ACK when queueing succeeds.
+- `command_system::apply_reset_origin_requests` drains reset-origin requests and currently emits failed ACKs.
+- `command_system::apply_config_info_requests` drains config-info requests and currently emits failed ACKs.
+- `World` schedules both systems before comm responses are sent.
+- Legacy `ROSFlight` mirrors the same scheduling for compatibility while the old path still exists.
+
+Compile-time boundary improvement:
+
+- Comms no longer directly owns these command outcomes.
+- Reset-origin behavior now has an explicit command-system placeholder that can later be replaced by an estimator/navigation-origin system.
+- Config-info behavior now has an explicit command-system placeholder that can later be replaced by a config-info response system once the message shape is implemented.
+- This keeps the causality visible: comm parser emits request, command system emits completion/failure, comm response stage transmits.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `ResetOriginRequested`.
+  - Adds `ConfigInfoRequested`.
+  - Adds fixed-capacity queues for both request types.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits reset-origin and config-info requests instead of using inline placeholder ACK logic.
+- `rustflight_core/src/command_system.rs`
+  - Adds `ResetOriginCtx`.
+  - Adds `ConfigInfoCtx`.
+  - Adds request application systems that currently emit failed ACKs.
+- `rustflight_core/src/world.rs`
+  - Schedules the new request application systems.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the same compatibility scheduling in the legacy loop.
+
+Tests added:
+
+- `command_system::tests::apply_reset_origin_requests_reports_unsupported_as_failed_ack`
+  - Proves the command system owns reset-origin failure ACK emission.
+- `command_system::tests::apply_config_info_requests_reports_unsupported_as_failed_ack`
+  - Proves the command system owns config-info failure ACK emission.
+- `comm_manager::tests::reset_origin_emits_request_and_defers_ack`
+  - Proves comms emits reset-origin request intent and does not ACK immediately.
+- `comm_manager::tests::send_all_config_infos_emits_request_and_defers_ack`
+  - Proves comms emits config-info request intent and does not ACK immediately.
+- `world::tests::world_routes_reset_origin_and_acks_unsupported_after_apply_stage`
+  - Proves the World scheduler drains reset-origin requests and sends failed ACK after the apply stage.
+- `world::tests::world_routes_config_info_and_acks_unsupported_after_apply_stage`
+  - Proves the World scheduler drains config-info requests and sends failed ACK after the apply stage.
+
+Validation:
+
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Inspect `CommManager::act_on_messages` again and confirm that command parsing now only emits request/response events, except for truly immediate protocol operations such as timesync.
+- Then move to the next compatibility gap: either implement a real origin-reset capability if ROSflight-main behavior and local estimator/navigation support make that possible, or start converting the next subsystem boundary where HList is still actively shaping the new path.
+
 ## Dedicated Comm Response Queue Progress
 
 Reason for this change:

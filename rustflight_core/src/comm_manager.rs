@@ -40,9 +40,10 @@ use crate::bodytype::BodyType;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
-    CalibrationRequested, CommEventQueues, CommandEventQueues, CommResponse,
-    BoardCommandRequested, OffboardControlRequested, ParamDefaultsRequested, ParamEventQueues,
-    ParamListRequested, ParamReadRequested, ParamSetRequested, RcTrimCalibrationRequested,
+    BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
+    CommandEventQueues, ConfigInfoRequested, OffboardControlRequested, ParamDefaultsRequested,
+    ParamEventQueues, ParamListRequested, ParamReadRequested, ParamSetRequested,
+    RcTrimCalibrationRequested, ResetOriginRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -850,15 +851,26 @@ where
                     success = RosflightCmdResponse::RosflightCmdSuccess;
                 }
                 RosflightCmd::ResetOrigin => {
-                    // Placeholder: Logic depends on your estimator implementation
-                    //defmt::info!("Warning: ResetOrigin command not implemented.");
-                    // Call relevant function on your estimator instance if applicable
-                    // success = RosflightCmdResponse::RosflightCmdSuccess;
+                    if command_events
+                        .reset_origin_requests
+                        .push(ResetOriginRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::SendAllConfigInfos => {
-                    //defmt::info!("Warning: SendAllConfigInfos command not implemented.");
-                    // This is less common, might involve sending detailed setup info.
-                    // success = RosflightCmdResponse::RosflightCmdSuccess;
+                    if command_events
+                        .config_info_requests
+                        .push(ConfigInfoRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        send_ack_now = false;
+                    }
                 }
             } // end match
 
@@ -1473,5 +1485,57 @@ mod tests {
 
         let request = command_events.rc_trim_calibration_requests.pop().unwrap();
         assert!(matches!(request.command, RosflightCmd::RcCalibration));
+    }
+
+    #[test]
+    fn reset_origin_emits_request_and_defers_ack() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::ResetOrigin,
+        });
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
+
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+        assert!(comm_events.responses.is_empty());
+
+        let request = command_events.reset_origin_requests.pop().unwrap();
+        assert!(matches!(request.command, RosflightCmd::ResetOrigin));
+    }
+
+    #[test]
+    fn send_all_config_infos_emits_request_and_defers_ack() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::SendAllConfigInfos,
+        });
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut board,
+        );
+
+        assert_eq!(manager.comm_link().cmd_ack_count, 0);
+        assert!(comm_events.responses.is_empty());
+
+        let request = command_events.config_info_requests.pop().unwrap();
+        assert!(matches!(request.command, RosflightCmd::SendAllConfigInfos));
     }
 }

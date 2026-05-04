@@ -41,7 +41,8 @@ use crate::{
     comm_messages::{self, messages::HeartbeatMsg},
     command_manager::{CommandManager, ControlType},
     command_system::{
-        self, BoardCommandCtx, CalibrationRequestCtx, OffboardControlCtx, ParamDefaultsCtx,
+        self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
+        ParamDefaultsCtx, ResetOriginCtx,
     },
     controller::Controller,
     events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
@@ -247,6 +248,16 @@ where
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             board: &mut self.board,
             params: &mut self.params,
+        });
+
+        command_system::apply_reset_origin_requests(ResetOriginCtx {
+            requests: EventDrainPort::new(&mut self.command_events.reset_origin_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+        });
+
+        command_system::apply_config_info_requests(ConfigInfoCtx {
+            requests: EventDrainPort::new(&mut self.command_events.config_info_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
         param_system::service_param_read_requests(ParamReadCtx {

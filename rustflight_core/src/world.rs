@@ -6,7 +6,8 @@ use crate::{
     comm_manager::{CommManager, comm_link_trait::CommInterface},
     command_manager::CommandManager,
     command_system::{
-        self, BoardCommandCtx, CalibrationRequestCtx, OffboardControlCtx, ParamDefaultsCtx,
+        self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
+        ParamDefaultsCtx, ResetOriginCtx,
     },
     controller::Controller,
     events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
@@ -176,6 +177,16 @@ where
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             board: &mut self.board,
             params: &mut self.params,
+        });
+
+        command_system::apply_reset_origin_requests(ResetOriginCtx {
+            requests: EventDrainPort::new(&mut self.command_events.reset_origin_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+        });
+
+        command_system::apply_config_info_requests(ConfigInfoCtx {
+            requests: EventDrainPort::new(&mut self.command_events.config_info_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
         param_system::service_param_read_requests(ParamReadCtx {
@@ -941,6 +952,76 @@ mod tests {
         assert!(matches!(
             ack.success,
             RosflightCmdResponse::RosflightCmdSuccess
+        ));
+    }
+
+    #[test]
+    fn world_routes_reset_origin_and_acks_unsupported_after_apply_stage() {
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::ResetOrigin,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert!(world.command_events.reset_origin_requests.is_empty());
+        assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
+        let ack = world.comm.comm_link().last_cmd_ack.unwrap();
+        assert!(matches!(ack.command, RosflightCmd::ResetOrigin));
+        assert!(matches!(
+            ack.success,
+            RosflightCmdResponse::RosflightCmdFailed
+        ));
+    }
+
+    #[test]
+    fn world_routes_config_info_and_acks_unsupported_after_apply_stage() {
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.cmd = Some(RosflightCmdMsg {
+            command: RosflightCmd::SendAllConfigInfos,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert!(world.command_events.config_info_requests.is_empty());
+        assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
+        let ack = world.comm.comm_link().last_cmd_ack.unwrap();
+        assert!(matches!(ack.command, RosflightCmd::SendAllConfigInfos));
+        assert!(matches!(
+            ack.success,
+            RosflightCmdResponse::RosflightCmdFailed
         ));
     }
 
