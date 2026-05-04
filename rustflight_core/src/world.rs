@@ -5,8 +5,9 @@ use crate::{
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
     command_manager::CommandManager,
+    command_system::{self, CalibrationRequestCtx},
     controller::Controller,
-    events::ParamEventQueues,
+    events::{CommandEventQueues, ParamEventQueues},
     estimator::{AttitudeStateTrait, NamedEstimator},
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
@@ -40,6 +41,7 @@ where
     pub params: Params,
     pub params_iter: Option<ParamIter>,
     pub param_events: ParamEventQueues,
+    pub command_events: CommandEventQueues,
     pub comm: CommManager<B, CI>,
     pub raw_sensors: SensorBus,
     pub processed_sensors: ProcessedSensors,
@@ -102,6 +104,7 @@ where
             params,
             params_iter: None,
             param_events: ParamEventQueues::default(),
+            command_events: CommandEventQueues::default(),
             comm,
             raw_sensors: SensorBus::default(),
             processed_sensors: ProcessedSensors::default(),
@@ -138,10 +141,15 @@ where
             &mut self.params_iter,
             &mut self.params,
             &mut self.param_events,
-            &mut self.cal_flags,
+            &mut self.command_events,
             &mut self.board,
             &mut self.command,
         );
+
+        command_system::apply_calibration_requests(CalibrationRequestCtx {
+            requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
+            flags: &mut self.cal_flags,
+        });
 
         param_system::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut self.params),

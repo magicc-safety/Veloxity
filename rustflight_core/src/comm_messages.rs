@@ -318,7 +318,7 @@ pub mod messages {
 pub mod enums {
     use super::bitflags;
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum RosflightCmd {
         RcCalibration,
         AccelCalibration,

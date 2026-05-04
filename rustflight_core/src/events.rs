@@ -1,5 +1,5 @@
 use crate::{
-    comm_messages::messages::ParamValueMsg,
+    comm_messages::{enums::RosflightCmd, messages::ParamValueMsg},
     params2::{ParamId, ParamValue},
 };
 
@@ -105,6 +105,11 @@ pub struct ParamChanged {
     pub param_id_bytes: [u8; 16],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CalibrationRequested {
+    pub command: RosflightCmd,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum CommResponse {
     ParamValue(ParamValueMsg),
@@ -113,12 +118,18 @@ pub enum CommResponse {
 pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const PARAM_CHANGED_QUEUE_CAPACITY: usize = 8;
 pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = 8;
+pub const CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 4;
 
 #[derive(Default)]
 pub struct ParamEventQueues {
     pub set_requests: EventQueue<ParamSetRequested, PARAM_SET_REQUEST_QUEUE_CAPACITY>,
     pub changes: EventQueue<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>,
     pub comm_responses: EventQueue<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+}
+
+#[derive(Default)]
+pub struct CommandEventQueues {
+    pub calibration_requests: EventQueue<CalibrationRequested, CALIBRATION_REQUEST_QUEUE_CAPACITY>,
 }
 
 impl ParamEventQueues {

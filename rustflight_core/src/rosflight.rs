@@ -40,8 +40,9 @@ use crate::{
     comm_manager::{self, comm_link_trait::CommInterface},
     comm_messages::{self, messages::HeartbeatMsg},
     command_manager::{CommandManager, ControlType},
+    command_system::{self, CalibrationRequestCtx},
     controller::Controller,
-    events::ParamEventQueues,
+    events::{CommandEventQueues, ParamEventQueues},
     errors,
     estimator::{
         self, AttitudeStateTrait, Estimator,
@@ -101,6 +102,7 @@ where
     params: params2::Params,
     params_iter: Option<ParamIter>,
     param_events: ParamEventQueues,
+    command_events: CommandEventQueues,
     comm_manager: comm_manager::CommManager<B, CI>,
     sensors: B::RawSensorSet,
     processorhlist: B::ProcessorHList,
@@ -180,6 +182,7 @@ where
             params,
             params_iter: None,
             param_events: ParamEventQueues::default(),
+            command_events: CommandEventQueues::default(),
             comm_manager,
             sensors: B::RawSensorSet::default(),
             processorhlist: B::ProcessorHList::default(),
@@ -209,10 +212,15 @@ where
             &mut self.params_iter,
             &mut self.params,
             &mut self.param_events,
-            &mut self.cal_flags,
+            &mut self.command_events,
             &mut self.board,
             &mut self.command_manager,
         );
+
+        command_system::apply_calibration_requests(CalibrationRequestCtx {
+            requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
+            flags: &mut self.cal_flags,
+        });
 
         param_system::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut self.params),

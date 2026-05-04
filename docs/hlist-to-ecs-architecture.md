@@ -1376,6 +1376,136 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Current Handoff Notes
+
+Current design rule:
+
+- Communication code should decode requests and emit events.
+- Domain systems should mutate domain resources.
+- Completion systems should emit responses after work is actually complete.
+- World owns resources and schedules stages.
+- Systems should receive narrow ports/resources, not `&mut World`.
+
+Current stage ownership:
+
+- `CommManager::process_incoming_messages`
+  - Owns transport decode into stored incoming messages.
+  - Should not mutate flight resources.
+- `CommManager::act_on_messages`
+  - Owns conversion from incoming MAVLink/ROSflight messages into internal events or immediate responses for truly immediate commands.
+  - Parameter set now emits `ParamSetRequested`.
+  - Calibration commands are being moved to emit `CalibrationRequested`.
+  - It should not directly set calibration flags in the new path.
+- `param_system::apply_param_requests`
+  - Owns parameter mutation.
+  - Emits `ParamChanged`.
+  - Emits deferred parameter response only after mutation.
+- `param_reactions`
+  - Owns module reactions to `ParamChanged`.
+  - RC and command manager no longer receive direct parameter callbacks from comms.
+- `command_system::apply_calibration_requests`
+  - Owns conversion from calibration request events into `CalibrationFlags`.
+  - This is the current in-progress command slice.
+- `sensor_systems::process_sensor_bus`
+  - Owns raw named sensor packets to processed named sensor packets.
+  - Calibration processors clear calibration flags when calibration completes.
+- `World::update_sensor_health_and_calibration`
+  - Owns IMU timeout/error propagation.
+  - Owns state-machine `CALIBRATION_COMPLETE` after calibration flags clear.
+  - Calls `CommManager::send_completed_calibration_ack` after completion is observable.
+- `pwm_system::sync_pwm_output_state`
+  - Owns PWM enable/disable transitions from state-machine armed facts.
+- `pwm_system::write_pwm_commands`
+  - Owns gated PWM command writes.
+  - Control computes actuator commands; PWM system decides if they reach output.
+
+Most recent command slice:
+
+- Added `CalibrationRequested`.
+- Added `CommandEventQueues`.
+- Added `command_system::apply_calibration_requests`.
+- `CommManager::act_on_messages` now pushes `CalibrationRequested` instead of mutating `CalibrationFlags`.
+- `World` and legacy `ROSFlight` now drain calibration requests into calibration flags.
+- Tests prove:
+  - comm command receipt emits calibration request and does not set flags directly
+  - command system sets the right flags
+  - World still sends calibration success ACK only after flags clear
+
+What to check if resuming from here:
+
+- Run `cargo test -p rustflight_core command_system::tests --lib`.
+- Run `cargo test -p rustflight_core comm_manager::tests --lib`.
+- Run `cargo test -p rustflight_core world::tests --lib`.
+- Run `cargo check -p rustflight_core --lib`.
+- Run `cargo check -p sim`.
+- If these pass, the command-event slice should be commit-ready.
+- If they fail, likely places to inspect are:
+  - `rustflight_core/src/events.rs`
+  - `rustflight_core/src/command_system.rs`
+  - `rustflight_core/src/comm_manager.rs::act_on_messages`
+  - `rustflight_core/src/world.rs::run_comm_param_sensor_stages_only`
+  - legacy compatibility wiring in `rustflight_core/src/rosflight.rs`
+
+## Command Event Progress
+
+Design correction:
+
+- Calibration commands should follow the same request/work/response shape as parameter changes.
+- Comms should not directly mutate `CalibrationFlags`.
+- Comms should emit a calibration request event.
+- A command/calibration system should apply that request to calibration resources.
+- Completion ACKs should still wait until processing clears the relevant calibration flag.
+
+`rustflight_core/src/events.rs`
+
+- Adds `CalibrationRequested`.
+- Adds `CommandEventQueues`.
+- Adds fixed-capacity calibration request queue storage.
+
+`rustflight_core/src/command_system.rs`
+
+- Adds `CalibrationRequestCtx`.
+- Adds `apply_calibration_requests`.
+- This system drains calibration request events and sets the requested `CalibrationFlags`.
+
+`rustflight_core/src/comm_manager.rs`
+
+- `act_on_messages` now receives `CommandEventQueues`.
+- Calibration commands push `CalibrationRequested`.
+- Calibration commands no longer mutate `CalibrationFlags` directly.
+- Pending calibration ACK behavior remains deferred until completion.
+
+`rustflight_core/src/world.rs`
+
+- Adds `command_events: CommandEventQueues`.
+- Schedules `command_system::apply_calibration_requests` after comm message handling and before sensor processing.
+- Existing calibration completion ACK behavior continues after sensor processing observes cleared flags.
+
+`rustflight_core/src/rosflight.rs`
+
+- Adds legacy compatibility wiring so the old loop also drains `CommandEventQueues`.
+- This keeps the legacy path compiling while the new World path matures.
+
+Tests added or updated:
+
+- `command_system::tests::apply_calibration_requests_sets_requested_flags`
+  - Proves calibration request events set the expected calibration flags.
+- `comm_manager::tests::calibration_command_ack_is_deferred_until_flag_clears`
+  - Updated to prove comms emits a calibration request first and does not directly set flags.
+  - Then applies the request through `command_system`.
+  - Still proves ACK is sent only after the flag clears.
+- `world::tests::world_sends_calibration_ack_after_calibration_flag_clears`
+  - Proves the full World scheduler path still defers ACK until completion.
+
+Validation:
+
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

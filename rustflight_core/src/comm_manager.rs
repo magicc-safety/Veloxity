@@ -39,7 +39,9 @@ pub mod mavlink_parser;
 use crate::bodytype::BodyType;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
-use crate::events::{CommResponse, ParamEventQueues, ParamSetRequested};
+use crate::events::{
+    CalibrationRequested, CommandEventQueues, CommResponse, ParamEventQueues, ParamSetRequested,
+};
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
 use crate::mavlink::dialects::Rosflight;
@@ -639,7 +641,7 @@ where
         params_iter: &mut Option<ParamIter>,
         params: &mut Params,
         param_events: &mut ParamEventQueues,
-        cal_flags: &mut CalibrationFlags,
+        command_events: &mut CommandEventQueues,
         board: &mut B,
         command_manager: &mut CommandManager,
     ) {
@@ -728,31 +730,55 @@ where
                 }
                 RosflightCmd::AccelCalibration => {
                     //defmt::info!("Starting Accelerometer Calibration.");
-                    cal_flags.insert(CalibrationFlags::ACCEL); // Set the flag
-                    // The actual calibration happens over time in ImuProcessor
-                    self.pending_calibration_ack = Some(msg.command);
-                    send_ack_now = false;
+                    if command_events
+                        .calibration_requests
+                        .push(CalibrationRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        self.pending_calibration_ack = Some(msg.command);
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::GyroCalibration => {
                     //defmt::info!("Starting Gyro Calibration.");
-                    cal_flags.insert(CalibrationFlags::GYRO); // Set the flag
-                    // The actual calibration happens over time in ImuProcessor
-                    self.pending_calibration_ack = Some(msg.command);
-                    send_ack_now = false;
+                    if command_events
+                        .calibration_requests
+                        .push(CalibrationRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        self.pending_calibration_ack = Some(msg.command);
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::BaroCalibration => {
                     //defmt::info!("Starting Baro Calibration.");
-                    cal_flags.insert(CalibrationFlags::BARO); // Set the flag
-                    // The actual calibration happens over time in BaroProcessor
-                    self.pending_calibration_ack = Some(msg.command);
-                    send_ack_now = false;
+                    if command_events
+                        .calibration_requests
+                        .push(CalibrationRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        self.pending_calibration_ack = Some(msg.command);
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::AirspeedCalibration => {
                     //defmt::info!("Starting Airspeed Calibration.");
-                    cal_flags.insert(CalibrationFlags::PITOT); // Set the flag
-                    // The actual calibration happens over time in PitotProcessor
-                    self.pending_calibration_ack = Some(msg.command);
-                    send_ack_now = false;
+                    if command_events
+                        .calibration_requests
+                        .push(CalibrationRequested {
+                            command: msg.command,
+                        })
+                        .is_ok()
+                    {
+                        self.pending_calibration_ack = Some(msg.command);
+                        send_ack_now = false;
+                    }
                 }
                 RosflightCmd::ReadParams => {
                     // Placeholder: Need BoardTrait method for reading from non-volatile memory
@@ -929,11 +955,12 @@ mod tests {
     use crate::{
         board::BoardTrait,
         command_manager::CommandManager,
+        command_system::{self, CalibrationRequestCtx},
         comm_messages::{
             enums::{RosflightCmd, RosflightCmdResponse},
             messages::{ParamSetMsg, RosflightCmdMsg},
         },
-        events::{CommResponse, ParamEventQueues},
+        events::{CommandEventQueues, CommResponse, ParamEventQueues},
         param_system::{self, ParamApplyCtx},
         params2::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsWritePort},
@@ -949,7 +976,7 @@ mod tests {
         let mut params = Params::new();
         let mut params_iter = None;
         let mut param_events = ParamEventQueues::default();
-        let mut cal_flags = CalibrationFlags::empty();
+        let mut command_events = CommandEventQueues::default();
         let mut command_manager = CommandManager::new();
 
         manager.msgs.param_set = Some(ParamSetMsg {
@@ -963,7 +990,7 @@ mod tests {
             &mut params_iter,
             &mut params,
             &mut param_events,
-            &mut cal_flags,
+            &mut command_events,
             &mut board,
             &mut command_manager,
         );
@@ -1013,7 +1040,7 @@ mod tests {
         let mut params = Params::new();
         let mut params_iter = None;
         let mut param_events = ParamEventQueues::default();
-        let mut cal_flags = CalibrationFlags::empty();
+        let mut command_events = CommandEventQueues::default();
         let mut command_manager = CommandManager::new();
 
         manager.msgs.param_set = Some(ParamSetMsg {
@@ -1027,7 +1054,7 @@ mod tests {
             &mut params_iter,
             &mut params,
             &mut param_events,
-            &mut cal_flags,
+            &mut command_events,
             &mut board,
             &mut command_manager,
         );
@@ -1119,6 +1146,7 @@ mod tests {
         let mut params = Params::new();
         let mut params_iter = None;
         let mut param_events = ParamEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
         let mut cal_flags = CalibrationFlags::empty();
         let mut command_manager = CommandManager::new();
 
@@ -1130,10 +1158,16 @@ mod tests {
             &mut params_iter,
             &mut params,
             &mut param_events,
-            &mut cal_flags,
+            &mut command_events,
             &mut board,
             &mut command_manager,
         );
+
+        assert!(cal_flags.is_empty());
+        command_system::apply_calibration_requests(CalibrationRequestCtx {
+            requests: EventDrainPort::new(&mut command_events.calibration_requests),
+            flags: &mut cal_flags,
+        });
 
         assert!(cal_flags.contains(CalibrationFlags::GYRO));
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
