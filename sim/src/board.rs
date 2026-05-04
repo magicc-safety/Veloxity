@@ -4,9 +4,8 @@ use std::time::Instant;
 
 use cdr::CdrLe;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
-use rustflight_core::board::BoardTrait;
+use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
-use rustflight_core::hlist::HNil;
 use rustflight_core::packets::{self, RC_PACKET_CHANNELS};
 use rustflight_core::sensors::SensorBus;
 use tokio::io::ErrorKind;
@@ -89,13 +88,7 @@ impl Board {
     }
 }
 
-impl BoardTrait for Board {
-    type RawSensorSet = HNil;
-    type ProcessedSensorSet = HNil;
-    type ProcessorHList = HNil;
-
-    fn update_sensors(&mut self, _sensors: &mut Self::RawSensorSet) {}
-
+impl BoardIo for Board {
     fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
         sensors.clear();
         sensors.imu = recv_sensor(&mut self.imu_rx, "imu");

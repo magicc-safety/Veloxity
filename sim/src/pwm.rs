@@ -211,20 +211,14 @@ impl PwmDriver for SimPwmDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustflight_core::{board::BoardTrait, errors, hlist::HNil};
+    use rustflight_core::{board::BoardIo, errors};
     use std::time::Duration;
 
     struct TestBoard {
         elapsed_us: u64,
     }
 
-    impl BoardTrait for TestBoard {
-        type RawSensorSet = HNil;
-        type ProcessedSensorSet = HNil;
-        type ProcessorHList = HNil;
-
-        fn update_sensors(&mut self, _sensors: &mut Self::RawSensorSet) {}
-
+    impl BoardIo for TestBoard {
         fn serial_rx_read(&mut self, _buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
             None
         }

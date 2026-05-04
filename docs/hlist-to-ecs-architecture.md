@@ -1173,6 +1173,27 @@ Validation:
 - `cargo test -p sim pwm::tests --lib` passes.
 - `cargo check -p sim` passes.
 
+## Sim Board Boundary Progress
+
+`sim/src/board.rs`
+
+- The sim board now implements `BoardIo` directly.
+- It no longer implements `BoardTrait`.
+- It no longer declares `RawSensorSet`, `ProcessedSensorSet`, or `ProcessorHList`.
+- It no longer imports `HNil`.
+- This makes the new sim path independent of the legacy HList board boundary.
+
+`sim/src/pwm.rs`
+
+- The PWM component tests now use a direct `BoardIo` test board.
+- The test board no longer needs `BoardTrait` or `HNil`.
+
+Validation:
+
+- `cargo check -p sim` passes.
+- `cargo test -p sim pwm::tests --lib` passes.
+- `rg -n "HNil|BoardTrait|RawSensorSet|ProcessedSensorSet|ProcessorHList" sim/src` returns no matches.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.
