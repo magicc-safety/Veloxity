@@ -1194,6 +1194,28 @@ Validation:
 - `cargo test -p sim pwm::tests --lib` passes.
 - `rg -n "HNil|BoardTrait|RawSensorSet|ProcessedSensorSet|ProcessorHList" sim/src` returns no matches.
 
+## Named Estimator Progress
+
+`rustflight_core/src/estimator/quad_estimator.rs`
+
+- Extracts the quad estimator math into `QuadEstimator::estimate_packets`.
+- The legacy HList `Estimator::estimate` entry point now delegates into `estimate_packets`.
+- The new `NamedEstimator::estimate_named` entry point also delegates into `estimate_packets`.
+- The named estimator path no longer constructs `HCons(..., HNil)` internally.
+- This preserves estimator behavior while removing HList from the new scheduler-facing estimator path.
+
+Tests added:
+
+- `estimator::quad_estimator::tests::named_estimator_matches_legacy_hlist_entrypoint`
+  - Proves the named estimator entry point returns the same state as the legacy HList entry point for the same IMU packet.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p sim` passes.
+
 Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.

@@ -204,12 +204,14 @@ impl Default for QuadEstimator {
     }
 }
 
-impl Estimator for QuadEstimator {
-    type Inputs = hlist_type![Option<packets::ImuPacket>, Option<packets::MagPacket>];
-
-    type State = AttitudeState;
-
-    fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State {
+impl QuadEstimator {
+    fn estimate_packets(
+        &mut self,
+        imu: Option<packets::ImuPacket>,
+        _mag: Option<packets::MagPacket>,
+        params: &Params,
+        dt: f64,
+    ) -> AttitudeState {
         // Update parameters from parameter server (matches C behavior)
         self.update_params(params);
 
@@ -224,7 +226,7 @@ impl Estimator for QuadEstimator {
             };
         }
 
-        if let Some(imu_packet) = inputs.0 {
+        if let Some(imu_packet) = imu {
             // Get current timestamp for initialization tracking
             let current_time = imu_packet.header.timestamp; // microseconds
 
@@ -347,8 +349,18 @@ impl Estimator for QuadEstimator {
             q_dot: self.q_dot,
             body_rate: self.body_rate,
             b_hat: self.b_hat,
-            is_healthy: is_healthy,
+            is_healthy,
         }
+    }
+}
+
+impl Estimator for QuadEstimator {
+    type Inputs = hlist_type![Option<packets::ImuPacket>, Option<packets::MagPacket>];
+
+    type State = AttitudeState;
+
+    fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State {
+        self.estimate_packets(inputs.0, inputs.1.0, params, dt)
     }
 }
 
@@ -361,7 +373,46 @@ impl NamedEstimator for QuadEstimator {
         params: &Params,
         dt: f64,
     ) -> Self::State {
-        let inputs = HCons(sensors.imu, HCons(sensors.mag, HNil));
-        self.estimate(&inputs, params, dt)
+        self.estimate_packets(sensors.imu, sensors.mag, params, dt)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        estimator::{Estimator, NamedEstimator},
+        hlist::HCons,
+        hlist::HNil,
+        packets::{ImuPacket, RosflightPacketHeader},
+    };
+
+    #[test]
+    fn named_estimator_matches_legacy_hlist_entrypoint() {
+        let params = Params::new();
+        let imu = ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1_000,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -G],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        };
+        let legacy_inputs = HCons(Some(imu), HCons(None, HNil));
+        let mut named_sensors = ProcessedSensors::default();
+        named_sensors.imu = Some(imu);
+
+        let mut legacy = QuadEstimator::default();
+        let mut named = QuadEstimator::default();
+
+        let legacy_state = legacy.estimate(&legacy_inputs, &params, 1.0 / 400.0);
+        let named_state = named.estimate_named(&named_sensors, &params, 1.0 / 400.0);
+
+        assert_eq!(legacy_state.is_healthy(), named_state.is_healthy());
+        assert_eq!(legacy_state.q(), named_state.q());
+        assert_eq!(legacy_state.q_dot(), named_state.q_dot());
+        assert_eq!(legacy_state.body_rate, named_state.body_rate);
     }
 }
