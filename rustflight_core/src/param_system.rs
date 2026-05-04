@@ -44,12 +44,16 @@ pub struct ParamReadCtx<'a> {
 
 pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
     while let Some(req) = ctx.requests.next() {
-        let old = ctx.params.get(req.id);
-        ctx.params.set(req.id, req.value);
-        let new = ctx.params.get(req.id);
+        let Some(id) = param_id_from_name_bytes(req.param_id_bytes) else {
+            continue;
+        };
+
+        let old = ctx.params.get(id);
+        ctx.params.set(id, req.value);
+        let new = ctx.params.get(id);
 
         let changed = ParamChanged {
-            id: req.id,
+            id,
             old,
             new,
             param_id_bytes: req.param_id_bytes,
@@ -60,7 +64,7 @@ pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
             param_id: req.param_id_bytes,
             param_value: new,
             param_count: PARAMS_COUNT as u16,
-            param_index: req.id as u16,
+            param_index: id as u16,
         };
         let _ = ctx.responses.emit(CommResponse::ParamValue(response));
     }
@@ -114,15 +118,17 @@ fn param_id_from_identifier(identifier: ParamIdentifier) -> Option<ParamId> {
             PARAM_DEFINITIONS.get(index as usize).map(|def| def.id)
         }
         ParamIdentifier::INDEX(_) => None,
-        ParamIdentifier::ID(bytes) => {
-            let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-            let name = core::str::from_utf8(&bytes[..len]).ok()?;
-            PARAM_DEFINITIONS
-                .iter()
-                .find(|def| def.name == name)
-                .map(|def| def.id)
-        }
+        ParamIdentifier::ID(bytes) => param_id_from_name_bytes(bytes),
     }
+}
+
+fn param_id_from_name_bytes(bytes: [u8; 16]) -> Option<ParamId> {
+    let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    let name = core::str::from_utf8(&bytes[..len]).ok()?;
+    PARAM_DEFINITIONS
+        .iter()
+        .find(|def| def.name == name)
+        .map(|def| def.id)
 }
 
 #[cfg(test)]
@@ -142,7 +148,6 @@ mod tests {
         let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
 
         let request = ParamSetRequested {
-            id: ParamId::PARAM_SYSTEM_ID,
             value: ParamValue::Int(42),
             param_id_bytes: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
         };

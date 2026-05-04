@@ -95,7 +95,6 @@ impl<'a, T: Copy, const N: usize> Iterator for EventQueueIter<'a, T, N> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamSetRequested {
-    pub id: ParamId,
     pub value: ParamValue,
     pub param_id_bytes: [u8; 16],
 }

@@ -1801,6 +1801,57 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Param Set Name Resolution Progress
+
+Reason for this change:
+
+- `PARAM_SET` already used the new request/apply/response pipeline.
+- However, `CommManager` was still resolving the parameter name against `PARAM_DEFINITIONS`.
+- That meant communication code still knew too much about parameter ownership.
+- The better boundary is for comms to emit the raw MAVLink parameter bytes and requested value, while the parameter system resolves and mutates.
+
+Design now implemented:
+
+- `ParamSetRequested` now carries only:
+  - the requested value,
+  - the raw 16-byte MAVLink parameter identifier.
+- `CommManager` pushes `ParamSetRequested` without consulting `PARAM_DEFINITIONS`.
+- `param_system::apply_param_requests` resolves the parameter name bytes.
+- Unknown or invalid parameter names are ignored by the parameter system.
+- Valid requests mutate params, emit `ParamChanged`, and emit `CommResponse::ParamValue`.
+
+Compile-time boundary improvement:
+
+- `CommManager` no longer imports `PARAM_DEFINITIONS`.
+- `CommManager` no longer owns parameter-name resolution.
+- All parameter lookup and mutation for `PARAM_SET`, `PARAM_REQUEST_READ`, and `PARAM_REQUEST_LIST` is now in `param_system`.
+- This makes parameter causality easier to diagnose: inbound comms produce events; parameter systems decide what happens to parameters.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Narrows `ParamSetRequested`.
+- `rustflight_core/src/param_system.rs`
+  - Moves set-request name resolution into `apply_param_requests`.
+  - Reuses the same parameter-name resolution logic for request-read by name.
+- `rustflight_core/src/comm_manager.rs`
+  - Removes direct parameter-definition lookup from `PARAM_SET`.
+  - Removes the now-unused direct `send_param_value` helper.
+
+Tests:
+
+- Existing `param_system::tests::apply_param_requests_mutates_params_and_defers_ack` now covers parameter-system name resolution for set requests.
+- Existing `comm_manager::tests::param_set_emits_request_without_mutating_or_acknowledging` now proves comms emits raw request intent only.
+- Existing `world::tests::world_scheduler_runs_deferred_param_pipeline` continues to prove end-to-end World behavior.
+
+Validation:
+
+- `cargo test -p rustflight_core param_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 Current status after this slice:
 
 - `params_iter` is gone from `World`.

@@ -48,9 +48,7 @@ use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
 use crate::mavlink::dialects::Rosflight;
 use crate::packets::{self, RC_PACKET_CHANNELS};
-use crate::params2::{
-    PARAM_DEFINITIONS, PARAMS_COUNT, ParamDefinition, ParamId, ParamValue, Params,
-};
+use crate::params2::{ParamId, ParamValue, Params};
 use crate::rosflight::Configuration;
 use crate::sensorprocessors::CalibrationFlags;
 use crate::sensors::ProcessedSensors;
@@ -698,27 +696,10 @@ where
         }
 
         if let Some(msg) = self.msgs.param_set.take() {
-            // TODO: Add checking on target system and component ID here if needed.
-            let param_name_bytes = &msg.param_id;
-            let len = param_name_bytes
-                .iter()
-                .position(|&b| b == 0)
-                .unwrap_or(param_name_bytes.len());
-            let name_slice = &param_name_bytes[..len];
-
-            if let Ok(param_name_str) = core::str::from_utf8(name_slice) {
-                if let Some(def) = PARAM_DEFINITIONS.iter().find(|d| d.name == param_name_str) {
-                    let _ = param_events.set_requests.push(ParamSetRequested {
-                        id: def.id,
-                        value: msg.param_value,
-                        param_id_bytes: msg.param_id,
-                    });
-                } else {
-                    // Optionally emit a NACK or STATUSTEXT message here.
-                }
-            } else {
-                // The received param_id was not valid UTF-8.
-            }
+            let _ = param_events.set_requests.push(ParamSetRequested {
+                value: msg.param_value,
+                param_id_bytes: msg.param_id,
+            });
         }
 
         // now act on ROSflight Commands
@@ -889,16 +870,6 @@ where
         }
     }
 
-    pub fn send_param_value(&mut self, def: &ParamDefinition, val: ParamValue, board: &mut B) {
-        let msg = ParamValueMsg {
-            param_id: str_to_fixed_bytes(def.name),
-            param_value: val,
-            param_count: PARAMS_COUNT as u16,
-            param_index: def.id as u16,
-        };
-        self.comm_link.send_named_value(board, self.sysid, msg);
-    }
-
     pub fn send_timesync(&mut self, board: &mut B, msg: TimesyncMsg) {
         self.comm_link.send_timesync(board, self.sysid, msg);
     }
@@ -1017,7 +988,6 @@ mod tests {
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
 
         let request = param_events.set_requests.pop().unwrap();
-        assert_eq!(request.id, ParamId::PARAM_SYSTEM_ID);
         assert_eq!(request.value, ParamValue::Int(42));
         assert_eq!(request.param_id_bytes, *b"SYS_ID\0\0\0\0\0\0\0\0\0\0");
     }
