@@ -253,7 +253,7 @@ pub mod messages {
     pub struct RosflightStatusMsg {
         pub armed: u8,
         pub failsafe: u8,
-        pub rc_override: u8,
+        pub rc_override: u16,
         pub offboard: u8,
         pub error_code: ErrorFlag,
         pub control_mode: OffboardControlMode,

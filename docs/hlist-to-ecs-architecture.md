@@ -1854,6 +1854,62 @@ Future follow-up:
 - `rc_override_active()` is currently boolean, while upstream reports a bitmask-like `rc_override_` value. Keep this noted for future command-manager parity work.
 - The next parity slice should inspect whether local RC override reasoning has enough channel-level detail to publish the full ROSflight 2.x override value instead of a boolean.
 
+## Status Telemetry Wire-Width Progress
+
+Reason for this change:
+
+- While checking the RC override follow-up, the local MAVLink dialect was found to define `ROSFLIGHT_STATUS.rc_override` as `uint8_t`.
+- Current ROSflight 2.x defines that field as `uint16_t`.
+- The upstream command manager uses that width because override reasons are a bitmask with values up through `0x200`.
+
+Design now implemented:
+
+- Local `rustflight_core/mavlink_definitions/rosflight.xml` now defines `ROSFLIGHT_STATUS.rc_override` as `uint16_t`.
+- Local `RosflightStatusMsg` now carries `rc_override: u16`.
+- The current boolean local override state is widened at the telemetry boundary instead of truncating the field type.
+
+ROSflight compatibility:
+
+- This aligns the local wire schema with current ROSflight 2.x for `ROSFLIGHT_STATUS`.
+- It does not yet mean local RustFlight computes every upstream override reason.
+- It removes a blocking schema mismatch so a future command-manager slice can publish the full upstream bitmask.
+
+Compile-time boundary improvement:
+
+- The message type now prevents accidental truncation when the command manager grows from boolean override reporting to upstream-style bitmask reporting.
+- Telemetry remains read-only over command state.
+
+Files changed in this slice:
+
+- `rustflight_core/mavlink_definitions/rosflight.xml`
+  - Changes `ROSFLIGHT_STATUS.rc_override` from `uint8_t` to `uint16_t`.
+- `rustflight_core/src/comm_messages.rs`
+  - Changes `RosflightStatusMsg::rc_override` from `u8` to `u16`.
+- `rustflight_core/src/comm_manager.rs`
+  - Widens the current boolean override value to `u16` when building status messages.
+
+Validation status:
+
+- `cargo test -p rustflight_core comm_manager::tests::named_status_telemetry_reports_command_manager_override_state --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Future follow-up:
+
+- Implement upstream-style RC override reason bits in `CommandManager`:
+  - `OVERRIDE_ATT_SWITCH = 0x1`,
+  - `OVERRIDE_THR_SWITCH = 0x2`,
+  - `OVERRIDE_X = 0x4`,
+  - `OVERRIDE_Y = 0x8`,
+  - `OVERRIDE_Z = 0x10`,
+  - `OVERRIDE_T = 0x20`,
+  - `OVERRIDE_OFFBOARD_X_INACTIVE = 0x40`,
+  - `OVERRIDE_OFFBOARD_Y_INACTIVE = 0x80`,
+  - `OVERRIDE_OFFBOARD_Z_INACTIVE = 0x100`,
+  - `OVERRIDE_OFFBOARD_T_INACTIVE = 0x200`.
+
 ## Armed Command Compatibility Progress
 
 Upstream source findings:
