@@ -17,6 +17,7 @@ User requirements for ongoing work:
 - Run focused tests for each added component before moving on.
 - Also run broader validation checks, especially `cargo check -p rustflight_core --lib` and `cargo check -p sim`, before committing a completed slice.
 - Preserve ROSflight/rosflight_io wire behavior while improving internal causality.
+- Treat current ROSflight 2.x behavior from `rosflight_firmware` and `rosflight_ros_pkgs/rosflight_io` as the compatibility target.
 - Responses that imply completed work should be sent after the relevant owning system completes that work.
 - Avoid one-off patches that duplicate old shortcuts in the new architecture.
 - Continue building the new World/ports/events path in parallel with the legacy HList path until the new path is verified enough to delete the old path.
@@ -2073,6 +2074,92 @@ Validation:
 Next planned migration target:
 
 - Either implement upstream-style external attitude correction in `QuadEstimator`, or move aux command state into the mixer path as a separate, focused slice.
+
+## Aux Command Output Composition Progress
+
+Compatibility target:
+
+- Current ROSflight 2.x behavior from `rosflight_firmware` and `rosflight_ros_pkgs/rosflight_io`.
+- `rosflight_io` publishes `aux_command` MAVLink messages from the ROS `aux_command` topic.
+- Current ROSflight firmware stores aux commands in the mixer path and applies them during output mixing.
+
+Reason for this change:
+
+- The companion-input slice preserved aux commands in `AuxCommandState`.
+- Those values still did not affect outputs.
+- The new architecture should not let comms mutate the mixer directly.
+- The output-stage owner should decide how primary actuator commands and aux commands combine before PWM write.
+
+Design choice:
+
+- Keep this as an output-composition slice, not a broad mixer-trait rewrite.
+- The current local `QuadMixer` produces four primary motor channels.
+- The current sim PWM driver supports 14 output channels.
+- Upstream ROSflight has richer mixer output typing and channel ownership.
+- Instead of changing all mixer traits now, this slice composes aux commands onto unused channels after primary mixing and before PWM writes.
+- This is intentionally incremental; exact upstream parity for channel ownership should come later with a richer mixer output type.
+
+Design now implemented:
+
+- Added `pwm_system::compose_pwm_outputs`.
+- The function:
+  - preserves primary mixer outputs in the leading channels,
+  - applies aux commands only after the primary command slice,
+  - maps servo aux values from `[-1.0, 1.0]` to `[0.0, 1.0]`,
+  - applies motor aux values only when armed,
+  - applies idle-throttle behavior for armed aux motors when `SPIN_MOTORS_WHEN_ARMED` is enabled,
+  - leaves disabled aux channels low.
+- `World::run_control_stages_if_new_imu` now composes PWM outputs before calling `write_pwm_commands`.
+- Telemetry still reports primary actuator commands for now.
+
+ROSflight 2.x compatibility:
+
+- This matches the current ROSflight principle that aux commands are applied in the output path, not in comm parsing.
+- It also preserves motor safety behavior: aux motor output is forced low while disarmed.
+- It is not full mixer-output parity yet because RustFlight does not yet model upstream's per-channel output type ownership.
+- The deferred parity work is explicitly to replace this simple composition with typed mixer output ownership.
+
+Compile-time boundary improvement:
+
+- Comms only emits aux input events.
+- `companion_system` stores latest aux command state.
+- The output stage reads `AuxCommandState` and params/state to compose PWM outputs.
+- Mixer and PWM interactions remain scheduler-owned rather than callback-owned.
+
+Files changed in this slice:
+
+- `rustflight_core/src/pwm_system.rs`
+  - Adds `PWM_OUTPUT_CHANNELS`.
+  - Adds `compose_pwm_outputs`.
+  - Adds focused aux composition tests.
+- `rustflight_core/src/world.rs`
+  - Uses `compose_pwm_outputs` before PWM writes.
+  - Extends World control-stage coverage to prove aux values reach the PWM command slice.
+
+Tests added or updated:
+
+- `pwm_system::tests::compose_pwm_outputs_preserves_primary_and_applies_aux_to_unused_channels`
+  - Proves primary outputs are preserved and servo/motor aux commands are applied to unused channels.
+- `pwm_system::tests::compose_pwm_outputs_forces_aux_motors_low_when_disarmed`
+  - Proves aux motor commands do not drive outputs while disarmed.
+- `world::tests::world_control_stage_runs_once_per_imu_timestamp`
+  - Extended to prove the World output stage sends a 14-channel composed PWM command slice with aux values.
+
+Validation:
+
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core companion_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Later parity work:
+  - introduce typed mixer output channel ownership,
+  - move from simple "primary slice then aux channels" composition to ROSflight 2.x style output-type composition,
+  - decide whether telemetry should report primary actuator commands or final composed output commands.
 
 ## Remaining Placeholder Command Event Progress
 

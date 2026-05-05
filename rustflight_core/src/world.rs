@@ -22,7 +22,9 @@ use crate::{
     params2::Params,
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
-    pwm_system::{PwmOutputState, sync_pwm_output_state, write_pwm_commands},
+    pwm_system::{
+        PwmOutputState, compose_pwm_outputs, sync_pwm_output_state, write_pwm_commands,
+    },
     rc::Rc,
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
@@ -366,11 +368,17 @@ where
             Self::ESTIMATOR_DT,
         );
         let actuator_commands = self.mixer.mix(&controls, &self.state);
+        let pwm_outputs = compose_pwm_outputs(
+            actuator_commands.as_ref(),
+            self.aux_commands.latest.as_ref(),
+            &self.state,
+            &self.params,
+        );
         write_pwm_commands(
             &mut self.board,
             &mut self.pwm,
             &self.pwm_output,
-            actuator_commands.as_ref(),
+            &pwm_outputs,
         );
         let now_us = self.board.clock_micros();
         self.comm.send_named_telemetry_streams(
@@ -415,7 +423,7 @@ mod tests {
         disable_all_count: usize,
         flush_count: usize,
         send_count: usize,
-        last_commands: [f64; 8],
+        last_commands: [f64; 14],
         last_command_len: usize,
     }
 
@@ -427,7 +435,7 @@ mod tests {
                 disable_all_count: 0,
                 flush_count: 0,
                 send_count: 0,
-                last_commands: [0.0; 8],
+                last_commands: [0.0; 14],
                 last_command_len: 0,
             }
         }
@@ -631,6 +639,8 @@ mod tests {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
+        params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
+        params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Bool(true));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
         let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
@@ -658,6 +668,15 @@ mod tests {
             qy: 0.0,
             qz: 0.0,
         });
+        let mut aux = RosflightAuxCmdMsg {
+            type_array: [RosflightAuxCmdType::Disabled; 14],
+            aux_cmd_array: [0.0; 14],
+        };
+        aux.type_array[4] = RosflightAuxCmdType::Servo;
+        aux.aux_cmd_array[4] = -0.5;
+        aux.type_array[5] = RosflightAuxCmdType::Motor;
+        aux.aux_cmd_array[5] = 0.1;
+        world.aux_commands.latest = Some(aux);
         world.processed_sensors.imu = Some(crate::packets::ImuPacket {
             header: crate::packets::RosflightPacketHeader {
                 timestamp: 1,
@@ -679,6 +698,9 @@ mod tests {
         assert!(world.latest_actuator_commands.is_some());
         assert!(world.external_attitude.latest.is_none());
         assert_eq!(world.latest_state.q(), [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(world.pwm.last_command_len, 14);
+        assert_eq!(world.pwm.last_commands[4], 0.25);
+        assert!((world.pwm.last_commands[5] - 0.2).abs() < 1e-6);
 
         assert!(!world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 1);

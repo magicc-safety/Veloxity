@@ -1,8 +1,15 @@
 use crate::{
     board::BoardIo,
+    comm_messages::{
+        enums::RosflightAuxCmdType,
+        messages::RosflightAuxCmdMsg,
+    },
+    params2::{ParamId, ParamValue, Params},
     pwm::{PwmDriver, PwmError},
     state_machine::StateManager,
 };
+
+pub const PWM_OUTPUT_CHANNELS: usize = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PwmOutputState {
@@ -61,6 +68,53 @@ where
 
     pwm.send_commands(board, commands);
     true
+}
+
+pub fn compose_pwm_outputs(
+    primary_commands: &[f64],
+    aux_command: Option<&RosflightAuxCmdMsg>,
+    state: &StateManager,
+    params: &Params,
+) -> [f64; PWM_OUTPUT_CHANNELS] {
+    let mut outputs = [0.0; PWM_OUTPUT_CHANNELS];
+    let primary_len = primary_commands.len().min(PWM_OUTPUT_CHANNELS);
+    outputs[..primary_len].copy_from_slice(&primary_commands[..primary_len]);
+
+    let Some(aux_command) = aux_command else {
+        return outputs;
+    };
+
+    let idle_throttle = match params.get_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE) {
+        ParamValue::Float(value) => value as f64,
+        _ => 0.0,
+    };
+    let spin_when_armed = match params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) {
+        ParamValue::Bool(value) => value,
+        _ => false,
+    };
+
+    for (channel, output) in outputs.iter_mut().enumerate().skip(primary_len) {
+        let value = aux_command.aux_cmd_array[channel] as f64;
+        *output = match aux_command.type_array[channel] {
+            RosflightAuxCmdType::Disabled => 0.0,
+            RosflightAuxCmdType::Servo => value.clamp(-1.0, 1.0) * 0.5 + 0.5,
+            RosflightAuxCmdType::Motor => {
+                if !state.is_armed() {
+                    0.0
+                } else if value > 1.0 {
+                    1.0
+                } else if value < idle_throttle && spin_when_armed {
+                    idle_throttle
+                } else if value < 0.0 {
+                    0.0
+                } else {
+                    value
+                }
+            }
+        };
+    }
+
+    outputs
 }
 
 #[cfg(test)]
@@ -210,5 +264,51 @@ mod tests {
             &[0.1, 0.2]
         ));
         assert_eq!(pwm.send_count, 1);
+    }
+
+    #[test]
+    fn compose_pwm_outputs_preserves_primary_and_applies_aux_to_unused_channels() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
+        params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Bool(true));
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update(Event::REQUEST_ARM, &params);
+        let mut aux = RosflightAuxCmdMsg {
+            type_array: [RosflightAuxCmdType::Disabled; PWM_OUTPUT_CHANNELS],
+            aux_cmd_array: [0.0; PWM_OUTPUT_CHANNELS],
+        };
+        aux.type_array[4] = RosflightAuxCmdType::Servo;
+        aux.aux_cmd_array[4] = -0.5;
+        aux.type_array[5] = RosflightAuxCmdType::Motor;
+        aux.aux_cmd_array[5] = 0.1;
+
+        let outputs = compose_pwm_outputs(&[0.1, 0.2, 0.3, 0.4], Some(&aux), &state, &params);
+
+        assert_eq!(outputs[0], 0.1);
+        assert_eq!(outputs[1], 0.2);
+        assert_eq!(outputs[2], 0.3);
+        assert_eq!(outputs[3], 0.4);
+        assert_eq!(outputs[4], 0.25);
+        assert!((outputs[5] - 0.2).abs() < 1e-6);
+        assert_eq!(outputs[6], 0.0);
+    }
+
+    #[test]
+    fn compose_pwm_outputs_forces_aux_motors_low_when_disarmed() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        let mut aux = RosflightAuxCmdMsg {
+            type_array: [RosflightAuxCmdType::Disabled; PWM_OUTPUT_CHANNELS],
+            aux_cmd_array: [0.0; PWM_OUTPUT_CHANNELS],
+        };
+        aux.type_array[4] = RosflightAuxCmdType::Motor;
+        aux.aux_cmd_array[4] = 0.8;
+
+        let outputs = compose_pwm_outputs(&[0.1, 0.2, 0.3, 0.4], Some(&aux), &state, &params);
+
+        assert_eq!(outputs[4], 0.0);
     }
 }
