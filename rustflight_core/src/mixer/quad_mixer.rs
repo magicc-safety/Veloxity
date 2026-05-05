@@ -36,7 +36,7 @@
 // // **
 
 use crate::controller::quad_controller::MixerInput;
-use crate::mixer::Mixer;
+use crate::mixer::{Mixer, MixerOutputType};
 use crate::params2::{ParamId, ParamValue, Params};
 use crate::state_machine::StateManager;
 use libm::{cos, fabs, sin};
@@ -47,6 +47,7 @@ use num_traits::Float;
 
 // In no_std, we can use core::f64::consts or just hardcode constants.
 const FRAC_PI_4: f64 = 0.78539816339744830961; // 45 degrees in radians
+const QUAD_OUTPUT_TYPES: [MixerOutputType; 4] = [MixerOutputType::Motor; 4];
 
 #[derive(Debug, Clone, Copy)]
 pub struct MixerParams {
@@ -234,5 +235,9 @@ impl Mixer for QuadMixer {
         // crate::log_info!("Motor outputs with params: {:.3?} {:.3?} {:.3?} {:.3?}", outputs[0], outputs[1], outputs[2], outputs[3]);
 
         outputs
+    }
+
+    fn output_types(&self) -> &[MixerOutputType] {
+        &QUAD_OUTPUT_TYPES
     }
 }

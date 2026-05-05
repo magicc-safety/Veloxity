@@ -370,6 +370,7 @@ where
         let actuator_commands = self.mixer.mix(&controls, &self.state);
         let pwm_outputs = compose_pwm_outputs(
             actuator_commands.as_ref(),
+            self.mixer.output_types(),
             self.aux_commands.latest.as_ref(),
             &self.state,
             &self.params,

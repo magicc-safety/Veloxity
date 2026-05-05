@@ -1966,6 +1966,77 @@ Future follow-up:
 - Compare the local force-channel muxing shape against upstream's `MuxChannel`/`Mixer::NUM_MIXER_OUTPUTS` model when the mixer ownership rewrite happens.
 - The current local throttle override still applies to `fx`, `fy`, and `fz` together, matching the pre-existing RustFlight behavior; upstream evaluates the selected throttle axis but then muxes by channel masks.
 
+## Mixer Output Ownership Progress
+
+Reason for this change:
+
+- The previous aux/PWM composition was still based on "primary slice length": primary mixer outputs owned channels `0..primary_len`, and aux commands could only use channels after that slice.
+- Current ROSflight 2.x uses mixer output types to decide channel ownership.
+- In upstream, AUX commands may fill channels inside the primary mixer range only when the selected mixer marks that output as AUX.
+- This makes output causality clearer than relying on array length.
+
+Design now implemented:
+
+- `MixerOutputType` was added with:
+  - `Aux`,
+  - `Motor`,
+  - `Servo`.
+- The `Mixer` trait now exposes a read-only `output_types()` port.
+- `QuadMixer` reports its four outputs as motor-owned.
+- `pwm_system::compose_pwm_outputs` now receives:
+  - primary command values,
+  - primary output ownership,
+  - optional aux command state,
+  - state and params for motor safety mapping.
+- For each of the 14 output channels:
+  - non-AUX mixer-owned channels use the primary mixer value and primary output type,
+  - AUX-owned channels use the aux command type/value,
+  - channels beyond the primary ownership list default to AUX-owned.
+- Raw output mapping now follows the output type:
+  - `Servo`: clamp `[-1, 1]`, then map to `[0, 1]`,
+  - `Motor`: zero while disarmed, otherwise apply clamp/idle/spin-when-armed behavior,
+  - `Aux`: output zero.
+
+ROSflight compatibility:
+
+- This matches the important ROSflight 2.x rule: aux commands do not overwrite mixer-owned motor/servo channels, but they can fill channels the mixer marks AUX.
+- Current quad behavior remains four motor-owned channels.
+- AUX commands on channels beyond those four still work as before, but now because those channels are explicitly treated as AUX-owned rather than because they are past `primary_len`.
+- Primary motor outputs now pass through motor raw-output rules in the composition stage, including armed idle-throttle enforcement. The old test expectation that primary value `0.1` stayed `0.1` while armed with idle `0.2` was corrected to `0.2`, matching the typed motor output stage.
+
+Compile-time boundary improvement:
+
+- PWM composition no longer guesses ownership from command array length.
+- The mixer exposes only a shared output-type view; PWM can read ownership but cannot mutate mixer internals.
+- The World scheduler wires the mixer output-type port into the PWM system explicitly.
+
+Files changed in this slice:
+
+- `rustflight_core/src/mixer.rs`
+  - Adds `MixerOutputType`.
+  - Adds `Mixer::output_types()`.
+- `rustflight_core/src/mixer/quad_mixer.rs`
+  - Reports four motor-owned outputs.
+- `rustflight_core/src/pwm_system.rs`
+  - Reworks `compose_pwm_outputs` around typed ownership.
+  - Adds focused tests for aux-owned slots inside the primary range and motor safety mapping.
+- `rustflight_core/src/world.rs`
+  - Passes `self.mixer.output_types()` into PWM composition.
+
+Validation:
+
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Future follow-up:
+
+- The local mixer still lacks upstream's full primary/secondary mixer selection model driven by RC override masks.
+- Fixed-wing mixer output ownership still needs to be introduced when the fixed-wing path is migrated into the new named-resource architecture.
+- `ROSFLIGHT_OUTPUT_RAW` telemetry currently receives the pre-composed actuator command vector, not the final 14-channel raw PWM output array. Compare this against current ROSflight 2.x `mixer_.get_outputs()` behavior before changing telemetry payload semantics.
+
 ## Armed Command Compatibility Progress
 
 Upstream source findings:

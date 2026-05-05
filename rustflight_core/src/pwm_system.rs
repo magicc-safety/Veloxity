@@ -4,6 +4,7 @@ use crate::{
         enums::RosflightAuxCmdType,
         messages::RosflightAuxCmdMsg,
     },
+    mixer::MixerOutputType,
     params2::{ParamId, ParamValue, Params},
     pwm::{PwmDriver, PwmError},
     state_machine::StateManager,
@@ -72,18 +73,11 @@ where
 
 pub fn compose_pwm_outputs(
     primary_commands: &[f64],
+    primary_output_types: &[MixerOutputType],
     aux_command: Option<&RosflightAuxCmdMsg>,
     state: &StateManager,
     params: &Params,
 ) -> [f64; PWM_OUTPUT_CHANNELS] {
-    let mut outputs = [0.0; PWM_OUTPUT_CHANNELS];
-    let primary_len = primary_commands.len().min(PWM_OUTPUT_CHANNELS);
-    outputs[..primary_len].copy_from_slice(&primary_commands[..primary_len]);
-
-    let Some(aux_command) = aux_command else {
-        return outputs;
-    };
-
     let idle_throttle = match params.get_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE) {
         ParamValue::Float(value) => value as f64,
         _ => 0.0,
@@ -93,28 +87,72 @@ pub fn compose_pwm_outputs(
         _ => false,
     };
 
-    for (channel, output) in outputs.iter_mut().enumerate().skip(primary_len) {
-        let value = aux_command.aux_cmd_array[channel] as f64;
-        *output = match aux_command.type_array[channel] {
-            RosflightAuxCmdType::Disabled => 0.0,
-            RosflightAuxCmdType::Servo => value.clamp(-1.0, 1.0) * 0.5 + 0.5,
-            RosflightAuxCmdType::Motor => {
-                if !state.is_armed() {
-                    0.0
-                } else if value > 1.0 {
-                    1.0
-                } else if value < idle_throttle && spin_when_armed {
-                    idle_throttle
-                } else if value < 0.0 {
-                    0.0
-                } else {
-                    value
-                }
-            }
+    let mut outputs = [0.0; PWM_OUTPUT_CHANNELS];
+
+    for channel in 0..PWM_OUTPUT_CHANNELS {
+        let primary_type = primary_output_types
+            .get(channel)
+            .copied()
+            .unwrap_or(MixerOutputType::Aux);
+        let primary_value = primary_commands.get(channel).copied().unwrap_or(0.0);
+        let (output_type, value) = if primary_type == MixerOutputType::Aux {
+            aux_output_for_channel(aux_command, channel)
+        } else {
+            (primary_type, primary_value)
         };
+
+        outputs[channel] =
+            raw_output_for_type(output_type, value, state, idle_throttle, spin_when_armed);
     }
 
     outputs
+}
+
+fn aux_output_for_channel(
+    aux_command: Option<&RosflightAuxCmdMsg>,
+    channel: usize,
+) -> (MixerOutputType, f64) {
+    let Some(aux_command) = aux_command else {
+        return (MixerOutputType::Aux, 0.0);
+    };
+
+    match aux_command.type_array[channel] {
+        RosflightAuxCmdType::Disabled => (MixerOutputType::Aux, 0.0),
+        RosflightAuxCmdType::Servo => (
+            MixerOutputType::Servo,
+            aux_command.aux_cmd_array[channel] as f64,
+        ),
+        RosflightAuxCmdType::Motor => (
+            MixerOutputType::Motor,
+            aux_command.aux_cmd_array[channel] as f64,
+        ),
+    }
+}
+
+fn raw_output_for_type(
+    output_type: MixerOutputType,
+    value: f64,
+    state: &StateManager,
+    idle_throttle: f64,
+    spin_when_armed: bool,
+) -> f64 {
+    match output_type {
+        MixerOutputType::Aux => 0.0,
+        MixerOutputType::Servo => value.clamp(-1.0, 1.0) * 0.5 + 0.5,
+        MixerOutputType::Motor => {
+            if !state.is_armed() {
+                0.0
+            } else if value > 1.0 {
+                1.0
+            } else if value < idle_throttle && spin_when_armed {
+                idle_throttle
+            } else if value < 0.0 {
+                0.0
+            } else {
+                value
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -284,10 +322,22 @@ mod tests {
         aux.type_array[5] = RosflightAuxCmdType::Motor;
         aux.aux_cmd_array[5] = 0.1;
 
-        let outputs = compose_pwm_outputs(&[0.1, 0.2, 0.3, 0.4], Some(&aux), &state, &params);
+        let output_types = [
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+        ];
+        let outputs = compose_pwm_outputs(
+            &[0.1, 0.2, 0.3, 0.4],
+            &output_types,
+            Some(&aux),
+            &state,
+            &params,
+        );
 
-        assert_eq!(outputs[0], 0.1);
-        assert_eq!(outputs[1], 0.2);
+        assert!((outputs[0] - 0.2).abs() < 1e-6);
+        assert!((outputs[1] - 0.2).abs() < 1e-6);
         assert_eq!(outputs[2], 0.3);
         assert_eq!(outputs[3], 0.4);
         assert_eq!(outputs[4], 0.25);
@@ -307,8 +357,56 @@ mod tests {
         aux.type_array[4] = RosflightAuxCmdType::Motor;
         aux.aux_cmd_array[4] = 0.8;
 
-        let outputs = compose_pwm_outputs(&[0.1, 0.2, 0.3, 0.4], Some(&aux), &state, &params);
+        let output_types = [
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+        ];
+        let outputs = compose_pwm_outputs(
+            &[0.1, 0.2, 0.3, 0.4],
+            &output_types,
+            Some(&aux),
+            &state,
+            &params,
+        );
 
         assert_eq!(outputs[4], 0.0);
+    }
+
+    #[test]
+    fn compose_pwm_outputs_uses_aux_inside_primary_range_only_for_aux_owned_slots() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update(Event::REQUEST_ARM, &params);
+        let mut aux = RosflightAuxCmdMsg {
+            type_array: [RosflightAuxCmdType::Disabled; PWM_OUTPUT_CHANNELS],
+            aux_cmd_array: [0.0; PWM_OUTPUT_CHANNELS],
+        };
+        aux.type_array[1] = RosflightAuxCmdType::Servo;
+        aux.aux_cmd_array[1] = 1.0;
+        aux.type_array[2] = RosflightAuxCmdType::Servo;
+        aux.aux_cmd_array[2] = -1.0;
+        let output_types = [
+            MixerOutputType::Motor,
+            MixerOutputType::Aux,
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+        ];
+
+        let outputs = compose_pwm_outputs(
+            &[0.1, 0.2, 0.3, 0.4],
+            &output_types,
+            Some(&aux),
+            &state,
+            &params,
+        );
+
+        assert!((outputs[0] - 0.1).abs() < 1e-6);
+        assert_eq!(outputs[1], 1.0);
+        assert_eq!(outputs[2], 0.3);
+        assert_eq!(outputs[3], 0.4);
     }
 }

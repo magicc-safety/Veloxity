@@ -37,6 +37,13 @@
 use crate::state_machine::StateManager;
 
 pub mod quad_mixer;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixerOutputType {
+    Aux,
+    Motor,
+    Servo,
+}
+
 pub trait Mixer {
     type MixerInput;
     type ActuatorCommands: AsRef<[f64]>;
@@ -45,4 +52,8 @@ pub trait Mixer {
         controls: &Self::MixerInput,
         state_manager: &StateManager,
     ) -> Self::ActuatorCommands;
+
+    fn output_types(&self) -> &[MixerOutputType] {
+        &[]
+    }
 }
