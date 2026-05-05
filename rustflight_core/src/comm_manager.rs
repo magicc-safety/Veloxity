@@ -214,8 +214,8 @@ where
             let status_msg = comm_messages::messages::RosflightStatusMsg {
                 armed: state_manager.is_armed() as u8,
                 failsafe: state_manager.is_in_failsafe() as u8,
-                rc_override: 0, // Placeholder: self.command_manager.is_rc_override() as u8,
-                offboard: 0,    // Placeholder: self.command_manager.is_offboard() as u8,
+                rc_override: command_manager.rc_override_active() as u8,
+                offboard: command_manager.is_offboard_active() as u8,
                 error_code: state_manager.get_errors(),
                 control_mode: command_manager.get_control_mode().into(),
                 num_errors: state_manager.get_errors().bits().count_ones() as i16,
@@ -479,8 +479,8 @@ where
                 RosflightStatusMsg {
                     armed: state_manager.is_armed() as u8,
                     failsafe: state_manager.is_in_failsafe() as u8,
-                    rc_override: 0,
-                    offboard: 0,
+                    rc_override: command_manager.rc_override_active() as u8,
+                    offboard: command_manager.is_offboard_active() as u8,
                     error_code: state_manager.get_errors(),
                     control_mode: command_manager.get_control_mode().into(),
                     num_errors: state_manager.get_errors().bits().count_ones() as i16,
@@ -1328,6 +1328,50 @@ mod tests {
         assert_eq!(output.values[1], 0.2);
         assert_eq!(output.values[2], 0.3);
         assert_eq!(output.values[3], 0.4);
+    }
+
+    #[test]
+    fn named_status_telemetry_reports_command_manager_override_state() {
+        let mut board = TestBoard {
+            current_time_us: 1_100_000,
+            tx_write_count: 0,
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        let state_manager = StateManager::new();
+        let mut command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
+        let processed_sensors = ProcessedSensors::default();
+        let actuator_commands = [0.0, 0.0, 0.0, 0.0];
+
+        command_manager.set_new_offboard_command(
+            board.clock_micros(),
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.0,
+            },
+            &params,
+        );
+
+        manager.send_named_telemetry_streams(
+            &mut board,
+            1_100_000,
+            &state_manager,
+            &command_manager,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+        );
+
+        let status = manager.comm_link().last_status.unwrap();
+        assert_eq!(status.offboard, 1);
+        assert_eq!(status.rc_override, 0);
     }
 
     #[test]

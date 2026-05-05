@@ -1802,6 +1802,58 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Status Telemetry Command-State Progress
+
+Reason for this change:
+
+- Current ROSflight 2.x status telemetry reports whether RC override is active and whether offboard control is active.
+- RustFlight's telemetry path still had zero placeholders for both fields.
+- That made `rosflight_io` status consumers see a less faithful view of the flight stack even after offboard commands were routed through events.
+
+Design now implemented:
+
+- Both legacy HList telemetry and named `World` telemetry now ask `CommandManager` for:
+  - `rc_override_active()`,
+  - `is_offboard_active()`.
+- `CommManager` still owns wire transmission, but it no longer fabricates these fields.
+- `CommandManager` remains the only owner of the override/offboard decision state.
+
+ROSflight compatibility:
+
+- This follows current ROSflight 2.x `CommManager::send_status`, which uses command-manager state for `rc_override` and `offboard`.
+- `rosflight_io` receives the same status-field intent: offboard activity is observable in the status stream after an offboard control command is active.
+
+Compile-time boundary improvement:
+
+- Telemetry receives a shared reference to `CommandManager`; it can observe command state but cannot mutate command state.
+- The World scheduler keeps mutation in the command system and read-only status reporting in telemetry.
+- This is the ports pattern in a small form: telemetry gets a read capability for exactly the state it must publish.
+
+Files changed in this slice:
+
+- `rustflight_core/src/comm_manager.rs`
+  - Replaces status telemetry placeholder fields with command-manager accessors.
+  - Adds a focused test for offboard status reporting.
+- `rustflight_core/src/test_support.rs`
+  - Records the latest status message so telemetry tests can assert field contents.
+
+Tests added:
+
+- `comm_manager::tests::named_status_telemetry_reports_command_manager_override_state`
+  - Proves named telemetry reports active offboard state through `RosflightStatusMsg`.
+
+Validation status:
+
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Future follow-up:
+
+- `rc_override_active()` is currently boolean, while upstream reports a bitmask-like `rc_override_` value. Keep this noted for future command-manager parity work.
+- The next parity slice should inspect whether local RC override reasoning has enough channel-level detail to publish the full ROSflight 2.x override value instead of a boolean.
+
 ## Armed Command Compatibility Progress
 
 Upstream source findings:

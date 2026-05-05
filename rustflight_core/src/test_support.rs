@@ -42,6 +42,7 @@ pub struct RecordingCommLink {
     pub sent_param_value_count: usize,
     pub heartbeat_count: usize,
     pub status_count: usize,
+    pub last_status: Option<RosflightStatusMsg>,
     pub imu_count: usize,
     pub attitude_count: usize,
     pub output_raw_count: usize,
@@ -59,6 +60,7 @@ impl RecordingCommLink {
             sent_param_value_count: 0,
             heartbeat_count: 0,
             status_count: 0,
+            last_status: None,
             imu_count: 0,
             attitude_count: 0,
             output_raw_count: 0,
@@ -108,9 +110,10 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         &mut self,
         _board: &mut TestBoard,
         _system_id: u8,
-        _msg: RosflightStatusMsg,
+        msg: RosflightStatusMsg,
     ) {
         self.status_count += 1;
+        self.last_status = Some(msg);
     }
 
     fn send_timesync(
