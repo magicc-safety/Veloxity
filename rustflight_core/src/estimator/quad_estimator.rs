@@ -37,6 +37,7 @@
 
 use super::AttitudeStateTrait;
 use super::{Estimator, NamedEstimator};
+use crate::comm_messages::messages::ExternalAttitudeMsg;
 use crate::hlist::*;
 use crate::hlist_type;
 use crate::packets;
@@ -205,6 +206,17 @@ impl Default for QuadEstimator {
 }
 
 impl QuadEstimator {
+    fn apply_external_attitude(&mut self, external_attitude: ExternalAttitudeMsg) {
+        let mut q = Quaternion::from_array([
+            external_attitude.qw as f64,
+            external_attitude.qx as f64,
+            external_attitude.qy as f64,
+            external_attitude.qz as f64,
+        ]);
+        q.normalize_fill();
+        self.q_hat = q;
+    }
+
     fn estimate_packets(
         &mut self,
         imu: Option<packets::ImuPacket>,
@@ -375,12 +387,26 @@ impl NamedEstimator for QuadEstimator {
     ) -> Self::State {
         self.estimate_packets(sensors.imu, sensors.mag, params, dt)
     }
+
+    fn estimate_named_with_external_attitude(
+        &mut self,
+        sensors: &ProcessedSensors,
+        params: &Params,
+        dt: f64,
+        external_attitude: Option<ExternalAttitudeMsg>,
+    ) -> Self::State {
+        if let Some(external_attitude) = external_attitude {
+            self.apply_external_attitude(external_attitude);
+        }
+        self.estimate_packets(sensors.imu, sensors.mag, params, dt)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
+        comm_messages::messages::ExternalAttitudeMsg,
         estimator::{Estimator, NamedEstimator},
         hlist::HCons,
         hlist::HNil,
@@ -414,5 +440,38 @@ mod tests {
         assert_eq!(legacy_state.q(), named_state.q());
         assert_eq!(legacy_state.q_dot(), named_state.q_dot());
         assert_eq!(legacy_state.body_rate, named_state.body_rate);
+    }
+
+    #[test]
+    fn named_estimator_consumes_external_attitude_on_next_run() {
+        let params = Params::new();
+        let imu = ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1_000,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -G],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        };
+        let mut sensors = ProcessedSensors::default();
+        sensors.imu = Some(imu);
+
+        let mut estimator = QuadEstimator::default();
+        let state = estimator.estimate_named_with_external_attitude(
+            &sensors,
+            &params,
+            1.0 / 400.0,
+            Some(ExternalAttitudeMsg {
+                qw: 0.0,
+                qx: 1.0,
+                qy: 0.0,
+                qz: 0.0,
+            }),
+        );
+
+        assert_eq!(state.q(), [0.0, 1.0, 0.0, 0.0]);
+        assert!(state.is_healthy());
     }
 }

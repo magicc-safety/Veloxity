@@ -2009,6 +2009,71 @@ Next planned migration target:
   - apply external attitude state to estimator with focused estimator tests.
 - Do not wire both in one slice; they affect different control paths and should remain easy to review.
 
+## External Attitude Estimator Handoff Progress
+
+Reason for this change:
+
+- The previous companion-input slice preserved external attitude messages as explicit `ExternalAttitudeState`.
+- Upstream ROSflight handles external attitude in the estimator, not in comms.
+- The new architecture should follow that ownership:
+  - comms emits external attitude input,
+  - companion input stage stores the latest pending fact,
+  - the estimator stage consumes that fact through an estimator-specific input path.
+
+Upstream compatibility note:
+
+- Upstream firmware stores the external attitude quaternion and marks it for use on the next estimator run.
+- During estimator run, upstream computes an external-attitude correction term and uses `FILTER_KP_EXT`; it does not simply mutate estimator state from the comm callback.
+- This slice preserves the ownership and scheduling semantics, but it does not yet implement the full upstream external-attitude correction math.
+- Current RustFlight `QuadEstimator` is simpler than upstream and now consumes the pending external attitude by applying the provided quaternion before its next named estimator update.
+- A later estimator-parity slice should replace this with the upstream-style correction term when the local estimator math is ready.
+
+Design now implemented:
+
+- `NamedEstimator` now has `estimate_named_with_external_attitude`.
+- The default trait implementation calls `estimate_named`, so estimators that do not support external attitude are not forced to change behavior.
+- `QuadEstimator` overrides the new method.
+- `World::run_control_stages_if_new_imu` takes the pending `ExternalAttitudeState::latest` value and passes it into the named estimator path.
+- The pending external attitude is consumed once with `take()`, matching upstream's "update next run" shape.
+
+Compile-time boundary improvement:
+
+- The estimator owns external attitude consumption.
+- Comms does not receive mutable estimator access.
+- The scheduler is the only place that connects companion input state to estimator input.
+- The function signature makes the dependency explicit.
+
+Files changed in this slice:
+
+- `rustflight_core/src/estimator.rs`
+  - Adds `estimate_named_with_external_attitude` to `NamedEstimator`.
+- `rustflight_core/src/estimator/quad_estimator.rs`
+  - Adds external attitude consumption for the named estimator path.
+  - Adds focused estimator coverage.
+- `rustflight_core/src/world.rs`
+  - Passes pending external attitude into the estimator stage.
+  - Proves the pending value is consumed by the scheduler.
+
+Tests added or updated:
+
+- `estimator::quad_estimator::tests::named_estimator_consumes_external_attitude_on_next_run`
+  - Proves the named estimator path consumes an external attitude input.
+- `world::tests::world_control_stage_runs_once_per_imu_timestamp`
+  - Extended to prove the World control stage passes pending external attitude into the estimator and consumes it once.
+
+Validation:
+
+- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core companion_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Either implement upstream-style external attitude correction in `QuadEstimator`, or move aux command state into the mixer path as a separate, focused slice.
+
 ## Remaining Placeholder Command Event Progress
 
 Reason for this change:

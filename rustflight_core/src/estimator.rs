@@ -34,7 +34,10 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{hlist::*, params2::Params, sensors::ProcessedSensors};
+use crate::{
+    comm_messages::messages::ExternalAttitudeMsg, hlist::*, params2::Params,
+    sensors::ProcessedSensors,
+};
 pub mod quad_estimator;
 
 pub trait Estimator {
@@ -51,6 +54,16 @@ pub trait NamedEstimator {
         params: &Params,
         dt: f64,
     ) -> Self::State;
+
+    fn estimate_named_with_external_attitude(
+        &mut self,
+        sensors: &ProcessedSensors,
+        params: &Params,
+        dt: f64,
+        _external_attitude: Option<ExternalAttitudeMsg>,
+    ) -> Self::State {
+        self.estimate_named(sensors, params, dt)
+    }
 }
 
 pub trait AttitudeStateTrait {

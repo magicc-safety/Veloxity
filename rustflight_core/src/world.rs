@@ -334,9 +334,13 @@ where
         }
         self.last_imu_time = current_time;
 
-        let state =
-            self.estimator
-                .estimate_named(&self.processed_sensors, &self.params, Self::ESTIMATOR_DT);
+        let external_attitude = self.external_attitude.latest.take();
+        let state = self.estimator.estimate_named_with_external_attitude(
+            &self.processed_sensors,
+            &self.params,
+            Self::ESTIMATOR_DT,
+            external_attitude,
+        );
 
         if state.is_healthy() {
             self.state.update(
@@ -648,6 +652,12 @@ mod tests {
         assert!(world.run_pwm_output_stage());
 
         world.board.current_time_us = 1_100_000;
+        world.external_attitude.latest = Some(ExternalAttitudeMsg {
+            qw: 0.0,
+            qx: 1.0,
+            qy: 0.0,
+            qz: 0.0,
+        });
         world.processed_sensors.imu = Some(crate::packets::ImuPacket {
             header: crate::packets::RosflightPacketHeader {
                 timestamp: 1,
@@ -667,6 +677,8 @@ mod tests {
         assert_eq!(world.comm.comm_link().attitude_count, 1);
         assert_eq!(world.comm.comm_link().output_raw_count, 1);
         assert!(world.latest_actuator_commands.is_some());
+        assert!(world.external_attitude.latest.is_none());
+        assert_eq!(world.latest_state.q(), [0.0, 1.0, 0.0, 0.0]);
 
         assert!(!world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 1);
