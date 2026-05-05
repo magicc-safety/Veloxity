@@ -60,6 +60,18 @@ pub enum ControlType {
 const ATTITUDE_RATE_MODE: i32 = 0;
 const ATTITUDE_ANGLE_MODE: i32 = 1;
 
+pub const OVERRIDE_NO_OVERRIDE: u16 = 0x0;
+pub const OVERRIDE_ATT_SWITCH: u16 = 0x1;
+pub const OVERRIDE_THR_SWITCH: u16 = 0x2;
+pub const OVERRIDE_X: u16 = 0x4;
+pub const OVERRIDE_Y: u16 = 0x8;
+pub const OVERRIDE_Z: u16 = 0x10;
+pub const OVERRIDE_T: u16 = 0x20;
+pub const OVERRIDE_OFFBOARD_X_INACTIVE: u16 = 0x40;
+pub const OVERRIDE_OFFBOARD_Y_INACTIVE: u16 = 0x80;
+pub const OVERRIDE_OFFBOARD_Z_INACTIVE: u16 = 0x100;
+pub const OVERRIDE_OFFBOARD_T_INACTIVE: u16 = 0x200;
+
 #[derive(Clone, Copy, Debug)]
 pub struct ControlChannel {
     pub active: bool,
@@ -102,6 +114,7 @@ pub struct CommandManager {
     // State flags
     rc_throttle_override: bool,
     rc_attitude_override: bool,
+    rc_override: u16,
 }
 
 impl CommandManager {
@@ -479,11 +492,30 @@ impl CommandManager {
     /// This is the C++ `run` function's muxing logic
     fn do_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32) {
         // C++: command_manager.cpp (lines 253-256)
-        self.rc_attitude_override = self.do_attitude_muxing(params, rc, now_ms);
-        self.rc_throttle_override = self.do_throttle_muxing(params, rc);
+        let attitude_override = self.do_attitude_muxing(params, rc, now_ms);
+        let throttle_override = self.do_throttle_muxing(params, rc);
+        self.rc_override = attitude_override | throttle_override;
+        self.rc_attitude_override = attitude_override != OVERRIDE_NO_OVERRIDE;
+        self.rc_throttle_override = throttle_override != OVERRIDE_NO_OVERRIDE;
     }
 
-    fn do_attitude_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32) -> bool {
+    fn attitude_stick_deviated(
+        &mut self,
+        rc: &Rc,
+        stick: Stick,
+        deviation_param: f64,
+        lag_time_ms: u32,
+        now_ms: u32,
+    ) -> bool {
+        if (rc.stick(stick) as f64).abs() > deviation_param {
+            self.last_stick_override_time[stick as usize] = now_ms;
+            true
+        } else {
+            now_ms < self.last_stick_override_time[stick as usize].saturating_add(lag_time_ms)
+        }
+    }
+
+    fn do_attitude_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32) -> u16 {
         let deviation_param = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
             ParamValue::Float(val) => val as f64, // Convert f32 to f64
             other => {
@@ -504,60 +536,67 @@ impl CommandManager {
         let switch_override =
             rc.switch_mapped(Switch::AttOverride) && rc.switch_on(Switch::AttOverride);
 
-        let axes = [
-            (
-                Stick::X,
-                &self.rc_command.qx,
-                &self.offboard_command.qx,
-                &mut self.combined_command.qx,
-            ),
-            (
-                Stick::Y,
-                &self.rc_command.qy,
-                &self.offboard_command.qy,
-                &mut self.combined_command.qy,
-            ),
-            (
-                Stick::Z,
-                &self.rc_command.qz,
-                &self.offboard_command.qz,
-                &mut self.combined_command.qz,
-            ),
-        ];
+        let mut override_mask = if switch_override {
+            OVERRIDE_ATT_SWITCH
+        } else {
+            OVERRIDE_NO_OVERRIDE
+        };
 
-        let mut any_axis_overridden = false;
-
-        for (stick, rc_command, offboard_channel, combined_channel) in axes {
-            let mut stick_is_deviated = false;
-
-            if (rc.stick(stick) as f64).abs() > deviation_param {
-                self.last_stick_override_time[stick as usize] = now_ms;
-                stick_is_deviated = true;
-            } else if now_ms
-                < self.last_stick_override_time[stick as usize].saturating_add(lag_time_ms)
-            {
-                stick_is_deviated = true;
-            }
-
-            let override_this_axis =
-                switch_override || stick_is_deviated || !offboard_channel.active;
-
-            if override_this_axis {
-                //*combined_channel = rc.stick(stick) as f64;
-                //*combined_channel = self.rc_command[stick as usize];
-                //(*combined_channel).value = rc_command.value;
-                *combined_channel = *rc_command;
-                any_axis_overridden = true;
-            } else {
-                //(*combined_channel).value = offboard_channel.value;
-                *combined_channel = *offboard_channel;
-            }
+        let x_stick_deviated =
+            self.attitude_stick_deviated(rc, Stick::X, deviation_param, lag_time_ms, now_ms);
+        if x_stick_deviated {
+            override_mask |= OVERRIDE_X;
         }
+        if !self.offboard_command.qx.active {
+            override_mask |= OVERRIDE_OFFBOARD_X_INACTIVE;
+        }
+        self.combined_command.qx = if switch_override
+            || x_stick_deviated
+            || !self.offboard_command.qx.active
+        {
+            self.rc_command.qx
+        } else {
+            self.offboard_command.qx
+        };
 
-        true
+        let y_stick_deviated =
+            self.attitude_stick_deviated(rc, Stick::Y, deviation_param, lag_time_ms, now_ms);
+        if y_stick_deviated {
+            override_mask |= OVERRIDE_Y;
+        }
+        if !self.offboard_command.qy.active {
+            override_mask |= OVERRIDE_OFFBOARD_Y_INACTIVE;
+        }
+        self.combined_command.qy = if switch_override
+            || y_stick_deviated
+            || !self.offboard_command.qy.active
+        {
+            self.rc_command.qy
+        } else {
+            self.offboard_command.qy
+        };
+
+        let z_stick_deviated =
+            self.attitude_stick_deviated(rc, Stick::Z, deviation_param, lag_time_ms, now_ms);
+        if z_stick_deviated {
+            override_mask |= OVERRIDE_Z;
+        }
+        if !self.offboard_command.qz.active {
+            override_mask |= OVERRIDE_OFFBOARD_Z_INACTIVE;
+        }
+        self.combined_command.qz = if switch_override
+            || z_stick_deviated
+            || !self.offboard_command.qz.active
+        {
+            self.rc_command.qz
+        } else {
+            self.offboard_command.qz
+        };
+
+        override_mask
     }
 
-    fn do_throttle_muxing(&mut self, params: &Params, rc: &Rc) -> bool {
+    fn do_throttle_muxing(&mut self, params: &Params, rc: &Rc) -> u16 {
         let throttle_axis_idx = match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
             ParamValue::Int(val) => val as u32,
             other => {
@@ -572,10 +611,10 @@ impl CommandManager {
             _ => (self.rc_command.fz.value, &self.offboard_command.fz),
         };
 
-        let mut override_active = false;
+        let mut override_mask = OVERRIDE_NO_OVERRIDE;
 
         if rc.switch_mapped(Switch::ThrottleOverride) && rc.switch_on(Switch::ThrottleOverride) {
-            override_active = true;
+            override_mask |= OVERRIDE_THR_SWITCH;
         } else {
             if offboard_throttle_channel.active {
                 let take_min = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE)
@@ -588,16 +627,18 @@ impl CommandManager {
                 };
 
                 if take_min {
-                    override_active = rc_throttle_value < offboard_throttle_channel.value;
+                    if rc_throttle_value < offboard_throttle_channel.value {
+                        override_mask |= OVERRIDE_T;
+                    }
                 } else {
-                    override_active = false;
+                    override_mask = OVERRIDE_NO_OVERRIDE;
                 }
             } else {
-                override_active = true;
+                override_mask |= OVERRIDE_OFFBOARD_T_INACTIVE;
             }
         }
 
-        if override_active {
+        if override_mask != OVERRIDE_NO_OVERRIDE {
             self.combined_command.fx = self.rc_command.fx;
             self.combined_command.fy = self.rc_command.fy;
             self.combined_command.fz = self.rc_command.fz;
@@ -607,7 +648,7 @@ impl CommandManager {
             self.combined_command.fz = self.offboard_command.fz;
         }
 
-        override_active
+        override_mask
     }
 
     pub fn combined_control(&self) -> &CombinedControl {
@@ -621,7 +662,11 @@ impl CommandManager {
     }
 
     pub fn rc_override_active(&self) -> bool {
-        self.rc_attitude_override || self.rc_throttle_override
+        self.rc_override != OVERRIDE_NO_OVERRIDE
+    }
+
+    pub fn get_rc_override(&self) -> u16 {
+        self.rc_override
     }
 
     /// Port of C++ `offboard_control_active` (line 220)
@@ -644,5 +689,106 @@ impl From<ControlType> for OffboardControlMode {
             ControlType::Angle => OffboardControlMode::ModeRollPitchYawrateThrottle,
             _ => OffboardControlMode::ModeRollPitchYawrateThrottle, // qx cannot ever be anything but rate, passthrough, or angle... so to satisfy match statement, set to angle... TODO clean up logic here
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        packets::{RcPacket, RosflightPacketHeader, RC_PACKET_CHANNELS},
+        test_support::TestBoard,
+    };
+
+    fn initialized_rc(params: &Params) -> Rc {
+        let mut rc = Rc::new();
+        let mut board = TestBoard::default();
+        rc.init(&mut board, params);
+        rc
+    }
+
+    fn receive_rc(
+        rc: &mut Rc,
+        params: &Params,
+        state: &mut StateManager,
+        channels: [f32; RC_PACKET_CHANNELS],
+    ) {
+        rc.receive(
+            &RcPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 100_000,
+                    status: 0,
+                },
+                n_chan: 8,
+                chan: channels,
+                lol: false,
+            },
+            params,
+            state,
+        );
+    }
+
+    #[test]
+    fn rc_override_status_reports_upstream_stick_and_throttle_bits() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[0] = 0.7;
+        channels[2] = 0.2;
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.8,
+                fy: 0.8,
+                fz: 0.8,
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, channels);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        assert_eq!(command.get_rc_override(), OVERRIDE_X | OVERRIDE_T);
+        assert!(command.rc_override_active());
+    }
+
+    #[test]
+    fn rc_override_status_reports_inactive_offboard_channel_bits() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::IGNORE_QY | OffboardControlIgnore::IGNORE_FZ,
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.8,
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        assert_eq!(
+            command.get_rc_override(),
+            OVERRIDE_OFFBOARD_Y_INACTIVE | OVERRIDE_OFFBOARD_T_INACTIVE
+        );
+        assert!(command.rc_override_active());
     }
 }

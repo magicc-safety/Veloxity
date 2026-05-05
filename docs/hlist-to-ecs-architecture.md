@@ -1910,6 +1910,62 @@ Future follow-up:
   - `OVERRIDE_OFFBOARD_Z_INACTIVE = 0x100`,
   - `OVERRIDE_OFFBOARD_T_INACTIVE = 0x200`.
 
+## RC Override Bitmask Progress
+
+Reason for this change:
+
+- Current ROSflight 2.x reports `rc_override` as a `uint16_t` reason bitmask.
+- After aligning the local wire width, RustFlight still only widened a boolean override state into that field.
+- That preserved message width but did not preserve the diagnostic meaning expected by `rosflight_io` consumers.
+
+Design now implemented:
+
+- `CommandManager` now stores a `u16` `rc_override` mask.
+- The upstream ROSflight 2.x override reason constants are represented locally:
+  - attitude override switch,
+  - throttle override switch,
+  - X/Y/Z stick override,
+  - throttle minimum override,
+  - X/Y/Z offboard inactive,
+  - throttle offboard inactive.
+- Attitude muxing now returns the specific attitude reason bits while still selecting RC or offboard channel outputs.
+- Throttle muxing now returns the specific throttle reason bits while preserving the existing local behavior of applying the throttle override decision to the three local force channels.
+- Status telemetry now reads `CommandManager::get_rc_override()` instead of widening `rc_override_active()`.
+
+ROSflight compatibility:
+
+- Status telemetry now carries the same style of RC override reason bitmask as current ROSflight 2.x.
+- This improves diagnosability in `rosflight_io` because status consumers can distinguish "stick moved", "switch forced", and "offboard inactive" cases instead of seeing only `0` or `1`.
+
+Compile-time boundary improvement:
+
+- `CommandManager` owns all override decision state.
+- `CommManager` receives only a shared `CommandManager` reference and can publish the mask but cannot mutate command decisions.
+- This keeps the command/telemetry boundary compatible with the ports model: command has write ownership of command state; telemetry has read-only visibility.
+
+Files changed in this slice:
+
+- `rustflight_core/src/command_manager.rs`
+  - Adds upstream-style override constants.
+  - Stores and exposes `get_rc_override()`.
+  - Produces a bitmask during muxing.
+  - Adds focused unit tests for stick/throttle and inactive-offboard override bits.
+- `rustflight_core/src/comm_manager.rs`
+  - Publishes the command-manager override bitmask in status telemetry.
+
+Validation status:
+
+- `cargo test -p rustflight_core command_manager::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Future follow-up:
+
+- Compare the local force-channel muxing shape against upstream's `MuxChannel`/`Mixer::NUM_MIXER_OUTPUTS` model when the mixer ownership rewrite happens.
+- The current local throttle override still applies to `fx`, `fy`, and `fz` together, matching the pre-existing RustFlight behavior; upstream evaluates the selected throttle axis but then muxes by channel masks.
+
 ## Armed Command Compatibility Progress
 
 Upstream source findings:

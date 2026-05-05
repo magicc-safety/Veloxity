@@ -214,7 +214,7 @@ where
             let status_msg = comm_messages::messages::RosflightStatusMsg {
                 armed: state_manager.is_armed() as u8,
                 failsafe: state_manager.is_in_failsafe() as u8,
-                rc_override: command_manager.rc_override_active() as u16,
+                rc_override: command_manager.get_rc_override(),
                 offboard: command_manager.is_offboard_active() as u8,
                 error_code: state_manager.get_errors(),
                 control_mode: command_manager.get_control_mode().into(),
@@ -479,7 +479,7 @@ where
                 RosflightStatusMsg {
                     armed: state_manager.is_armed() as u8,
                     failsafe: state_manager.is_in_failsafe() as u8,
-                    rc_override: command_manager.rc_override_active() as u16,
+                    rc_override: command_manager.get_rc_override(),
                     offboard: command_manager.is_offboard_active() as u8,
                     error_code: state_manager.get_errors(),
                     control_mode: command_manager.get_control_mode().into(),
