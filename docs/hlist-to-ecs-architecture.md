@@ -1907,6 +1907,108 @@ Next planned migration target:
   - confirm whether param read/list/set behavior should be allowed while armed, because upstream's armed rejection is specific to ROSflight command messages, not MAVLink parameter messages,
   - inspect reboot/write-param board hooks before pixracerpro migration so hardware side effects follow the same state-gated command-system rule.
 
+## Companion Input Event Progress
+
+Reason for this change:
+
+- `rosflight_io` publishes companion-computer inputs that are not parameter requests and not ROSflight command ACK flows:
+  - companion heartbeat,
+  - aux command,
+  - external attitude.
+- Current upstream firmware handles these through callbacks:
+  - heartbeat marks the companion link connected,
+  - aux command updates mixer aux-command state,
+  - external attitude updates estimator external-attitude state.
+- RustFlight already parsed and stored these inbound MAVLink messages in `Messages`, but `CommManager::act_on_messages` did not consume them.
+- That meant the messages were effectively silent no-ops in the scheduler path.
+
+Design choice:
+
+- Keep this as one grouped `companion_system` boundary instead of creating separate systems for heartbeat, aux, and external attitude.
+- This avoids unnecessary subsystem sprawl while still giving these related companion-computer inputs an explicit owner.
+- The current slice stores latest input facts only.
+- It intentionally does not yet wire aux commands into the mixer or external attitude into the estimator.
+- Those integrations should be separate slices because they change control/estimator behavior and need targeted tests.
+
+Design now implemented:
+
+- Added companion input events:
+  - `CompanionHeartbeatReceived`,
+  - `AuxCommandReceived`,
+  - `ExternalAttitudeReceived`.
+- Added `CompanionEventQueues`.
+- Added `companion_system` with compact state resources:
+  - `CompanionLinkState`,
+  - `AuxCommandState`,
+  - `ExternalAttitudeState`.
+- `CommManager::act_on_messages` now emits companion input events when those messages are present.
+- `World` owns companion input queues and state resources.
+- `World` schedules companion input application immediately after comm parsing.
+- Legacy `ROSFlight` mirrors the same scheduling while it still exists.
+
+ROSflight compatibility:
+
+- `rosflight_io` sends `aux_command` and `external_attitude` MAVLink messages from ROS topics.
+- Upstream firmware has callbacks for these messages.
+- RustFlight now has an explicit event handoff for those same inbound messages instead of silently ignoring them.
+- The behavior is still incomplete compared with upstream because aux commands are not yet applied to mixer output and external attitude is not yet applied to estimator state.
+- This slice is still compatibility progress because it preserves the inputs as typed scheduler facts for later owner systems.
+
+Compile-time boundary improvement:
+
+- Comms remains a parser and event producer.
+- Comms does not receive mutable mixer or estimator access.
+- Companion input state is explicit and owned by the scheduler.
+- Later mixer/estimator integrations can read these resources through narrow contexts instead of receiving broad comm access.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds companion input event types.
+  - Adds fixed-capacity companion input queues.
+  - Adds `CompanionEventQueues`.
+- `rustflight_core/src/companion_system.rs`
+  - Adds grouped companion input state resources.
+  - Adds systems to drain companion input queues and store latest facts.
+- `rustflight_core/src/lib.rs`
+  - Exposes the new grouped companion system module.
+- `rustflight_core/src/comm_manager.rs`
+  - Emits companion input events for heartbeat, aux command, and external attitude messages.
+- `rustflight_core/src/world.rs`
+  - Owns companion input queues and state resources.
+  - Schedules companion input application after comm parsing.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors companion input scheduling in the legacy loop.
+
+Tests added:
+
+- `companion_system::tests::companion_heartbeat_marks_link_connected_and_records_latest`
+  - Proves heartbeat events update companion link state.
+- `companion_system::tests::aux_command_records_latest_command`
+  - Proves aux command events update latest aux command state.
+- `companion_system::tests::external_attitude_records_latest_attitude`
+  - Proves external attitude events update latest external attitude state.
+- `comm_manager::tests::companion_inputs_emit_companion_events`
+  - Proves comm parsing emits typed companion input events.
+- `world::tests::world_applies_companion_input_events`
+  - Proves the World scheduler drains those events and updates companion input state.
+
+Validation:
+
+- `cargo test -p rustflight_core companion_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+Next planned migration target:
+
+- Then choose one behavior integration:
+  - apply aux command state to mixer output with focused mixer tests, or
+  - apply external attitude state to estimator with focused estimator tests.
+- Do not wire both in one slice; they affect different control paths and should remain easy to review.
+
 ## Remaining Placeholder Command Event Progress
 
 Reason for this change:

@@ -40,6 +40,7 @@ pub mod board;
 pub mod bodytype;
 pub mod comm_manager;
 pub mod comm_messages;
+pub mod companion_system;
 pub mod command_system;
 pub mod controller;
 pub mod events;

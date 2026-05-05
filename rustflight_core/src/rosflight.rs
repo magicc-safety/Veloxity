@@ -39,13 +39,17 @@ use crate::{
     bodytype::BodyType,
     comm_manager::{self, comm_link_trait::CommInterface},
     comm_messages::{self, messages::HeartbeatMsg},
+    companion_system::{
+        self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
+        ExternalAttitudeCtx, ExternalAttitudeState,
+    },
     command_manager::{CommandManager, ControlType},
     command_system::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
         ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
     controller::Controller,
-    events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
+    events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     errors,
     estimator::{
         self, AttitudeStateTrait, Estimator,
@@ -107,6 +111,10 @@ where
     param_events: ParamEventQueues,
     comm_events: CommEventQueues,
     command_events: CommandEventQueues,
+    companion_events: CompanionEventQueues,
+    companion_link: CompanionLinkState,
+    aux_commands: AuxCommandState,
+    external_attitude: ExternalAttitudeState,
     comm_manager: comm_manager::CommManager<B, CI>,
     sensors: B::RawSensorSet,
     processorhlist: B::ProcessorHList,
@@ -188,6 +196,10 @@ where
             param_events: ParamEventQueues::default(),
             comm_events: CommEventQueues::default(),
             command_events: CommandEventQueues::default(),
+            companion_events: CompanionEventQueues::default(),
+            companion_link: CompanionLinkState::default(),
+            aux_commands: AuxCommandState::default(),
+            external_attitude: ExternalAttitudeState::default(),
             comm_manager,
             sensors: B::RawSensorSet::default(),
             processorhlist: B::ProcessorHList::default(),
@@ -217,8 +229,22 @@ where
             &mut self.param_events,
             &mut self.comm_events,
             &mut self.command_events,
+            &mut self.companion_events,
             &mut self.board,
         );
+
+        companion_system::apply_companion_heartbeats(CompanionHeartbeatCtx {
+            requests: EventDrainPort::new(&mut self.companion_events.heartbeats),
+            state: &mut self.companion_link,
+        });
+        companion_system::apply_aux_commands(AuxCommandCtx {
+            requests: EventDrainPort::new(&mut self.companion_events.aux_commands),
+            state: &mut self.aux_commands,
+        });
+        companion_system::apply_external_attitudes(ExternalAttitudeCtx {
+            requests: EventDrainPort::new(&mut self.companion_events.external_attitudes),
+            state: &mut self.external_attitude,
+        });
 
         let started_calibration = command_system::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut self.command_events.calibration_requests),

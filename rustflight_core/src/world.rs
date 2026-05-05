@@ -4,13 +4,17 @@ use crate::{
     board::BoardIo,
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
+    companion_system::{
+        self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
+        ExternalAttitudeCtx, ExternalAttitudeState,
+    },
     command_manager::CommandManager,
     command_system::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
         ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
     controller::Controller,
-    events::{CommEventQueues, CommandEventQueues, ParamEventQueues},
+    events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     estimator::{AttitudeStateTrait, NamedEstimator},
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
@@ -46,6 +50,10 @@ where
     pub param_events: ParamEventQueues,
     pub comm_events: CommEventQueues,
     pub command_events: CommandEventQueues,
+    pub companion_events: CompanionEventQueues,
+    pub companion_link: CompanionLinkState,
+    pub aux_commands: AuxCommandState,
+    pub external_attitude: ExternalAttitudeState,
     pub comm: CommManager<B, CI>,
     pub raw_sensors: SensorBus,
     pub processed_sensors: ProcessedSensors,
@@ -110,6 +118,10 @@ where
             param_events: ParamEventQueues::default(),
             comm_events: CommEventQueues::default(),
             command_events: CommandEventQueues::default(),
+            companion_events: CompanionEventQueues::default(),
+            companion_link: CompanionLinkState::default(),
+            aux_commands: AuxCommandState::default(),
+            external_attitude: ExternalAttitudeState::default(),
             comm,
             raw_sensors: SensorBus::default(),
             processed_sensors: ProcessedSensors::default(),
@@ -146,8 +158,22 @@ where
             &mut self.param_events,
             &mut self.comm_events,
             &mut self.command_events,
+            &mut self.companion_events,
             &mut self.board,
         );
+
+        companion_system::apply_companion_heartbeats(CompanionHeartbeatCtx {
+            requests: EventDrainPort::new(&mut self.companion_events.heartbeats),
+            state: &mut self.companion_link,
+        });
+        companion_system::apply_aux_commands(AuxCommandCtx {
+            requests: EventDrainPort::new(&mut self.companion_events.aux_commands),
+            state: &mut self.aux_commands,
+        });
+        companion_system::apply_external_attitudes(ExternalAttitudeCtx {
+            requests: EventDrainPort::new(&mut self.companion_events.external_attitudes),
+            state: &mut self.external_attitude,
+        });
 
         let started_calibration = command_system::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
@@ -366,12 +392,12 @@ mod tests {
         bodytype::quadrotor::Quadrotor,
         comm_messages::{
             enums::{
-                OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightCmd,
-                RosflightCmdResponse,
+                OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightAuxCmdType,
+                RosflightCmd, RosflightCmdResponse,
             },
             messages::{
-                OffboardControlMsg, ParamRequestListMsg, ParamRequestReadMsg, ParamSetMsg,
-                RosflightCmdMsg,
+                ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamRequestListMsg,
+                ParamRequestReadMsg, ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
             },
         },
         params2::{ParamId, ParamValue},
@@ -828,6 +854,63 @@ mod tests {
 
         assert!(world.command.is_offboard_active());
         assert!(world.command_events.offboard_control_requests.is_empty());
+    }
+
+    #[test]
+    fn world_applies_companion_input_events() {
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.comm.msgs.heartbeat = Some(HeartbeatMsg {
+            type_: 1,
+            autopilot: 2,
+            base_mode: 3,
+            custom_mode: 4,
+            system_status: 5,
+            mavlink_version: 6,
+        });
+        let mut aux = RosflightAuxCmdMsg {
+            type_array: [RosflightAuxCmdType::Disabled; 14],
+            aux_cmd_array: [0.0; 14],
+        };
+        aux.type_array[3] = RosflightAuxCmdType::Servo;
+        aux.aux_cmd_array[3] = 0.8;
+        world.comm.msgs.aux_cmd = Some(aux);
+        world.comm.msgs.external_attitude = Some(ExternalAttitudeMsg {
+            qw: 1.0,
+            qx: 0.1,
+            qy: 0.2,
+            qz: 0.3,
+        });
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert!(world.companion_link.connected);
+        assert_eq!(
+            world.companion_link.last_heartbeat.unwrap().system_status,
+            5
+        );
+        let aux = world.aux_commands.latest.unwrap();
+        assert!(matches!(aux.type_array[3], RosflightAuxCmdType::Servo));
+        assert_eq!(aux.aux_cmd_array[3], 0.8);
+        assert_eq!(world.external_attitude.latest.unwrap().qz, 0.3);
+        assert!(world.companion_events.heartbeats.is_empty());
+        assert!(world.companion_events.aux_commands.is_empty());
+        assert!(world.companion_events.external_attitudes.is_empty());
     }
 
     #[test]

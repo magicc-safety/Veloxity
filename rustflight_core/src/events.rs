@@ -1,7 +1,10 @@
 use crate::{
     comm_messages::{
         enums::{ParamIdentifier, RosflightCmd},
-        messages::{OffboardControlMsg, ParamValueMsg, RosflightCmdAckMsg, RosflightVersionMsg},
+        messages::{
+            ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamValueMsg,
+            RosflightAuxCmdMsg, RosflightCmdAckMsg, RosflightVersionMsg,
+        },
     },
     params2::{ParamId, ParamValue},
 };
@@ -157,6 +160,21 @@ pub struct ConfigInfoRequested {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct CompanionHeartbeatReceived {
+    pub msg: HeartbeatMsg,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AuxCommandReceived {
+    pub msg: RosflightAuxCmdMsg,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExternalAttitudeReceived {
+    pub msg: ExternalAttitudeMsg,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum CommResponse {
     ParamValue(ParamValueMsg),
     CmdAck(RosflightCmdAckMsg),
@@ -176,6 +194,9 @@ pub const RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const VERSION_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const RESET_ORIGIN_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const CONFIG_INFO_REQUEST_QUEUE_CAPACITY: usize = 2;
+pub const COMPANION_HEARTBEAT_QUEUE_CAPACITY: usize = 2;
+pub const AUX_COMMAND_QUEUE_CAPACITY: usize = 2;
+pub const EXTERNAL_ATTITUDE_QUEUE_CAPACITY: usize = 2;
 
 #[derive(Default)]
 pub struct ParamEventQueues {
@@ -188,6 +209,14 @@ pub struct ParamEventQueues {
 #[derive(Default)]
 pub struct CommEventQueues {
     pub responses: EventQueue<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+}
+
+#[derive(Default)]
+pub struct CompanionEventQueues {
+    pub heartbeats: EventQueue<CompanionHeartbeatReceived, COMPANION_HEARTBEAT_QUEUE_CAPACITY>,
+    pub aux_commands: EventQueue<AuxCommandReceived, AUX_COMMAND_QUEUE_CAPACITY>,
+    pub external_attitudes:
+        EventQueue<ExternalAttitudeReceived, EXTERNAL_ATTITUDE_QUEUE_CAPACITY>,
 }
 
 #[derive(Default)]
@@ -220,6 +249,14 @@ impl ParamEventQueues {
 impl CommEventQueues {
     pub fn clear_loop_events(&mut self) {
         self.responses.clear();
+    }
+}
+
+impl CompanionEventQueues {
+    pub fn clear_loop_events(&mut self) {
+        self.heartbeats.clear();
+        self.aux_commands.clear();
+        self.external_attitudes.clear();
     }
 }
 

@@ -41,9 +41,10 @@ use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
     BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
-    CommandEventQueues, ConfigInfoRequested, OffboardControlRequested, ParamDefaultsRequested,
-    ParamEventQueues, ParamListRequested, ParamReadRequested, ParamSetRequested,
-    RcTrimCalibrationRequested, ResetOriginRequested, VersionRequested,
+    CommandEventQueues, CompanionEventQueues, CompanionHeartbeatReceived, ConfigInfoRequested,
+    AuxCommandReceived, ExternalAttitudeReceived, OffboardControlRequested,
+    ParamDefaultsRequested, ParamEventQueues, ParamListRequested, ParamReadRequested,
+    ParamSetRequested, RcTrimCalibrationRequested, ResetOriginRequested, VersionRequested,
 };
 use crate::estimator::{AttitudeStateTrait, Estimator};
 use crate::hlist::*;
@@ -648,8 +649,15 @@ where
         param_events: &mut ParamEventQueues,
         comm_events: &mut CommEventQueues,
         command_events: &mut CommandEventQueues,
+        companion_events: &mut CompanionEventQueues,
         board: &mut B,
     ) {
+        if let Some(msg) = self.msgs.heartbeat.take() {
+            let _ = companion_events
+                .heartbeats
+                .push(CompanionHeartbeatReceived { msg });
+        }
+
         // first check the param_request_list
         if let Some(msg) = self.msgs.param_request_read.take() {
             let _ = param_events.read_requests.push(ParamReadRequested {
@@ -674,6 +682,18 @@ where
             let _ = command_events
                 .offboard_control_requests
                 .push(OffboardControlRequested { now_us, msg });
+        }
+
+        if let Some(msg) = self.msgs.aux_cmd.take() {
+            let _ = companion_events
+                .aux_commands
+                .push(AuxCommandReceived { msg });
+        }
+
+        if let Some(msg) = self.msgs.external_attitude.take() {
+            let _ = companion_events
+                .external_attitudes
+                .push(ExternalAttitudeReceived { msg });
         }
 
         if let Some(msg) = self.msgs.param_set.take() {
@@ -961,12 +981,18 @@ mod tests {
         command_system::{self, CalibrationRequestCtx},
         comm_messages::{
             enums::{
-                OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightCmd,
-                RosflightCmdResponse,
+                OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightAuxCmdType,
+                RosflightCmd, RosflightCmdResponse,
             },
-            messages::{OffboardControlMsg, ParamRequestReadMsg, ParamSetMsg, RosflightCmdMsg},
+            messages::{
+                ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamRequestReadMsg,
+                ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
+            },
         },
-        events::{CommEventQueues, CommandEventQueues, CommResponse, ParamEventQueues},
+        events::{
+            CommEventQueues, CommandEventQueues, CommResponse, CompanionEventQueues,
+            ParamEventQueues,
+        },
         param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
         params2::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
@@ -981,6 +1007,10 @@ mod tests {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
         state
+    }
+
+    fn companion_events() -> CompanionEventQueues {
+        CompanionEventQueues::default()
     }
 
     #[test]
@@ -1003,6 +1033,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1036,6 +1067,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1077,6 +1109,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1169,6 +1202,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1212,6 +1246,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1312,6 +1347,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1368,6 +1404,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1376,6 +1413,69 @@ mod tests {
         assert_eq!(request.msg.mode, OffboardControlMode::ModeRollPitchYawrateThrottle);
         assert!(request.msg.ignore.contains(OffboardControlIgnore::IGNORE_FY));
         assert_eq!(request.msg.qx, 0.1);
+    }
+
+    #[test]
+    fn companion_inputs_emit_companion_events() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+        let mut companion_events = CompanionEventQueues::default();
+
+        manager.msgs.heartbeat = Some(HeartbeatMsg {
+            type_: 1,
+            autopilot: 2,
+            base_mode: 3,
+            custom_mode: 4,
+            system_status: 5,
+            mavlink_version: 6,
+        });
+        let mut aux = RosflightAuxCmdMsg {
+            type_array: [RosflightAuxCmdType::Disabled; 14],
+            aux_cmd_array: [0.0; 14],
+        };
+        aux.type_array[1] = RosflightAuxCmdType::Motor;
+        aux.aux_cmd_array[1] = 0.4;
+        manager.msgs.aux_cmd = Some(aux);
+        manager.msgs.external_attitude = Some(ExternalAttitudeMsg {
+            qw: 1.0,
+            qx: 0.1,
+            qy: 0.2,
+            qz: 0.3,
+        });
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events,
+            &mut board,
+        );
+
+        assert_eq!(companion_events.heartbeats.len(), 1);
+        assert_eq!(companion_events.aux_commands.len(), 1);
+        assert_eq!(companion_events.external_attitudes.len(), 1);
+        assert_eq!(
+            companion_events.heartbeats.pop().unwrap().msg.system_status,
+            5
+        );
+        let aux_event = companion_events.aux_commands.pop().unwrap();
+        assert!(matches!(
+            aux_event.msg.type_array[1],
+            RosflightAuxCmdType::Motor
+        ));
+        assert_eq!(aux_event.msg.aux_cmd_array[1], 0.4);
+        assert_eq!(
+            companion_events
+                .external_attitudes
+                .pop()
+                .unwrap()
+                .msg
+                .qz,
+            0.3
+        );
     }
 
     #[test]
@@ -1396,6 +1496,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1444,6 +1545,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1470,6 +1572,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1496,6 +1599,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
@@ -1522,6 +1626,7 @@ mod tests {
             &mut param_events,
             &mut comm_events,
             &mut command_events,
+            &mut companion_events(),
             &mut board,
         );
 
