@@ -3341,6 +3341,30 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Pitot Processor Native Conversion Progress
+
+Reason for this change:
+
+- After `BaroProcessor` moved to native `SensorPacketProcessor`, the next low-risk complex processor target was `PitotProcessor`.
+- This continues shrinking the explicit HList adapter surface without changing legacy `ROSFlight` processor behavior.
+
+Design now implemented:
+
+- `PitotProcessor` now implements `SensorPacketProcessor<PitotPacket>` directly.
+- Its legacy `Func` implementation remains for the old HList processor path.
+- Both entry points delegate to the same internal `process_packet` implementation.
+- Remaining explicit `Func` adapters:
+  - `ImuProcessor`,
+  - `MagProcessor`.
+
+Validation:
+
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

@@ -566,18 +566,14 @@ impl PitotProcessor {
     pub fn new() -> Self {
         Self::default()
     }
-}
 
-impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for PitotProcessor {
-    type Output = Option<PitotPacket>;
-
-    fn call(
+    fn process_packet(
         &mut self,
-        arg: &'a mut Option<Result<PitotPacket, errors::SensorError>>,
+        packet: &mut Option<Result<PitotPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(mut packet)) = arg.take() {
+    ) -> Option<PitotPacket> {
+        if let Some(Ok(mut packet)) = packet.take() {
             if flags.contains(CalibrationFlags::PITOT) && !self.calibration_state.calibrated {
                 self.calibration_state.count += 1;
                 let total_cycles = SENSOR_CAL_DELAY_CYCLES + SENSOR_CAL_CYCLES;
@@ -622,7 +618,30 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for Pito
         }
     }
 }
-impl_sensor_packet_processor_via_func!(PitotProcessor, PitotPacket);
+
+impl SensorPacketProcessor<PitotPacket> for PitotProcessor {
+    fn process(
+        &mut self,
+        packet: &mut Option<Result<PitotPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Option<PitotPacket> {
+        self.process_packet(packet, flags, params)
+    }
+}
+
+impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for PitotProcessor {
+    type Output = Option<PitotPacket>;
+
+    fn call(
+        &mut self,
+        packet: &'a mut Option<Result<PitotPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        self.process_packet(packet, flags, params)
+    }
+}
 // ------------------------------
 // Mag Packet
 // ------------------------------
