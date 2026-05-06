@@ -3388,6 +3388,29 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## IMU Processor Native Conversion Progress
+
+Reason for this change:
+
+- After `MagProcessor` moved to native `SensorPacketProcessor`, `ImuProcessor` was the last complex processor using the explicit `Func` adapter.
+- Converting it completes the sensor processor boundary step: the named sensor path no longer needs any `Func -> SensorPacketProcessor` bridge.
+
+Design now implemented:
+
+- `ImuProcessor` now implements `SensorPacketProcessor<ImuPacket>` directly.
+- Its legacy `Func` implementation remains for the old HList processor path.
+- Both entry points delegate to the same internal `process_packet` implementation.
+- Removed the now-unused `impl_sensor_packet_processor_via_func!` macro.
+- No explicit `Func` adapters remain for the named sensor path.
+
+Validation:
+
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

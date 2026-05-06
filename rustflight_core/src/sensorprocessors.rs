@@ -74,21 +74,6 @@ fn take_ok_packet<P>(packet: &mut Option<Result<P, errors::SensorError>>) -> Opt
     }
 }
 
-macro_rules! impl_sensor_packet_processor_via_func {
-    ($processor:ty, $packet:ty) => {
-        impl SensorPacketProcessor<$packet> for $processor {
-            fn process(
-                &mut self,
-                packet: &mut Option<Result<$packet, errors::SensorError>>,
-                flags: &mut CalibrationFlags,
-                params: &mut Params,
-            ) -> Option<$packet> {
-                self.call(packet, flags, params)
-            }
-        }
-    };
-}
-
 macro_rules! impl_passthrough_sensor_packet_processor {
     ($processor:ty, $packet:ty) => {
         impl SensorPacketProcessor<$packet> for $processor {
@@ -191,18 +176,14 @@ impl ImuProcessor {
             },
         }
     }
-}
 
-impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuProcessor {
-    type Output = Option<ImuPacket>;
-
-    fn call(
+    fn process_packet(
         &mut self,
-        arg: &'a mut Option<Result<ImuPacket, errors::SensorError>>,
+        packet: &mut Option<Result<ImuPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(mut packet)) = arg.take() {
+    ) -> Option<ImuPacket> {
+        if let Some(Ok(mut packet)) = packet.take() {
             let is_calibrating = flags.intersects(CalibrationFlags::IMU);
 
             if is_calibrating {
@@ -382,7 +363,30 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
         }
     }
 }
-impl_sensor_packet_processor_via_func!(ImuProcessor, ImuPacket);
+
+impl SensorPacketProcessor<ImuPacket> for ImuProcessor {
+    fn process(
+        &mut self,
+        packet: &mut Option<Result<ImuPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Option<ImuPacket> {
+        self.process_packet(packet, flags, params)
+    }
+}
+
+impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuProcessor {
+    type Output = Option<ImuPacket>;
+
+    fn call(
+        &mut self,
+        packet: &'a mut Option<Result<ImuPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        self.process_packet(packet, flags, params)
+    }
+}
 
 // ------------------------------
 // Baro Packet
