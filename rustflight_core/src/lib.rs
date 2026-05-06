@@ -47,6 +47,7 @@ pub mod events;
 pub mod errors;
 pub mod estimator;
 pub mod hlist;
+pub mod log_system;
 pub mod mixer;
 pub mod packets;
 pub mod param_reactions;

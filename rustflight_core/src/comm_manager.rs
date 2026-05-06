@@ -55,7 +55,7 @@ use crate::rosflight::Configuration;
 use crate::sensorprocessors::CalibrationFlags;
 use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
-use crate::{board, log_info};
+use crate::board;
 use core::marker::PhantomData;
 
 const HEARTBEAT_INTERVAL_US: u64 = 1_000_000; // 1 second = 1,000,000 microseconds
@@ -897,6 +897,9 @@ where
                 CommResponse::Version(msg) => {
                     self.comm_link.send_version(board, self.sysid, msg);
                 }
+                CommResponse::Statustext(msg) => {
+                    self.comm_link.send_statustext(board, self.sysid, msg);
+                }
             }
         }
     }
@@ -953,23 +956,6 @@ where
         self.comm_link.send_output_raw(board, self.sysid, msg);
     }
 
-    pub fn send_statustext(&mut self, board: &mut B, severity: Severity, text: &str) {
-        let text_bytes = {
-            let mut arr = [0u8; 50];
-            let len = text.len().min(50);
-            arr[..len].copy_from_slice(&text.as_bytes()[..len]);
-            arr
-        };
-
-        self.comm_link.send_statustext(
-            board,
-            self.sysid,
-            StatustextMsg {
-                severity,
-                text: text_bytes,
-            },
-        );
-    }
 }
 
 #[cfg(test)]
@@ -1173,12 +1159,20 @@ mod tests {
                 command: RosflightCmd::SendVersion,
                 success: RosflightCmdResponse::RosflightCmdSuccess,
             }));
+        let _ = comm_events
+            .responses
+            .push(CommResponse::Statustext(StatustextMsg {
+                severity: Severity::Info,
+                text: [9; 50],
+            }));
 
         manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.comm_link().version_count, 1);
         assert_eq!(manager.comm_link().last_version.unwrap().version, [7; 50]);
         assert_eq!(manager.comm_link().cmd_ack_count, 1);
+        assert_eq!(manager.comm_link().statustext_count, 1);
+        assert_eq!(manager.comm_link().last_statustext.unwrap().text, [9; 50]);
         assert!(matches!(
             manager.comm_link().last_cmd_ack.unwrap().command,
             RosflightCmd::SendVersion

@@ -16,6 +16,7 @@ use crate::{
     controller::{Controller, RcTrimCalibrator},
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     estimator::{AttitudeStateTrait, NamedEstimator},
+    log_system::{self, LogDrainCtx},
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
@@ -277,6 +278,9 @@ where
             &mut self.params,
         );
         self.update_sensor_health_and_calibration(now_us);
+        log_system::drain_logs_to_comm_responses(LogDrainCtx {
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+        });
         self.comm
             .send_comm_responses(&mut self.board, &mut self.comm_events);
     }
@@ -1026,6 +1030,35 @@ mod tests {
             ack.success,
             RosflightCmdResponse::RosflightCmdFailed
         ));
+    }
+
+    #[test]
+    fn world_drains_logs_through_comm_response_stage() {
+        while crate::logger::Logger::pop().is_some() {}
+
+        let board = TestBoard::default();
+        let params = Params::new();
+        let comm_link = RecordingCommLink::new();
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
+            board,
+            params,
+            comm_link,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        crate::log_info!("world log");
+        world.run_comm_param_sensor_stages_only();
+
+        assert_eq!(world.comm.comm_link().statustext_count, 1);
+        let msg = world.comm.comm_link().last_statustext.unwrap();
+        assert_eq!(&msg.text[..9], b"world log");
     }
 
     #[test]

@@ -3,7 +3,7 @@ use crate::{
         enums::{ParamIdentifier, RosflightCmd},
         messages::{
             ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamValueMsg,
-            RosflightAuxCmdMsg, RosflightCmdAckMsg, RosflightVersionMsg,
+            RosflightAuxCmdMsg, RosflightCmdAckMsg, RosflightVersionMsg, StatustextMsg,
         },
     },
     params2::{ParamId, ParamValue},
@@ -179,6 +179,7 @@ pub enum CommResponse {
     ParamValue(ParamValueMsg),
     CmdAck(RosflightCmdAckMsg),
     Version(RosflightVersionMsg),
+    Statustext(StatustextMsg),
 }
 
 pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = 4;

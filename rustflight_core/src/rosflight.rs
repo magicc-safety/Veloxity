@@ -56,6 +56,7 @@ use crate::{
         quad_estimator::{AttitudeState, QuadEstimator},
     },
     hlist::*,
+    log_system::{self, LogDrainCtx},
     mixer::Mixer,
     packets,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
@@ -488,22 +489,11 @@ where
             // Measure loop time for this control cycle
             self.loop_time_us = (self.board.clock_micros() - start_time_us) as u32;
 
-            // NON-CRITICAL: Logging
-            // We limit to 5 logs per loop to prevent a burst of logs from violating
-            // the loop time budget.
-            let mut logs_processed = 0;
-            while logs_processed < 5 {
-                if let Some(entry) = crate::logger::Logger::pop() {
-                    self.comm_manager.send_statustext(
-                        &mut self.board,
-                        entry.severity,
-                        entry.message.as_str(),
-                    );
-                    logs_processed += 1;
-                } else {
-                    break;
-                }
-            }
+            log_system::drain_logs_to_comm_responses(LogDrainCtx {
+                responses: EventEmitPort::new(&mut self.comm_events.responses),
+            });
+            self.comm_manager
+                .send_comm_responses(&mut self.board, &mut self.comm_events);
 
             // Send telemetry with the new state
             self.comm_manager.send_telemetry_streams::<BT, C, _>(

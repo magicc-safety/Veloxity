@@ -51,6 +51,8 @@ pub struct RecordingCommLink {
     pub last_version: Option<RosflightVersionMsg>,
     pub cmd_ack_count: usize,
     pub last_cmd_ack: Option<RosflightCmdAckMsg>,
+    pub statustext_count: usize,
+    pub last_statustext: Option<StatustextMsg>,
 }
 
 impl RecordingCommLink {
@@ -69,6 +71,8 @@ impl RecordingCommLink {
             last_version: None,
             cmd_ack_count: 0,
             last_cmd_ack: None,
+            statustext_count: 0,
+            last_statustext: None,
         }
     }
 
@@ -212,8 +216,10 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         &mut self,
         _board: &mut TestBoard,
         _system_id: u8,
-        _msg: StatustextMsg,
+        msg: StatustextMsg,
     ) {
+        self.statustext_count += 1;
+        self.last_statustext = Some(msg);
     }
 
     fn handle_incoming_messages(

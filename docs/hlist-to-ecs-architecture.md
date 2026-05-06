@@ -2882,6 +2882,76 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Log Response Queue Progress
+
+Reason for this change:
+
+- `CommManager::act_on_messages` now only decodes messages, emits request events, queues immediate command failures, and handles timesync as a truly immediate protocol response.
+- The remaining non-telemetry direct wire-output shortcut was statustext logging.
+- Legacy `ROSFlight::run` drained the global `Logger` and called `CommManager::send_statustext` directly.
+- The new architecture should route logs the same way as other internal responses: internal fact first, wire output stage second.
+
+Design now implemented:
+
+- Adds `log_system`.
+- Adds `LogDrainCtx`.
+- Adds `log_system::drain_logs_to_comm_responses`.
+- Adds `CommResponse::Statustext`.
+- `CommManager::send_comm_responses` now sends statustext responses.
+- Removes the direct `CommManager::send_statustext` helper.
+- `World::run_comm_param_sensor_stages_only` drains logs into `CommEventQueues` before the response stage.
+- Legacy `ROSFlight::run` mirrors this queueing path while it still exists.
+- The existing global logger remains the producer for now; this slice centralizes wire output, but it does not yet replace global logging with explicit `LogPort` injection.
+
+ROSflight compatibility:
+
+- The wire message remains MAVLink `STATUSTEXT`.
+- Log text is still bounded to the MAVLink 50-byte payload.
+- At most five log entries are drained per scheduler pass, preserving the existing loop-budget guard.
+
+Compile-time boundary improvement:
+
+- Modules still emit logs through the logger, but they no longer cause direct comm-link writes.
+- Comm response transmission is centralized in `CommManager::send_comm_responses`.
+- `World` and legacy `ROSFlight` both use the same queued response boundary.
+
+Files changed in this slice:
+
+- `rustflight_core/src/events.rs`
+  - Adds `CommResponse::Statustext`.
+- `rustflight_core/src/log_system.rs`
+  - Adds the logger-to-comm-response drain system.
+- `rustflight_core/src/comm_manager.rs`
+  - Sends queued statustext responses through `send_comm_responses`.
+  - Removes the direct statustext helper.
+- `rustflight_core/src/world.rs`
+  - Schedules log draining before comm responses are sent.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors log draining into queued responses in the legacy loop.
+- `rustflight_core/src/test_support.rs`
+  - Records statustext messages for tests.
+
+Tests added or updated:
+
+- `log_system::tests::drain_logs_queues_statustext_responses`
+  - Proves logger entries become queued statustext responses.
+- `comm_manager::tests::send_comm_responses_sends_command_ack_and_version`
+  - Extended to prove the response stage sends statustext responses.
+- `world::tests::world_drains_logs_through_comm_response_stage`
+  - Proves the World scheduler drains logs and transmits them only through the comm response stage.
+
+Validation:
+
+- `cargo test -p rustflight_core log_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests::send_comm_responses_sends_command_ack_and_version --lib` passes.
+- `cargo test -p rustflight_core world::tests::world_drains_logs_through_comm_response_stage --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p sim board::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
