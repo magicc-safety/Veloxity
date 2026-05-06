@@ -39,6 +39,7 @@ use crate::errors;
 use crate::hlist_type;
 use crate::packets;
 use crate::sensorprocessors;
+use crate::sensors::SensorBus;
 
 #[derive(Default)]
 pub struct DummyBoard {
@@ -94,6 +95,19 @@ impl BoardTrait for DummyBoard {
         sensors.1.1.1.1.1.1.1.1.0 = Some(Ok(packets::AttitudePacket::default()));
     }
 
+    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        sensors.clear();
+        sensors.imu = Some(Ok(packets::ImuPacket::default()));
+        sensors.mag = Some(Ok(packets::MagPacket::default()));
+        sensors.baro = Some(Ok(packets::BaroPacket::default()));
+        sensors.pitot = Some(Ok(packets::PitotPacket::default()));
+        sensors.range = Some(Ok(packets::RangePacket::default()));
+        sensors.gnss = Some(Ok(packets::GNSSPacket::default()));
+        sensors.battery = Some(Ok(packets::BatteryPacket::default()));
+        sensors.rc = Some(Ok(packets::RcPacket::default()));
+        sensors.attitude = Some(Ok(packets::AttitudePacket::default()));
+    }
+
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         None // pretend we never receive any data
     }
@@ -115,5 +129,29 @@ impl BoardTrait for DummyBoard {
     }
     fn set_test_pin_2(&mut self, high: bool) {
         // Dummy implementation does nothing
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::board::BoardIo;
+
+    #[test]
+    fn dummy_board_populates_named_sensor_bus() {
+        let mut board = DummyBoard::default();
+        let mut sensors = SensorBus::default();
+
+        BoardIo::update_sensor_bus(&mut board, &mut sensors);
+
+        assert!(sensors.imu.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.mag.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.baro.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.pitot.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.range.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.gnss.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.battery.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.rc.as_ref().is_some_and(Result::is_ok));
+        assert!(sensors.attitude.as_ref().is_some_and(Result::is_ok));
     }
 }

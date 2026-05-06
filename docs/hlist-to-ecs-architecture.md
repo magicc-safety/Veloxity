@@ -3062,6 +3062,35 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p rustflight_core state_machine::tests --lib` still has pre-existing arming/`UNCALIBRATED_IMU` failures noted in the earlier next-steps list; this slice did not change that behavior.
 
+## Dummy Board Named Sensor Progress
+
+Reason for this change:
+
+- `DummyBoard` still exists for legacy binary scaffolding and the old `ROSFlight` path.
+- It populated the legacy raw sensor HList, but the `BoardIo` named sensor hook inherited the default implementation that clears `SensorBus`.
+- That meant dummy-board users had default packets on the old path and no packets on the new named sensor path.
+
+Design now implemented:
+
+- `DummyBoard::update_sensor_bus` now fills every named `SensorBus` field with the same default packet types used by `update_sensors`.
+- The legacy HList `BoardTrait` implementation remains intact for compatibility.
+- The new behavior is reached through the `BoardIo` blanket implementation, so it exercises the same board boundary used by `World`.
+
+Tests added or updated:
+
+- `board::dummy::tests::dummy_board_populates_named_sensor_bus`
+  - Calls `BoardIo::update_sensor_bus` on `DummyBoard`.
+  - Verifies IMU, mag, baro, pitot, range, GNSS, battery, RC, and attitude named fields are populated with successful packets.
+
+Validation:
+
+- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
