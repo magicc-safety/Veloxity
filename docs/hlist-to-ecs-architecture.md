@@ -3140,6 +3140,33 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## BodyModel Named Estimator Bound Progress
+
+Reason for this change:
+
+- `World` already requires `BT::Estimator: NamedEstimator`.
+- However, `BodyModel` itself still allowed any estimator type, including an estimator that only implemented the legacy HList-bearing `Estimator` trait.
+- That left the new body boundary less explicit than the scheduler that consumes it.
+
+Design now implemented:
+
+- `BodyModel::Estimator` is now bounded by `NamedEstimator`.
+- Legacy `BodyType::Estimator` remains bounded by the old HList `Estimator` trait.
+- `Quadrotor` still implements both `BodyType` and `BodyModel`.
+
+Compile-time boundary improvement:
+
+- Any body type used with the new `World` model must expose a named-resource estimator entry point.
+- The legacy HList estimator trait remains available only through `BodyType` and `ROSFlight`.
+
+Validation:
+
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
