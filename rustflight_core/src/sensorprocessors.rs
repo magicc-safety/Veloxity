@@ -432,22 +432,14 @@ impl BaroProcessor {
     pub fn new() -> Self {
         Self::default()
     }
-}
 
-fn pressure_to_altitude(pressure: f64) -> f64 {
-    44330.0 * (1.0 - (pressure / 101325.0).powf(0.190295))
-}
-
-impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroProcessor {
-    type Output = Option<BaroPacket>;
-
-    fn call(
+    fn process_packet(
         &mut self,
-        arg: &'a mut Option<Result<BaroPacket, errors::SensorError>>,
+        packet: &mut Option<Result<BaroPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(mut packet)) = arg.take() {
+    ) -> Option<BaroPacket> {
+        if let Some(Ok(mut packet)) = packet.take() {
             // If the BARO flag is set, we are calibrating.
             if flags.contains(CalibrationFlags::BARO) {
                 self.calibration_state.count += 1;
@@ -498,7 +490,34 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroP
         }
     }
 }
-impl_sensor_packet_processor_via_func!(BaroProcessor, BaroPacket);
+
+fn pressure_to_altitude(pressure: f64) -> f64 {
+    44330.0 * (1.0 - (pressure / 101325.0).powf(0.190295))
+}
+
+impl SensorPacketProcessor<BaroPacket> for BaroProcessor {
+    fn process(
+        &mut self,
+        packet: &mut Option<Result<BaroPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Option<BaroPacket> {
+        self.process_packet(packet, flags, params)
+    }
+}
+
+impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroProcessor {
+    type Output = Option<BaroPacket>;
+
+    fn call(
+        &mut self,
+        packet: &'a mut Option<Result<BaroPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        self.process_packet(packet, flags, params)
+    }
+}
 
 // ------------------------------
 // Pitot Packet

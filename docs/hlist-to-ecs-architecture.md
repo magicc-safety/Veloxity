@@ -3316,6 +3316,31 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Baro Processor Native Conversion Progress
+
+Reason for this change:
+
+- After passthrough processors moved to native `SensorPacketProcessor`, the remaining processor/HList bridge was limited to complex processors.
+- `BaroProcessor` is the smallest complex processor, so it is the first safe conversion target.
+
+Design now implemented:
+
+- `BaroProcessor` now implements `SensorPacketProcessor<BaroPacket>` directly.
+- Its legacy `Func` implementation remains for the old HList processor path.
+- Both entry points delegate to the same internal `process_packet` implementation.
+- Remaining explicit `Func` adapters:
+  - `ImuProcessor`,
+  - `PitotProcessor`,
+  - `MagProcessor`.
+
+Validation:
+
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
