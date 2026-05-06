@@ -3209,6 +3209,39 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Sim SensorBus Coverage Progress
+
+Reason for this change:
+
+- The new `World` scheduler now has test coverage proving board-backed named sensor ingestion.
+- The sim board already implements `BoardIo::update_sensor_bus`, but sim tests only covered parameter persistence.
+- Since sim is the no-hardware board path, it should be verified alongside core whenever the named board/sensor boundary advances.
+
+Design now implemented:
+
+- Added a sim board test that constructs a `Board` with local Tokio channels and a local UDP socket.
+- The test queues ROS-like IMU, mag, baro, GNSS, and RC messages into the board receivers.
+- It calls the real `BoardIo::update_sensor_bus` hook.
+- It verifies the resulting named `SensorBus` packets and coordinate/value conversions.
+- This does not require Zenoh, a simulator process, or hardware.
+
+Test added:
+
+- `sim::board::tests::sim_board_update_sensor_bus_converts_queued_messages`
+  - Verifies IMU timestamp and axis sign conversions.
+  - Verifies magnetometer axis sign conversions.
+  - Verifies barometer Kelvin-to-Celsius conversion.
+  - Verifies GNSS timestamp and lat/lon radian conversion.
+  - Verifies RC microsecond-to-normalized-channel conversion and clamping.
+
+Validation:
+
+- `cargo test -p sim board::tests::sim_board_update_sensor_bus_converts_queued_messages --lib` passes.
+- `cargo test -p sim board::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

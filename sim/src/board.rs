@@ -403,6 +403,31 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 mod tests {
     use super::*;
     use rustflight_core::params2::ParamId;
+    use std::time::Instant;
+
+    fn stamp(sec: i32, nanosec: u32) -> ros_messages::Time {
+        ros_messages::Time { sec, nanosec }
+    }
+
+    fn header(sec: i32, nanosec: u32) -> ros_messages::Header {
+        ros_messages::Header {
+            stamp: stamp(sec, nanosec),
+            frame_id: "test".into(),
+        }
+    }
+
+    fn vector(x: f64, y: f64, z: f64) -> ros_messages::Vector3 {
+        ros_messages::Vector3 { x, y, z }
+    }
+
+    fn quaternion() -> ros_messages::Quaternion {
+        ros_messages::Quaternion {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        }
+    }
 
     fn test_param_path(name: &str) -> PathBuf {
         let mut path = env::temp_dir();
@@ -468,5 +493,105 @@ mod tests {
         );
 
         let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn sim_board_update_sensor_bus_converts_queued_messages() {
+        let (imu_tx, imu_rx) = mpsc::channel(1);
+        let (mag_tx, mag_rx) = mpsc::channel(1);
+        let (baro_tx, baro_rx) = mpsc::channel(1);
+        let (gnss_tx, gnss_rx) = mpsc::channel(1);
+        let (rc_tx, rc_rx) = mpsc::channel(1);
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let param_store_path = test_param_path("sensor_bus");
+
+        imu_tx
+            .try_send(ros_messages::ImuData {
+                header: header(1, 250_000_000),
+                orientation: quaternion(),
+                orientation_covariance: [0.0; 9],
+                angular_velocity: vector(0.1, 0.2, 0.3),
+                angular_velocity_covariance: [0.0; 9],
+                linear_acceleration: vector(1.0, 2.0, 3.0),
+                linear_acceleration_covariance: [0.0; 9],
+            })
+            .unwrap();
+        mag_tx
+            .try_send(ros_messages::MagneticField {
+                header: header(2, 500_000),
+                magnetic_field: vector(4.0, 5.0, 6.0),
+                magnetic_field_covariance: [0.0; 9],
+            })
+            .unwrap();
+        baro_tx
+            .try_send(ros_messages::Barometer {
+                header: header(3, 0),
+                altitude: 123.0,
+                pressure: 101_325.0,
+                temperature: 298.15,
+            })
+            .unwrap();
+        gnss_tx
+            .try_send(ros_messages::GNSS {
+                header: header(4, 0),
+                fix_type: 3,
+                num_sat: 11,
+                lat: 40.0,
+                lon: -111.0,
+                alt: 1550.0,
+                horizontal_accuracy: 0.7,
+                vertical_accuracy: 1.2,
+                vel_n: 1.0,
+                vel_e: 2.0,
+                vel_d: -0.5,
+                speed_accuracy: 0.3,
+                rosflight_timestamp: 4_200_000.0,
+            })
+            .unwrap();
+        rc_tx
+            .try_send(ros_messages::RCRaw {
+                header: header(5, 125_000),
+                values: [1000, 1250, 1500, 1750, 2000, 2500, 500, 1100],
+            })
+            .unwrap();
+
+        let mut board = Board {
+            start_time: Instant::now(),
+            mavlink_socket: socket,
+            imu_rx,
+            mag_rx,
+            baro_rx,
+            gnss_rx,
+            rc_rx,
+            param_store_path,
+        };
+        let mut sensors = SensorBus::default();
+
+        board.update_sensor_bus(&mut sensors);
+
+        let imu = sensors.imu.unwrap().unwrap();
+        assert_eq!(imu.header.timestamp, 1_250_000);
+        assert_eq!(imu.accel, [1.0, -2.0, -3.0]);
+        assert_eq!(imu.gyro, [0.1, -0.2, -0.3]);
+
+        let mag = sensors.mag.unwrap().unwrap();
+        assert_eq!(mag.header.timestamp, 2_000_500);
+        assert_eq!(mag.flux, [4.0, -5.0, -6.0]);
+
+        let baro = sensors.baro.unwrap().unwrap();
+        assert_eq!(baro.header.timestamp, 3_000_000);
+        assert_eq!(baro.pressure, 101_325.0);
+        assert!((baro.temperature - 25.0).abs() < 1e-5);
+
+        let gnss = sensors.gnss.unwrap().unwrap();
+        assert_eq!(gnss.header.timestamp, 4_200_000);
+        assert!((gnss.lat - 40.0_f64.to_radians()).abs() < 1e-12);
+        assert!((gnss.lon - (-111.0_f64).to_radians()).abs() < 1e-12);
+        assert_eq!(gnss.num_sats, 11);
+
+        let rc = sensors.rc.unwrap().unwrap();
+        assert_eq!(rc.header.timestamp, 5_000_125);
+        assert_eq!(rc.n_chan, 8);
+        assert_eq!(&rc.chan[..8], &[0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 0.0, 0.1]);
     }
 }
