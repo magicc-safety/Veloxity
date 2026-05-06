@@ -1,5 +1,8 @@
 use std::env;
+use std::fs;
+use std::io::{self, Write};
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use cdr::CdrLe;
@@ -7,6 +10,7 @@ use chrono::{Datelike, TimeZone, Timelike, Utc};
 use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
 use rustflight_core::packets::{self, RC_PACKET_CHANNELS};
+use rustflight_core::params2::{PARAM_DEFINITIONS, ParamValue, Params};
 use rustflight_core::sensors::SensorBus;
 use tokio::io::ErrorKind;
 use tokio::net::UdpSocket;
@@ -20,6 +24,8 @@ use crate::ros_messages;
 const DEFAULT_ZENOH_ENDPOINT: &str = "tcp/127.0.0.1:7447";
 const DEFAULT_MAVLINK_BIND: &str = "127.0.0.1:14557";
 const DEFAULT_MAVLINK_REMOTE: &str = "127.0.0.1:14520";
+const DEFAULT_PARAM_STORE: &str = "rustflight_sim.params";
+const PARAM_STORE_ENV: &str = "RUSTFLIGHT_SIM_PARAM_STORE";
 
 pub struct Board {
     start_time: Instant,
@@ -29,6 +35,7 @@ pub struct Board {
     baro_rx: mpsc::Receiver<ros_messages::Barometer>,
     gnss_rx: mpsc::Receiver<ros_messages::GNSS>,
     rc_rx: mpsc::Receiver<ros_messages::RCRaw>,
+    param_store_path: PathBuf,
 }
 
 impl Board {
@@ -82,6 +89,7 @@ impl Board {
                 baro_rx,
                 gnss_rx,
                 rc_rx,
+                param_store_path: param_store_path(),
             },
             session,
         )
@@ -128,6 +136,80 @@ impl BoardIo for Board {
 
     fn clock_micros(&self) -> u64 {
         self.start_time.elapsed().as_micros() as u64
+    }
+
+    fn read_params(&mut self, params: &mut Params) -> bool {
+        read_params_from_path(&self.param_store_path, params).is_ok()
+    }
+
+    fn write_params(&mut self, params: &Params) -> bool {
+        write_params_to_path(&self.param_store_path, params).is_ok()
+    }
+}
+
+fn param_store_path() -> PathBuf {
+    env::var_os(PARAM_STORE_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_PARAM_STORE))
+}
+
+fn write_params_to_path(path: &Path, params: &Params) -> io::Result<()> {
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut contents = Vec::new();
+    for definition in PARAM_DEFINITIONS.iter() {
+        writeln!(
+            contents,
+            "{}={}",
+            definition.name,
+            format_param_value(params.get_by_id(definition.id))
+        )?;
+    }
+
+    let temp_path = path.with_extension("tmp");
+    fs::write(&temp_path, contents)?;
+    fs::rename(temp_path, path)
+}
+
+fn read_params_from_path(path: &Path, params: &mut Params) -> io::Result<()> {
+    let contents = fs::read_to_string(path)?;
+
+    for line in contents.lines() {
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        let Some(definition) = PARAM_DEFINITIONS
+            .iter()
+            .find(|definition| definition.name == name)
+        else {
+            continue;
+        };
+        let Some(parsed) = parse_param_value(value, definition.default) else {
+            continue;
+        };
+        params.set_by_id(definition.id, parsed);
+    }
+
+    Ok(())
+}
+
+fn format_param_value(value: ParamValue) -> String {
+    match value {
+        ParamValue::Float(value) => value.to_string(),
+        ParamValue::Int(value) => value.to_string(),
+        ParamValue::Uint(value) => value.to_string(),
+        ParamValue::Bool(value) => value.to_string(),
+    }
+}
+
+fn parse_param_value(value: &str, default: ParamValue) -> Option<ParamValue> {
+    match default {
+        ParamValue::Float(_) => value.parse().ok().map(ParamValue::Float),
+        ParamValue::Int(_) => value.parse().ok().map(ParamValue::Int),
+        ParamValue::Uint(_) => value.parse().ok().map(ParamValue::Uint),
+        ParamValue::Bool(_) => value.parse().ok().map(ParamValue::Bool),
     }
 }
 
@@ -314,5 +396,77 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
             temperature: 25.0,
             seq: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustflight_core::params2::ParamId;
+
+    fn test_param_path(name: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        path.push(format!("rustflight_sim_{}_{}.params", name, std::process::id()));
+        let _ = fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn sim_param_store_round_trips_known_param_values() {
+        let path = test_param_path("round_trip");
+        let mut written = Params::new();
+        written.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        written.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Bool(true));
+        written.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(0.25));
+
+        write_params_to_path(&path, &written).unwrap();
+
+        let mut read = Params::new();
+        read.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(7));
+        read.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Bool(false));
+        read.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(-0.5));
+
+        read_params_from_path(&path, &mut read).unwrap();
+
+        assert_eq!(
+            read.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(42)
+        );
+        assert_eq!(
+            read.get_by_id(ParamId::PARAM_FIXED_WING),
+            ParamValue::Bool(true)
+        );
+        assert_eq!(
+            read.get_by_id(ParamId::PARAM_X_EQ_TORQUE),
+            ParamValue::Float(0.25)
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sim_param_store_ignores_unknown_and_malformed_lines() {
+        let path = test_param_path("malformed");
+        fs::write(
+            &path,
+            "SYS_ID=77\nUNKNOWN_PARAM=1\nMALFORMED\nFIXED_WING=not-a-bool\n",
+        )
+        .unwrap();
+
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Bool(true));
+
+        read_params_from_path(&path, &mut params).unwrap();
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(77)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_FIXED_WING),
+            ParamValue::Bool(true)
+        );
+
+        let _ = fs::remove_file(path);
     }
 }

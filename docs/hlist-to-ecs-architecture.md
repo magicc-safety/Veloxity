@@ -2819,8 +2819,68 @@ Validation:
 
 Next planned migration target:
 
-- Decide whether to implement simulated board persistence for `ReadParams`/`WriteParams` or leave board hooks unsupported until the pixracerpro migration.
+- Sim board persistence for `ReadParams`/`WriteParams` is now implemented.
 - Move `RcCalibration` out of the inline command parser next, because it needs a persistent RC calibration state rather than a placeholder failed ACK.
+
+## Sim Board Persistence Progress
+
+Reason for this change:
+
+- Board command events already route `ReadParams` and `WriteParams` through `BoardIo` hooks.
+- The core default hooks correctly return unsupported, which is appropriate for boards that have not implemented persistence yet.
+- The sim board does not require hardware-specific flash support, so it should exercise the board persistence path now instead of reporting unsupported forever.
+
+Design now implemented:
+
+- `sim::board::Board` now owns a parameter-store path.
+- Default store path: `rustflight_sim.params`.
+- Override environment variable: `RUSTFLIGHT_SIM_PARAM_STORE`.
+- `BoardIo::write_params` writes all known params to a text file as `PARAM_NAME=value`.
+- `BoardIo::read_params` reads that file back into the active `Params`.
+- Value parsing uses each parameter's static default type from `PARAM_DEFINITIONS`.
+- Unknown, malformed, or incorrectly typed lines are ignored so a partially edited sim file does not corrupt unrelated params.
+- Writes go through a temporary file and rename step so complete store contents are replaced as one operation.
+
+ROSflight compatibility:
+
+- The ROSflight command slots remain unchanged:
+  - `ROSFLIGHT_CMD_READ_PARAMS`,
+  - `ROSFLIGHT_CMD_WRITE_PARAMS`.
+- The command system still owns the read/write operation and emits the ACK after the board hook returns.
+- Sim boards now ACK success when the filesystem operation succeeds.
+- Hardware boards still inherit the unsupported default until their board-specific persistence hooks are implemented.
+
+Compile-time boundary improvement:
+
+- Comms still only emits board command intent.
+- `command_system::apply_board_command_requests` remains the only system with board persistence authority.
+- Sim-specific file format and filesystem behavior stay in the sim board layer, not in `rustflight_core`.
+
+Files changed in this slice:
+
+- `sim/src/board.rs`
+  - Adds a parameter-store path to the sim board.
+  - Implements `BoardIo::read_params`.
+  - Implements `BoardIo::write_params`.
+  - Adds typed text serialization helpers for `Params`.
+
+Tests added:
+
+- `sim::board::tests::sim_param_store_round_trips_known_param_values`
+  - Proves known int, bool, and float parameters persist and restore.
+- `sim::board::tests::sim_param_store_ignores_unknown_and_malformed_lines`
+  - Proves unknown names, malformed lines, and invalid values are ignored without clobbering existing params.
+
+Validation:
+
+- `cargo test -p sim board::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests::world_routes_board_command_and_acks_unsupported_after_apply_stage --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p sim pwm::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
 
 ## RC Trim Calibration Event Progress
 
