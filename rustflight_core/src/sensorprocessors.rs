@@ -671,16 +671,14 @@ impl_passthrough_sensor_packet_processor!(PassthroughMagProcessor, MagPacket);
 #[derive(Default, Copy, Clone)]
 pub struct MagProcessor;
 
-impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for MagProcessor {
-    type Output = Option<MagPacket>;
-
-    fn call(
+impl MagProcessor {
+    fn process_packet(
         &mut self,
-        arg: &'a mut Option<Result<MagPacket, errors::SensorError>>,
+        packet: &mut Option<Result<MagPacket, errors::SensorError>>,
         _flags: &mut CalibrationFlags,
         params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(mut packet)) = arg.take() {
+    ) -> Option<MagPacket> {
+        if let Some(Ok(mut packet)) = packet.take() {
             // Apply hard-iron biases from parameters
             let mag_hard_x = packet.flux[0]
                 - if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_MAG_X_BIAS) {
@@ -759,7 +757,30 @@ impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for MagPro
         }
     }
 }
-impl_sensor_packet_processor_via_func!(MagProcessor, MagPacket);
+
+impl SensorPacketProcessor<MagPacket> for MagProcessor {
+    fn process(
+        &mut self,
+        packet: &mut Option<Result<MagPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Option<MagPacket> {
+        self.process_packet(packet, flags, params)
+    }
+}
+
+impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for MagProcessor {
+    type Output = Option<MagPacket>;
+
+    fn call(
+        &mut self,
+        packet: &'a mut Option<Result<MagPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Self::Output {
+        self.process_packet(packet, flags, params)
+    }
+}
 
 // ------------------------------
 // Rc Packet

@@ -3365,6 +3365,29 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Mag Processor Native Conversion Progress
+
+Reason for this change:
+
+- After `PitotProcessor` moved to native `SensorPacketProcessor`, `MagProcessor` was the smaller remaining complex processor.
+- This keeps reducing the HList bridge surface one processor at a time while retaining the old `ROSFlight` processor entry point.
+
+Design now implemented:
+
+- `MagProcessor` now implements `SensorPacketProcessor<MagPacket>` directly.
+- Its legacy `Func` implementation remains for the old HList processor path.
+- Both entry points delegate to the same internal `process_packet` implementation.
+- Remaining explicit `Func` adapter:
+  - `ImuProcessor`.
+
+Validation:
+
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
