@@ -13,7 +13,7 @@ use crate::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
         ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
-    controller::Controller,
+    controller::{Controller, RcTrimCalibrator},
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     estimator::{AttitudeStateTrait, NamedEstimator},
     mixer::Mixer,
@@ -39,7 +39,7 @@ where
     B: BoardIo,
     BT: BodyType,
     BT::Estimator: NamedEstimator,
-    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State>,
+    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
     BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
     <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
     <BT::Estimator as NamedEstimator>::State: Copy + Default,
@@ -81,7 +81,7 @@ where
     B: BoardIo,
     BT: BodyType,
     BT::Estimator: NamedEstimator,
-    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State>,
+    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
     BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
     <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
     <BT::Estimator as NamedEstimator>::State: Copy + Default,
@@ -200,7 +200,8 @@ where
             requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             state: &self.state,
-            rc: &self.rc,
+            command: &self.command,
+            controller: &mut self.controller,
             params: &mut self.params,
         });
 
@@ -1030,7 +1031,17 @@ mod tests {
     #[test]
     fn world_routes_rc_trim_calibration_and_sets_equilibrium_torques() {
         let board = TestBoard::default();
-        let params = Params::new();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_ROLLRATE, ParamValue::Float(1.0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_PITCHRATE, ParamValue::Float(1.0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_YAWRATE, ParamValue::Float(1.0));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_P, ParamValue::Float(2.0));
+        params.set_by_id(ParamId::PARAM_PID_PITCH_RATE_P, ParamValue::Float(3.0));
+        params.set_by_id(ParamId::PARAM_PID_YAW_RATE_P, ParamValue::Float(4.0));
+        params.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(0.5));
+        params.set_by_id(ParamId::PARAM_Y_EQ_TORQUE, ParamValue::Float(-0.5));
+        params.set_by_id(ParamId::PARAM_Z_EQ_TORQUE, ParamValue::Float(0.25));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
         let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
@@ -1063,6 +1074,7 @@ mod tests {
             &world.params,
             &mut world.state,
         );
+        world.run_rc_command_state_stages();
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::RcCalibration,
@@ -1073,15 +1085,15 @@ mod tests {
         assert!(world.command_events.rc_trim_calibration_requests.is_empty());
         assert_eq!(
             world.params.get_by_id(ParamId::PARAM_X_EQ_TORQUE),
-            ParamValue::Float(0.100000024)
+            ParamValue::Float(0.70000005)
         );
         assert_eq!(
             world.params.get_by_id(ParamId::PARAM_Y_EQ_TORQUE),
-            ParamValue::Float(-0.100000024)
+            ParamValue::Float(-0.8000001)
         );
         assert_eq!(
             world.params.get_by_id(ParamId::PARAM_Z_EQ_TORQUE),
-            ParamValue::Float(0.20000005)
+            ParamValue::Float(1.0500002)
         );
         assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
         let ack = world.comm.comm_link().last_cmd_ack.unwrap();

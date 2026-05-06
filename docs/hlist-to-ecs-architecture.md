@@ -2086,7 +2086,91 @@ RC trim compatibility note:
 - Current upstream `Controller::calculate_equilbrium_torque_from_rc` does not write raw RC stick offsets into equilibrium torque params.
 - It runs controller PID logic once with a fake level estimator state, `dt = 0`, RC control input, and integrators disabled.
 - It then adds the resulting torque outputs to the existing `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE` params.
-- The current RustFlight RC trim implementation is therefore only document-level compatible and should be corrected in a focused future slice before further RC trim work.
+- RustFlight has now been corrected to follow that ownership and calculation shape in the new command-system path.
+
+## RC Trim Controller Ownership Progress
+
+Reason for this change:
+
+- The previous RC trim command-system slice wrote raw RC stick offsets directly into equilibrium torque params.
+- Current upstream ROSflight 2.x makes RC trim calibration controller-owned:
+  - command handling requests RC calibration,
+  - controller runs PID logic once against fake level attitude,
+  - resulting PID torques are added to existing equilibrium torque params,
+  - command ACK succeeds when disarmed.
+- RustFlight needed to preserve the event/scheduler ownership model while matching that upstream calculation.
+
+Upstream source findings:
+
+- Current upstream `rosflight_firmware` was refreshed from `origin/main`.
+- Firmware source revision checked: `099a9846406d9f20b2bae08a2ea3dda74a01cf59`.
+- `CommManager::command_callback` initializes command result to success when disarmed and calls `RF_.controller_.calculate_equilbrium_torque_from_rc()` for `COMMAND_RC_CALIBRATION`.
+- `Controller::calculate_equilbrium_torque_from_rc` uses a fake level estimator state and calls `run_pid_loops(0, fake_state, RF_.command_manager_.rc_control(), false)`.
+- It adds `pid_output.u[3..5]` to `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE`.
+
+Design now implemented:
+
+- Adds `Controller::RcTrimCalibrator`.
+- `QuadController` implements `RcTrimCalibrator`.
+- The implementation runs the existing quad controller PID path against `AttitudeState::default()`, RC control input, `dt = 0`, and without existing equilibrium torque feed-forward.
+- `CommandManager` exposes read-only `rc_control()`.
+- `command_system::apply_rc_trim_calibration_requests` now receives:
+  - read-only command-manager access,
+  - mutable controller access,
+  - mutable params access,
+  - read-only state access.
+- The command system rejects the request while armed, matching upstream command gating.
+- When disarmed, it adds controller-calculated torques to existing equilibrium torque params and emits success ACK.
+- `World` and legacy `ROSFlight` pass their controller and command-manager resources into this system.
+
+ROSflight compatibility:
+
+- `ROSFLIGHT_CMD_RC_CALIBRATION` still maps to RC trim calibration.
+- The external ACK remains `ROSFLIGHT_CMD_ACK`.
+- Disarmed requests now succeed even though the result depends on current command-manager RC-control state, matching upstream's command callback result behavior.
+- Equilibrium torque params now accumulate controller PID torque output rather than raw stick offsets.
+
+Compile-time boundary improvement:
+
+- Comms still only emits `RcTrimCalibrationRequested`.
+- Command system owns command authorization and response emission.
+- Controller owns the RC-trim calculation.
+- CommandManager exposes only a read capability for the current RC control input.
+
+Files changed in this slice:
+
+- `rustflight_core/src/controller.rs`
+  - Adds `RcTrimCalibrator`.
+- `rustflight_core/src/controller/quad_controller.rs`
+  - Adds controller-owned RC trim torque calculation.
+  - Refactors normal control through a shared PID helper while preserving armed gating.
+- `rustflight_core/src/command_manager.rs`
+  - Adds read-only `rc_control()`.
+- `rustflight_core/src/command_system.rs`
+  - Routes RC trim calibration through the controller and adds torque output to existing params.
+- `rustflight_core/src/world.rs`
+  - Wires controller and command-manager resources into the RC trim command system.
+- `rustflight_core/src/rosflight.rs`
+  - Mirrors the compatibility scheduling in the legacy path.
+
+Tests added or updated:
+
+- `controller::quad_controller::tests::rc_trim_calibration_uses_pid_output_without_existing_equilibrium_torques`
+  - Proves the controller-owned calculation returns PID torque output and does not include existing equilibrium torque params.
+- `command_system::tests::apply_rc_trim_calibration_requests_sets_equilibrium_torques_and_acks`
+  - Updated to prove RC trim adds controller-calculated torque output to existing equilibrium params.
+- `world::tests::world_routes_rc_trim_calibration_and_sets_equilibrium_torques`
+  - Updated to prove the World scheduler handoff uses current command-manager RC control input and sends success ACK.
+
+Validation:
+
+- `cargo test -p rustflight_core controller::quad_controller::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p sim pwm::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
 
 ## Armed Command Compatibility Progress
 

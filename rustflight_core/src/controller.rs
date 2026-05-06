@@ -53,3 +53,11 @@ pub trait Controller {
     ) -> Self::ControlOutput;
     fn update_gains(&mut self, params: &Params);
 }
+
+pub trait RcTrimCalibrator {
+    fn calculate_equilibrium_torques_from_rc(
+        &mut self,
+        rc_control: &CombinedControl,
+        params: &Params,
+    ) -> [f32; 3];
+}

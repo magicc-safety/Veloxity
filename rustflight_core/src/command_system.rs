@@ -5,6 +5,7 @@ use crate::{
         messages::{RosflightCmdAckMsg, RosflightVersionMsg},
     },
     command_manager::CommandManager,
+    controller::RcTrimCalibrator,
     events::{
         BoardCommandRequested, COMM_RESPONSE_QUEUE_CAPACITY, CalibrationRequested, CommResponse,
         ConfigInfoRequested, OffboardControlRequested, ParamDefaultsRequested,
@@ -12,7 +13,6 @@ use crate::{
     },
     params2::{ParamId, ParamValue, Params},
     ports::{EventDrainPort, EventEmitPort},
-    rc::{Rc, Stick},
     sensorprocessors::CalibrationFlags,
     state_machine::StateManager,
 };
@@ -133,43 +133,58 @@ where
     }
 }
 
-pub struct RcTrimCalibrationCtx<'a, const N: usize> {
+pub struct RcTrimCalibrationCtx<'a, C, const N: usize>
+where
+    C: RcTrimCalibrator,
+{
     pub requests: EventDrainPort<'a, RcTrimCalibrationRequested, N>,
     pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
     pub state: &'a StateManager,
-    pub rc: &'a Rc,
+    pub command: &'a CommandManager,
+    pub controller: &'a mut C,
     pub params: &'a mut Params,
 }
 
-pub fn apply_rc_trim_calibration_requests<const N: usize>(
-    mut ctx: RcTrimCalibrationCtx<'_, N>,
-) {
+pub fn apply_rc_trim_calibration_requests<C, const N: usize>(
+    mut ctx: RcTrimCalibrationCtx<'_, C, N>,
+) where
+    C: RcTrimCalibrator,
+{
     while let Some(request) = ctx.requests.next() {
-        let has_rc = !ctx.state.is_armed() && ctx.rc.get_rc_struct().num_channels > 0;
-        if has_rc {
+        if !ctx.state.is_armed() {
+            let torques = ctx
+                .controller
+                .calculate_equilibrium_torques_from_rc(ctx.command.rc_control(), ctx.params);
             ctx.params.set_by_id(
                 ParamId::PARAM_X_EQ_TORQUE,
-                ParamValue::Float(ctx.rc.stick(Stick::X)),
+                ParamValue::Float(param_float(ctx.params, ParamId::PARAM_X_EQ_TORQUE) + torques[0]),
             );
             ctx.params.set_by_id(
                 ParamId::PARAM_Y_EQ_TORQUE,
-                ParamValue::Float(ctx.rc.stick(Stick::Y)),
+                ParamValue::Float(param_float(ctx.params, ParamId::PARAM_Y_EQ_TORQUE) + torques[1]),
             );
             ctx.params.set_by_id(
                 ParamId::PARAM_Z_EQ_TORQUE,
-                ParamValue::Float(ctx.rc.stick(Stick::Z)),
+                ParamValue::Float(param_float(ctx.params, ParamId::PARAM_Z_EQ_TORQUE) + torques[2]),
             );
         }
 
-        let success = if has_rc {
-            RosflightCmdResponse::RosflightCmdSuccess
-        } else {
+        let success = if ctx.state.is_armed() {
             RosflightCmdResponse::RosflightCmdFailed
+        } else {
+            RosflightCmdResponse::RosflightCmdSuccess
         };
         let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
             command: request.command,
             success,
         }));
+    }
+}
+
+fn param_float(params: &Params, id: ParamId) -> f32 {
+    match params.get_by_id(id) {
+        ParamValue::Float(value) => value,
+        _ => 0.0,
     }
 }
 
@@ -237,6 +252,7 @@ pub fn apply_config_info_requests<const N: usize>(mut ctx: ConfigInfoCtx<'_, N>)
 mod tests {
     use super::*;
     use crate::{
+        controller::quad_controller::QuadController,
         comm_messages::{
             enums::{OffboardControlIgnore, OffboardControlMode},
             messages::OffboardControlMsg,
@@ -249,6 +265,7 @@ mod tests {
             VERSION_REQUEST_QUEUE_CAPACITY,
         },
         packets::{RcPacket, RosflightPacketHeader},
+        rc::Rc,
         state_machine::{Event, StateManager},
         test_support::TestBoard,
     };
@@ -399,8 +416,19 @@ mod tests {
     #[test]
     fn apply_rc_trim_calibration_requests_sets_equilibrium_torques_and_acks() {
         let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_ROLLRATE, ParamValue::Float(1.0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_PITCHRATE, ParamValue::Float(1.0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_YAWRATE, ParamValue::Float(1.0));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_P, ParamValue::Float(2.0));
+        params.set_by_id(ParamId::PARAM_PID_PITCH_RATE_P, ParamValue::Float(3.0));
+        params.set_by_id(ParamId::PARAM_PID_YAW_RATE_P, ParamValue::Float(4.0));
+        params.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(0.5));
+        params.set_by_id(ParamId::PARAM_Y_EQ_TORQUE, ParamValue::Float(-0.5));
+        params.set_by_id(ParamId::PARAM_Z_EQ_TORQUE, ParamValue::Float(0.25));
         let mut rc = Rc::new();
         let mut state = crate::state_machine::StateManager::new();
+        state.update(Event::INITIALIZED, &params);
         rc.init(&mut (), &params);
         let mut channels = [0.5; crate::packets::RC_PACKET_CHANNELS];
         channels[0] = 0.55;
@@ -419,6 +447,9 @@ mod tests {
             &params,
             &mut state,
         );
+        let mut command = CommandManager::new();
+        command.run(0, &params, &mut rc, &mut state);
+        let mut controller = QuadController::default();
         let mut requests = EventQueue::<
             RcTrimCalibrationRequested,
             RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY,
@@ -433,21 +464,22 @@ mod tests {
             requests: EventDrainPort::new(&mut requests),
             responses: EventEmitPort::new(&mut responses),
             state: &initialized_state(),
-            rc: &rc,
+            command: &command,
+            controller: &mut controller,
             params: &mut params,
         });
 
         assert_eq!(
             params.get_by_id(ParamId::PARAM_X_EQ_TORQUE),
-            ParamValue::Float(0.100000024)
+            ParamValue::Float(0.70000005)
         );
         assert_eq!(
             params.get_by_id(ParamId::PARAM_Y_EQ_TORQUE),
-            ParamValue::Float(-0.100000024)
+            ParamValue::Float(-0.8000001)
         );
         assert_eq!(
             params.get_by_id(ParamId::PARAM_Z_EQ_TORQUE),
-            ParamValue::Float(0.20000005)
+            ParamValue::Float(1.0500002)
         );
 
         match responses.pop().unwrap() {

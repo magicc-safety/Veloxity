@@ -655,6 +655,10 @@ impl CommandManager {
         &self.combined_command
     }
 
+    pub fn rc_control(&self) -> &CombinedControl {
+        &self.rc_command
+    }
+
     pub fn get_control_mode(&self) -> ControlType {
         // We assume the qx (roll) channel represents the
         // primary attitude control mode.

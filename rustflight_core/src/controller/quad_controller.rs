@@ -35,7 +35,7 @@
 // ******************************************************************************
 // **
 
-use super::Controller;
+use super::{Controller, RcTrimCalibrator};
 use crate::command_manager::{CombinedControl, ControlType};
 use crate::estimator::quad_estimator::AttitudeState;
 use crate::params2::{ParamId, ParamValue, Params};
@@ -207,6 +207,95 @@ impl QuadController {
             pitch_angle_pid,
         }
     }
+
+    fn reset_pids(&mut self) {
+        self.roll_rate_pid.reset();
+        self.pitch_rate_pid.reset();
+        self.yaw_rate_pid.reset();
+        self.roll_angle_pid.reset();
+        self.pitch_angle_pid.reset();
+    }
+
+    fn run_pid_control(
+        &mut self,
+        state: &AttitudeState,
+        command: &CombinedControl,
+        params: &Params,
+        dt: f64,
+        add_equilibrium_torques: bool,
+    ) -> MixerInput {
+        if command.qx.control_type == ControlType::Passthrough {
+            return MixerInput {
+                torques: Vector::from_array([
+                    command.qx.value as f64,
+                    command.qy.value as f64,
+                    command.qy.value as f64,
+                ]),
+                thrust: command.fz.value as f64,
+            };
+        }
+
+        let enable_integrator = false;
+        let q_hat = state.q_hat;
+        let current_rates = state.body_rate;
+        let mut rate_setpoints = Vector::from_array([0.0, 0.0, 0.0, 0.0]);
+
+        if command.qx.control_type == ControlType::Angle {
+            let current_yaw = get_yaw(q_hat);
+            let q_target = quaternion_from_euler(
+                command.qx.value as f64,
+                command.qy.value as f64,
+                current_yaw,
+            );
+
+            let mut q_err = q_hat.conjugate() * q_target;
+
+            if q_err.get_w() < 0.0 {
+                q_err = q_err * -1.0;
+            }
+
+            rate_setpoints[0] = self.roll_angle_pid.run_with_derivative(
+                0.0,
+                2.0 * q_err.get_x(),
+                current_rates[0],
+                dt,
+                enable_integrator,
+            );
+            rate_setpoints[1] = self.pitch_angle_pid.run_with_derivative(
+                0.0,
+                2.0 * q_err.get_y(),
+                current_rates[1],
+                dt,
+                enable_integrator,
+            )
+        } else {
+            rate_setpoints[0] = command.qx.value as f64;
+            rate_setpoints[1] = command.qy.value as f64;
+        }
+
+        rate_setpoints[2] = command.qz.value as f64;
+
+        let mut torque_x =
+            self.roll_rate_pid
+                .run(current_rates[0], rate_setpoints[0], dt, enable_integrator);
+        let mut torque_y =
+            self.pitch_rate_pid
+                .run(current_rates[1], rate_setpoints[1], dt, enable_integrator);
+        let mut torque_z =
+            self.yaw_rate_pid
+                .run(current_rates[2], rate_setpoints[2], dt, enable_integrator);
+
+        if add_equilibrium_torques {
+            torque_x += param_float(params, ParamId::PARAM_X_EQ_TORQUE) as f64;
+            torque_y += param_float(params, ParamId::PARAM_Y_EQ_TORQUE) as f64;
+            torque_z += param_float(params, ParamId::PARAM_Z_EQ_TORQUE) as f64;
+        }
+
+        MixerInput {
+            torques: Vector::from_array([torque_x, torque_y, torque_z]),
+            thrust: command.fz.value as f64,
+        }
+    }
 }
 
 impl Controller for QuadController {
@@ -321,118 +410,40 @@ impl Controller for QuadController {
         self.update_gains(params);
 
         if !state_manager.is_armed() {
-            self.roll_rate_pid.reset();
-            self.pitch_rate_pid.reset();
-            self.yaw_rate_pid.reset();
-            self.roll_angle_pid.reset();
-            self.pitch_angle_pid.reset();
+            self.reset_pids();
 
             MixerInput {
                 torques: Vector::from_array([0.0f64, 0.0f64, 0.0f64]),
                 thrust: 0.0f64,
             }
         } else {
-            if command.qx.control_type == ControlType::Passthrough {
-                MixerInput {
-                    torques: Vector::from_array([
-                        command.qx.value as f64,
-                        command.qy.value as f64,
-                        command.qy.value as f64,
-                    ]),
-                    thrust: command.fz.value as f64,
-                }
-            } else {
-                // prevent ourselves from running the integrator while we're on the ground...
-                //let enable_integrator = command.fz.value > 0.1;
-                let enable_integrator = false;
-
-                // --- Step 1: Extract the necessary quaternions from the input state ---
-                let q_hat = state.q_hat;
-                let q_dot = state.q_dot;
-
-                // --- Step 2: Calculate angular velocity using the kinematic equation ---
-                let q_conj = q_hat.conjugate();
-
-                // BAD: don't ever update based on how fast the estimator is catching up to true body rates... use the body rates!!!
-                //let omega_q = 2.0 * (q_conj * q_dot);
-                // The vector part of omega_q is our current angular rate [p, q, r]
-                //let current_rates = Vector::from_array([
-                //    omega_q.get_x(),
-                //    omega_q.get_y(),
-                //    omega_q.get_z(),
-                //]);
-                let current_rates = state.body_rate;
-
-                let mut rate_setpoints = Vector::from_array([0.0, 0.0, 0.0, 0.0]);
-
-                // run the inner loop as necessary
-                if command.qx.control_type == ControlType::Angle {
-                    // use commanded roll/pitch, but use current yaw so we calculate tilt error relative to where we're facing
-                    let current_yaw = get_yaw(q_hat);
-                    let q_target = quaternion_from_euler(
-                        command.qx.value as f64,
-                        command.qy.value as f64,
-                        current_yaw,
-                    );
-
-                    let mut q_err = q_hat.conjugate() * q_target;
-
-                    if q_err.get_w() < 0.0 {
-                        q_err = q_err * -1.0;
-                    }
-
-                    rate_setpoints[0] = self.roll_angle_pid.run_with_derivative(
-                        0.0,
-                        2.0 * q_err.get_x(),
-                        current_rates[0],
-                        dt,
-                        enable_integrator,
-                    );
-                    rate_setpoints[1] = self.pitch_angle_pid.run_with_derivative(
-                        0.0,
-                        2.0 * q_err.get_y(),
-                        current_rates[1],
-                        dt,
-                        enable_integrator,
-                    )
-                } else {
-                    // Mode: RollratePitchrateYawrateThrottle (Acro)
-                    rate_setpoints[0] = command.qx.value as f64;
-                    rate_setpoints[1] = command.qy.value as f64;
-                }
-
-                rate_setpoints[2] = command.qz.value as f64;
-
-                let mut torque_x = self.roll_rate_pid.run(
-                    current_rates[0],
-                    rate_setpoints[0],
-                    dt,
-                    enable_integrator,
-                );
-                let mut torque_y = self.pitch_rate_pid.run(
-                    current_rates[1],
-                    rate_setpoints[1],
-                    dt,
-                    enable_integrator,
-                );
-                let mut torque_z = self.yaw_rate_pid.run(
-                    current_rates[2],
-                    rate_setpoints[2],
-                    dt,
-                    enable_integrator,
-                );
-
-                torque_x += param_float(params, ParamId::PARAM_X_EQ_TORQUE) as f64;
-                torque_y += param_float(params, ParamId::PARAM_Y_EQ_TORQUE) as f64;
-                torque_z += param_float(params, ParamId::PARAM_Z_EQ_TORQUE) as f64;
-
-                // --- Step 5: Assemble and return the final output ---
-                MixerInput {
-                    torques: Vector::from_array([torque_x, torque_y, torque_z]),
-                    thrust: command.fz.value as f64,
-                }
-            }
+            self.run_pid_control(state, command, params, dt, true)
         }
+    }
+}
+
+impl RcTrimCalibrator for QuadController {
+    fn calculate_equilibrium_torques_from_rc(
+        &mut self,
+        rc_control: &CombinedControl,
+        params: &Params,
+    ) -> [f32; 3] {
+        let mut controller = *self;
+        controller.update_gains(params);
+        controller.reset_pids();
+        let output = controller.run_pid_control(
+            &AttitudeState::default(),
+            rc_control,
+            params,
+            0.0,
+            false,
+        );
+
+        [
+            output.torques[0] as f32,
+            output.torques[1] as f32,
+            output.torques[2] as f32,
+        ]
     }
 }
 
@@ -527,5 +538,47 @@ mod tests {
         assert_eq!(output.torques[1], -0.20000000298023224);
         assert_eq!(output.torques[2], 0.30000001192092896);
         assert_eq!(output.thrust, 0.4);
+    }
+
+    #[test]
+    fn rc_trim_calibration_uses_pid_output_without_existing_equilibrium_torques() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_P, ParamValue::Float(2.0));
+        params.set_by_id(ParamId::PARAM_PID_PITCH_RATE_P, ParamValue::Float(3.0));
+        params.set_by_id(ParamId::PARAM_PID_YAW_RATE_P, ParamValue::Float(4.0));
+        params.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(0.5));
+        params.set_by_id(ParamId::PARAM_Y_EQ_TORQUE, ParamValue::Float(-0.5));
+        params.set_by_id(ParamId::PARAM_Z_EQ_TORQUE, ParamValue::Float(0.25));
+
+        let command = CombinedControl {
+            qx: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: 0.1,
+            },
+            qy: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: -0.1,
+            },
+            qz: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: 0.2,
+            },
+            fz: ControlChannel {
+                active: true,
+                control_type: ControlType::Throttle,
+                value: 0.4,
+            },
+            ..Default::default()
+        };
+
+        let mut controller = QuadController::default();
+        let torques = controller.calculate_equilibrium_torques_from_rc(&command, &params);
+
+        assert_eq!(torques[0], 0.2);
+        assert_eq!(torques[1], -0.3);
+        assert_eq!(torques[2], 0.8);
     }
 }

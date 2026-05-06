@@ -48,7 +48,7 @@ use crate::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
         ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
-    controller::Controller,
+    controller::{Controller, RcTrimCalibrator},
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     errors,
     estimator::{
@@ -149,7 +149,7 @@ where
         >>::Remainder,
     >,
     <BT::Estimator as Estimator>::State: AttitudeStateTrait,
-    BT::Controller: Controller<State = <BT::Estimator as Estimator>::State>,
+    BT::Controller: Controller<State = <BT::Estimator as Estimator>::State> + RcTrimCalibrator,
     BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
     <<BT as BodyType>::Mixer as Mixer>::ActuatorCommands: AsRef<[f64]>,
     // This tells Rust that the compiler *can* find a way to `get` these packet
@@ -270,7 +270,8 @@ where
             requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             state: &self.state_manager,
-            rc: &self.rc_manager,
+            command: &self.command_manager,
+            controller: &mut self.controller,
             params: &mut self.params,
         });
 
