@@ -33,7 +33,6 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::BoardTrait;
 use crate::comm_manager::CommManager;
 use crate::comm_manager::comm_link_trait::CommInterface;
 use crate::comm_messages::{

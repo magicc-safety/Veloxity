@@ -3033,6 +3033,35 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Stale BoardTrait Import Cleanup
+
+Reason for this change:
+
+- After `TestBoard` moved to direct `BoardIo`, a few modules still imported `BoardTrait` even though they no longer used the HList-bearing board trait.
+- These stale imports made the new path look more coupled to the legacy board shape than it actually is.
+
+Design now implemented:
+
+- `CommandManager` no longer imports `BoardTrait`.
+- `StateManager` no longer imports `BoardTrait`.
+- No behavior changed; both modules were already operating without board sensor associated types.
+
+Remaining `BoardTrait` references:
+
+- `comm_manager.rs` keeps a local bound for the legacy HList telemetry method.
+- `rosflight.rs` remains the legacy HList scheduler/reference path.
+- `board/dummy.rs` remains the legacy HList dummy board.
+- `params.rs` is not exported by `lib.rs`; the active parameter module is `params2.rs`.
+
+Validation:
+
+- `cargo test -p rustflight_core command_manager::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core state_machine::tests --lib` still has pre-existing arming/`UNCALIBRATED_IMU` failures noted in the earlier next-steps list; this slice did not change that behavior.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

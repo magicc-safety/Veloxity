@@ -40,7 +40,6 @@
 mod tests;
 
 use crate::{
-    board::BoardTrait,
     comm_manager::CommManager,
     params2::{ParamId, ParamValue, Params},
 };
