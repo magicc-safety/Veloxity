@@ -2035,7 +2035,58 @@ Future follow-up:
 
 - The local mixer still lacks upstream's full primary/secondary mixer selection model driven by RC override masks.
 - Fixed-wing mixer output ownership still needs to be introduced when the fixed-wing path is migrated into the new named-resource architecture.
-- `ROSFLIGHT_OUTPUT_RAW` telemetry currently receives the pre-composed actuator command vector, not the final 14-channel raw PWM output array. Compare this against current ROSflight 2.x `mixer_.get_outputs()` behavior before changing telemetry payload semantics.
+- `ROSFLIGHT_OUTPUT_RAW` telemetry now receives the final composed 14-channel output array. Continue comparing local mixer/PWM semantics against upstream as mixer parity grows.
+
+## Output Raw Telemetry Ownership Progress
+
+Upstream source findings:
+
+- Current upstream `rosflight_firmware` was refreshed from `origin/main`.
+- Firmware source revision checked: `099a9846406d9f20b2bae08a2ea3dda74a01cf59`.
+- `CommManager::send_output_raw` sends `RF_.mixer_.get_outputs()`.
+- `Mixer::get_outputs()` returns the mixer's `raw_outputs_` array.
+- Therefore `ROSFLIGHT_OUTPUT_RAW` should report the final mixed/raw 14-channel output state, not the controller's primary actuator-command vector.
+
+Design now implemented:
+
+- `World::run_control_stages_if_new_imu` still computes primary actuator commands through controller and mixer.
+- `pwm_system::compose_pwm_outputs` still owns the final 14-channel composition from primary mixer output ownership plus aux command state and motor safety rules.
+- Named telemetry now receives the composed `pwm_outputs` array.
+- `latest_actuator_commands` remains the primary mixer output record for internal diagnostics; it is no longer the value handed to `ROSFLIGHT_OUTPUT_RAW` in the World path.
+
+ROSflight compatibility:
+
+- This aligns named `World` telemetry with upstream's `mixer_.get_outputs()` source for `ROSFLIGHT_OUTPUT_RAW`.
+- Aux-owned channels and motor safety mapping are now visible in `output_raw` telemetry after composition, matching the intent that telemetry reports final output state.
+- Wire message type and payload width remain unchanged.
+
+Compile-time boundary improvement:
+
+- Telemetry still receives read-only values from the scheduler.
+- The PWM system remains the owner of output composition.
+- CommManager remains the owner of wire transmission.
+- The scheduler explicitly connects composition output to telemetry, so output telemetry semantics are visible at the stage boundary.
+
+Files changed in this slice:
+
+- `rustflight_core/src/world.rs`
+  - Passes composed `pwm_outputs` into named telemetry instead of primary `actuator_commands`.
+  - Extends the control-stage test to assert aux-composed channels are present in `ROSFLIGHT_OUTPUT_RAW`.
+
+Validation:
+
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p sim pwm::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
+RC trim compatibility note:
+
+- Current upstream `Controller::calculate_equilbrium_torque_from_rc` does not write raw RC stick offsets into equilibrium torque params.
+- It runs controller PID logic once with a fake level estimator state, `dt = 0`, RC control input, and integrators disabled.
+- It then adds the resulting torque outputs to the existing `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE` params.
+- The current RustFlight RC trim implementation is therefore only document-level compatible and should be corrected in a focused future slice before further RC trim work.
 
 ## Armed Command Compatibility Progress
 

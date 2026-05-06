@@ -389,7 +389,7 @@ where
             &self.command,
             &state,
             &self.processed_sensors,
-            &actuator_commands,
+            &pwm_outputs,
         );
 
         self.latest_state = state;
@@ -702,6 +702,9 @@ mod tests {
         assert_eq!(world.pwm.last_command_len, 14);
         assert_eq!(world.pwm.last_commands[4], 0.25);
         assert!((world.pwm.last_commands[5] - 0.2).abs() < 1e-6);
+        let output_raw = world.comm.comm_link().last_output_raw.unwrap();
+        assert_eq!(output_raw.values[4], 0.25);
+        assert!((output_raw.values[5] - 0.2).abs() < 1e-6);
 
         assert!(!world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 1);
