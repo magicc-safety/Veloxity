@@ -3623,7 +3623,30 @@ Current status after this slice:
 - `params_iter` is gone from `World`.
 - `params_iter` is gone from legacy `ROSFlight`.
 - `params_iter` is gone from `CommManager`.
-- `Params::iter` and `ParamIter` still exist in `params2`; they are no longer part of the active comm scheduling path and can be removed later if no remaining use appears.
+- `Params::iter` and `ParamIter` have since been removed from `params2`; parameter listing now flows through `PARAM_DEFINITIONS` and the explicit request/event path.
+
+## Stale Params Iterator Removal Progress
+
+Reason for this change:
+
+- After the parameter protocol moved to explicit request events, `Params::iter` and `ParamIter` no longer had active call sites.
+- Keeping that cloned iterator API made it look like parameter listing still depended on mutable scheduler-owned iterator state.
+
+Design now implemented:
+
+- Removed `Params::iter`.
+- Removed `ParamIter`.
+- Removed the iterator-only unit test.
+- Parameter listing remains handled by `param_system` using `PARAM_DEFINITIONS` and `Params` read access.
+
+Validation:
+
+- `cargo test -p rustflight_core params2::tests --lib` passes.
+- `cargo test -p rustflight_core param_system::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
 
 ## Param Request Read Event Progress
 

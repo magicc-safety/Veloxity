@@ -118,14 +118,6 @@ macro_rules! declare_params {
                     false
                 }
             }
-
-            /// Returns an iterator over the parameters.
-            pub fn iter(&self) -> ParamIter {
-                ParamIter {
-                    params: self.clone(),
-                    index: 0,
-                }
-            }
         }
 
         impl Default for Params {
@@ -395,32 +387,7 @@ declare_params! {
 }
 
 //=================================================================================
-// 4. Custom Iterator
-//=================================================================================
-
-/// A `no_std`, stack-based iterator for the `Params` struct.
-pub struct ParamIter {
-    params: Params,
-    index: usize,
-}
-
-impl ParamIter {
-    /// Returns the next parameter as a `(ParamId, ParamValue)` tuple, or `None`.
-    pub fn next(&mut self) -> Option<(ParamId, ParamValue)> {
-        if self.index < PARAMS_COUNT {
-            // Unsafe is acceptable here because `self.index` is guaranteed to be in bounds.
-            let id: ParamId = unsafe { core::mem::transmute(self.index as u16) };
-            let value = self.params.get_by_id(id);
-            self.index += 1;
-            Some((id, value))
-        } else {
-            None
-        }
-    }
-}
-
-//=================================================================================
-// 5. Unit Tests
+// 4. Unit Tests
 //=================================================================================
 
 #[cfg(test)]
@@ -480,21 +447,4 @@ mod tests {
         assert_eq!(p.get_by_name("NON_EXISTENT"), None);
     }
 
-    #[test]
-    fn test_iterator() {
-        let p = Params::new();
-        let mut iter = p.iter();
-
-        let first = iter.next();
-        assert!(first.is_some());
-        assert_eq!(first.unwrap().0, ParamId::PARAM_BAUD_RATE);
-
-        let mut count = 1;
-        while iter.next().is_some() {
-            count += 1;
-        }
-
-        assert_eq!(count, PARAMS_COUNT);
-        assert!(iter.next().is_none());
-    }
 }
