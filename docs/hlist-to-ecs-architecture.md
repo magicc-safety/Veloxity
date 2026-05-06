@@ -3091,6 +3091,55 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Telemetry Delegation And RC Compatibility Progress
+
+Upstream compatibility check:
+
+- Fetched `rosflight_firmware` `main` at `099a9846406d9f20b2bae08a2ea3dda74a01cf59`.
+- Current upstream `CommManager::send_rc_raw` reads RC channels and sends only the first 8 values.
+- The upstream formula is `channels[i] = rc_struct->chan[i] * 1000.0 + 1000`.
+- Upstream packs `RC_CHANNELS` with `chancount = 0`, channels 9-18 as `0`, and RSSI as `0`.
+- Upstream uses `RF_.board_.clock_millis()` for the RC telemetry timestamp.
+
+Reason for this change:
+
+- `CommManager` still had two telemetry implementations:
+  - legacy `send_telemetry_streams` over `B::ProcessedSensorSet` plus `HListGet`,
+  - new `send_named_telemetry_streams` over `ProcessedSensors`.
+- Keeping two implementations risks wire-behavior drift while the new `World` path replaces the old HList scheduler.
+- RC telemetry had already drifted: the named path scaled more than the upstream first 8 channels and reported `chancount = packet.n_chan`.
+
+Design now implemented:
+
+- Legacy `send_telemetry_streams` now converts the HList processed sensor set into `ProcessedSensors`.
+- It then delegates to `send_named_telemetry_streams`.
+- The legacy method still has local HList bounds because `ROSFlight` still passes `B::ProcessedSensorSet`.
+- The message-building logic now lives in the named telemetry path.
+- Named RC telemetry now matches upstream `send_rc_raw` packing:
+  - first 8 channels scaled from normalized values,
+  - remaining channels zero,
+  - `chancount = 0`,
+  - `rssi = 0`,
+  - timestamp from `board.clock_millis()`.
+
+Tests added or updated:
+
+- `comm_manager::tests::named_rc_telemetry_matches_upstream_raw_channel_packing`
+  - Verifies first 8 channels are scaled as upstream.
+  - Verifies channels 9-18 are zero.
+  - Verifies `chancount`, RSSI, and board-clock timestamp.
+- `RecordingCommLink`
+  - Records the last RC channels message for telemetry assertions.
+
+Validation:
+
+- `cargo test -p rustflight_core comm_manager::tests::named_rc_telemetry_matches_upstream_raw_channel_packing --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

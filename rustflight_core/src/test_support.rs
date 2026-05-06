@@ -38,6 +38,8 @@ pub struct RecordingCommLink {
     pub last_status: Option<RosflightStatusMsg>,
     pub imu_count: usize,
     pub attitude_count: usize,
+    pub rc_channels_count: usize,
+    pub last_rc_channels: Option<RcChannelsMsg>,
     pub output_raw_count: usize,
     pub last_output_raw: Option<RosflightOutputRawMsg>,
     pub version_count: usize,
@@ -58,6 +60,8 @@ impl RecordingCommLink {
             last_status: None,
             imu_count: 0,
             attitude_count: 0,
+            rc_channels_count: 0,
+            last_rc_channels: None,
             output_raw_count: 0,
             last_output_raw: None,
             version_count: 0,
@@ -193,8 +197,10 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         &mut self,
         _board: &mut TestBoard,
         _system_id: u8,
-        _msg: RcChannelsMsg,
+        msg: RcChannelsMsg,
     ) {
+        self.rc_channels_count += 1;
+        self.last_rc_channels = Some(msg);
     }
 
     fn send_battery_status(
