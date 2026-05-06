@@ -419,9 +419,211 @@ mod tests {
             },
         },
         params2::{ParamId, ParamValue},
+        packets::{ImuPacket, RcPacket, RosflightPacketHeader, RC_PACKET_CHANNELS},
         pwm::{PwmDriver, PwmError},
         test_support::{RecordingCommLink, TestBoard},
     };
+
+    #[derive(Default)]
+    struct SensorStageBoard {
+        current_time_us: u64,
+        imu: Option<ImuPacket>,
+        rc: Option<RcPacket>,
+        update_count: usize,
+    }
+
+    impl BoardIo for SensorStageBoard {
+        fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+            sensors.clear();
+            self.update_count += 1;
+            if let Some(imu) = self.imu.take() {
+                sensors.imu = Some(Ok(imu));
+            }
+            if let Some(rc) = self.rc.take() {
+                sensors.rc = Some(Ok(rc));
+            }
+        }
+
+        fn serial_rx_read(
+            &mut self,
+            _buf: &mut [u8],
+        ) -> Option<Result<usize, crate::errors::TelemError>> {
+            None
+        }
+
+        fn serial_tx_write(
+            &mut self,
+            bytes: &[u8],
+        ) -> Option<Result<usize, crate::errors::TelemError>> {
+            Some(Ok(bytes.len()))
+        }
+
+        fn clock_millis(&self) -> u32 {
+            (self.current_time_us / 1000) as u32
+        }
+
+        fn clock_micros(&self) -> u64 {
+            self.current_time_us
+        }
+    }
+
+    #[derive(Default)]
+    struct SensorStageCommLink;
+
+    impl CommInterface<SensorStageBoard> for SensorStageCommLink {
+        fn send_heartbeat(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: HeartbeatMsg,
+        ) -> bool {
+            true
+        }
+
+        fn send_named_value(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::ParamValueMsg,
+        ) {
+        }
+
+        fn send_status(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RosflightStatusMsg,
+        ) {
+        }
+
+        fn send_timesync(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::TimesyncMsg,
+        ) -> bool {
+            true
+        }
+
+        fn send_version(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RosflightVersionMsg,
+        ) {
+        }
+
+        fn send_output_raw(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RosflightOutputRawMsg,
+        ) {
+        }
+
+        fn send_attitude(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::AttitudeQuaternionMsg,
+        ) {
+        }
+
+        fn send_baro(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::SmallBaroMsg,
+        ) {
+        }
+
+        fn send_diff_pressure(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::DiffPressureMsg,
+        ) {
+        }
+
+        fn send_imu(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::SmallImuMsg,
+        ) {
+        }
+
+        fn send_mag(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::SmallMagMsg,
+        ) {
+        }
+
+        fn send_rc_raw(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RosflightOutputRawMsg,
+        ) {
+        }
+
+        fn send_range(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::SmallRangeMsg,
+        ) {
+        }
+
+        fn send_gnss(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RosflightGnssMsg,
+        ) {
+        }
+
+        fn send_cmd_ack(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RosflightCmdAckMsg,
+        ) {
+        }
+
+        fn send_rc_channels(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RcChannelsMsg,
+        ) {
+        }
+
+        fn send_battery_status(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::BatteryStatusMsg,
+        ) {
+        }
+
+        fn send_statustext(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::StatustextMsg,
+        ) {
+        }
+
+        fn handle_incoming_messages(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _msgs: &mut crate::comm_messages::Messages,
+        ) {
+        }
+    }
 
     pub struct TestPwm {
         enabled: bool,
@@ -601,6 +803,71 @@ mod tests {
         let response = world.comm.comm_link().sent_param_values[0].unwrap();
         assert_eq!(response.param_index, ParamId::PARAM_SYSTEM_ID as u16);
         assert_eq!(response.param_value, ParamValue::Int(42));
+    }
+
+    #[test]
+    fn world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
+        let board = SensorStageBoard {
+            current_time_us: 25_000,
+            imu: Some(ImuPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 25_000,
+                    status: 0,
+                },
+                accel: [0.0, 0.0, -9.80665],
+                gyro: [0.1, 0.2, 0.3],
+                temperature: 25.0,
+                seq: 7,
+            }),
+            rc: Some(RcPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 24_000,
+                    status: 0,
+                },
+                n_chan: 1,
+                chan: [0.5; RC_PACKET_CHANNELS],
+                lol: false,
+            }),
+            update_count: 0,
+        };
+        let state = StateManager::new();
+        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+
+        let mut world = World::<SensorStageBoard, Quadrotor, SensorStageCommLink, TestPwm>::init(
+            board,
+            params,
+            SensorStageCommLink,
+            state,
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        world.run_comm_param_sensor_stages_only();
+
+        assert_eq!(world.board.update_count, 1);
+        assert!(world.raw_sensors.imu.is_none());
+        assert!(world.raw_sensors.rc.is_none());
+        assert_eq!(world.processed_sensors.imu.unwrap().header.timestamp, 25_000);
+        assert_eq!(world.processed_sensors.rc.unwrap().chan[0], 0.5);
+        assert!(
+            !world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::IMU_NOT_RESPONDING)
+        );
+
+        world.run_rc_command_state_stages();
+
+        assert!(
+            !world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::RC_LOST)
+        );
     }
 
     #[test]

@@ -3167,6 +3167,48 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## World Sensor Ingestion Coverage Progress
+
+Reason for this change:
+
+- `World` already owned `SensorBus` and `ProcessedSensors`.
+- The scheduler already called `BoardIo::update_sensor_bus` and `process_sensor_bus`.
+- However, most World tests still injected `processed_sensors` directly.
+- That proved downstream behavior, but it did not prove the board-to-World named sensor ingestion path without a legacy HList fixture.
+
+Design now implemented:
+
+- Added a World test-only `SensorStageBoard`.
+- `SensorStageBoard` implements `BoardIo` directly.
+- It does not implement `BoardTrait`.
+- It has no `RawSensorSet`, `ProcessedSensorSet`, `ProcessorHList`, or HList indices.
+- Its `update_sensor_bus` hook supplies IMU and RC packets through named `SensorBus` fields.
+- Added a minimal test comm link for that board so the scheduler can run without reusing the legacy HList-compatible test board.
+
+Test added:
+
+- `world::tests::world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture`
+  - Runs `World::run_comm_param_sensor_stages_only`.
+  - Verifies the board `update_sensor_bus` hook is called.
+  - Verifies raw named sensor slots are consumed by processing.
+  - Verifies processed IMU and RC packets are populated.
+  - Verifies IMU health clears through the named path.
+  - Runs RC/state stages and verifies RC loss is not raised from the named RC packet.
+
+Compile-time boundary improvement:
+
+- The test proves the new scheduler can ingest board sensors through `BoardIo` and named resources without constructing any HList sensor fixture.
+- This narrows the remaining HList dependency to the legacy `ROSFlight` path and explicitly retained legacy traits.
+
+Validation:
+
+- `cargo test -p rustflight_core world::tests::world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture --lib` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
