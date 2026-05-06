@@ -3411,6 +3411,28 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Legacy Estimator Named Delegation Progress
+
+Reason for this change:
+
+- The new `World` path already requires `NamedEstimator`.
+- The legacy `Estimator` entry point for `QuadEstimator` still read its HList inputs and called the packet-level implementation directly.
+- Keeping two entry points that bypass each other creates drift risk while the HList path is retained for compatibility.
+
+Design now implemented:
+
+- `QuadEstimator`'s legacy `Estimator::estimate` implementation now converts its IMU/mag HList input into `ProcessedSensors`.
+- The legacy entry point delegates to `estimate_named`.
+- The existing `NamedEstimator` implementation remains the scheduler-facing source of estimator behavior.
+- The legacy `Estimator` trait and HList input type remain in place for `ROSFlight` compatibility.
+
+Validation:
+
+- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

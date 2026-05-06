@@ -372,7 +372,10 @@ impl Estimator for QuadEstimator {
     type State = AttitudeState;
 
     fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State {
-        self.estimate_packets(inputs.0, inputs.1.0, params, dt)
+        let mut sensors = ProcessedSensors::default();
+        sensors.imu = inputs.0;
+        sensors.mag = inputs.1.0;
+        self.estimate_named(&sensors, params, dt)
     }
 }
 
