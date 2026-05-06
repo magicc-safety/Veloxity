@@ -67,18 +67,41 @@ pub trait SensorPacketProcessor<P> {
     ) -> Option<P>;
 }
 
-impl<P, T> SensorPacketProcessor<P> for T
-where
-    for<'a> T: Func<&'a mut Option<Result<P, errors::SensorError>>, Output = Option<P>>,
-{
-    fn process(
-        &mut self,
-        packet: &mut Option<Result<P, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Option<P> {
-        self.call(packet, flags, params)
+fn take_ok_packet<P>(packet: &mut Option<Result<P, errors::SensorError>>) -> Option<P> {
+    match packet.take() {
+        Some(Ok(packet)) => Some(packet),
+        _ => None,
     }
+}
+
+macro_rules! impl_sensor_packet_processor_via_func {
+    ($processor:ty, $packet:ty) => {
+        impl SensorPacketProcessor<$packet> for $processor {
+            fn process(
+                &mut self,
+                packet: &mut Option<Result<$packet, errors::SensorError>>,
+                flags: &mut CalibrationFlags,
+                params: &mut Params,
+            ) -> Option<$packet> {
+                self.call(packet, flags, params)
+            }
+        }
+    };
+}
+
+macro_rules! impl_passthrough_sensor_packet_processor {
+    ($processor:ty, $packet:ty) => {
+        impl SensorPacketProcessor<$packet> for $processor {
+            fn process(
+                &mut self,
+                packet: &mut Option<Result<$packet, errors::SensorError>>,
+                _flags: &mut CalibrationFlags,
+                _params: &mut Params,
+            ) -> Option<$packet> {
+                take_ok_packet(packet)
+            }
+        }
+    };
 }
 
 // ------------------------------
@@ -104,6 +127,7 @@ impl<'a> Func<&'a mut Option<Result<BatteryPacket, errors::SensorError>>>
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughBatteryProcessor, BatteryPacket);
 
 // ------------------------------
 // IMU Packet
@@ -131,6 +155,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for Passth
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughImuProcessor, ImuPacket);
 
 #[derive(Default, Copy, Clone)]
 pub struct ImuCalibrationState {
@@ -357,6 +382,7 @@ impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuPro
         }
     }
 }
+impl_sensor_packet_processor_via_func!(ImuProcessor, ImuPacket);
 
 // ------------------------------
 // Baro Packet
@@ -384,6 +410,7 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>>
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughBaroProcessor, BaroPacket);
 
 const SENSOR_CAL_DELAY_CYCLES: u16 = 128;
 const SENSOR_CAL_CYCLES: u16 = 127;
@@ -471,6 +498,7 @@ impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroP
         }
     }
 }
+impl_sensor_packet_processor_via_func!(BaroProcessor, BaroPacket);
 
 // ------------------------------
 // Pitot Packet
@@ -498,6 +526,7 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>>
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughPitotProcessor, PitotPacket);
 
 const PITOT_MAX_CALIBRATION_VARIANCE: f64 = 100.0;
 
@@ -574,6 +603,7 @@ impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for Pito
         }
     }
 }
+impl_sensor_packet_processor_via_func!(PitotProcessor, PitotPacket);
 // ------------------------------
 // Mag Packet
 // ------------------------------
@@ -598,6 +628,7 @@ impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for Passth
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughMagProcessor, MagPacket);
 
 #[derive(Default, Copy, Clone)]
 pub struct MagProcessor;
@@ -690,6 +721,7 @@ impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for MagPro
         }
     }
 }
+impl_sensor_packet_processor_via_func!(MagProcessor, MagPacket);
 
 // ------------------------------
 // Rc Packet
@@ -715,6 +747,7 @@ impl<'a> Func<&'a mut Option<Result<RcPacket, errors::SensorError>>> for Passthr
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughRcProcessor, RcPacket);
 
 // ------------------------------
 // Range Packet
@@ -741,6 +774,7 @@ impl<'a> Func<&'a mut Option<Result<RangePacket, errors::SensorError>>>
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughRangeProcessor, RangePacket);
 
 // ------------------------------
 // GNSS Packet
@@ -767,6 +801,7 @@ impl<'a> Func<&'a mut Option<Result<GNSSPacket, errors::SensorError>>>
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughGNSSProcessor, GNSSPacket);
 
 // ------------------------------
 // PPS Packet
@@ -791,6 +826,7 @@ impl<'a> Func<&'a mut Option<Result<PpsPacket, errors::SensorError>>> for Passth
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughPpsProcessor, PpsPacket);
 
 // ------------------------------
 // Attitude Packet
@@ -817,3 +853,4 @@ impl<'a> Func<&'a mut Option<Result<AttitudePacket, errors::SensorError>>>
         }
     }
 }
+impl_passthrough_sensor_packet_processor!(PassthroughAttitudeProcessor, AttitudePacket);

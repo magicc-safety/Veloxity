@@ -3275,6 +3275,47 @@ Validation:
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
+## Passthrough Sensor Processor Conversion Progress
+
+Reason for this change:
+
+- `sensor_systems` now depends on `SensorPacketProcessor`, but all concrete processors still reached that trait through a blanket adapter from legacy `hlist::Func`.
+- The next low-risk step is to move simple passthrough processors to native `SensorPacketProcessor` implementations while preserving their `Func` implementations for the legacy HList path.
+
+Design now implemented:
+
+- Removed the blanket `Func -> SensorPacketProcessor` implementation.
+- Added native `SensorPacketProcessor` implementations for passthrough processors:
+  - battery,
+  - IMU,
+  - baro,
+  - pitot,
+  - mag,
+  - RC,
+  - range,
+  - GNSS,
+  - PPS,
+  - attitude.
+- Kept the existing `Func` implementations on those processors so legacy HList mapping still compiles.
+- Added explicit `Func` adapters only for complex processors that still need conversion:
+  - `ImuProcessor`,
+  - `BaroProcessor`,
+  - `PitotProcessor`,
+  - `MagProcessor`.
+
+Compile-time boundary improvement:
+
+- The named sensor path now uses native passthrough packet processors without relying on a blanket HList adapter.
+- Remaining processor/HList coupling is explicit and limited to complex processors plus the legacy `Func` implementations retained for `ROSFlight`.
+
+Validation:
+
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
