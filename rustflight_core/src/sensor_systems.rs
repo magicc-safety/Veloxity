@@ -1,12 +1,11 @@
 use crate::{
-    errors::SensorError,
-    hlist::Func,
     packets::*,
     params2::Params,
     sensorprocessors::{
         CalibrationFlags, ImuProcessor, MagProcessor, PassthroughAttitudeProcessor,
         PassthroughBaroProcessor, PassthroughBatteryProcessor, PassthroughGNSSProcessor,
         PassthroughPitotProcessor, PassthroughRangeProcessor, PassthroughRcProcessor,
+        SensorPacketProcessor,
     },
     sensors::{ProcessedSensors, SensorBus},
 };
@@ -108,33 +107,25 @@ pub fn process_sensor_bus<
     flags: &mut CalibrationFlags,
     params: &mut Params,
 ) where
-    for<'a> ImuProc:
-        Func<&'a mut Option<Result<ImuPacket, SensorError>>, Output = Option<ImuPacket>>,
-    for<'a> MagProc:
-        Func<&'a mut Option<Result<MagPacket, SensorError>>, Output = Option<MagPacket>>,
-    for<'a> BaroProc:
-        Func<&'a mut Option<Result<BaroPacket, SensorError>>, Output = Option<BaroPacket>>,
-    for<'a> PitotProc:
-        Func<&'a mut Option<Result<PitotPacket, SensorError>>, Output = Option<PitotPacket>>,
-    for<'a> RangeProc:
-        Func<&'a mut Option<Result<RangePacket, SensorError>>, Output = Option<RangePacket>>,
-    for<'a> GnssProc:
-        Func<&'a mut Option<Result<GNSSPacket, SensorError>>, Output = Option<GNSSPacket>>,
-    for<'a> BatteryProc:
-        Func<&'a mut Option<Result<BatteryPacket, SensorError>>, Output = Option<BatteryPacket>>,
-    for<'a> RcProc: Func<&'a mut Option<Result<RcPacket, SensorError>>, Output = Option<RcPacket>>,
-    for<'a> AttitudeProc:
-        Func<&'a mut Option<Result<AttitudePacket, SensorError>>, Output = Option<AttitudePacket>>,
+    ImuProc: SensorPacketProcessor<ImuPacket>,
+    MagProc: SensorPacketProcessor<MagPacket>,
+    BaroProc: SensorPacketProcessor<BaroPacket>,
+    PitotProc: SensorPacketProcessor<PitotPacket>,
+    RangeProc: SensorPacketProcessor<RangePacket>,
+    GnssProc: SensorPacketProcessor<GNSSPacket>,
+    BatteryProc: SensorPacketProcessor<BatteryPacket>,
+    RcProc: SensorPacketProcessor<RcPacket>,
+    AttitudeProc: SensorPacketProcessor<AttitudePacket>,
 {
-    processed.imu = processors.imu.call(&mut raw.imu, flags, params);
-    processed.mag = processors.mag.call(&mut raw.mag, flags, params);
-    processed.baro = processors.baro.call(&mut raw.baro, flags, params);
-    processed.pitot = processors.pitot.call(&mut raw.pitot, flags, params);
-    processed.range = processors.range.call(&mut raw.range, flags, params);
-    processed.gnss = processors.gnss.call(&mut raw.gnss, flags, params);
-    processed.battery = processors.battery.call(&mut raw.battery, flags, params);
-    processed.rc = processors.rc.call(&mut raw.rc, flags, params);
-    processed.attitude = processors.attitude.call(&mut raw.attitude, flags, params);
+    processed.imu = processors.imu.process(&mut raw.imu, flags, params);
+    processed.mag = processors.mag.process(&mut raw.mag, flags, params);
+    processed.baro = processors.baro.process(&mut raw.baro, flags, params);
+    processed.pitot = processors.pitot.process(&mut raw.pitot, flags, params);
+    processed.range = processors.range.process(&mut raw.range, flags, params);
+    processed.gnss = processors.gnss.process(&mut raw.gnss, flags, params);
+    processed.battery = processors.battery.process(&mut raw.battery, flags, params);
+    processed.rc = processors.rc.process(&mut raw.rc, flags, params);
+    processed.attitude = processors.attitude.process(&mut raw.attitude, flags, params);
 }
 
 #[cfg(test)]

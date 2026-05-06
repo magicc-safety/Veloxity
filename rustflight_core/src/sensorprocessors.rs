@@ -58,6 +58,29 @@ bitflags! {
     }
 }
 
+pub trait SensorPacketProcessor<P> {
+    fn process(
+        &mut self,
+        packet: &mut Option<Result<P, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Option<P>;
+}
+
+impl<P, T> SensorPacketProcessor<P> for T
+where
+    for<'a> T: Func<&'a mut Option<Result<P, errors::SensorError>>, Output = Option<P>>,
+{
+    fn process(
+        &mut self,
+        packet: &mut Option<Result<P, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+    ) -> Option<P> {
+        self.call(packet, flags, params)
+    }
+}
+
 // ------------------------------
 // Battery Packet
 // ------------------------------

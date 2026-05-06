@@ -3242,6 +3242,39 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Sensor Processor Boundary Progress
+
+Reason for this change:
+
+- `World` and `sensor_systems` now operate on named `SensorBus` and `ProcessedSensors`.
+- However, `sensor_systems::process_sensor_bus` still used `hlist::Func` as its processor interface.
+- That meant the named sensor path still had a direct dependency on the legacy HList processor abstraction.
+
+Design now implemented:
+
+- Added `SensorPacketProcessor<P>` in `sensorprocessors`.
+- `SensorPacketProcessor` is a named packet processor trait:
+  - input: `&mut Option<Result<P, SensorError>>`
+  - context: calibration flags and params
+  - output: `Option<P>`
+- Existing legacy `Func` processors automatically implement `SensorPacketProcessor` through a blanket adapter in `sensorprocessors`.
+- `sensor_systems` now depends on `SensorPacketProcessor` instead of `hlist::Func`.
+- `process_sensor_bus` now calls `.process(...)` for each named packet field.
+
+Compile-time boundary improvement:
+
+- The new named sensor system no longer imports or bounds itself on `hlist::Func`.
+- The only remaining `Func` bridge is isolated in `sensorprocessors`, where the legacy processor implementations already live.
+- This creates a clear path to later convert concrete processors from `Func` implementations to native `SensorPacketProcessor` implementations without touching `World`.
+
+Validation:
+
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
