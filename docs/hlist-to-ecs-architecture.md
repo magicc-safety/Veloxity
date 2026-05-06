@@ -2997,6 +2997,42 @@ Validation:
 - `cargo test -p sim board::tests --lib` passes.
 - `cargo check -p sim` passes.
 
+## Test Board Boundary Progress
+
+Reason for this change:
+
+- The shared core `TestBoard` is used by the new comm, command, and World scheduler tests.
+- It previously implemented `BoardTrait` only to satisfy board I/O calls, which forced the test fixture to declare dummy `HNil` raw sensors, processed sensors, and processor lists.
+- Those associated types are legacy HList scaffolding and are not needed by the new scheduler-facing tests.
+
+Design now implemented:
+
+- `TestBoard` implements `BoardIo` directly.
+- `TestBoard` no longer imports or declares `HNil`, `RawSensorSet`, `ProcessedSensorSet`, or `ProcessorHList`.
+- Comm manager tests import `BoardIo` explicitly where they call board clock helpers through the trait.
+
+Compile-time boundary improvement:
+
+- The shared core test board no longer depends on the legacy HList-bearing `BoardTrait`.
+- The comm, command-system, and World tests now exercise a HList-free board fixture through the same `BoardIo` boundary used by the new scheduler path.
+- This keeps the legacy `BoardTrait` available for the old `ROSFlight` path while reducing the surface area that must survive after HList deletion.
+
+Files changed in this slice:
+
+- `rustflight_core/src/test_support.rs`
+  - Moves `TestBoard` from `BoardTrait` to direct `BoardIo`.
+- `rustflight_core/src/comm_manager.rs`
+  - Updates test imports from `BoardTrait` to `BoardIo`.
+
+Validation:
+
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p sim board::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

@@ -1,9 +1,8 @@
 use crate::{
-    board::BoardTrait,
+    board::BoardIo,
     comm_manager::comm_link_trait::CommInterface,
     comm_messages::{self, messages::*},
     errors,
-    hlist::HNil,
 };
 
 #[derive(Default)]
@@ -12,13 +11,7 @@ pub struct TestBoard {
     pub tx_write_count: usize,
 }
 
-impl BoardTrait for TestBoard {
-    type RawSensorSet = HNil;
-    type ProcessedSensorSet = HNil;
-    type ProcessorHList = HNil;
-
-    fn update_sensors(&mut self, _sensors: &mut Self::RawSensorSet) {}
-
+impl BoardIo for TestBoard {
     fn serial_rx_read(&mut self, _buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         None
     }

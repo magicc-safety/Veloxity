@@ -962,7 +962,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        board::BoardTrait,
+        board::BoardIo,
         command_manager::CommandManager,
         command_system::{self, CalibrationRequestCtx},
         comm_messages::{
