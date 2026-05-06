@@ -2952,6 +2952,51 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Body Model Boundary Progress
+
+Reason for this change:
+
+- `World` no longer uses body-type sensor sculpting or HList sensor requirements.
+- However, `World` still had a `BT: BodyType` bound.
+- `BodyType` carries `RequiredSensors: HList` for the legacy `ROSFlight` loop, so the new scheduler still depended on a HList-bearing trait even though it did not use that capability.
+- Removing that bound is a direct step toward making the new `World` path independently checkable before deleting the old HList path.
+
+Design now implemented:
+
+- Adds `BodyModel`.
+- `BodyModel` contains only:
+  - `Estimator`,
+  - `Controller`,
+  - `Mixer`.
+- `BodyType` remains unchanged for the legacy HList path.
+- `Quadrotor` implements both `BodyType` and `BodyModel`.
+- `World` now requires `BT: BodyModel` instead of `BT: BodyType`.
+- World tests now construct mixers through `<Quadrotor as BodyModel>::Mixer`.
+
+Compile-time boundary improvement:
+
+- `World` no longer depends on `BodyType::RequiredSensors`.
+- The new scheduler body boundary is HList-free.
+- The legacy path still carries HList requirements until `ROSFlight` can be deleted deliberately.
+
+Files changed in this slice:
+
+- `rustflight_core/src/bodytype.rs`
+  - Adds HList-free `BodyModel`.
+- `rustflight_core/src/bodytype/quadrotor.rs`
+  - Implements `BodyModel` for `Quadrotor`.
+- `rustflight_core/src/world.rs`
+  - Switches the scheduler body bound from `BodyType` to `BodyModel`.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo test -p sim board::tests --lib` passes.
+- `cargo check -p sim` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

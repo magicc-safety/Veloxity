@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::bodytype::BodyType;
+use crate::bodytype::{BodyModel, BodyType};
 use crate::controller;
 use crate::estimator;
 use crate::hlist_type;
@@ -53,6 +53,12 @@ impl BodyType for Quadrotor {
         Option<packets::RcPacket>
     ];
 
+    type Estimator = estimator::quad_estimator::QuadEstimator;
+    type Controller = controller::quad_controller::QuadController;
+    type Mixer = mixer::quad_mixer::QuadMixer;
+}
+
+impl BodyModel for Quadrotor {
     type Estimator = estimator::quad_estimator::QuadEstimator;
     type Controller = controller::quad_controller::QuadController;
     type Mixer = mixer::quad_mixer::QuadMixer;
