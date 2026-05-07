@@ -49,8 +49,8 @@ use rustflight_core::{
     mixer::Mixer,
     mixer::quad_mixer::QuadMixer,
     params2::Params,
-    rosflight::ROSFlight,
     state_machine::StateManager,
+    world::World,
 };
 use stm_32::*;
 
@@ -70,8 +70,7 @@ fn main() -> ! {
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::<_, Quadrotor, _, _>::init(
-        1000,
+    let mut world = World::<_, Quadrotor, _, _>::init(
         board,
         params,
         mavlink,
@@ -84,6 +83,6 @@ fn main() -> ! {
 
     loop {
         // defmt::debug!("One Loop");
-        rosflight.run();
+        world.run_comm_param_sensor_stages();
     }
 }

@@ -50,8 +50,8 @@ use rustflight_core::{
     mixer::Mixer,
     params2::Params,
     pwm,
-    rosflight::ROSFlight,
     state_machine::StateManager,
+    world::World,
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
@@ -78,8 +78,7 @@ fn main() -> ! {
     // PWM Driver from servos object
     let pwm_driver = BoardPwmDriver::new(&mut servos);
 
-    let mut rosflight = ROSFlight::<_, Quadrotor, _, _>::init(
-        1000,
+    let mut world = World::<_, Quadrotor, _, _>::init(
         board,
         Params::default(),
         mavlink,
@@ -92,6 +91,6 @@ fn main() -> ! {
 
     loop {
         // defmt::info!("Hello World!");
-        rosflight.run();
+        world.run_comm_param_sensor_stages();
     }
 }

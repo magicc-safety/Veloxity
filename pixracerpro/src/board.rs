@@ -48,7 +48,7 @@ use stm_32::*;
 include!("../../stm_32/stm32h7x3_common.rs");
 
 pub struct Board {
-    probe: [Output<'static>; 3], // We only have 3 from ROSFlight
+    probe: [Output<'static>; 3], // PixRacerPro exposes three probe pins.
     pub start_time: embassy_time::Instant,
     test_pin_1: Output<'static>,
     test_pin_2: Output<'static>,

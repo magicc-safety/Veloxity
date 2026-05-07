@@ -4037,3 +4037,33 @@ Validation:
 - `cargo test -p rustflight_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Embedded World Entrypoint Progress
+
+Reason for this change:
+
+- Sim already used the new `World` scheduler.
+- PixRacerPro and Nucleo still instantiated the legacy `ROSFlight` scheduler even though the board, body, comms, and PWM boundaries now compile against `World`.
+- Keeping embedded entrypoints on `ROSFlight` delayed the transition from a duplicated scheduler to one producer/consumer world path.
+
+Design now implemented:
+
+- Updated `pixracerpro/src/bin/rustflight.rs` to instantiate `World`.
+- Updated `nucleo/src/bin/rustflight.rs` to instantiate `World`.
+- Both embedded loops now call `world.run_comm_param_sensor_stages()`, matching the sim entrypoint.
+- Removed a stale PixRacerPro board comment that referred to ROSFlight.
+
+Current status after this slice:
+
+- Sim, PixRacerPro, and Nucleo all instantiate the same `World` scheduler architecture.
+- `ROSFlight` still exists in core for now, but it is no longer used by board or sim crates.
+- The next cleanup can focus on retiring or reducing `rustflight_core::rosflight` itself once any remaining compatibility concerns are checked.
+
+Validation:
+
+- `rg -n "ROSFlight|rosflight::" pixracerpro/src nucleo/src sim/src` returns no matches.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
