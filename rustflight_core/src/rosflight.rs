@@ -52,7 +52,7 @@ use crate::{
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     errors,
     estimator::{
-        self, AttitudeStateTrait, Estimator,
+        self, AttitudeStateTrait, NamedEstimator,
         quad_estimator::{AttitudeState, QuadEstimator},
     },
     hlist::*,
@@ -66,6 +66,7 @@ use crate::{
     pwm::{self, PwmDriver},
     rc::Rc,
     sensorprocessors::CalibrationFlags,
+    sensors::processed_sensors_from_hlist,
     state_machine::{self, ErrorFlag, Event, StateManager},
 };
 use core::marker::PhantomData;
@@ -142,20 +143,13 @@ where
     C: Configuration<B, BT>,
     PD: PwmDriver,
     for<'a> B::RawSensorSet: HMappable<'a, B::ProcessorHList, Output = B::ProcessedSensorSet>,
-    BT::RequiredSensors: Plucker<Option<packets::RcPacket>, C::RcPacketSculptedIndex>,
-    BT::Estimator: Estimator<
-        Inputs = <BT::RequiredSensors as Plucker<
-            Option<packets::RcPacket>,
-            C::RcPacketSculptedIndex,
-        >>::Remainder,
-    >,
-    <BT::Estimator as Estimator>::State: AttitudeStateTrait,
-    BT::Controller: Controller<State = <BT::Estimator as Estimator>::State> + RcTrimCalibrator,
+    BT::Estimator: NamedEstimator,
+    <BT::Estimator as NamedEstimator>::State: AttitudeStateTrait,
+    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
     BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
     <<BT as BodyType>::Mixer as Mixer>::ActuatorCommands: AsRef<[f64]>,
     // This tells Rust that the compiler *can* find a way to `get` these packet
     // types using the indices from the `Configuration`.
-    B::ProcessedSensorSet: Clone + Sculptor<BT::RequiredSensors, C::SculptIndices>,
     B::ProcessedSensorSet: HListGet<Option<packets::ImuPacket>, C::ImuPacketIndex>
         + HListGet<Option<packets::MagPacket>, C::MagPacketIndex>
         + HListGet<Option<packets::BaroPacket>, C::BaroPacketIndex>
@@ -352,9 +346,21 @@ where
             &mut self.cal_flags,
             &mut self.params,
         );
+        let named_sensors = processed_sensors_from_hlist::<
+            _,
+            C::ImuPacketIndex,
+            C::MagPacketIndex,
+            C::BaroPacketIndex,
+            C::PitotPacketIndex,
+            C::RangePacketIndex,
+            C::GNSSPacketIndex,
+            C::BatteryPacketIndex,
+            C::AttitudePacketIndex,
+            C::RcPacketIndex,
+        >(&processed_sensors);
 
         // also check for imu: if it's been too long, add a flag for imu not responding...
-        let imu_packet_option: &Option<packets::ImuPacket> = processed_sensors.get();
+        let imu_packet_option = &named_sensors.imu;
         if imu_packet_option.is_some() {
             //self.board.set_test_pin_1(true);
             // We got data! Reset the timer and clear the error.
@@ -391,11 +397,8 @@ where
         self.comm_manager
             .send_comm_responses(&mut self.board, &mut self.comm_events);
 
-        let (required_sensors, _remainder) = processed_sensors.clone().sculpt();
-        let (rc_packet_option, estimator_sensors) = required_sensors.pluck();
-
         // now run the RC unit and the command manager unit
-        if let Some(rc_packet) = rc_packet_option {
+        if let Some(rc_packet) = named_sensors.rc {
             // defmt::info!("Received RC in rustflight_typed");
             self.rc_manager
                 .receive(&rc_packet, &self.params, &mut self.state_manager);
@@ -452,7 +455,7 @@ where
             // Run the estimator with constant dt (assume 400Hz)
             let state = self
                 .estimator
-                .estimate(&estimator_sensors, &self.params, ESTIMATOR_DT);
+                .estimate_named(&named_sensors, &self.params, ESTIMATOR_DT);
 
             // Health check
             if state.is_healthy() {
@@ -496,14 +499,13 @@ where
                 .send_comm_responses(&mut self.board, &mut self.comm_events);
 
             // Send telemetry with the new state
-            self.comm_manager.send_telemetry_streams::<BT, C, _>(
+            self.comm_manager.send_named_telemetry_streams(
                 &mut self.board,
                 now_us,
                 &self.state_manager,
                 &self.command_manager,
-                &self.params,
                 &state,             // The estimator state we just calculated
-                &processed_sensors, // The full set of processed sensors
+                &named_sensors,     // The full set of processed sensors
                 &actuator_commands, // The final motor commands
             );
         }

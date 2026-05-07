@@ -53,7 +53,7 @@ use crate::packets::{self, RC_PACKET_CHANNELS};
 use crate::params2::{ParamId, ParamValue, Params};
 use crate::rosflight::Configuration;
 use crate::sensorprocessors::CalibrationFlags;
-use crate::sensors::ProcessedSensors;
+use crate::sensors::{processed_sensors_from_hlist, ProcessedSensors};
 use crate::state_machine::StateManager;
 use crate::board;
 use core::marker::PhantomData;
@@ -193,17 +193,18 @@ where
             + HListGet<Option<packets::AttitudePacket>, C::AttitudePacketIndex>
             + HListGet<Option<packets::RcPacket>, C::RcPacketIndex>,
     {
-        let named_sensors = ProcessedSensors {
-            imu: *processed_sensors.get(),
-            mag: *processed_sensors.get(),
-            baro: *processed_sensors.get(),
-            pitot: *processed_sensors.get(),
-            range: *processed_sensors.get(),
-            gnss: *processed_sensors.get(),
-            battery: *processed_sensors.get(),
-            rc: *processed_sensors.get(),
-            attitude: *processed_sensors.get(),
-        };
+        let named_sensors = processed_sensors_from_hlist::<
+            _,
+            C::ImuPacketIndex,
+            C::MagPacketIndex,
+            C::BaroPacketIndex,
+            C::PitotPacketIndex,
+            C::RangePacketIndex,
+            C::GNSSPacketIndex,
+            C::BatteryPacketIndex,
+            C::AttitudePacketIndex,
+            C::RcPacketIndex,
+        >(processed_sensors);
 
         self.send_named_telemetry_streams(
             board,

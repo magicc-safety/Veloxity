@@ -3433,6 +3433,34 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Legacy RustFlight Scheduler Named Sensor Use Progress
+
+Reason for this change:
+
+- RustFlight's legacy `ROSFlight` scheduler still sculpted `BT::RequiredSensors` from the processed sensor HList to split RC input from estimator input.
+- It also called the legacy `Estimator::estimate` entry point and legacy HList telemetry wrapper even though named equivalents now exist.
+- This kept body-required HList sculpting in the control path after the estimator and telemetry compatibility shims were already available.
+
+Design now implemented:
+
+- Added `sensors::processed_sensors_from_hlist` as the explicit compatibility bridge from legacy processed HLists to `ProcessedSensors`.
+- After legacy HList sensor processing, RustFlight's legacy `ROSFlight` scheduler converts the processed sensor HList into `ProcessedSensors` once through that helper.
+- `ROSFlight` reads RC input from `ProcessedSensors::rc`.
+- `ROSFlight` calls `NamedEstimator::estimate_named` with the named processed sensor struct.
+- `ROSFlight` calls `send_named_telemetry_streams` directly.
+- Removed the legacy scheduler's `BT::RequiredSensors: Plucker` and `B::ProcessedSensorSet: Sculptor` bounds.
+- The legacy telemetry wrapper now uses the same HList-to-named helper before delegating to named telemetry.
+- The raw-to-processed legacy HList map remains in place for the old scheduler path.
+
+Validation:
+
+- `cargo test -p rustflight_core sensors::tests --lib` passes.
+- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
