@@ -35,16 +35,9 @@
 // ******************************************************************************
 // **/
 use crate::{
-    comm_messages::messages::ExternalAttitudeMsg, hlist::*, params2::Params,
-    sensors::ProcessedSensors,
+    comm_messages::messages::ExternalAttitudeMsg, params2::Params, sensors::ProcessedSensors,
 };
 pub mod quad_estimator;
-
-pub trait Estimator {
-    type Inputs: HList;
-    type State: AttitudeStateTrait;
-    fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State;
-}
 
 pub trait NamedEstimator {
     type State: AttitudeStateTrait;

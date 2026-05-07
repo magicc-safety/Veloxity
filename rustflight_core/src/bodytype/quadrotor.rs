@@ -37,22 +37,13 @@
 use crate::bodytype::{BodyModel, BodyType};
 use crate::controller;
 use crate::estimator;
-use crate::hlist_type;
 use crate::mixer;
 use crate::mixer::Mixer;
-use crate::packets;
 use crate::packets::*;
 
 pub struct Quadrotor;
 
 impl BodyType for Quadrotor {
-    // shopping list of required sensors...
-    type RequiredSensors = hlist_type![
-        Option<packets::ImuPacket>,
-        Option<packets::MagPacket>,
-        Option<packets::RcPacket>
-    ];
-
     type Estimator = estimator::quad_estimator::QuadEstimator;
     type Controller = controller::quad_controller::QuadController;
     type Mixer = mixer::quad_mixer::QuadMixer;

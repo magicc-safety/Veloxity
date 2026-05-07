@@ -3579,6 +3579,39 @@ Validation:
 - `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
 - `cargo test -p rustflight_core world::tests --lib` passes.
 
+## Legacy Estimator, Body Sensor Requirement, and HList Bridge Removal Progress
+
+Reason for this change:
+
+- The active estimator path uses `NamedEstimator` and `ProcessedSensors`.
+- `BodyType::RequiredSensors` no longer had an active scheduler use after `ROSFlight` stopped sculpting sensor HLists.
+- `processed_sensors_from_hlist` no longer had call sites after `ROSFlight` moved to `SensorBus`.
+
+Design now implemented:
+
+- Removed the legacy HList-bearing `Estimator` trait.
+- Changed `BodyType::Estimator` to require `NamedEstimator`.
+- Removed `BodyType::RequiredSensors`.
+- Removed the quadrotor required-sensor HList.
+- Removed `QuadEstimator`'s legacy HList `Estimator` implementation and its compatibility test.
+- Removed `processed_sensors_from_hlist` and its HList-specific test.
+- Removed stale HList imports from controller and hardware entrypoints.
+- Updated the Nucleo board source to populate `SensorBus` directly, matching the core and PixRacerPro board boundary.
+
+Current boundary status:
+
+- Core and sim no longer use HLists for board sensors, sensor processors, estimator inputs, body sensor requirements, telemetry, or scheduler sensor routing.
+- The remaining HList surface is isolated to `hlist.rs` itself and stale comments there.
+- Embedded package checks still require the correct Cortex-M target environment before they can validate package code.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p rustflight_core sensors::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

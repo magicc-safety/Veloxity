@@ -36,9 +36,7 @@
 // **/
 use rustflight_core::board::BoardTrait;
 use rustflight_core::errors;
-use rustflight_core::hlist_type;
-use rustflight_core::packets;
-use rustflight_core::sensorprocessors;
+use rustflight_core::sensors::SensorBus;
 
 use stm_32::peripherals;
 use stm_32::*;
@@ -54,40 +52,14 @@ pub struct Board {
 }
 
 impl BoardTrait for Board {
-    type RawSensorSet = hlist_type![
-        Option<Result<packets::ImuPacket, errors::SensorError>>,
-        Option<Result<packets::MagPacket, errors::SensorError>>,
-        Option<Result<packets::BaroPacket, errors::SensorError>>,
-        Option<Result<packets::PitotPacket, errors::SensorError>>,
-        Option<Result<packets::GNSSPacket, errors::SensorError>>,
-        Option<Result<packets::RcPacket, errors::SensorError>>
-    ];
-
-    type ProcessedSensorSet = hlist_type![
-        Option<packets::ImuPacket>,
-        Option<packets::MagPacket>,
-        Option<packets::BaroPacket>,
-        Option<packets::PitotPacket>,
-        Option<packets::GNSSPacket>,
-        Option<packets::RcPacket>
-    ];
-
-    type ProcessorHList = hlist_type![
-        sensorprocessors::PassthroughImuProcessor,
-        sensorprocessors::PassthroughMagProcessor,
-        sensorprocessors::PassthroughBaroProcessor,
-        sensorprocessors::PassthroughPitotProcessor,
-        sensorprocessors::PassthroughGNSSProcessor,
-        sensorprocessors::PassthroughRcProcessor
-    ];
-
-    fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
-        sensors.0 = peripherals::bmi08x::IMU_SIGNAL.try_take();
-        sensors.1.0 = peripherals::iis2mdc::MAG_SIGNAL.try_take();
-        sensors.1.1.0 = peripherals::dps310::BARO_SIGNAL.try_take();
-        sensors.1.1.1.0 = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
-        sensors.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
-        sensors.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        sensors.clear();
+        sensors.imu = peripherals::bmi08x::IMU_SIGNAL.try_take();
+        sensors.mag = peripherals::iis2mdc::MAG_SIGNAL.try_take();
+        sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
+        sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
+        sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
 
         // if let Some(gnss_packet) = sensors.1.1.1.1.0 {
         //     match gnss_packet {

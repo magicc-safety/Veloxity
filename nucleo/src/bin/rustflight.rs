@@ -46,7 +46,6 @@ use rustflight_core::{
     bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
-    estimator::Estimator,
     mixer::Mixer,
     rosflight::{Configuration, ROSFlight},
     state_machine::StateManager,

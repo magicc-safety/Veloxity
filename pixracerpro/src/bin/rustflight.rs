@@ -49,7 +49,6 @@ use rustflight_core::{
     bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
-    estimator::Estimator,
     mixer::Mixer,
     params2::Params,
     pwm,

@@ -36,10 +36,8 @@
 // **
 
 use super::AttitudeStateTrait;
-use super::{Estimator, NamedEstimator};
+use super::NamedEstimator;
 use crate::comm_messages::messages::ExternalAttitudeMsg;
-use crate::hlist::*;
-use crate::hlist_type;
 use crate::packets;
 use crate::params2::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
@@ -366,19 +364,6 @@ impl QuadEstimator {
     }
 }
 
-impl Estimator for QuadEstimator {
-    type Inputs = hlist_type![Option<packets::ImuPacket>, Option<packets::MagPacket>];
-
-    type State = AttitudeState;
-
-    fn estimate(&mut self, inputs: &Self::Inputs, params: &Params, dt: f64) -> Self::State {
-        let mut sensors = ProcessedSensors::default();
-        sensors.imu = inputs.0;
-        sensors.mag = inputs.1.0;
-        self.estimate_named(&sensors, params, dt)
-    }
-}
-
 impl NamedEstimator for QuadEstimator {
     type State = AttitudeState;
 
@@ -410,40 +395,9 @@ mod tests {
     use super::*;
     use crate::{
         comm_messages::messages::ExternalAttitudeMsg,
-        estimator::{Estimator, NamedEstimator},
-        hlist::HCons,
-        hlist::HNil,
+        estimator::NamedEstimator,
         packets::{ImuPacket, RosflightPacketHeader},
     };
-
-    #[test]
-    fn named_estimator_matches_legacy_hlist_entrypoint() {
-        let params = Params::new();
-        let imu = ImuPacket {
-            header: RosflightPacketHeader {
-                timestamp: 1_000,
-                status: 0,
-            },
-            accel: [0.0, 0.0, -G],
-            gyro: [0.0, 0.0, 0.0],
-            temperature: 25.0,
-            seq: 1,
-        };
-        let legacy_inputs = HCons(Some(imu), HCons(None, HNil));
-        let mut named_sensors = ProcessedSensors::default();
-        named_sensors.imu = Some(imu);
-
-        let mut legacy = QuadEstimator::default();
-        let mut named = QuadEstimator::default();
-
-        let legacy_state = legacy.estimate(&legacy_inputs, &params, 1.0 / 400.0);
-        let named_state = named.estimate_named(&named_sensors, &params, 1.0 / 400.0);
-
-        assert_eq!(legacy_state.is_healthy(), named_state.is_healthy());
-        assert_eq!(legacy_state.q(), named_state.q());
-        assert_eq!(legacy_state.q_dot(), named_state.q_dot());
-        assert_eq!(legacy_state.body_rate, named_state.body_rate);
-    }
 
     #[test]
     fn named_estimator_consumes_external_attitude_on_next_run() {

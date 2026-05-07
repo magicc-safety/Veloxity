@@ -36,17 +36,14 @@
 // **/
 use crate::{
     controller::Controller,
-    estimator::{Estimator, NamedEstimator},
-    hlist::*,
+    estimator::NamedEstimator,
     mixer::Mixer,
 };
 
 pub mod quadrotor;
 
 pub trait BodyType {
-    type RequiredSensors: HList;
-
-    type Estimator: Estimator;
+    type Estimator: NamedEstimator;
     type Controller: Controller;
     type Mixer: Mixer;
 }
