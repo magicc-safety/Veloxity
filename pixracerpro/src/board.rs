@@ -36,10 +36,7 @@
 // **/
 use rustflight_core::board::BoardTrait;
 use rustflight_core::errors;
-use rustflight_core::hlist_type;
-use rustflight_core::packets;
-use rustflight_core::packets::BaroPacket;
-use rustflight_core::sensorprocessors;
+use rustflight_core::sensors::SensorBus;
 
 use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
@@ -58,42 +55,6 @@ pub struct Board {
 }
 
 impl BoardTrait for Board {
-    type RawSensorSet = hlist_type![
-        Option<Result<packets::ImuPacket, errors::SensorError>>,
-        Option<Result<packets::MagPacket, errors::SensorError>>,
-        Option<Result<packets::BaroPacket, errors::SensorError>>,
-        Option<Result<packets::PitotPacket, errors::SensorError>>,
-        Option<Result<packets::RangePacket, errors::SensorError>>,
-        Option<Result<packets::GNSSPacket, errors::SensorError>>,
-        Option<Result<packets::BatteryPacket, errors::SensorError>>,
-        Option<Result<packets::RcPacket, errors::SensorError>>,
-        Option<Result<packets::AttitudePacket, errors::SensorError>>
-    ];
-
-    type ProcessedSensorSet = hlist_type![
-        Option<packets::ImuPacket>,
-        Option<packets::MagPacket>,
-        Option<packets::BaroPacket>,
-        Option<packets::PitotPacket>,
-        Option<packets::RangePacket>,
-        Option<packets::GNSSPacket>,
-        Option<packets::BatteryPacket>,
-        Option<packets::RcPacket>,
-        Option<packets::AttitudePacket>
-    ];
-
-    type ProcessorHList = hlist_type![
-        sensorprocessors::ImuProcessor,
-        sensorprocessors::MagProcessor,
-        sensorprocessors::PassthroughBaroProcessor,
-        sensorprocessors::PassthroughPitotProcessor,
-        sensorprocessors::PassthroughRangeProcessor,
-        sensorprocessors::PassthroughGNSSProcessor,
-        sensorprocessors::PassthroughBatteryProcessor,
-        sensorprocessors::PassthroughRcProcessor,
-        sensorprocessors::PassthroughAttitudeProcessor
-    ];
-
     fn set_test_pin_1(&mut self, high: bool) {
         if high {
             self.test_pin_1.set_high();
@@ -110,18 +71,19 @@ impl BoardTrait for Board {
         }
     }
 
-    fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
-        sensors.0 = peripherals::bmi08x::IMU_SIGNAL.try_take();
-        sensors.1.0 = peripherals::ist8308::MAG_SIGNAL.try_take();
-        sensors.1.1.0 = peripherals::dps310::BARO_SIGNAL.try_take();
-        sensors.1.1.1.0 = peripherals::ms4525::PITOT_SIGNAL.try_take();
-        sensors.1.1.1.1.0 = peripherals::llv3hp::RANGE_SIGNAL.try_take();
-        sensors.1.1.1.1.1.0 = peripherals::ublox::GNSS_SIGNAL.try_take();
-        sensors.1.1.1.1.1.1.1.0 = peripherals::sbus::RC_SIGNAL.try_take();
+    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        sensors.clear();
+        sensors.imu = peripherals::bmi08x::IMU_SIGNAL.try_take();
+        sensors.mag = peripherals::ist8308::MAG_SIGNAL.try_take();
+        sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
+        sensors.pitot = peripherals::ms4525::PITOT_SIGNAL.try_take();
+        sensors.range = peripherals::llv3hp::RANGE_SIGNAL.try_take();
+        sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
         let mut delay = Delay;
 
         // Debug statements to check receiving sensor data
-        if let Some(imu_packet) = sensors.0 {
+        if sensors.imu.is_some() {
             self.set_test_pin_1(true);
             delay.delay_us(1u32);
             self.set_test_pin_1(false);

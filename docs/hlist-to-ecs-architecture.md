@@ -3519,6 +3519,37 @@ Validation:
 - `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
 - `cargo test -p rustflight_core world::tests --lib` passes.
 
+## BoardTrait HList Sensor Inventory Removal Progress
+
+Reason for this change:
+
+- After `ROSFlight` moved to `SensorBus`, the core `BoardTrait` no longer needed HList raw sensor, processed sensor, or processor associated types.
+- Keeping those associated types made board implementations continue to look HList-shaped even though the active scheduler path no longer consumed them.
+
+Design now implemented:
+
+- Removed `RawSensorSet`, `ProcessedSensorSet`, `ProcessorHList`, and `update_sensors` from `BoardTrait`.
+- Removed the legacy HList sensor implementation from `rustflight_core::board::dummy::DummyBoard`.
+- Updated `pixracerpro::board::Board` to populate `SensorBus` directly through `update_sensor_bus`.
+- Removed PixRacerPro board HList sensor imports and processor-list declarations.
+
+Current boundary status:
+
+- Core board traits no longer expose HList sensor inventory.
+- Core dummy board is named-sensor-only.
+- PixRacerPro board is named-sensor-only at the source level.
+- Nucleo board still needs the same source-level cleanup.
+- HList remains in retained estimator/body/processor compatibility shims and in `hlist.rs`.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p pixracerpro` was attempted, but the current host environment compiles `cortex-m` for the host target and fails before reaching local PixRacerPro crate code.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

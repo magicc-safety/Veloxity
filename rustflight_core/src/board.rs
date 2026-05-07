@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{errors, hlist::*, params2::Params, sensors::SensorBus};
+use crate::{errors, params2::Params, sensors::SensorBus};
 pub mod dummy;
 
 pub trait BoardIo {
@@ -63,11 +63,6 @@ pub trait BoardIo {
 }
 
 pub trait BoardTrait {
-    type RawSensorSet: HList + Default;
-    type ProcessedSensorSet: HList;
-    type ProcessorHList: PolyFunc;
-
-    fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet);
     fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
         sensors.clear();
     }

@@ -36,9 +36,7 @@
 // **/
 use crate::board::BoardTrait;
 use crate::errors;
-use crate::hlist_type;
 use crate::packets;
-use crate::sensorprocessors;
 use crate::sensors::SensorBus;
 
 #[derive(Default)]
@@ -47,54 +45,6 @@ pub struct DummyBoard {
 }
 
 impl BoardTrait for DummyBoard {
-    type RawSensorSet = hlist_type![
-        Option<Result<packets::ImuPacket, errors::SensorError>>,
-        Option<Result<packets::MagPacket, errors::SensorError>>,
-        Option<Result<packets::BaroPacket, errors::SensorError>>,
-        Option<Result<packets::PitotPacket, errors::SensorError>>,
-        Option<Result<packets::RangePacket, errors::SensorError>>,
-        Option<Result<packets::GNSSPacket, errors::SensorError>>,
-        Option<Result<packets::BatteryPacket, errors::SensorError>>,
-        Option<Result<packets::RcPacket, errors::SensorError>>,
-        Option<Result<packets::AttitudePacket, errors::SensorError>>
-    ];
-
-    type ProcessedSensorSet = hlist_type![
-        Option<packets::ImuPacket>,
-        Option<packets::MagPacket>,
-        Option<packets::BaroPacket>,
-        Option<packets::PitotPacket>,
-        Option<packets::RangePacket>,
-        Option<packets::GNSSPacket>,
-        Option<packets::BatteryPacket>,
-        Option<packets::RcPacket>,
-        Option<packets::AttitudePacket>
-    ];
-
-    type ProcessorHList = hlist_type![
-        sensorprocessors::PassthroughImuProcessor,
-        sensorprocessors::PassthroughMagProcessor,
-        sensorprocessors::PassthroughBaroProcessor,
-        sensorprocessors::PassthroughPitotProcessor,
-        sensorprocessors::PassthroughRangeProcessor,
-        sensorprocessors::PassthroughGNSSProcessor,
-        sensorprocessors::PassthroughBatteryProcessor,
-        sensorprocessors::PassthroughRcProcessor,
-        sensorprocessors::PassthroughAttitudeProcessor
-    ];
-
-    fn update_sensors(&mut self, sensors: &mut Self::RawSensorSet) {
-        sensors.0 = Some(Ok(packets::ImuPacket::default()));
-        sensors.1.0 = Some(Ok(packets::MagPacket::default()));
-        sensors.1.1.0 = Some(Ok(packets::BaroPacket::default()));
-        sensors.1.1.1.0 = Some(Ok(packets::PitotPacket::default()));
-        sensors.1.1.1.1.0 = Some(Ok(packets::RangePacket::default()));
-        sensors.1.1.1.1.1.0 = Some(Ok(packets::GNSSPacket::default()));
-        sensors.1.1.1.1.1.1.0 = Some(Ok(packets::BatteryPacket::default()));
-        sensors.1.1.1.1.1.1.1.0 = Some(Ok(packets::RcPacket::default()));
-        sensors.1.1.1.1.1.1.1.1.0 = Some(Ok(packets::AttitudePacket::default()));
-    }
-
     fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
         sensors.clear();
         sensors.imu = Some(Ok(packets::ImuPacket::default()));
