@@ -3461,6 +3461,33 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Legacy HList Telemetry Wrapper Removal Progress
+
+Reason for this change:
+
+- The local legacy `ROSFlight` scheduler now calls `CommManager::send_named_telemetry_streams` directly.
+- `World` and the sim already use the same named telemetry path.
+- The old `CommManager::send_telemetry_streams` wrapper had no remaining call sites and only preserved HList bounds inside comms.
+
+Design now implemented:
+
+- Removed `CommManager::send_telemetry_streams`.
+- Removed the HList, `BodyType`, legacy `Estimator`, `Configuration`, and HList-to-named conversion imports that were only needed by that wrapper.
+- `CommManager` telemetry now exposes the named `ProcessedSensors` API only.
+
+Current boundary status:
+
+- HList telemetry sculpting is gone from the local legacy `ROSFlight` scheduler.
+- HList telemetry conversion is gone from `CommManager`.
+- The remaining HList sensor conversion is isolated in the local legacy scheduler while it still maps the legacy board raw sensor HList into a processed HList before creating `ProcessedSensors`.
+
+Validation:
+
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

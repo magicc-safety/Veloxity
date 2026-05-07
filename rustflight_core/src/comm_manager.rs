@@ -36,26 +36,23 @@
 pub mod comm_link_trait;
 pub mod mavlink_parser;
 
-use crate::bodytype::BodyType;
+use crate::board;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
 use crate::events::{
-    BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
+    AuxCommandReceived, BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
     CommandEventQueues, CompanionEventQueues, CompanionHeartbeatReceived, ConfigInfoRequested,
-    AuxCommandReceived, ExternalAttitudeReceived, OffboardControlRequested,
-    ParamDefaultsRequested, ParamEventQueues, ParamListRequested, ParamReadRequested,
-    ParamSetRequested, RcTrimCalibrationRequested, ResetOriginRequested, VersionRequested,
+    ExternalAttitudeReceived, OffboardControlRequested, ParamDefaultsRequested, ParamEventQueues,
+    ParamListRequested, ParamReadRequested, ParamSetRequested, RcTrimCalibrationRequested,
+    ResetOriginRequested, VersionRequested,
 };
-use crate::estimator::{AttitudeStateTrait, Estimator};
-use crate::hlist::*;
+use crate::estimator::AttitudeStateTrait;
 use crate::mavlink::dialects::Rosflight;
-use crate::packets::{self, RC_PACKET_CHANNELS};
+use crate::packets::RC_PACKET_CHANNELS;
 use crate::params2::{ParamId, ParamValue, Params};
-use crate::rosflight::Configuration;
 use crate::sensorprocessors::CalibrationFlags;
-use crate::sensors::{processed_sensors_from_hlist, ProcessedSensors};
+use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
-use crate::board;
 use core::marker::PhantomData;
 
 const HEARTBEAT_INTERVAL_US: u64 = 1_000_000; // 1 second = 1,000,000 microseconds
@@ -164,57 +161,6 @@ where
     #[cfg(test)]
     pub(crate) fn comm_link(&self) -> &T {
         &self.comm_link
-    }
-
-    pub fn send_telemetry_streams<BT, C, A>(
-        &mut self,
-        board: &mut B,
-        now_us: u64,
-        state_manager: &StateManager,
-        command_manager: &CommandManager,
-        _params: &Params,
-        estimator_state: &<BT::Estimator as Estimator>::State,
-        processed_sensors: &B::ProcessedSensorSet,
-        actuator_commands: &A,
-    ) where
-        B: board::BoardTrait,
-        BT: BodyType,
-        A: AsRef<[f64]>,
-        C: Configuration<B, BT>,
-        BT::Estimator: Estimator,
-        <BT::Estimator as Estimator>::State: AttitudeStateTrait,
-        B::ProcessedSensorSet: HListGet<Option<packets::ImuPacket>, C::ImuPacketIndex>
-            + HListGet<Option<packets::MagPacket>, C::MagPacketIndex>
-            + HListGet<Option<packets::BaroPacket>, C::BaroPacketIndex>
-            + HListGet<Option<packets::PitotPacket>, C::PitotPacketIndex>
-            + HListGet<Option<packets::RangePacket>, C::RangePacketIndex>
-            + HListGet<Option<packets::GNSSPacket>, C::GNSSPacketIndex>
-            + HListGet<Option<packets::BatteryPacket>, C::BatteryPacketIndex>
-            + HListGet<Option<packets::AttitudePacket>, C::AttitudePacketIndex>
-            + HListGet<Option<packets::RcPacket>, C::RcPacketIndex>,
-    {
-        let named_sensors = processed_sensors_from_hlist::<
-            _,
-            C::ImuPacketIndex,
-            C::MagPacketIndex,
-            C::BaroPacketIndex,
-            C::PitotPacketIndex,
-            C::RangePacketIndex,
-            C::GNSSPacketIndex,
-            C::BatteryPacketIndex,
-            C::AttitudePacketIndex,
-            C::RcPacketIndex,
-        >(processed_sensors);
-
-        self.send_named_telemetry_streams(
-            board,
-            now_us,
-            state_manager,
-            command_manager,
-            estimator_state,
-            &named_sensors,
-            actuator_commands,
-        );
     }
 
     pub fn process_incoming_messages(&mut self, board: &mut B) {
