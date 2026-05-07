@@ -4067,3 +4067,32 @@ Validation:
 - `cargo test -p rustflight_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Legacy ROSFlight Scheduler Removal
+
+Reason for this change:
+
+- Sim, PixRacerPro, and Nucleo now all instantiate `World`.
+- `rustflight_core::rosflight` had no live crate call sites after the embedded entrypoint migration.
+- Keeping the duplicate scheduler made the architecture look split and kept old compatibility code in the active core API surface.
+
+Design now implemented:
+
+- Removed `rustflight_core/src/rosflight.rs`.
+- Removed the `pub mod rosflight` export from `rustflight_core`.
+- Updated current README wording to describe `World`, `BoardIo`, and PWM drivers instead of the old `Configuration`/`ROSFlight`/`BoardTrait` wiring.
+
+Current status after this slice:
+
+- The active scheduler path is `World`.
+- Board and sim crates do not reference the legacy `ROSFlight` scheduler.
+- Remaining source uses of `rosflight` are protocol/dialect names, not the removed scheduler module.
+
+Validation:
+
+- `rg -n "HList|HLIST|BoardTrait|BodyModel|pub mod rosflight|struct ROSFlight|rosflight::" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns only protocol/dialect timestamp references.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.

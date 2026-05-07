@@ -6,11 +6,11 @@
 
 | Crate | Target | Purpose |
 |---|---|---|
-| `rustflight_core` | host | `no_std` algorithm library: traits, HList, estimator, controller, mixer, MAVLink |
+| `rustflight_core` | host | `no_std` algorithm library: board I/O, world scheduler, estimator, controller, mixer, MAVLink |
 | `stm_32` | `thumbv7em-none-eabihf` | STM32/Embassy HAL and peripheral drivers |
-| `nucleo` | `thumbv7em-none-eabihf` | Binary — `BoardTrait` impl for the Nucleo-H753ZI dev board |
-| `pixracerpro` | `thumbv7em-none-eabihf` | Binary — `BoardTrait` impl for the Pixracer Pro flight controller |
-| `sim` | host | Binary — `BoardTrait` impl for host-side simulation via Zenoh |
+| `nucleo` | `thumbv7em-none-eabihf` | Binary with `BoardIo` and PWM drivers for the Nucleo-H753ZI dev board |
+| `pixracerpro` | `thumbv7em-none-eabihf` | Binary with `BoardIo` and PWM drivers for the Pixracer Pro flight controller |
+| `sim` | host | Binary with `BoardIo` and PWM drivers for host-side simulation via Zenoh |
 
 MAVLink message types are code-generated at build time by `rustflight_core/build.rs` from `mavlink_definitions/` using the `mavspec` crate. They are accessible as `rustflight_core::mavlink::*`.
 
@@ -61,7 +61,7 @@ cargo run -p nucleo --target thumbv7em-none-eabihf --bin rustflight
 cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin rustflight
 ```
 
-Both boards run the same `rustflight` binary entry point. The `Configuration` impl in each binary's `rustflight.rs` wires the board-specific sensor indices to the generic `ROSFlight` controller.
+Both boards run the same `rustflight` binary entry point. Each binary wires its board, MAVLink interface, quadrotor body components, state manager, and PWM driver into the shared `World` scheduler.
 
 ### Sim
 
@@ -79,7 +79,7 @@ To enable defmt logging, uncomment the `defmt` dependency in the relevant crate'
 
 The MAVLink parser (`rustflight_core::comm_manager::mavlink_parser`) is board-agnostic. It operates on raw `&[u8]` bytes: `MavlinkParser::feed_byte` accumulates bytes and returns a frame once the start byte, length, and CRC all match. `process_mavlink_frame` decodes the frame into a typed `Rosflight` dialect message.
 
-`MavlinkInterface` (in `rustflight_core::comm_manager::comm_link_trait::mavlink`) implements the `CommInterface<B: BoardTrait>` trait and wires the parser into the main loop via `comm_manager`.
+`MavlinkInterface` (in `rustflight_core::comm_manager::comm_link_trait::mavlink`) implements the `CommInterface<B: BoardIo>` trait and wires the parser into the main loop via `comm_manager`.
 
 ## Branching Strategy
 

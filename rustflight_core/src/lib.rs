@@ -58,7 +58,6 @@ pub mod ports;
 pub mod pwm;
 pub mod pwm_system;
 pub mod rc;
-pub mod rosflight;
 pub mod sensors;
 pub mod sensor_systems;
 pub mod sensorprocessors;
