@@ -50,15 +50,10 @@ use rustflight_core::{
     mixer::Mixer,
     params2::Params,
     pwm,
-    rosflight::{Configuration, ROSFlight},
+    rosflight::ROSFlight,
     state_machine::StateManager,
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
-
-// define the wiring diagram
-#[derive(Default)]
-pub struct PixRacerProQuadConfig;
-impl Configuration<board::Board, Quadrotor> for PixRacerProQuadConfig {}
 
 #[entry]
 fn main() -> ! {
@@ -74,9 +69,6 @@ fn main() -> ! {
         &Params::default(),
     );
 
-    // zero-sized configuration marker (necessary)
-    let config = PixRacerProQuadConfig::default();
-
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
 
@@ -86,7 +78,7 @@ fn main() -> ! {
     // PWM Driver from servos object
     let pwm_driver = BoardPwmDriver::new(&mut servos);
 
-    let mut rosflight = ROSFlight::init(
+    let mut rosflight = ROSFlight::<_, Quadrotor, _, _>::init(
         1000,
         board,
         Params::default(),
@@ -95,7 +87,6 @@ fn main() -> ! {
         estimator,
         controller,
         mixer,
-        config,
         pwm_driver,
     );
 

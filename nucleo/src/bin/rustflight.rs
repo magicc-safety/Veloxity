@@ -49,15 +49,10 @@ use rustflight_core::{
     mixer::Mixer,
     mixer::quad_mixer::QuadMixer,
     params2::Params,
-    rosflight::{Configuration, ROSFlight},
+    rosflight::ROSFlight,
     state_machine::StateManager,
 };
 use stm_32::*;
-
-// define the wiring diagram
-#[derive(Default)]
-pub struct NucleoQuadConfig;
-impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {}
 
 #[entry]
 fn main() -> ! {
@@ -70,15 +65,12 @@ fn main() -> ! {
     let controller = QuadController::default();
     let mixer = QuadMixer::new(&params);
 
-    // zero-sized configuration marker (necessary)
-    let config = NucleoQuadConfig::default();
-
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
 
     let state_manager = StateManager::new();
 
-    let mut rosflight = ROSFlight::init(
+    let mut rosflight = ROSFlight::<_, Quadrotor, _, _>::init(
         1000,
         board,
         params,
@@ -87,7 +79,6 @@ fn main() -> ! {
         estimator,
         controller,
         mixer,
-        config,
         pwm_driver,
     );
 

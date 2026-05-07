@@ -72,15 +72,11 @@ use micro_algebra::stack::vector::Vector;
 const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
 const ESTIMATOR_DT: f64 = 1.0 / 400.0; // Assume constant 400Hz for estimator
 
-/// A compatibility marker for the legacy `ROSFlight` constructor.
-pub trait Configuration<B: crate::board::BoardIo, BT: crate::bodytype::BodyType> {}
-
-pub struct ROSFlight<B, BT, C, CI, PD>
+pub struct ROSFlight<B, BT, CI, PD>
 //pub struct ROSFlight<B, BT, C, CI>
 where
     B: BoardIo,
     BT: BodyType,
-    C: Configuration<B, BT>, // The new "glue" constraint
     CI: CommInterface<B>,
     PD: PwmDriver,
 {
@@ -113,16 +109,14 @@ where
 
     // necessary to tell the compiler these generics are in use.
     _body_type: PhantomData<BT>,
-    _configuration: PhantomData<C>,
 }
 
-impl<B, BT, C, CI, PD> ROSFlight<B, BT, C, CI, PD>
+impl<B, BT, CI, PD> ROSFlight<B, BT, CI, PD>
 //impl<B, BT, C, CI> ROSFlight<B, BT, C, CI>
 where
     B: BoardIo,
     BT: BodyType,
     CI: CommInterface<B>,
-    C: Configuration<B, BT>,
     PD: PwmDriver,
     BT::Estimator: NamedEstimator,
     <BT::Estimator as NamedEstimator>::State: AttitudeStateTrait,
@@ -139,7 +133,6 @@ where
         mut estimator: BT::Estimator,
         mut controller: BT::Controller,
         mut mixer: BT::Mixer,
-        _config: C, // zero-cost marker for deduction during "init" creation
         mut pwm_driver: PD,
     ) -> Self {
         state_manager.update(Event::INITIALIZED, &params);
@@ -177,8 +170,7 @@ where
             state_manager,
             cal_flags: CalibrationFlags::empty(),
             pwm_driver,
-            _body_type: PhantomData,     // field initialization
-            _configuration: PhantomData, // field initialization
+            _body_type: PhantomData, // field initialization
         }
     }
 

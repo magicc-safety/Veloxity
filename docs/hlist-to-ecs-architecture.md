@@ -3676,6 +3676,37 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
+## ROSFlight Configuration Marker Removal Progress
+
+Reason for this change:
+
+- `Configuration` used to carry HList wiring indices.
+- After HLIST removal, it was only a zero-sized marker argument to `ROSFlight::init`.
+- Keeping it forced hardware entrypoints to define marker config structs with no behavior.
+
+Design now implemented:
+
+- Removed `rosflight::Configuration`.
+- Removed the `C` generic from `ROSFlight`.
+- Removed the `_configuration` phantom field.
+- Removed the config argument from `ROSFlight::init`.
+- Deleted PixRacerPro and Nucleo marker config structs and impls.
+- Hardware entrypoints now specify `Quadrotor` explicitly with `ROSFlight::<_, Quadrotor, _, _>::init`.
+
+Current boundary status:
+
+- `ROSFlight` no longer has HList-era configuration wiring.
+- Hardware entrypoints construct the scheduler from concrete resources only.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:
