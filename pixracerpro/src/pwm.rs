@@ -36,7 +36,7 @@
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::board::BoardTrait;
+use rustflight_core::board::BoardIo;
 use rustflight_core::pwm::{self, PwmDriver, PwmError};
 //use stm_32::defmt;
 // use crate::ros_messages::{OutputRaw, Header, Time};
@@ -139,7 +139,7 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
             .map_err(|_| PwmError::GenericError)
     }
 
-    fn flush<B: BoardTrait>(&mut self, board: &mut B) {
+    fn flush<B: BoardIo>(&mut self, board: &mut B) {
         // Hardware state is already applied in set_duty_cycle.
         // Telemetry publishing:
         let now_us = board.clock_micros();
@@ -156,7 +156,7 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         // TODO: Send via telemetry channel (similar to sim driver)
     }
 
-    fn send_commands<B: BoardTrait>(&mut self, board: &mut B, commands_slice: &[f64]) {
+    fn send_commands<B: BoardIo>(&mut self, board: &mut B, commands_slice: &[f64]) {
         let count = commands_slice.len().min(NUM_HW_CHANNELS);
         for i in 0..count {
             let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;

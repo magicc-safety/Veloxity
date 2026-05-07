@@ -3612,6 +3612,38 @@ Validation:
 - `cargo test -p rustflight_core sensors::tests --lib` passes.
 - `cargo test -p rustflight_core world::tests --lib` passes.
 
+## HList Removal Completion
+
+Reason for this change:
+
+- After the board, processor, estimator, body, telemetry, and scheduler paths moved to named resources, `hlist.rs` had no remaining source consumers.
+- Embedded checks could now be run against the correct Cortex-M target instead of the host target.
+
+Design now implemented:
+
+- Installed the `thumbv7em-none-eabihf` target into a workspace-local Rustup home for embedded package validation.
+- Fixed PixRacerPro's `PwmDriver` implementation to use the HList-free `BoardIo` bound.
+- Updated Nucleo's board/PWM split to provide a `BoardPwmDriver` to `ROSFlight::init`.
+- Updated Nucleo's `ROSFlight::init` call to pass `Params` and the PWM driver.
+- Added Nucleo's missing `panic-halt` dependency and panic handler import.
+- Removed `pub mod hlist`.
+- Deleted `rustflight_core/src/hlist.rs`.
+
+Current boundary status:
+
+- HLIST is removed from the source architecture.
+- The only remaining source hit for "hlist" is a test name documenting that the World sensor fixture is HList-free.
+- Core, sim, PixRacerPro, and Nucleo compile through the new named-resource architecture.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

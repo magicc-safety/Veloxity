@@ -2001,6 +2001,7 @@ dependencies = [
 name = "nucleo"
 version = "0.1.0"
 dependencies = [
+ "panic-halt",
  "rustflight_core",
  "stm_32",
 ]

@@ -39,14 +39,16 @@
 use cortex_m_rt::entry;
 //use defmt;
 use nucleo::*;
+use panic_halt as _;
 use rustflight_core::{
-    board::BoardTrait,
-    board::dummy::DummyBoard,
-    bodytype::BodyType,
-    bodytype::quadrotor::{QuadController, QuadEstimator, QuadMixer, Quadrotor},
+    bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
+    controller::quad_controller::QuadController,
+    estimator::quad_estimator::QuadEstimator,
     mixer::Mixer,
+    mixer::quad_mixer::QuadMixer,
+    params2::Params,
     rosflight::{Configuration, ROSFlight},
     state_machine::StateManager,
 };
@@ -60,12 +62,13 @@ impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {}
 #[entry]
 fn main() -> ! {
     // board implementation
-    let mut board = board::Board::new();
+    let (board, pwm_driver) = board::Board::new();
+    let params = Params::default();
 
     // body type instantiations
     let estimator = QuadEstimator::default();
     let controller = QuadController::default();
-    let mixer = QuadMixer::default();
+    let mixer = QuadMixer::new(&params);
 
     // zero-sized configuration marker (necessary)
     let config = NucleoQuadConfig::default();
@@ -78,12 +81,14 @@ fn main() -> ! {
     let mut rosflight = ROSFlight::init(
         1000,
         board,
+        params,
         mavlink,
         state_manager,
         estimator,
         controller,
         mixer,
         config,
+        pwm_driver,
     );
 
     loop {

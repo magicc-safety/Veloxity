@@ -36,6 +36,7 @@
 // **/
 use rustflight_core::board::BoardTrait;
 use rustflight_core::errors;
+use rustflight_core::pwm::{PwmDriver, PwmError};
 use rustflight_core::sensors::SensorBus;
 
 use stm_32::peripherals;
@@ -47,8 +48,90 @@ include!("../../stm_32/stm32h7x3_common.rs");
 
 pub struct Board {
     probe: [Output<'static>; 4],
-    servos: peripherals::pwm::ServoMonstrosity,
     pub start_time: embassy_time::Instant,
+}
+
+pub struct BoardPwmDriver {
+    servos: peripherals::pwm::ServoMonstrosity,
+    enabled_chan_mask: u16,
+}
+
+impl BoardPwmDriver {
+    pub fn new(servos: peripherals::pwm::ServoMonstrosity) -> Self {
+        Self {
+            servos,
+            enabled_chan_mask: 0,
+        }
+    }
+}
+
+impl PwmDriver for BoardPwmDriver {
+    fn len(&self) -> usize {
+        self.servos.chan_list.len()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled_chan_mask != 0
+    }
+
+    fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
+        if channel >= self.len() {
+            return Err(PwmError::ChannelOutOfRange);
+        }
+        self.servos
+            .enable(channel)
+            .map_err(|_| PwmError::GenericError)?;
+        self.enabled_chan_mask |= 1 << channel;
+        Ok(())
+    }
+
+    fn disable(&mut self, channel: usize) -> Result<(), PwmError> {
+        if channel >= self.len() {
+            return Err(PwmError::ChannelOutOfRange);
+        }
+        self.servos
+            .disable(channel)
+            .map_err(|_| PwmError::GenericError)?;
+        self.enabled_chan_mask &= !(1 << channel);
+        Ok(())
+    }
+
+    fn enable_all(&mut self) -> Result<(), PwmError> {
+        for i in 0..self.len() {
+            self.enable(i)?;
+        }
+        Ok(())
+    }
+
+    fn disable_all(&mut self) {
+        for i in 0..self.len() {
+            let _ = self.disable(i);
+        }
+    }
+
+    fn set_duty_cycle(&mut self, channel: usize, duty: u16) -> Result<(), PwmError> {
+        if channel >= self.len() {
+            return Err(PwmError::ChannelOutOfRange);
+        }
+        self.servos
+            .set_duty_cycle(channel, duty)
+            .map_err(|_| PwmError::GenericError)
+    }
+
+    fn flush<B: rustflight_core::board::BoardIo>(&mut self, _board: &mut B) {}
+
+    fn send_commands<B: rustflight_core::board::BoardIo>(
+        &mut self,
+        board: &mut B,
+        commands: &[f64],
+    ) {
+        let count = commands.len().min(self.len());
+        for i in 0..count {
+            let duty = (commands[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
+            let _ = self.set_duty_cycle(i, duty);
+        }
+        self.flush(board);
+    }
 }
 
 impl BoardTrait for Board {
@@ -201,7 +284,7 @@ impl Board {
         self.probe[id].toggle(); // so we can see something on the logic analyzer.
     }
 
-    pub fn new() -> Board {
+    pub fn new() -> (Board, BoardPwmDriver) {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(8));
 
         let start_time = embassy_time::Instant::now();
@@ -566,10 +649,9 @@ impl Board {
             Output::new(p.PG0, Level::Low, Speed::Low),
         ];
 
-        Board {
-            probe,
-            servos,
-            start_time,
-        }
+        (
+            Board { probe, start_time },
+            BoardPwmDriver::new(servos),
+        )
     }
 }
