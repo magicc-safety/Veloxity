@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use crate::{
     board::BoardIo,
-    bodytype::BodyModel,
+    bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
     companion_system::{
         self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
@@ -38,7 +38,7 @@ const IMU_TIMEOUT_US: u64 = 100_000;
 pub struct World<B, BT, CI, PD>
 where
     B: BoardIo,
-    BT: BodyModel,
+    BT: BodyType,
     BT::Estimator: NamedEstimator,
     BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
     BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
@@ -80,7 +80,7 @@ where
 impl<B, BT, CI, PD> World<B, BT, CI, PD>
 where
     B: BoardIo,
-    BT: BodyModel,
+    BT: BodyType,
     BT::Estimator: NamedEstimator,
     BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
     BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
@@ -701,7 +701,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -736,7 +736,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -777,7 +777,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -833,7 +833,7 @@ mod tests {
             update_count: 0,
         };
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<SensorStageBoard, Quadrotor, SensorStageCommLink, TestPwm>::init(
             board,
@@ -876,7 +876,7 @@ mod tests {
         let mut params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
 
@@ -916,7 +916,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Bool(true));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -996,7 +996,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1045,7 +1045,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1092,7 +1092,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1136,7 +1136,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1172,7 +1172,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1230,7 +1230,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1270,7 +1270,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1307,7 +1307,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1344,7 +1344,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_Z_EQ_TORQUE, ParamValue::Float(0.25));
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1410,7 +1410,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1445,7 +1445,7 @@ mod tests {
         let params = Params::new();
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,
@@ -1484,7 +1484,7 @@ mod tests {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
         state.update(Event::REQUEST_ARM, &params);
-        let mixer = <Quadrotor as BodyModel>::Mixer::new(&params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
         let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
             board,

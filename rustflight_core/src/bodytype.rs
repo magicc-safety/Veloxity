@@ -47,9 +47,3 @@ pub trait BodyType {
     type Controller: Controller;
     type Mixer: Mixer;
 }
-
-pub trait BodyModel {
-    type Estimator: NamedEstimator;
-    type Controller;
-    type Mixer;
-}

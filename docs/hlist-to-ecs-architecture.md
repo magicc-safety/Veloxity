@@ -4007,3 +4007,33 @@ Validation:
 - `cargo test -p rustflight_core world::tests --lib` passes.
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
+
+## Body Type Boundary Cleanup
+
+Reason for this change:
+
+- After HLIST removal, `BodyModel` and `BodyType` described the same compile-time aircraft body mapping.
+- `ROSFlight` already used `BodyType`, while `World` still used `BodyModel`.
+- Keeping both traits made the architecture look split even though there is now only one body abstraction.
+
+Design now implemented:
+
+- Removed the redundant `BodyModel` trait.
+- Removed the duplicate `BodyModel` implementation for `Quadrotor`.
+- Updated `World` to use `BodyType`, matching the `ROSFlight` body boundary.
+- Updated world tests to construct the quadrotor mixer through `BodyType`.
+
+Current status after this slice:
+
+- `BodyType` is the single body-level associated-type boundary for estimator, controller, and mixer selection.
+- `World` and `ROSFlight` now agree on the body abstraction.
+- HLIST-era body model duplication is gone from core, sim, PixRacerPro, and Nucleo source scans.
+
+Validation:
+
+- `rg -n "BodyModel" rustflight_core/src sim/src pixracerpro/src nucleo/src` returns no matches.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
