@@ -3644,6 +3644,38 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
+## BoardTrait Removal Progress
+
+Reason for this change:
+
+- After HLIST removal, `BoardTrait` duplicated `BoardIo` and existed only to provide a blanket adapter.
+- Keeping both traits made hardware and `ROSFlight` look like they still had a legacy board boundary even though the active board interface was already `BoardIo`.
+
+Design now implemented:
+
+- Removed `BoardTrait`.
+- Removed the blanket `impl<T: BoardTrait> BoardIo for T`.
+- `ROSFlight` now requires `B: BoardIo`.
+- The compatibility `Configuration` marker now accepts `B: BoardIo`.
+- Core dummy, PixRacerPro, and Nucleo boards now implement `BoardIo` directly.
+- Removed stale `BoardTrait` imports and a commented Nucleo `BoardTrait` block.
+- Updated the old `params.rs` board generic bounds to `BoardIo` so no source references remain.
+
+Current boundary status:
+
+- `BoardIo` is the only board interface in source.
+- Core, sim, PixRacerPro, and Nucleo all compile without `BoardTrait`.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

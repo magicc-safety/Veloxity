@@ -35,7 +35,7 @@
 // ******************************************************************************
 // **/
 use crate::{
-    board::BoardTrait,
+    board::BoardIo,
     bodytype::BodyType,
     comm_manager::{self, comm_link_trait::CommInterface},
     companion_system::{
@@ -73,12 +73,12 @@ const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
 const ESTIMATOR_DT: f64 = 1.0 / 400.0; // Assume constant 400Hz for estimator
 
 /// A compatibility marker for the legacy `ROSFlight` constructor.
-pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {}
+pub trait Configuration<B: crate::board::BoardIo, BT: crate::bodytype::BodyType> {}
 
 pub struct ROSFlight<B, BT, C, CI, PD>
 //pub struct ROSFlight<B, BT, C, CI>
 where
-    B: BoardTrait,
+    B: BoardIo,
     BT: BodyType,
     C: Configuration<B, BT>, // The new "glue" constraint
     CI: CommInterface<B>,
@@ -119,7 +119,7 @@ where
 impl<B, BT, C, CI, PD> ROSFlight<B, BT, C, CI, PD>
 //impl<B, BT, C, CI> ROSFlight<B, BT, C, CI>
 where
-    B: BoardTrait,
+    B: BoardIo,
     BT: BodyType,
     CI: CommInterface<B>,
     C: Configuration<B, BT>,

@@ -43,8 +43,6 @@ use panic_halt as _;
 use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
 use rustflight_core::{
-    board::BoardTrait,
-    board::dummy::DummyBoard,
     bodytype::BodyType,
     bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,

@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::board::BoardTrait;
+use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
 use rustflight_core::pwm::{PwmDriver, PwmError};
 use rustflight_core::sensors::SensorBus;
@@ -134,7 +134,7 @@ impl PwmDriver for BoardPwmDriver {
     }
 }
 
-impl BoardTrait for Board {
+impl BoardIo for Board {
     fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
         sensors.clear();
         sensors.imu = peripherals::bmi08x::IMU_SIGNAL.try_take();
@@ -195,81 +195,6 @@ impl BoardTrait for Board {
         self.start_time.elapsed().as_micros() as u64
     }
 }
-
-/*
-impl BoardTrait for Board {
-    fn imu_read(&mut self) -> Option<Result<packets::ImuPacket, errors::SensorError>> {
-        peripherals::bmi08x::IMU_SIGNAL.try_take()
-    }
-
-    fn mag_read(&mut self) -> Option<Result<packets::MagPacket, errors::SensorError>> {
-        peripherals::iis2mdc::MAG_SIGNAL.try_take()
-    }
-
-    fn baro_read(&mut self) -> Option<Result<packets::BaroPacket, errors::SensorError>> {
-        peripherals::dps310::BARO_SIGNAL.try_take()
-    }
-
-    fn diff_pressure_read(&mut self) -> Option<Result<packets::PitotPacket, errors::SensorError>> {
-        peripherals::dlhrl20g::PITOT_SIGNAL.try_take()
-    }
-
-    fn sonar_read(&mut self) -> Option<Result<packets::RangePacket, errors::SensorError>> {
-        None
-    }
-
-    fn gnss_read(&mut self) -> Option<Result<packets::GNSSPacket, errors::SensorError>> {
-        peripherals::ublox::GNSS_SIGNAL.try_take()
-    }
-
-    fn battery_read(&mut self) -> Option<Result<packets::BatteryPacket, errors::SensorError>> {
-        None
-    }
-
-    fn rc_read(&mut self) -> Option<Result<packets::RcPacket, errors::SensorError>> {
-        peripherals::sbus::RC_SIGNAL.try_take()
-    }
-
-    fn attitude_read(&mut self) -> Option<Result<packets::AttitudePacket, errors::SensorError>> {
-        None
-    }
-
-    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        match peripherals::telem::TELEM_RX.try_read(buf) {
-            Ok(n) => return Some(Ok(n)),
-            Err(_) => {
-                return Some(Err(errors::TelemError::GenericTelemError(
-                    "Error Reading Telem Packet",
-                )));
-            }
-        }
-    }
-
-    fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        let mut n = 0;
-        //let len = byte_count;
-        let len = bytes.len();
-
-        loop {
-            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
-                Ok(wrote) => {
-                    if wrote == (len - n) {
-                        break;
-                    } else {
-                        n += wrote;
-                    }
-                }
-                Err(_) => {
-                    return Some(Err(errors::TelemError::GenericTelemError(
-                        "Error Writing Telem Packet!",
-                    )));
-                }
-            }
-        }
-        Some(Ok(n))
-    }
-}
-*/
 
 impl Board {
     fn probe_hi(&mut self, id: usize) {

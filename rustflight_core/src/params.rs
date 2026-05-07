@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::BoardTrait;
+use crate::board::BoardIo;
 mod param_types;
 pub use param_types::*;
 
@@ -1685,12 +1685,12 @@ impl Params {
         to_return
     }
 
-    pub fn init<B: BoardTrait>(&mut self, board: &mut B) {
+    pub fn init<B: BoardIo>(&mut self, board: &mut B) {
         self.set_defaults();
         self.write(board);
     }
 
-    pub fn write<B: BoardTrait>(&mut self, board: &mut B) -> bool {
+    pub fn write<B: BoardIo>(&mut self, board: &mut B) -> bool {
         // if !board.memory_write(self) {
         //     return false;
         // }
@@ -1698,7 +1698,7 @@ impl Params {
         true
     }
 
-    pub fn read<B: BoardTrait>(&mut self, board: &B) -> bool {
+    pub fn read<B: BoardIo>(&mut self, board: &B) -> bool {
         // if !board.memory_read(self, p: &Params) {
         //     return false;
         // }

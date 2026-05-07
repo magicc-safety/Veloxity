@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::board::BoardTrait;
+use crate::board::BoardIo;
 use crate::errors;
 use crate::packets;
 use crate::sensors::SensorBus;
@@ -44,7 +44,7 @@ pub struct DummyBoard {
     pub current_time_us: u64,
 }
 
-impl BoardTrait for DummyBoard {
+impl BoardIo for DummyBoard {
     fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
         sensors.clear();
         sensors.imu = Some(Ok(packets::ImuPacket::default()));

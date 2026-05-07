@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::board::BoardTrait;
+use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
 use rustflight_core::sensors::SensorBus;
 
@@ -54,7 +54,7 @@ pub struct Board {
     test_pin_2: Output<'static>,
 }
 
-impl BoardTrait for Board {
+impl BoardIo for Board {
     fn set_test_pin_1(&mut self, high: bool) {
         if high {
             self.test_pin_1.set_high();
