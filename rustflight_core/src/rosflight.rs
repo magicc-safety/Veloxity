@@ -38,35 +38,32 @@ use crate::{
     board::BoardTrait,
     bodytype::BodyType,
     comm_manager::{self, comm_link_trait::CommInterface},
-    comm_messages::{self, messages::HeartbeatMsg},
     companion_system::{
         self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
         ExternalAttitudeCtx, ExternalAttitudeState,
     },
-    command_manager::{CommandManager, ControlType},
+    command_manager::CommandManager,
     command_system::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
         ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
     controller::{Controller, RcTrimCalibrator},
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
-    errors,
     estimator::{
         self, AttitudeStateTrait, NamedEstimator,
         quad_estimator::{AttitudeState, QuadEstimator},
     },
-    hlist::*,
     log_system::{self, LogDrainCtx},
     mixer::Mixer,
-    packets,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
     params2::{self, PARAM_DEFINITIONS, ParamId},
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::{self, PwmDriver},
     rc::Rc,
+    sensor_systems::{process_sensor_bus, SensorProcessorSet},
     sensorprocessors::CalibrationFlags,
-    sensors::processed_sensors_from_hlist,
+    sensors::{ProcessedSensors, SensorBus},
     state_machine::{self, ErrorFlag, Event, StateManager},
 };
 use core::marker::PhantomData;
@@ -75,24 +72,8 @@ use micro_algebra::stack::vector::Vector;
 const IMU_TIMEOUT_US: u64 = 100_000; // 100ms
 const ESTIMATOR_DT: f64 = 1.0 / 400.0; // Assume constant 400Hz for estimator
 
-/// A "glue" trait that defines the "wiring diagram" (`SculptIndices`)
-/// for a specific combination of a Board and a BodyType.
-pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {
-    // --- Existing Indices ---
-    type SculptIndices: crate::hlist::HList; // For estimator
-
-    type RcPacketIndex;
-    type RcPacketSculptedIndex;
-
-    type ImuPacketIndex;
-    type MagPacketIndex;
-    type BaroPacketIndex;
-    type PitotPacketIndex;
-    type RangePacketIndex;
-    type GNSSPacketIndex;
-    type BatteryPacketIndex;
-    type AttitudePacketIndex;
-}
+/// A compatibility marker for the legacy `ROSFlight` constructor.
+pub trait Configuration<B: crate::board::BoardTrait, BT: crate::bodytype::BodyType> {}
 
 pub struct ROSFlight<B, BT, C, CI, PD>
 //pub struct ROSFlight<B, BT, C, CI>
@@ -118,8 +99,9 @@ where
     aux_commands: AuxCommandState,
     external_attitude: ExternalAttitudeState,
     comm_manager: comm_manager::CommManager<B, CI>,
-    sensors: B::RawSensorSet,
-    processorhlist: B::ProcessorHList,
+    raw_sensors: SensorBus,
+    processed_sensors: ProcessedSensors,
+    sensor_processors: SensorProcessorSet,
     estimator: BT::Estimator,
     controller: BT::Controller,
     mixer: BT::Mixer,
@@ -142,23 +124,11 @@ where
     CI: CommInterface<B>,
     C: Configuration<B, BT>,
     PD: PwmDriver,
-    for<'a> B::RawSensorSet: HMappable<'a, B::ProcessorHList, Output = B::ProcessedSensorSet>,
     BT::Estimator: NamedEstimator,
     <BT::Estimator as NamedEstimator>::State: AttitudeStateTrait,
     BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
     BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
     <<BT as BodyType>::Mixer as Mixer>::ActuatorCommands: AsRef<[f64]>,
-    // This tells Rust that the compiler *can* find a way to `get` these packet
-    // types using the indices from the `Configuration`.
-    B::ProcessedSensorSet: HListGet<Option<packets::ImuPacket>, C::ImuPacketIndex>
-        + HListGet<Option<packets::MagPacket>, C::MagPacketIndex>
-        + HListGet<Option<packets::BaroPacket>, C::BaroPacketIndex>
-        + HListGet<Option<packets::PitotPacket>, C::PitotPacketIndex>
-        + HListGet<Option<packets::RangePacket>, C::RangePacketIndex>
-        + HListGet<Option<packets::GNSSPacket>, C::GNSSPacketIndex>
-        + HListGet<Option<packets::BatteryPacket>, C::BatteryPacketIndex>
-        + HListGet<Option<packets::AttitudePacket>, C::AttitudePacketIndex>
-        + HListGet<Option<packets::RcPacket>, C::RcPacketIndex>,
 {
     pub fn init(
         loop_time_us: u32,
@@ -196,8 +166,9 @@ where
             aux_commands: AuxCommandState::default(),
             external_attitude: ExternalAttitudeState::default(),
             comm_manager,
-            sensors: B::RawSensorSet::default(),
-            processorhlist: B::ProcessorHList::default(),
+            raw_sensors: SensorBus::default(),
+            processed_sensors: ProcessedSensors::default(),
+            sensor_processors: SensorProcessorSet::default(),
             estimator,
             controller,
             mixer,
@@ -334,33 +305,17 @@ where
             self.cal_flags.insert(CalibrationFlags::GYRO);
         }
         //*/
-        // Data ingestion: let the board update the sensor data store
-        // Data processing: run the map operation across HLists
-        // This applies the 'ProcessorHList' to the 'RawSensorSet'
-        // which consumes the raw data and produces the clean 'ProcessedSensorSet'
-        // TODO pass state machine into here... if there's bad sensor data maybe we need to do something about it...
-        self.board.update_sensors(&mut self.sensors);
-        ///*
-        let processed_sensors = self.sensors.map(
-            &mut self.processorhlist,
+        self.board.update_sensor_bus(&mut self.raw_sensors);
+        process_sensor_bus(
+            &mut self.raw_sensors,
+            &mut self.processed_sensors,
+            &mut self.sensor_processors,
             &mut self.cal_flags,
             &mut self.params,
         );
-        let named_sensors = processed_sensors_from_hlist::<
-            _,
-            C::ImuPacketIndex,
-            C::MagPacketIndex,
-            C::BaroPacketIndex,
-            C::PitotPacketIndex,
-            C::RangePacketIndex,
-            C::GNSSPacketIndex,
-            C::BatteryPacketIndex,
-            C::AttitudePacketIndex,
-            C::RcPacketIndex,
-        >(&processed_sensors);
 
         // also check for imu: if it's been too long, add a flag for imu not responding...
-        let imu_packet_option = &named_sensors.imu;
+        let imu_packet_option = &self.processed_sensors.imu;
         if imu_packet_option.is_some() {
             //self.board.set_test_pin_1(true);
             // We got data! Reset the timer and clear the error.
@@ -398,7 +353,7 @@ where
             .send_comm_responses(&mut self.board, &mut self.comm_events);
 
         // now run the RC unit and the command manager unit
-        if let Some(rc_packet) = named_sensors.rc {
+        if let Some(rc_packet) = self.processed_sensors.rc {
             // defmt::info!("Received RC in rustflight_typed");
             self.rc_manager
                 .receive(&rc_packet, &self.params, &mut self.state_manager);
@@ -455,7 +410,7 @@ where
             // Run the estimator with constant dt (assume 400Hz)
             let state = self
                 .estimator
-                .estimate_named(&named_sensors, &self.params, ESTIMATOR_DT);
+                .estimate_named(&self.processed_sensors, &self.params, ESTIMATOR_DT);
 
             // Health check
             if state.is_healthy() {
@@ -505,7 +460,7 @@ where
                 &self.state_manager,
                 &self.command_manager,
                 &state,             // The estimator state we just calculated
-                &named_sensors,     // The full set of processed sensors
+                &self.processed_sensors, // The full set of processed sensors
                 &actuator_commands, // The final motor commands
             );
         }

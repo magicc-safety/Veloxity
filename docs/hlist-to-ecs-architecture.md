@@ -3488,6 +3488,37 @@ Validation:
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 
+## Legacy RustFlight Named Sensor Bus Progress
+
+Reason for this change:
+
+- The local legacy `ROSFlight` scheduler still stored `B::RawSensorSet` and `B::ProcessorHList`.
+- It still mapped raw HLists into processed HLists, then converted that processed HList into `ProcessedSensors`.
+- `World` and sim already use the named `SensorBus -> ProcessedSensors` path through `sensor_systems::process_sensor_bus`.
+
+Design now implemented:
+
+- `ROSFlight` now stores `SensorBus`, `ProcessedSensors`, and `SensorProcessorSet`.
+- `ROSFlight::run` now calls `board.update_sensor_bus` followed by `process_sensor_bus`.
+- Removed the legacy scheduler's `HMappable` and `HListGet` sensor bounds.
+- Removed `processed_sensors_from_hlist` use from `ROSFlight`.
+- `Configuration` is now only a compatibility marker for existing `ROSFlight::init` call sites.
+- Removed HList packet index associated types from the PixRacerPro and Nucleo marker configs.
+
+Current boundary status:
+
+- `ROSFlight` no longer has local HList sensor ingestion, processing, conversion, sculpting, or telemetry dispatch.
+- HList sensor associated types remain on `BoardTrait` for compatibility with legacy board definitions.
+- `processed_sensors_from_hlist` remains as a narrow testable compatibility helper, but the local legacy scheduler no longer calls it.
+- Hardware package checks were attempted, but the current host environment compiles `cortex-m` for the host target and fails before reaching these crates.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

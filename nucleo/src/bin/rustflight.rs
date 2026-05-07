@@ -47,8 +47,6 @@ use rustflight_core::{
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::Controller,
     estimator::Estimator,
-    hlist::{Here, There},
-    hlist_type,
     mixer::Mixer,
     rosflight::{Configuration, ROSFlight},
     state_machine::StateManager,
@@ -58,10 +56,7 @@ use stm_32::*;
 // define the wiring diagram
 #[derive(Default)]
 pub struct NucleoQuadConfig;
-impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {
-    // needs IMU, Baro, Mag, GNSS
-    type SculptIndices = hlist_type![Here, Here, Here, There<Here>];
-}
+impl Configuration<board::Board, Quadrotor> for NucleoQuadConfig {}
 
 #[entry]
 fn main() -> ! {
