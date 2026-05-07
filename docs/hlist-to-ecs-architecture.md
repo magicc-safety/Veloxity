@@ -3550,6 +3550,35 @@ Validation:
 - `cargo test -p rustflight_core world::tests --lib` passes.
 - `cargo check -p pixracerpro` was attempted, but the current host environment compiles `cortex-m` for the host target and fails before reaching local PixRacerPro crate code.
 
+## Legacy Func Sensor Processor Shim Removal Progress
+
+Reason for this change:
+
+- `sensor_systems::process_sensor_bus` now depends on `SensorPacketProcessor`.
+- `ROSFlight`, `World`, and sim no longer use HList processor mapping.
+- After `BoardTrait` stopped exposing `ProcessorHList`, the concrete sensor processors no longer needed legacy `hlist::Func` implementations.
+
+Design now implemented:
+
+- Removed the `hlist` import from `sensorprocessors.rs`.
+- Removed all legacy `Func` implementations from passthrough processors.
+- Removed all legacy `Func` implementations from `ImuProcessor`, `BaroProcessor`, `PitotProcessor`, and `MagProcessor`.
+- Kept the native `SensorPacketProcessor` implementations unchanged.
+
+Current boundary status:
+
+- Named sensor processing no longer depends on `hlist::Func`.
+- Processor HList compatibility shims are gone from core sensor processors.
+- Remaining HList dependencies are now concentrated in retained estimator/body compatibility and the explicit `processed_sensors_from_hlist` helper.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+
 ## RC Trim Calibration Event Progress
 
 Source-compatibility note:

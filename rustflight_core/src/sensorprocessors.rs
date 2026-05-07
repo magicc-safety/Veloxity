@@ -38,7 +38,6 @@
 use core::default;
 
 use crate::errors;
-use crate::hlist::*;
 use crate::log_info;
 use crate::packets::*;
 use crate::params2::{ParamId, ParamValue, Params};
@@ -95,23 +94,6 @@ macro_rules! impl_passthrough_sensor_packet_processor {
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughBatteryProcessor;
-impl<'a> Func<&'a mut Option<Result<BatteryPacket, errors::SensorError>>>
-    for PassthroughBatteryProcessor
-{
-    type Output = Option<BatteryPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<BatteryPacket, errors::SensorError>>,
-        _flags: &mut CalibrationFlags,
-        _params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(packet)) = arg.take() {
-            Some(packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughBatteryProcessor, BatteryPacket);
 
 // ------------------------------
@@ -122,24 +104,6 @@ const GYRO_MAX_CALIBRATION_DELTA: f64 = 0.1; // (rad/s) Threshold for movement..
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughImuProcessor;
-impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for PassthroughImuProcessor {
-    type Output = Option<ImuPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<ImuPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            //println!("Got IMU");
-            //defmt::debug!("Got IMU");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughImuProcessor, ImuPacket);
 
 #[derive(Default, Copy, Clone)]
@@ -375,45 +339,12 @@ impl SensorPacketProcessor<ImuPacket> for ImuProcessor {
     }
 }
 
-impl<'a> Func<&'a mut Option<Result<ImuPacket, errors::SensorError>>> for ImuProcessor {
-    type Output = Option<ImuPacket>;
-
-    fn call(
-        &mut self,
-        packet: &'a mut Option<Result<ImuPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        self.process_packet(packet, flags, params)
-    }
-}
-
 // ------------------------------
 // Baro Packet
 // ------------------------------
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughBaroProcessor;
-impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>>
-    for PassthroughBaroProcessor
-{
-    type Output = Option<BaroPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<BaroPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            // println!("Got Baro");
-            //defmt::debug!("Got Baro");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughBaroProcessor, BaroPacket);
 
 const SENSOR_CAL_DELAY_CYCLES: u16 = 128;
@@ -510,45 +441,12 @@ impl SensorPacketProcessor<BaroPacket> for BaroProcessor {
     }
 }
 
-impl<'a> Func<&'a mut Option<Result<BaroPacket, errors::SensorError>>> for BaroProcessor {
-    type Output = Option<BaroPacket>;
-
-    fn call(
-        &mut self,
-        packet: &'a mut Option<Result<BaroPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        self.process_packet(packet, flags, params)
-    }
-}
-
 // ------------------------------
 // Pitot Packet
 // ------------------------------
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughPitotProcessor;
-impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>>
-    for PassthroughPitotProcessor
-{
-    type Output = Option<PitotPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<PitotPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            // println!("Got Pitot");
-            //defmt::debug!("Got Pitot");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughPitotProcessor, PitotPacket);
 
 const PITOT_MAX_CALIBRATION_VARIANCE: f64 = 100.0;
@@ -634,42 +532,12 @@ impl SensorPacketProcessor<PitotPacket> for PitotProcessor {
     }
 }
 
-impl<'a> Func<&'a mut Option<Result<PitotPacket, errors::SensorError>>> for PitotProcessor {
-    type Output = Option<PitotPacket>;
-
-    fn call(
-        &mut self,
-        packet: &'a mut Option<Result<PitotPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        self.process_packet(packet, flags, params)
-    }
-}
 // ------------------------------
 // Mag Packet
 // ------------------------------
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughMagProcessor;
-impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for PassthroughMagProcessor {
-    type Output = Option<MagPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<MagPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            //println!("Got Mag");
-            //defmt::debug!("Got Mag");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughMagProcessor, MagPacket);
 
 #[derive(Default, Copy, Clone)]
@@ -773,43 +641,12 @@ impl SensorPacketProcessor<MagPacket> for MagProcessor {
     }
 }
 
-impl<'a> Func<&'a mut Option<Result<MagPacket, errors::SensorError>>> for MagProcessor {
-    type Output = Option<MagPacket>;
-
-    fn call(
-        &mut self,
-        packet: &'a mut Option<Result<MagPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        self.process_packet(packet, flags, params)
-    }
-}
-
 // ------------------------------
 // Rc Packet
 // ------------------------------
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughRcProcessor;
-impl<'a> Func<&'a mut Option<Result<RcPacket, errors::SensorError>>> for PassthroughRcProcessor {
-    type Output = Option<RcPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<RcPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            //println!("Got Rc");
-            //defmt::debug!("Got Rc");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughRcProcessor, RcPacket);
 
 // ------------------------------
@@ -818,25 +655,6 @@ impl_passthrough_sensor_packet_processor!(PassthroughRcProcessor, RcPacket);
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughRangeProcessor;
-impl<'a> Func<&'a mut Option<Result<RangePacket, errors::SensorError>>>
-    for PassthroughRangeProcessor
-{
-    type Output = Option<RangePacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<RangePacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            //println!("Got Range");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughRangeProcessor, RangePacket);
 
 // ------------------------------
@@ -845,25 +663,6 @@ impl_passthrough_sensor_packet_processor!(PassthroughRangeProcessor, RangePacket
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughGNSSProcessor;
-impl<'a> Func<&'a mut Option<Result<GNSSPacket, errors::SensorError>>>
-    for PassthroughGNSSProcessor
-{
-    type Output = Option<GNSSPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<GNSSPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            // println!("Got GNSS");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughGNSSProcessor, GNSSPacket);
 
 // ------------------------------
@@ -872,23 +671,6 @@ impl_passthrough_sensor_packet_processor!(PassthroughGNSSProcessor, GNSSPacket);
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughPpsProcessor;
-impl<'a> Func<&'a mut Option<Result<PpsPacket, errors::SensorError>>> for PassthroughPpsProcessor {
-    type Output = Option<PpsPacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<PpsPacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            //println!("Got Pps");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughPpsProcessor, PpsPacket);
 
 // ------------------------------
@@ -897,23 +679,4 @@ impl_passthrough_sensor_packet_processor!(PassthroughPpsProcessor, PpsPacket);
 
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughAttitudeProcessor;
-impl<'a> Func<&'a mut Option<Result<AttitudePacket, errors::SensorError>>>
-    for PassthroughAttitudeProcessor
-{
-    type Output = Option<AttitudePacket>;
-    fn call(
-        &mut self,
-        arg: &'a mut Option<Result<AttitudePacket, errors::SensorError>>,
-        flags: &mut CalibrationFlags,
-        params: &mut Params,
-    ) -> Self::Output {
-        if let Some(Ok(_packet)) = arg.take() {
-            // do something with the parameters access...
-            //println!("Got Attitude");
-            Some(_packet)
-        } else {
-            None
-        }
-    }
-}
 impl_passthrough_sensor_packet_processor!(PassthroughAttitudeProcessor, AttitudePacket);
