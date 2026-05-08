@@ -143,14 +143,6 @@ impl BoardIo for Board {
         sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
-
-        // if let Some(gnss_packet) = sensors.1.1.1.1.0 {
-        //     match gnss_packet {
-        //         Ok(data) => defmt::info!("GPS data: lat {:?} | lon {:?}", data.lat, data.lon),
-        //         Err(e) => defmt::error!("Error reading IMU data"),
-        //     }
-        //     // defmt::info!("GPS data received!");
-        // }
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {

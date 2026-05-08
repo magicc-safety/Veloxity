@@ -1,4 +1,4 @@
-# Moving From HLists Toward Static ECS-Style Systems
+# RustFlight World/Ports Architecture Migration Record
 
 ## Working Agreement
 
@@ -20,7 +20,7 @@ User requirements for ongoing work:
 - Treat current ROSflight 2.x behavior from `rosflight_firmware` and `rosflight_ros_pkgs/rosflight_io` as the compatibility target.
 - Responses that imply completed work should be sent after the relevant owning system completes that work.
 - Avoid one-off patches that duplicate old shortcuts in the new architecture.
-- Continue building the new World/ports/events path in parallel with the legacy HList path until the new path is verified enough to delete the old path.
+- Keep the active `World`/ports/events/resource path compatible with the ROSflight 2.x wire architecture while removing stale migration scaffolding as each replacement is proven.
 
 Workflow notes for future agents:
 
@@ -32,28 +32,29 @@ Workflow notes for future agents:
   - add the event/resource/port shape,
   - move ownership of mutation to the domain system,
   - wire `World`,
-  - keep legacy `ROSFlight` compatibility wired where needed,
+  - preserve ROSflight wire compatibility and command ordering,
   - add component tests,
   - add World handoff tests when the scheduler path changes,
   - update this document,
   - validate,
   - commit locally.
-- `cargo fmt` is currently unavailable in this environment because `cargo-fmt` is not installed.
+- `cargo fmt` is available through the workspace-local toolchain:
+  `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt`.
 - If sandbox namespace errors occur on read-only shell commands, rerun the same command with the approved/escalated path rather than changing the workflow.
 
-## Context
+## Current Context
 
-RustFlight currently uses HLists to encode board sensor inventory, sensor processing pipelines, body-type sensor requirements, telemetry packet access, and compile-time compatibility between boards and vehicle bodies.
+RustFlight formerly used HLists to encode board sensor inventory, sensor processing pipelines, body-type sensor requirements, telemetry packet access, and compile-time compatibility between boards and vehicle bodies. The active source now runs through `World`, `BoardIo`, named sensor resources, bounded event queues, and explicit systems.
 
 That design solved an important early problem: it let the compiler prove that a selected board could provide the packet types required by a selected body type. It also made the raw-to-processed sensor pipeline generic over different board shapes.
 
 The downside is that the type system is now carrying too much architectural bookkeeping. Adding a board/body/configuration requires positional type indices such as `There<There<There<Here>>>`, and board implementations have to write through nested tuple fields such as `sensors.1.1.1.0`. This makes the architecture hard to extend, hard to read, and brittle when sensors, telemetry streams, or body requirements change.
 
-The goal of this proposal is to keep RustFlight modular and deterministic while replacing HList rigidity with named resources, fixed-order systems, and bounded events.
+The goal remains to keep RustFlight modular and deterministic while replacing HList rigidity with named resources, fixed-order systems, and bounded events.
 
-## Current HList Responsibilities
+## Original HList Responsibilities
 
-The current HList design provides five main capabilities:
+The old HList design provided five main capabilities:
 
 1. Board-specific raw sensor inventory.
 2. Raw-to-processed sensor processor ordering.
@@ -61,9 +62,9 @@ The current HList design provides five main capabilities:
 4. Telemetry access to processed packet types.
 5. Compile-time board/body compatibility checks.
 
-Those capabilities are valuable. The proposed architecture keeps the capabilities but moves them into simpler constructs.
+Those capabilities remain valuable. The active architecture keeps the capabilities but moves them into simpler constructs.
 
-## Proposed Direction
+## Active Direction
 
 Use a static ECS-style architecture rather than a conventional dynamic ECS crate.
 
@@ -113,7 +114,7 @@ This removes positional access from board code and telemetry code. A board fills
 Instead of mapping an HList of processors over an HList of raw packets, sensor processing becomes a set of named systems.
 
 ```rust
-fn update_board_sensors<B: BoardTrait>(board: &mut B, raw: &mut SensorBus);
+fn update_board_sensors<B: BoardIo>(board: &mut B, raw: &mut SensorBus);
 
 fn process_imu(
     raw: &mut SensorBus,
@@ -4256,6 +4257,45 @@ Current status after this slice:
 
 - Active source no longer carries commented-out import/module/debug scaffolding.
 - Remaining TODO scan hits represent actual unresolved work or ordinary explanatory comments.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Architecture Review Checkpoint
+
+Reason for this review:
+
+- The branch had completed major HLIST, `ROSFlight`, `BoardTrait`, `BodyModel`, and params cleanup.
+- Before continuing implementation, the codebase needed a synchronous review of whether the new architecture was becoming more understandable and closer to the original migration goal.
+
+Reviewer findings:
+
+- Understandability: `World::run_comm_param_sensor_stages` mixed too many pipeline phases in one method, and `World` exposed nearly every retained resource publicly.
+- Goal progress: the active architecture is on track. Core, sim, PixRacerPro, and Nucleo now run through `World`, named resources, bounded queues, staged systems, and `BoardIo`; HLIST is no longer part of the source architecture.
+- Verbosity: repeated World test setup, broad public fields, and generated-looking comments created noise that did not help a programmer interact with the code.
+- Confusing artifacts: the top of this document still described an early parallel HLIST migration, board files still carried commented positional sensor examples, and embedded entrypoint file headers still used the old `typed_test.rs` label.
+
+Recommended next ordered steps:
+
+1. Update this architecture document so the opening state matches the current source architecture and preserve the review report as a handoff checkpoint.
+2. Split the large `World::run_comm_param_sensor_stages` body into smaller named stage helpers without changing stage order.
+3. Make `World` retained resources private so extension goes through explicit scheduler methods instead of external field mutation.
+4. Remove stale HLIST/debug/comment artifacts from PixRacerPro, Nucleo, sim PWM, and embedded entrypoint headers.
+5. Add a shared World test fixture/builder and move repeated baseline setup to it.
+
+Current status:
+
+- The architecture document opening now describes the current `World`/ports/events/resource architecture rather than the original parallel HLIST migration state.
+- `World::run_comm_param_sensor_stages` now delegates to named private stage helpers while preserving the existing execution order.
+- `World` retained resources are private to the scheduler.
+- Stale HLIST/debug/comment artifacts from PixRacerPro, Nucleo, sim PWM, and embedded entrypoint headers have been removed.
+- World tests now share a baseline fixture for the common `TestBoard`/`Quadrotor`/`RecordingCommLink`/`TestPwm` setup.
 
 Validation:
 

@@ -64,33 +64,33 @@ where
     CI: CommInterface<B>,
     PD: PwmDriver,
 {
-    pub board: B,
-    pub params: Params,
-    pub param_list_state: ParamListState,
-    pub param_events: ParamEventQueues,
-    pub comm_events: CommEventQueues,
-    pub command_events: CommandEventQueues,
-    pub companion_events: CompanionEventQueues,
-    pub companion_link: CompanionLinkState,
-    pub aux_commands: AuxCommandState,
-    pub external_attitude: ExternalAttitudeState,
-    pub comm: CommManager<B, CI>,
-    pub raw_sensors: SensorBus,
-    pub processed_sensors: ProcessedSensors,
-    pub sensor_processors: SensorProcessorSet,
-    pub rc: Rc,
-    pub command: CommandManager,
-    pub state: StateManager,
-    pub cal_flags: CalibrationFlags,
-    pub estimator: BT::Estimator,
-    pub controller: BT::Controller,
-    pub mixer: BT::Mixer,
-    pub control_pipeline: ControlPipelineResource<
+    board: B,
+    params: Params,
+    param_list_state: ParamListState,
+    param_events: ParamEventQueues,
+    comm_events: CommEventQueues,
+    command_events: CommandEventQueues,
+    companion_events: CompanionEventQueues,
+    companion_link: CompanionLinkState,
+    aux_commands: AuxCommandState,
+    external_attitude: ExternalAttitudeState,
+    comm: CommManager<B, CI>,
+    raw_sensors: SensorBus,
+    processed_sensors: ProcessedSensors,
+    sensor_processors: SensorProcessorSet,
+    rc: Rc,
+    command: CommandManager,
+    state: StateManager,
+    cal_flags: CalibrationFlags,
+    estimator: BT::Estimator,
+    controller: BT::Controller,
+    mixer: BT::Mixer,
+    control_pipeline: ControlPipelineResource<
         <BT::Estimator as NamedEstimator>::State,
         <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands,
     >,
-    pub pwm_output: PwmOutputState,
-    pub pwm: PD,
+    pwm_output: PwmOutputState,
+    pwm: PD,
     last_imu_seen: u64,
     _body_type: PhantomData<BT>,
 }
@@ -172,6 +172,18 @@ where
     pub fn run_comm_param_sensor_stages(&mut self) {
         let now_us = self.board.clock_micros();
 
+        self.process_comm_stage();
+        self.apply_companion_events();
+        self.apply_command_events();
+        self.service_param_events();
+        self.apply_param_reactions();
+        self.request_gyro_calibration_if_needed();
+        self.run_sensor_ingestion_stage();
+        self.update_sensor_health_and_calibration(now_us);
+        self.drain_logs_and_send_responses();
+    }
+
+    fn process_comm_stage(&mut self) {
         self.comm.process_incoming_messages(&mut self.board);
         self.comm.act_on_messages(
             &mut self.param_events,
@@ -180,7 +192,9 @@ where
             &mut self.companion_events,
             &mut self.board,
         );
+    }
 
+    fn apply_companion_events(&mut self) {
         companion_system::apply_companion_heartbeats(CompanionHeartbeatCtx {
             requests: EventDrainPort::new(&mut self.companion_events.heartbeats),
             state: &mut self.companion_link,
@@ -193,7 +207,9 @@ where
             requests: EventDrainPort::new(&mut self.companion_events.external_attitudes),
             state: &mut self.external_attitude,
         });
+    }
 
+    fn apply_command_events(&mut self) {
         let started_calibration =
             command_system::apply_calibration_requests(CalibrationRequestCtx {
                 requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
@@ -246,7 +262,9 @@ where
             requests: EventDrainPort::new(&mut self.command_events.config_info_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
+    }
 
+    fn service_param_events(&mut self) {
         param_system::service_param_read_requests(ParamReadCtx {
             params: ParamsReadPort::new(&self.params),
             requests: EventDrainPort::new(&mut self.param_events.read_requests),
@@ -266,7 +284,9 @@ where
             changes: EventEmitPort::new(&mut self.param_events.changes),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
+    }
 
+    fn apply_param_reactions(&mut self) {
         param_reactions::rc_on_param_changed(RcParamChangedCtx {
             rc: &mut self.rc,
             params: ParamsReadPort::new(&self.params),
@@ -281,11 +301,15 @@ where
         });
 
         self.param_events.changes.clear();
+    }
 
+    fn request_gyro_calibration_if_needed(&mut self) {
         if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
             self.cal_flags.insert(CalibrationFlags::GYRO);
         }
+    }
 
+    fn run_sensor_ingestion_stage(&mut self) {
         self.board.update_sensor_bus(&mut self.raw_sensors);
         process_sensor_bus(
             &mut self.raw_sensors,
@@ -294,7 +318,9 @@ where
             &mut self.cal_flags,
             &mut self.params,
         );
-        self.update_sensor_health_and_calibration(now_us);
+    }
+
+    fn drain_logs_and_send_responses(&mut self) {
         log_system::drain_logs_to_comm_responses(LogDrainCtx {
             responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
@@ -712,24 +738,48 @@ mod tests {
         }
     }
 
-    #[test]
-    fn world_scheduler_runs_deferred_param_pipeline() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
+    type TestWorld = World<TestBoard, Quadrotor, RecordingCommLink, TestPwm>;
+
+    fn test_world_with_params(params: Params) -> TestWorld {
         let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
 
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
+        TestWorld::init(
+            TestBoard::default(),
             params,
-            comm_link,
+            RecordingCommLink::new(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        )
+    }
+
+    fn test_world() -> TestWorld {
+        test_world_with_params(Params::new())
+    }
+
+    fn armed_test_world_with_params(params: Params) -> TestWorld {
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update(Event::REQUEST_ARM, &params);
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+
+        TestWorld::init(
+            TestBoard::default(),
+            params,
+            RecordingCommLink::new(),
             state,
             Default::default(),
             Default::default(),
             mixer,
             TestPwm::new(),
-        );
+        )
+    }
+
+    #[test]
+    fn world_scheduler_runs_deferred_param_pipeline() {
+        let mut world = test_world();
 
         world.comm.msgs.param_set = Some(ParamSetMsg {
             target_system: 1,
@@ -749,22 +799,7 @@ mod tests {
 
     #[test]
     fn world_scheduler_streams_param_request_list_through_param_system() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.comm.msgs.param_request_list = Some(ParamRequestListMsg {
             target_system: 1,
@@ -789,23 +824,9 @@ mod tests {
 
     #[test]
     fn world_scheduler_answers_param_request_read_through_param_system() {
-        let board = TestBoard::default();
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world_with_params(params);
 
         world.comm.msgs.param_request_read = Some(ParamRequestReadMsg {
             target_system: 1,
@@ -892,24 +913,9 @@ mod tests {
 
     #[test]
     fn world_scheduler_processes_named_rc_packet() {
-        let board = TestBoard::default();
         let mut params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
         params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world_with_params(params);
 
         world.processed_sensors.rc = Some(crate::packets::RcPacket {
             header: crate::packets::RosflightPacketHeader {
@@ -933,7 +939,6 @@ mod tests {
 
     #[test]
     fn world_control_stage_runs_once_per_imu_timestamp() {
-        let board = TestBoard::default();
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
@@ -942,20 +947,7 @@ mod tests {
             ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED,
             ParamValue::Bool(true),
         );
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world_with_params(params);
 
         world
             .state
@@ -1028,23 +1020,7 @@ mod tests {
 
     #[test]
     fn world_sensor_health_sets_and_clears_imu_timeout() {
-        let mut board = TestBoard::default();
-        board.current_time_us = 0;
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.board.current_time_us = IMU_TIMEOUT_US + 1;
         world.update_sensor_health_and_calibration(world.board.clock_micros());
@@ -1078,22 +1054,7 @@ mod tests {
 
     #[test]
     fn world_sends_calibration_ack_after_calibration_flag_clears() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::GyroCalibration,
@@ -1123,24 +1084,10 @@ mod tests {
 
     #[test]
     fn world_pwm_output_stage_follows_armed_state_transitions() {
-        let board = TestBoard::default();
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world_with_params(params);
 
         assert!(!world.run_pwm_output_stage());
         assert_eq!(world.pwm.enable_all_count, 0);
@@ -1169,22 +1116,7 @@ mod tests {
 
     #[test]
     fn world_applies_offboard_control_command_event() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.comm.msgs.offboard_control = Some(OffboardControlMsg {
             mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
@@ -1205,22 +1137,7 @@ mod tests {
 
     #[test]
     fn world_applies_companion_input_events() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.comm.msgs.heartbeat = Some(HeartbeatMsg {
             type_: 1,
@@ -1262,23 +1179,9 @@ mod tests {
 
     #[test]
     fn world_applies_param_defaults_and_sends_ack_after_apply() {
-        let board = TestBoard::default();
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world_with_params(params);
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::SetParamDefaults,
@@ -1303,22 +1206,7 @@ mod tests {
 
     #[test]
     fn world_routes_board_command_and_acks_unsupported_after_apply_stage() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::WriteParams,
@@ -1340,22 +1228,7 @@ mod tests {
     fn world_drains_logs_through_comm_response_stage() {
         while crate::logger::Logger::pop().is_some() {}
 
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         crate::log_info!("world log");
         world.run_comm_param_sensor_stages();
@@ -1367,7 +1240,6 @@ mod tests {
 
     #[test]
     fn world_routes_rc_trim_calibration_and_sets_equilibrium_torques() {
-        let board = TestBoard::default();
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_RC_MAX_ROLLRATE, ParamValue::Float(1.0));
@@ -1379,20 +1251,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(0.5));
         params.set_by_id(ParamId::PARAM_Y_EQ_TORQUE, ParamValue::Float(-0.5));
         params.set_by_id(ParamId::PARAM_Z_EQ_TORQUE, ParamValue::Float(0.25));
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world_with_params(params);
 
         let mut channels = [0.5; crate::packets::RC_PACKET_CHANNELS];
         channels[0] = 0.55;
@@ -1443,22 +1302,7 @@ mod tests {
 
     #[test]
     fn world_routes_reset_origin_and_acks_unsupported_after_apply_stage() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::ResetOrigin,
@@ -1478,22 +1322,7 @@ mod tests {
 
     #[test]
     fn world_routes_config_info_and_acks_unsupported_after_apply_stage() {
-        let board = TestBoard::default();
-        let params = Params::new();
-        let comm_link = RecordingCommLink::new();
-        let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = test_world();
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::SendAllConfigInfos,
@@ -1513,26 +1342,10 @@ mod tests {
 
     #[test]
     fn world_rejects_command_actions_while_armed() {
-        let board = TestBoard::default();
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
-        let comm_link = RecordingCommLink::new();
-        let mut state = StateManager::new();
-        state.update(Event::INITIALIZED, &params);
-        state.update(Event::REQUEST_ARM, &params);
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-
-        let mut world = World::<TestBoard, Quadrotor, RecordingCommLink, TestPwm>::init(
-            board,
-            params,
-            comm_link,
-            state,
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
+        let mut world = armed_test_world_with_params(params);
         assert!(world.state.is_armed());
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
