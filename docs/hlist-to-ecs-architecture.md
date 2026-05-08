@@ -4096,3 +4096,32 @@ Validation:
 - `cargo test -p rustflight_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Stale Params Module Removal
+
+Reason for this change:
+
+- `params2` is the active parameter API used by core, sim, PixRacerPro, and Nucleo.
+- The old `rustflight_core/src/params.rs` file was no longer exported and had no live call sites.
+- Keeping the stale module made the parameter boundary look duplicated after the event/port parameter migration.
+
+Design now implemented:
+
+- Removed `rustflight_core/src/params.rs`.
+- Removed the stale commented `pub mod params` line from `rustflight_core/src/lib.rs`.
+- Removed a stale commented `crate::params::Params` import from `packets.rs`.
+
+Current status after this slice:
+
+- `params2` is the only parameter module in active source.
+- No active source imports `crate::params`.
+
+Validation:
+
+- `rg -n "params::|pub mod params|mod params|params\\.rs|crate::params" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns only `params2` matches.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.

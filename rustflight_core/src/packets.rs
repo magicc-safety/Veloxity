@@ -35,8 +35,6 @@
 // ******************************************************************************
 // **/
 //use crate::errors;
-//use crate::params::Params;
-
 //use defmt::Format;
 
 //pub static PAYLOAD_SIZE: usize = 448;
