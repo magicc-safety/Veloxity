@@ -51,6 +51,15 @@ impl<'a, T: Copy, const N: usize> EventEmitPort<'a, T, N> {
     pub fn emit(&mut self, event: T) -> Result<(), EventQueueError> {
         self.queue.push(event)
     }
+
+    pub fn emit_or_log(&mut self, event: T, label: &str) -> bool {
+        if self.emit(event).is_ok() {
+            true
+        } else {
+            crate::log_warn!("event queue full: {}", label);
+            false
+        }
+    }
 }
 
 pub struct EventDrainPort<'a, T: Copy, const N: usize> {
@@ -78,5 +87,22 @@ impl<'a, T: Copy, const N: usize> EventReadPort<'a, T, N> {
 
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
         self.queue.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn emit_or_log_reports_full_queue_without_overwriting_existing_event() {
+        let mut queue = EventQueue::<u8, 1>::new();
+        let mut port = EventEmitPort::new(&mut queue);
+
+        assert!(port.emit_or_log(1, "test event"));
+        assert!(!port.emit_or_log(2, "test event"));
+
+        assert_eq!(queue.pop(), Some(1));
+        assert_eq!(queue.pop(), None);
     }
 }

@@ -22,10 +22,10 @@ fn emit_cmd_ack<const N: usize>(
     command: RosflightCmd,
     success: RosflightCmdResponse,
 ) {
-    let _ = responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
-        command,
-        success,
-    }));
+    responses.emit_or_log(
+        CommResponse::CmdAck(RosflightCmdAckMsg { command, success }),
+        "command ack response",
+    );
 }
 
 pub struct CalibrationRequestCtx<'a, const N: usize> {
@@ -126,10 +126,13 @@ where
         } else {
             RosflightCmdResponse::RosflightCmdFailed
         };
-        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
-            command: request.command,
-            success,
-        }));
+        ctx.responses.emit_or_log(
+            CommResponse::CmdAck(RosflightCmdAckMsg {
+                command: request.command,
+                success,
+            }),
+            "board command ack response",
+        );
     }
 }
 
@@ -174,10 +177,13 @@ pub fn apply_rc_trim_calibration_requests<C, const N: usize>(
         } else {
             RosflightCmdResponse::RosflightCmdSuccess
         };
-        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
-            command: request.command,
-            success,
-        }));
+        ctx.responses.emit_or_log(
+            CommResponse::CmdAck(RosflightCmdAckMsg {
+                command: request.command,
+                success,
+            }),
+            "rc trim ack response",
+        );
     }
 }
 
@@ -209,11 +215,12 @@ pub fn apply_version_requests<const N: usize>(mut ctx: VersionRequestCtx<'_, N>)
         let mut version_bytes = [0u8; 50];
         let len = version_str.len().min(version_bytes.len());
         version_bytes[..len].copy_from_slice(version_str.as_bytes());
-        let _ = ctx
-            .responses
-            .emit(CommResponse::Version(RosflightVersionMsg {
+        ctx.responses.emit_or_log(
+            CommResponse::Version(RosflightVersionMsg {
                 version: version_bytes,
-            }));
+            }),
+            "version response",
+        );
         emit_cmd_ack(
             &mut ctx.responses,
             request.command,
@@ -229,10 +236,13 @@ pub struct ResetOriginCtx<'a, const N: usize> {
 
 pub fn apply_reset_origin_requests<const N: usize>(mut ctx: ResetOriginCtx<'_, N>) {
     while let Some(request) = ctx.requests.next() {
-        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
-            command: request.command,
-            success: RosflightCmdResponse::RosflightCmdFailed,
-        }));
+        ctx.responses.emit_or_log(
+            CommResponse::CmdAck(RosflightCmdAckMsg {
+                command: request.command,
+                success: RosflightCmdResponse::RosflightCmdFailed,
+            }),
+            "reset origin ack response",
+        );
     }
 }
 
@@ -243,10 +253,13 @@ pub struct ConfigInfoCtx<'a, const N: usize> {
 
 pub fn apply_config_info_requests<const N: usize>(mut ctx: ConfigInfoCtx<'_, N>) {
     while let Some(request) = ctx.requests.next() {
-        let _ = ctx.responses.emit(CommResponse::CmdAck(RosflightCmdAckMsg {
-            command: request.command,
-            success: RosflightCmdResponse::RosflightCmdFailed,
-        }));
+        ctx.responses.emit_or_log(
+            CommResponse::CmdAck(RosflightCmdAckMsg {
+                command: request.command,
+                success: RosflightCmdResponse::RosflightCmdFailed,
+            }),
+            "config info ack response",
+        );
     }
 }
 

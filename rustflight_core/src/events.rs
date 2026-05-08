@@ -40,6 +40,15 @@ impl<T: Copy, const N: usize> EventQueue<T, N> {
         Ok(())
     }
 
+    pub fn push_or_log(&mut self, event: T, label: &str) -> bool {
+        if self.push(event).is_ok() {
+            true
+        } else {
+            crate::log_warn!("event queue full: {}", label);
+            false
+        }
+    }
+
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             return None;
@@ -294,5 +303,16 @@ mod tests {
 
         assert_eq!(queue.pop(), Some(7));
         assert_eq!(queue.pop(), Some(8));
+    }
+
+    #[test]
+    fn push_or_log_drops_new_event_when_queue_is_full() {
+        let mut queue = EventQueue::<u8, 1>::new();
+
+        assert!(queue.push_or_log(1, "test event"));
+        assert!(!queue.push_or_log(2, "test event"));
+
+        assert_eq!(queue.pop(), Some(1));
+        assert_eq!(queue.pop(), None);
     }
 }

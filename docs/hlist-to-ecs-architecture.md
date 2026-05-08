@@ -4305,3 +4305,44 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## World Stage Context Boundary Progress
+
+Reason for this change:
+
+- After the review cleanup, the remaining direct scheduler coupling was concentrated in `World::run_rc_command_state_stages`, `World::run_pwm_output_stage`, and `World::run_control_stages_if_new_imu`.
+- The goal is to keep `World` as the deterministic scheduler/wiring owner while making producer/consumer ownership visible through explicit context structs.
+- Runtime event producers also ignored queue overflow in several places, which hid dropped events.
+
+Design now implemented:
+
+- Added `rc_system::RcCommandStateCtx` and `run_rc_command_state` for the RC packet, RC manager, command manager, state manager, and params handoff.
+- Added `pwm_system::PwmSyncCtx` so PWM enable/disable synchronization is an explicit context call.
+- Added `control_system::ControlPipelineResource`, `ControlPipelineCtx`, and `run_control_pipeline_if_new_imu` for estimator, controller, mixer, PWM output, telemetry, auxiliary command, and external-attitude flow.
+- `World` now constructs those contexts and delegates the stage work instead of owning the detailed control flow inline.
+- Added `EventQueue::push_or_log` and `EventEmitPort::emit_or_log`.
+- Runtime comm, command, and param producers now log and drop the new event when the target queue is full. Log draining still stops when the comm response queue is full to avoid recursively logging while draining logs.
+
+Current status after this slice:
+
+- Core stage boundaries are closer to the desired producer/consumer/context model.
+- `World` remains the central deterministic schedule, but RC/command/state, PWM sync, and control pipeline work now have named borrow contexts.
+- Event overflow handling is explicit for normal runtime producers instead of silent `let _ = ...` drops.
+- Existing hardware entrypoints required no source changes; they still compile against the updated core.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p rustflight_core rc_system::tests --lib` passes.
+- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
+- `cargo test -p rustflight_core events::tests --lib` passes.
+- `cargo test -p rustflight_core ports::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+Known unrelated test status:
+
+- `cargo test -p rustflight_core --lib` still hits the pre-existing state-machine `UNCALIBRATED_IMU` failures documented earlier; the affected World, RC, PWM, event, and port tests pass.

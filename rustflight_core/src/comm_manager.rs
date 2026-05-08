@@ -354,14 +354,13 @@ where
         };
 
         if calibration_command_is_complete(command, flags) {
-            if comm_events
-                .responses
-                .push(CommResponse::CmdAck(RosflightCmdAckMsg {
+            if !comm_events.responses.push_or_log(
+                CommResponse::CmdAck(RosflightCmdAckMsg {
                     command,
                     success: RosflightCmdResponse::RosflightCmdSuccess,
-                }))
-                .is_err()
-            {
+                }),
+                "completed calibration ack",
+            ) {
                 return false;
             }
             self.pending_calibration_ack = None;
@@ -380,20 +379,25 @@ where
         board: &mut B,
     ) {
         if let Some(msg) = self.msgs.heartbeat.take() {
-            let _ = companion_events
+            companion_events
                 .heartbeats
-                .push(CompanionHeartbeatReceived { msg });
+                .push_or_log(CompanionHeartbeatReceived { msg }, "companion heartbeat");
         }
 
         // first check the param_request_list
         if let Some(msg) = self.msgs.param_request_read.take() {
-            let _ = param_events.read_requests.push(ParamReadRequested {
-                identifier: msg.param_identifier,
-            });
+            param_events.read_requests.push_or_log(
+                ParamReadRequested {
+                    identifier: msg.param_identifier,
+                },
+                "param read request",
+            );
         }
 
         if self.msgs.param_request_list.take().is_some() {
-            let _ = param_events.list_requests.push(ParamListRequested);
+            param_events
+                .list_requests
+                .push_or_log(ParamListRequested, "param list request");
         }
 
         // next check for timesync messages
@@ -406,28 +410,31 @@ where
 
         if let Some(msg) = self.msgs.offboard_control.take() {
             let now_us = board.clock_micros();
-            let _ = command_events
+            command_events
                 .offboard_control_requests
-                .push(OffboardControlRequested { now_us, msg });
+                .push_or_log(OffboardControlRequested { now_us, msg }, "offboard control");
         }
 
         if let Some(msg) = self.msgs.aux_cmd.take() {
-            let _ = companion_events
+            companion_events
                 .aux_commands
-                .push(AuxCommandReceived { msg });
+                .push_or_log(AuxCommandReceived { msg }, "aux command");
         }
 
         if let Some(msg) = self.msgs.external_attitude.take() {
-            let _ = companion_events
+            companion_events
                 .external_attitudes
-                .push(ExternalAttitudeReceived { msg });
+                .push_or_log(ExternalAttitudeReceived { msg }, "external attitude");
         }
 
         if let Some(msg) = self.msgs.param_set.take() {
-            let _ = param_events.set_requests.push(ParamSetRequested {
-                value: msg.param_value,
-                param_id_bytes: msg.param_id,
-            });
+            param_events.set_requests.push_or_log(
+                ParamSetRequested {
+                    value: msg.param_value,
+                    param_id_bytes: msg.param_id,
+                },
+                "param set request",
+            );
         }
 
         // now act on ROSflight Commands
@@ -440,145 +447,132 @@ where
 
             match msg.command {
                 RosflightCmd::RcCalibration => {
-                    if command_events
-                        .rc_trim_calibration_requests
-                        .push(RcTrimCalibrationRequested {
+                    if command_events.rc_trim_calibration_requests.push_or_log(
+                        RcTrimCalibrationRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "rc trim calibration",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::AccelCalibration => {
-                    if command_events
-                        .calibration_requests
-                        .push(CalibrationRequested {
+                    if command_events.calibration_requests.push_or_log(
+                        CalibrationRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "accel calibration",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::GyroCalibration => {
-                    if command_events
-                        .calibration_requests
-                        .push(CalibrationRequested {
+                    if command_events.calibration_requests.push_or_log(
+                        CalibrationRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "gyro calibration",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::BaroCalibration => {
-                    if command_events
-                        .calibration_requests
-                        .push(CalibrationRequested {
+                    if command_events.calibration_requests.push_or_log(
+                        CalibrationRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "baro calibration",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::AirspeedCalibration => {
-                    if command_events
-                        .calibration_requests
-                        .push(CalibrationRequested {
+                    if command_events.calibration_requests.push_or_log(
+                        CalibrationRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "airspeed calibration",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::ReadParams => {
-                    if command_events
-                        .board_command_requests
-                        .push(BoardCommandRequested {
+                    if command_events.board_command_requests.push_or_log(
+                        BoardCommandRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "read params command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::WriteParams => {
-                    if command_events
-                        .board_command_requests
-                        .push(BoardCommandRequested {
+                    if command_events.board_command_requests.push_or_log(
+                        BoardCommandRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "write params command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::SetParamDefaults => {
-                    if command_events
-                        .param_defaults_requests
-                        .push(ParamDefaultsRequested {
+                    if command_events.param_defaults_requests.push_or_log(
+                        ParamDefaultsRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "param defaults command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::Reboot => {
-                    if command_events
-                        .board_command_requests
-                        .push(BoardCommandRequested {
+                    if command_events.board_command_requests.push_or_log(
+                        BoardCommandRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "reboot command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::RebootToBootloader => {
-                    if command_events
-                        .board_command_requests
-                        .push(BoardCommandRequested {
+                    if command_events.board_command_requests.push_or_log(
+                        BoardCommandRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "bootloader command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::SendVersion => {
-                    if command_events
-                        .version_requests
-                        .push(VersionRequested {
+                    if command_events.version_requests.push_or_log(
+                        VersionRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "version command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::ResetOrigin => {
-                    if command_events
-                        .reset_origin_requests
-                        .push(ResetOriginRequested {
+                    if command_events.reset_origin_requests.push_or_log(
+                        ResetOriginRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "reset origin command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
                 RosflightCmd::SendAllConfigInfos => {
-                    if command_events
-                        .config_info_requests
-                        .push(ConfigInfoRequested {
+                    if command_events.config_info_requests.push_or_log(
+                        ConfigInfoRequested {
                             command: msg.command,
-                        })
-                        .is_ok()
-                    {
+                        },
+                        "config info command",
+                    ) {
                         send_ack_now = false;
                     }
                 }
@@ -589,7 +583,9 @@ where
                     command: msg.command,
                     success,
                 };
-                let _ = comm_events.responses.push(CommResponse::CmdAck(ack_msg));
+                comm_events
+                    .responses
+                    .push_or_log(CommResponse::CmdAck(ack_msg), "command ack response");
             }
         } // end if let Some(msg)
     }

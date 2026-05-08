@@ -58,7 +58,7 @@ pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
             new,
             param_id_bytes: req.param_id_bytes,
         };
-        let _ = ctx.changes.emit(changed);
+        ctx.changes.emit_or_log(changed, "param changed event");
 
         let response = ParamValueMsg {
             param_id: req.param_id_bytes,
@@ -66,7 +66,8 @@ pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
             param_count: PARAMS_COUNT as u16,
             param_index: id as u16,
         };
-        let _ = ctx.responses.emit(CommResponse::ParamValue(response));
+        ctx.responses
+            .emit_or_log(CommResponse::ParamValue(response), "param set response");
     }
 }
 
@@ -82,7 +83,8 @@ pub fn service_param_read_requests(mut ctx: ParamReadCtx<'_>) {
             param_count: PARAMS_COUNT as u16,
             param_index: id as u16,
         };
-        let _ = ctx.responses.emit(CommResponse::ParamValue(response));
+        ctx.responses
+            .emit_or_log(CommResponse::ParamValue(response), "param read response");
     }
 }
 
@@ -106,7 +108,8 @@ pub fn service_param_list_requests(mut ctx: ParamListCtx<'_>) {
         param_count: PARAMS_COUNT as u16,
         param_index: def.id as u16,
     };
-    let _ = ctx.responses.emit(CommResponse::ParamValue(response));
+    ctx.responses
+        .emit_or_log(CommResponse::ParamValue(response), "param list response");
 
     let next = index + 1;
     ctx.state.next_index = (next < PARAMS_COUNT).then_some(next);

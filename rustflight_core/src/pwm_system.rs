@@ -24,29 +24,35 @@ impl PwmOutputState {
     }
 }
 
-pub fn sync_pwm_output_state<B, P>(
-    board: &mut B,
-    pwm: &mut P,
-    output: &mut PwmOutputState,
-    state: &StateManager,
-) -> Result<bool, PwmError>
+pub struct PwmSyncCtx<'a, B, P>
 where
     B: BoardIo,
     P: PwmDriver,
 {
-    let desired_enabled = state.is_armed();
-    if desired_enabled == output.enabled {
+    pub board: &'a mut B,
+    pub pwm: &'a mut P,
+    pub output: &'a mut PwmOutputState,
+    pub state: &'a StateManager,
+}
+
+pub fn sync_pwm_output_state<B, P>(ctx: PwmSyncCtx<'_, B, P>) -> Result<bool, PwmError>
+where
+    B: BoardIo,
+    P: PwmDriver,
+{
+    let desired_enabled = ctx.state.is_armed();
+    if desired_enabled == ctx.output.enabled {
         return Ok(false);
     }
 
     if desired_enabled {
-        pwm.enable_all()?;
+        ctx.pwm.enable_all()?;
     } else {
-        pwm.disable_all();
-        pwm.flush(board);
+        ctx.pwm.disable_all();
+        ctx.pwm.flush(ctx.board);
     }
 
-    output.enabled = desired_enabled;
+    ctx.output.enabled = desired_enabled;
     Ok(true)
 }
 
@@ -256,22 +262,54 @@ mod tests {
         let mut pwm = TestPwm::new(false);
         let mut output = PwmOutputState::new(pwm.is_enabled());
 
-        assert!(!sync_pwm_output_state(&mut board, &mut pwm, &mut output, &state).unwrap());
+        assert!(
+            !sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                state: &state,
+            })
+            .unwrap()
+        );
         assert_eq!(pwm.enable_all_count, 0);
         assert_eq!(pwm.disable_all_count, 0);
 
         state.update(Event::REQUEST_ARM, &params);
 
-        assert!(sync_pwm_output_state(&mut board, &mut pwm, &mut output, &state).unwrap());
+        assert!(
+            sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                state: &state,
+            })
+            .unwrap()
+        );
         assert!(output.is_enabled());
         assert_eq!(pwm.enable_all_count, 1);
 
-        assert!(!sync_pwm_output_state(&mut board, &mut pwm, &mut output, &state).unwrap());
+        assert!(
+            !sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                state: &state,
+            })
+            .unwrap()
+        );
         assert_eq!(pwm.enable_all_count, 1);
 
         state.update(Event::REQUEST_DISARM, &params);
 
-        assert!(sync_pwm_output_state(&mut board, &mut pwm, &mut output, &state).unwrap());
+        assert!(
+            sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                state: &state,
+            })
+            .unwrap()
+        );
         assert!(!output.is_enabled());
         assert_eq!(pwm.disable_all_count, 1);
         assert_eq!(pwm.flush_count, 1);

@@ -13,6 +13,9 @@ use crate::{
         self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
         ExternalAttitudeCtx, ExternalAttitudeState,
     },
+    control_system::{
+        ControlPipelineCtx, ControlPipelineResource, run_control_pipeline_if_new_imu,
+    },
     controller::{Controller, RcTrimCalibrator},
     estimator::{AttitudeStateTrait, NamedEstimator},
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
@@ -23,8 +26,9 @@ use crate::{
     params::Params,
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
-    pwm_system::{PwmOutputState, compose_pwm_outputs, sync_pwm_output_state, write_pwm_commands},
+    pwm_system::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
+    rc_system::{RcCommandStateCtx, run_rc_command_state},
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
@@ -32,25 +36,6 @@ use crate::{
 };
 
 const IMU_TIMEOUT_US: u64 = 100_000;
-
-pub struct ControlPipelineResource<S, A> {
-    pub latest_estimator_state: S,
-    pub latest_actuator_commands: Option<A>,
-    last_imu_time: u64,
-}
-
-impl<S, A> Default for ControlPipelineResource<S, A>
-where
-    S: Default,
-{
-    fn default() -> Self {
-        Self {
-            latest_estimator_state: Default::default(),
-            latest_actuator_commands: None,
-            last_imu_time: 0,
-        }
-    }
-}
 
 pub struct World<B, BT, CI, PD>
 where
@@ -352,97 +337,45 @@ where
     pub fn run_rc_command_state_stages(&mut self) {
         let now_ms = self.board.clock_millis();
 
-        if let Some(rc_packet) = self.processed_sensors.rc {
-            self.rc.receive(&rc_packet, &self.params, &mut self.state);
-        }
-
-        self.rc.run(now_ms, &self.params, &mut self.state);
-        self.command
-            .run(now_ms, &self.params, &mut self.rc, &mut self.state);
-        self.state.run(&self.params);
+        run_rc_command_state(RcCommandStateCtx {
+            now_ms,
+            sensors: &self.processed_sensors,
+            rc: &mut self.rc,
+            command: &mut self.command,
+            state: &mut self.state,
+            params: &self.params,
+        });
         self.run_pwm_output_stage();
     }
 
     pub fn run_pwm_output_stage(&mut self) -> bool {
-        sync_pwm_output_state(
-            &mut self.board,
-            &mut self.pwm,
-            &mut self.pwm_output,
-            &self.state,
-        )
+        sync_pwm_output_state(PwmSyncCtx {
+            board: &mut self.board,
+            pwm: &mut self.pwm,
+            output: &mut self.pwm_output,
+            state: &self.state,
+        })
         .unwrap_or(false)
     }
 
     pub fn run_control_stages_if_new_imu(&mut self) -> bool {
-        let Some(imu_packet) = self.processed_sensors.imu else {
-            return false;
-        };
-
-        let current_time = imu_packet.header.timestamp;
-        if current_time == self.control_pipeline.last_imu_time {
-            return false;
-        }
-        self.control_pipeline.last_imu_time = current_time;
-
-        let external_attitude = self.external_attitude.latest.take();
-        let state = self.estimator.estimate_named_with_external_attitude(
-            &self.processed_sensors,
-            &self.params,
-            Self::ESTIMATOR_DT,
-            external_attitude,
-        );
-
-        if state.is_healthy() {
-            self.state.update(
-                crate::state_machine::Event::ERROR_CLEARED(
-                    crate::state_machine::ErrorFlag::UNHEALTHY_ESTIMATOR,
-                ),
-                &self.params,
-            );
-        } else {
-            self.state.update(
-                crate::state_machine::Event::ERROR_OCCURRED(
-                    crate::state_machine::ErrorFlag::UNHEALTHY_ESTIMATOR,
-                ),
-                &self.params,
-            );
-        }
-
-        let controls = self.controller.control(
-            &state,
-            &mut self.state,
-            self.command.combined_control(),
-            &self.params,
-            Self::ESTIMATOR_DT,
-        );
-        let actuator_commands = self.mixer.mix(&controls, &self.state);
-        let pwm_outputs = compose_pwm_outputs(
-            actuator_commands.as_ref(),
-            self.mixer.output_types(),
-            self.aux_commands.latest.as_ref(),
-            &self.state,
-            &self.params,
-        );
-        write_pwm_commands(
-            &mut self.board,
-            &mut self.pwm,
-            &self.pwm_output,
-            &pwm_outputs,
-        );
-        let now_us = self.board.clock_micros();
-        self.comm.send_named_telemetry_streams(
-            &mut self.board,
-            now_us,
-            &self.state,
-            &self.command,
-            &state,
-            &self.processed_sensors,
-            &pwm_outputs,
-        );
-
-        self.control_pipeline.latest_estimator_state = state;
-        self.control_pipeline.latest_actuator_commands = Some(actuator_commands);
-        true
+        run_control_pipeline_if_new_imu::<B, BT, CI, PD>(ControlPipelineCtx {
+            board: &mut self.board,
+            comm: &mut self.comm,
+            params: &self.params,
+            sensors: &self.processed_sensors,
+            external_attitude: &mut self.external_attitude,
+            aux_commands: &self.aux_commands,
+            command: &self.command,
+            state: &mut self.state,
+            estimator: &mut self.estimator,
+            controller: &mut self.controller,
+            mixer: &mut self.mixer,
+            control_pipeline: &mut self.control_pipeline,
+            pwm_output: &self.pwm_output,
+            pwm: &mut self.pwm,
+            dt: Self::ESTIMATOR_DT,
+        })
     }
 }
 
