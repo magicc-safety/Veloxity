@@ -77,6 +77,6 @@ fn main() -> ! {
 
     loop {
         // defmt::debug!("One Loop");
-        world.run_comm_param_sensor_stages();
+        world.run_once();
     }
 }

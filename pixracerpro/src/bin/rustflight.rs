@@ -85,6 +85,6 @@ fn main() -> ! {
 
     loop {
         // defmt::info!("Hello World!");
-        world.run_comm_param_sensor_stages();
+        world.run_once();
     }
 }

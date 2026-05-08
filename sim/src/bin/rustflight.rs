@@ -31,6 +31,6 @@ async fn main() {
     );
 
     while tick_subscriber.recv_async().await.is_ok() {
-        world.run_comm_param_sensor_stages();
+        world.run_once();
     }
 }

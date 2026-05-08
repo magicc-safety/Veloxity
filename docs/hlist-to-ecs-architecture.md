@@ -4208,3 +4208,33 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## World Control Resource And Run Naming
+
+Reason for this change:
+
+- `World` stored retained control-pipeline facts directly as scheduler fields.
+- `latest_state`, `latest_actuator_commands`, and the IMU timestamp gate are retained world-owned data, not temporary system contexts.
+- The main loop method was still named `run_comm_param_sensor_stages`, even though it also ran RC, command, state, PWM, and control stages.
+
+Design now implemented:
+
+- Added `ControlPipelineResource` for retained control-pipeline data.
+- Moved latest estimator state, latest actuator commands, and last IMU timestamp into that resource.
+- Renamed the full loop method to `run_once`.
+- Kept `run_comm_param_sensor_stages` as the partial comm/param/sensor stage method used by focused tests.
+
+Current status after this slice:
+
+- Retained control outputs are grouped as a resource.
+- No stored field is named as a control context; context remains reserved for future temporary borrow bundles passed to system functions.
+- Sim, PixRacerPro, and Nucleo call `World::run_once()`.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.

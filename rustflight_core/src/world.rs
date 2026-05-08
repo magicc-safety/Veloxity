@@ -33,6 +33,25 @@ use crate::{
 
 const IMU_TIMEOUT_US: u64 = 100_000;
 
+pub struct ControlPipelineResource<S, A> {
+    pub latest_estimator_state: S,
+    pub latest_actuator_commands: Option<A>,
+    last_imu_time: u64,
+}
+
+impl<S, A> Default for ControlPipelineResource<S, A>
+where
+    S: Default,
+{
+    fn default() -> Self {
+        Self {
+            latest_estimator_state: Default::default(),
+            latest_actuator_commands: None,
+            last_imu_time: 0,
+        }
+    }
+}
+
 pub struct World<B, BT, CI, PD>
 where
     B: BoardIo,
@@ -66,11 +85,12 @@ where
     pub estimator: BT::Estimator,
     pub controller: BT::Controller,
     pub mixer: BT::Mixer,
-    pub latest_state: <BT::Estimator as NamedEstimator>::State,
-    pub latest_actuator_commands: Option<<BT::Mixer as crate::mixer::Mixer>::ActuatorCommands>,
+    pub control_pipeline: ControlPipelineResource<
+        <BT::Estimator as NamedEstimator>::State,
+        <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands,
+    >,
     pub pwm_output: PwmOutputState,
     pub pwm: PD,
-    last_imu_time: u64,
     last_imu_seen: u64,
     _body_type: PhantomData<BT>,
 }
@@ -134,24 +154,22 @@ where
             estimator,
             controller,
             mixer,
-            latest_state: Default::default(),
-            latest_actuator_commands: None,
+            control_pipeline: ControlPipelineResource::default(),
             pwm_output,
             pwm,
-            last_imu_time: 0,
             last_imu_seen: now_us,
             _body_type: PhantomData,
         }
     }
 
-    pub fn run_comm_param_sensor_stages(&mut self) -> bool {
-        self.run_comm_param_sensor_stages_only();
+    pub fn run_once(&mut self) -> bool {
+        self.run_comm_param_sensor_stages();
         self.run_rc_command_state_stages();
         self.run_control_stages_if_new_imu();
         true
     }
 
-    pub fn run_comm_param_sensor_stages_only(&mut self) {
+    pub fn run_comm_param_sensor_stages(&mut self) {
         let now_us = self.board.clock_micros();
 
         self.comm.process_incoming_messages(&mut self.board);
@@ -335,10 +353,10 @@ where
         };
 
         let current_time = imu_packet.header.timestamp;
-        if current_time == self.last_imu_time {
+        if current_time == self.control_pipeline.last_imu_time {
             return false;
         }
-        self.last_imu_time = current_time;
+        self.control_pipeline.last_imu_time = current_time;
 
         let external_attitude = self.external_attitude.latest.take();
         let state = self.estimator.estimate_named_with_external_attitude(
@@ -396,8 +414,8 @@ where
             &pwm_outputs,
         );
 
-        self.latest_state = state;
-        self.latest_actuator_commands = Some(actuator_commands);
+        self.control_pipeline.latest_estimator_state = state;
+        self.control_pipeline.latest_actuator_commands = Some(actuator_commands);
         true
     }
 }
@@ -720,7 +738,7 @@ mod tests {
             param_value: ParamValue::Int(42),
         });
 
-        assert!(world.run_comm_param_sensor_stages());
+        assert!(world.run_once());
 
         assert_eq!(
             world.params.get_by_id(ParamId::PARAM_SYSTEM_ID),
@@ -753,7 +771,7 @@ mod tests {
             target_component: 1,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.param_events.list_requests.is_empty());
         assert!(world.param_list_state.is_active());
@@ -762,7 +780,7 @@ mod tests {
         assert_eq!(first.param_index, ParamId::PARAM_BAUD_RATE as u16);
         assert_eq!(first.param_value, ParamValue::Int(921600));
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert_eq!(world.comm.comm_link().sent_param_value_count, 2);
         let second = world.comm.comm_link().sent_param_values[1].unwrap();
@@ -795,7 +813,7 @@ mod tests {
             param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.param_events.read_requests.is_empty());
         assert_eq!(world.comm.comm_link().sent_param_value_count, 1);
@@ -845,7 +863,7 @@ mod tests {
             TestPwm::new(),
         );
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert_eq!(world.board.update_count, 1);
         assert!(world.raw_sensors.imu.is_none());
@@ -978,9 +996,12 @@ mod tests {
         assert_eq!(world.comm.comm_link().imu_count, 1);
         assert_eq!(world.comm.comm_link().attitude_count, 1);
         assert_eq!(world.comm.comm_link().output_raw_count, 1);
-        assert!(world.latest_actuator_commands.is_some());
+        assert!(world.control_pipeline.latest_actuator_commands.is_some());
         assert!(world.external_attitude.latest.is_none());
-        assert_eq!(world.latest_state.q(), [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(
+            world.control_pipeline.latest_estimator_state.q(),
+            [0.0, 1.0, 0.0, 0.0]
+        );
         assert_eq!(world.pwm.last_command_len, 14);
         assert_eq!(world.pwm.last_commands[4], 0.25);
         assert!((world.pwm.last_commands[5] - 0.2).abs() < 1e-6);
@@ -1078,7 +1099,7 @@ mod tests {
             command: RosflightCmd::GyroCalibration,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.cal_flags.contains(CalibrationFlags::GYRO));
         assert_eq!(world.comm.comm_link().cmd_ack_count, 0);
@@ -1176,7 +1197,7 @@ mod tests {
             fz: 0.6,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.command.is_offboard_active());
         assert!(world.command_events.offboard_control_requests.is_empty());
@@ -1223,7 +1244,7 @@ mod tests {
             qz: 0.3,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.companion_link.connected);
         assert_eq!(
@@ -1263,7 +1284,7 @@ mod tests {
             command: RosflightCmd::SetParamDefaults,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert_eq!(
             world.params.get_by_id(ParamId::PARAM_SYSTEM_ID),
@@ -1303,7 +1324,7 @@ mod tests {
             command: RosflightCmd::WriteParams,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.command_events.board_command_requests.is_empty());
         assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
@@ -1337,7 +1358,7 @@ mod tests {
         );
 
         crate::log_info!("world log");
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert_eq!(world.comm.comm_link().statustext_count, 1);
         let msg = world.comm.comm_link().last_statustext.unwrap();
@@ -1396,7 +1417,7 @@ mod tests {
             command: RosflightCmd::RcCalibration,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.command_events.rc_trim_calibration_requests.is_empty());
         assert_eq!(
@@ -1443,7 +1464,7 @@ mod tests {
             command: RosflightCmd::ResetOrigin,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.command_events.reset_origin_requests.is_empty());
         assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
@@ -1478,7 +1499,7 @@ mod tests {
             command: RosflightCmd::SendAllConfigInfos,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert!(world.command_events.config_info_requests.is_empty());
         assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
@@ -1518,7 +1539,7 @@ mod tests {
             command: RosflightCmd::SetParamDefaults,
         });
 
-        world.run_comm_param_sensor_stages_only();
+        world.run_comm_param_sensor_stages();
 
         assert_eq!(
             world.params.get_by_id(ParamId::PARAM_SYSTEM_ID),
