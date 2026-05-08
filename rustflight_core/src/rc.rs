@@ -153,12 +153,8 @@ impl Rc {
         // --- REFACTORED: Stick::X ---
         self.sticks[Stick::X as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_X_CHANNEL) {
-                ParamValue::Int(val) => {
-                    // println!("Init RC channel {} for stick X", val);
-                    val
-                }
+                ParamValue::Int(val) => val,
                 other => {
-                    // println!("Error: PARAM_RC_X_CHANNEL is not an Int, but {:?}! Defaulting to 0.", other);
                     0 // Default C++ value
                 }
             },
@@ -168,12 +164,8 @@ impl Rc {
         // --- REFACTORED: Stick::Y ---
         self.sticks[Stick::Y as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Y_CHANNEL) {
-                ParamValue::Int(val) => {
-                    // println!("Init RC channel {} for stick Y", val);
-                    val
-                }
+                ParamValue::Int(val) => val,
                 other => {
-                    // println!("Error: PARAM_RC_Y_CHANNEL is not an Int, but {:?}! Defaulting to 1.", other);
                     1 // Default C++ value
                 }
             },
@@ -183,12 +175,8 @@ impl Rc {
         // --- REFACTORED: Stick::Z ---
         self.sticks[Stick::Z as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Z_CHANNEL) {
-                ParamValue::Int(val) => {
-                    // println!("Init RC channel {} for stick Z", val);
-                    val
-                }
+                ParamValue::Int(val) => val,
                 other => {
-                    // println!("Error: PARAM_RC_Z_CHANNEL is not an Int, but {:?}! Defaulting to 3.", other);
                     3 // Default C++ value
                 }
             },
@@ -198,12 +186,8 @@ impl Rc {
         // --- REFACTORED: Stick::F ---
         self.sticks[Stick::F as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_F_CHANNEL) {
-                ParamValue::Int(val) => {
-                    // println!("Init RC channel {} for stick F", val);
-                    val
-                }
+                ParamValue::Int(val) => val,
                 other => {
-                    // println!("Error: PARAM_RC_F_CHANNEL is not an Int, but {:?}! Defaulting to 2.", other);
                     2 // Default C++ value
                 }
             },
@@ -216,7 +200,6 @@ impl Rc {
         let rc_num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
             ParamValue::Int(val) => val,
             other => {
-                // println!("Error: PARAM_RC_NUM_CHANNELS is not an Int, but {:?}! Defaulting to 6.", other);
                 6 // Default C++ value
             }
         };
@@ -246,7 +229,6 @@ impl Rc {
                 match params.get_by_id(id) {
                     ParamValue::Int(val) => val,
                     other => {
-                        // println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 255.", id, other);
                         255 // Default for "INVALID"
                     }
                 }
@@ -259,9 +241,7 @@ impl Rc {
 
             // // debugging code to see if we mapped it or not...
             // if self.switches[i].mapped {
-            //     defmt::println!("Switch \"{}\" is mapped to channel {}", channel_name, channel_num);
             // } else {
-            //     defmt::println!("Switch \"{}\" will not be mapped.", channel_name);
             // }
 
             let direction_param_id = match channel_num {
@@ -277,7 +257,6 @@ impl Rc {
                 match params.get_by_id(id) {
                     ParamValue::Int(val) => val,
                     other => {
-                        // println!("Error: Param {:?} is not an Int, but {:?}! Defaulting to 1.", id, other);
                         1 // C++ default
                     }
                 }
@@ -311,11 +290,6 @@ impl Rc {
             }
 
             if self.switches[i].mapped {
-                // TODO: Re-enable this when your CommManager has a log method
-                // comm_manager.log(
-                //     LogSeverity::LOG_INFO,
-                //     &format!("{} switch mapped to RC channel {}", channel_name, self.switches[i].channel)
-                // );
                 log_info!(
                     "{} switch mapped to RC Channel {}",
                     channel_name,
@@ -398,7 +372,6 @@ impl Rc {
                 // Converts [0.0, 1.0] to [-1.0, 1.0]
                 self.stick_values[channel] = 2.0 * (pwm - 0.5);
             }
-            // defmt::info!("Stick {}: {}",channel, self.stick_values[channel]);
         }
 
         // SWITCHES
@@ -421,8 +394,6 @@ impl Rc {
             } else {
                 self.switch_values[channel] = false;
             }
-
-            // defmt::info!("Switch {}: {}",channel, self.switch_values[channel]);
         }
     }
 
@@ -460,12 +431,10 @@ impl Rc {
 
         if self.check_rc_health(now_us, params) {
             state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
-            //println!("RC is Healthy!");
 
             // only run arming logic if rc is healthy
             self.look_for_arm_disarm_signal(now_ms, params, state_manager);
         } else {
-            //println!("RC is Lost!");
             state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
         }
     }
@@ -483,18 +452,14 @@ impl Rc {
         let arm_threshold = match params.get_by_id(ParamId::PARAM_ARM_THRESHOLD) {
             ParamValue::Float(val) => val,
             other => {
-                // println!("Error: PARAM_ARM_THRESHOLD is not a Float, but {:?}! Defaulting to 0.15.", other);
                 0.15 // Default value from C++ param definitions
             }
         };
-
-        //println!("Arm Threshold is: {}", arm_threshold);
 
         // Use the correct public method from StateManager
         let is_armed = state_manager.is_armed();
 
         if !self.switch_mapped(Switch::Arm) {
-            //println!("The arm switch is not mapped!");
             // Stick arming
             let f_stick = self.stick(Stick::F);
             let z_stick = self.stick(Stick::Z);
@@ -506,13 +471,11 @@ impl Rc {
                     self.time_sticks_have_been_in_arming_position_ms = self
                         .time_sticks_have_been_in_arming_position_ms
                         .saturating_add(dt);
-                    // println!("Starting Arming Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
                 }
 
                 if self.time_sticks_have_been_in_arming_position_ms > 1000 {
-                    // defmt::info!("Requesting Arm!");
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
@@ -523,7 +486,6 @@ impl Rc {
                     self.time_sticks_have_been_in_arming_position_ms = self
                         .time_sticks_have_been_in_arming_position_ms
                         .saturating_add(dt);
-                    // println!("Starting Disarm Process");
                 } else {
                     self.time_sticks_have_been_in_arming_position_ms = 0;
                 }
@@ -532,15 +494,12 @@ impl Rc {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_DISARM, params);
                     self.time_sticks_have_been_in_arming_position_ms = 0;
-                    // defmt::info!("Requesting Disarm!")
                 }
             }
         } else {
             // Switch arming
-            //println!("The arm switch is mapped!!!");
             let f_stick = self.stick(Stick::F);
             if self.switch_on(Switch::Arm) {
-                // defmt::info!("is_armed: {} f_stick: {} arm_threshold: {}", is_armed, f_stick, arm_threshold);
                 if !is_armed && (f_stick < arm_threshold) {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);

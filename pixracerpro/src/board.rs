@@ -146,7 +146,6 @@ impl BoardIo for Board {
         //     ),
         //     Err(e) => defmt::error!("Error reading Pitot data"),
         // }
-        //defmt::info!("Sensor Range data received!");
         //}
         //if let Some(rc_packet_result) = &sensors.1.1.1.1.1.1.1.0 {
         // match rc_packet_result {
@@ -163,7 +162,6 @@ impl BoardIo for Board {
         //         // );
         //     },
         //     Err(_) => {
-        //         defmt::error!("BOARD: Error reading RC data");
         //     }
         // }
         //}
@@ -172,7 +170,6 @@ impl BoardIo for Board {
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         match peripherals::telem::TELEM_RX.try_read(buf) {
             Ok(n) => {
-                // defmt::info!("Success reading from serial!"); // Optional: Comment out to reduce noise
                 return Some(Ok(n));
             }
             Err(embassy_sync::pipe::TryReadError::Empty) => {
@@ -181,7 +178,6 @@ impl BoardIo for Board {
                 return Some(Ok(0));
             }
             Err(error) => {
-                // defmt::info!("Error reading from Serial: {}", error);
                 return Some(Err(errors::TelemError::GenericTelemError(
                     "Error Reading Telem Packet",
                 )));
@@ -192,7 +188,6 @@ impl BoardIo for Board {
         let mut n = 0;
         //let len = byte_count;
         let len = bytes.len();
-        // defmt::info!("Writing to Serial");
         loop {
             match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
@@ -203,7 +198,6 @@ impl BoardIo for Board {
                     }
                 }
                 Err(_) => {
-                    //defmt::info!("Error writing to Serial");
                     return Some(Err(errors::TelemError::GenericTelemError(
                         "Error Writing Telem Packet!",
                     )));

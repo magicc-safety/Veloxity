@@ -34,8 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-//use defmt::Format;
-
 #[derive(Debug, Clone, Copy)]
 pub enum TelemError {
     GenericTelemError(&'static str),

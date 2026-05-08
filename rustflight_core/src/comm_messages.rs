@@ -64,14 +64,9 @@ macro_rules! impl_store {
     ($ty:ty, $field:ident, $name:literal) => {
         impl Store<$ty> for Messages {
             fn store(&mut self, msg: $ty) {
-                if self.$field.is_some() {
-                    // println!("Overwrote {} message!", $name);
-                }
                 self.$field.insert(msg);
-                // println!("Stored {} message", $name);
             }
             fn take(&mut self) -> Option<$ty> {
-                // println!("Took {} message", $name)
                 self.$field.take()
             }
         }

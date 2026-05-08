@@ -37,7 +37,6 @@
 // ******************************************************************************
 // **/
 use cortex_m_rt::entry;
-//use defmt;
 use nucleo::*;
 use panic_halt as _;
 use rustflight_core::{
@@ -76,7 +75,6 @@ fn main() -> ! {
     );
 
     loop {
-        // defmt::debug!("One Loop");
         world.run_once();
     }
 }

@@ -177,18 +177,12 @@ impl CommandManager {
     pub fn update_failsafe_config(&mut self, params: &Params, state_manager: &mut StateManager) {
         let mut failsafe_throttle = match params.get_by_id(ParamId::PARAM_FAILSAFE_THROTTLE) {
             ParamValue::Float(val) => val,
-            other => {
-                // println!("Error: PARAM_FAILSAFE_THROTTLE is not a Float, but {:?}! Defaulting to 0.0.", other);
-                0.0f32
-            }
+            other => 0.0f32,
         };
 
         let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
             ParamValue::Bool(val) => val,
-            other => {
-                // println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false.", other);
-                false
-            }
+            other => false,
         };
 
         if !is_fixed_wing && (failsafe_throttle < 0.0 || failsafe_throttle > 1.0) {
@@ -211,7 +205,6 @@ impl CommandManager {
             // Error case: it's the wrong type.
             // We log the error and apply a safe default (Fz).
             other_type => {
-                // println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
                 self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64;
             }
         }
@@ -232,17 +225,11 @@ impl CommandManager {
         // --- 1. Failsafe Action (C++ lines 240-243) ---
         // This is the highest priority. If in failsafe, override all commands.
         if state_manager.is_in_failsafe() {
-            // println!("Command_Manager: We're in failsafe!!!");
-
             let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
                 ParamValue::Bool(val) => val,
-                other => {
-                    // println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
-                    false
-                }
+                other => false,
             };
             self.combined_command = if is_fixed_wing {
-                // println!("Command_Manager: failsafe is fixedwing failsafe");
                 self.fixedwing_failsafe_command
             } else {
                 self.multirotor_failsafe_command
@@ -260,7 +247,6 @@ impl CommandManager {
             let timeout_ms = match params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) {
                 ParamValue::Int(val) => val as u32,
                 other => {
-                    // println!("Error: PARAM_OFFBOARD_TIMEOUT is not an Int, but {:?}! Defaulting to 100ms.", other);
                     100 // Use the C++ default as a safe fallback
                 }
             };
@@ -310,7 +296,6 @@ impl CommandManager {
         self.offboard_command.fy.active = !msg.ignore.contains(OffboardControlIgnore::IGNORE_FY);
         self.offboard_command.fz.active = !msg.ignore.contains(OffboardControlIgnore::IGNORE_FZ);
 
-        // Logic moved from old `run` function
         match msg.mode {
             OffboardControlMode::ModePassThrough => {
                 self.offboard_command.qx.control_type = ControlType::Passthrough;
@@ -374,7 +359,6 @@ impl CommandManager {
             }
             // Error case: param is wrong type!
             other_type => {
-                // println!("Error: PARAM_RC_F_AXIS is not an Int, but {:?}! Defaulting to Fz.", other_type);
                 // Default to Z_AXIS for safety
                 self.rc_command.fx.value = 0.0;
                 self.rc_command.fy.value = 0.0;
@@ -396,7 +380,6 @@ impl CommandManager {
             other => {
                 // This is a param definition error. Default to the safer
                 // (non-fixed-wing) case.
-                // println!("Error: PARAM_FIXED_WING is not a Bool, but {:?}! Defaulting to false (multirotor).", other);
                 false
             }
         };
@@ -422,7 +405,6 @@ impl CommandManager {
                 let att_mode = match params.get_by_id(ParamId::PARAM_RC_ATTITUDE_MODE) {
                     ParamValue::Int(val) => val,
                     other => {
-                        // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
                         200 // Default value from C++ params
                     }
                 };
@@ -446,10 +428,7 @@ impl CommandManager {
                     };
                     let max_pitchrate = match params.get_by_id(ParamId::PARAM_RC_MAX_PITCHRATE) {
                         ParamValue::Float(val) => val as f64,
-                        other => {
-                            // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
-                            1.0
-                        }
+                        other => 1.0,
                     };
                     self.rc_command.qx.value *= max_rollrate;
                     self.rc_command.qx.value *= max_pitchrate;
@@ -461,10 +440,7 @@ impl CommandManager {
                     };
                     let max_pitch = match params.get_by_id(ParamId::PARAM_RC_MAX_PITCH) {
                         ParamValue::Float(val) => val as f64,
-                        other => {
-                            // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
-                            1.0
-                        }
+                        other => 1.0,
                     };
                     self.rc_command.qx.value *= max_roll;
                     self.rc_command.qx.value *= max_pitch;
@@ -475,10 +451,7 @@ impl CommandManager {
             self.rc_command.qz.control_type = ControlType::Rate;
             let max_yawrate = match params.get_by_id(ParamId::PARAM_RC_MAX_YAWRATE) {
                 ParamValue::Float(val) => val as f64,
-                other => {
-                    // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
-                    1.0
-                }
+                other => 1.0,
             };
             self.rc_command.qz.value *= max_yawrate;
 
@@ -518,7 +491,6 @@ impl CommandManager {
         let deviation_param = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
             ParamValue::Float(val) => val as f64, // Convert f32 to f64
             other => {
-                // println!("Error: PARAM_RC_OVERRIDE_DEVIATION is not a Float, but {:?}! Defaulting to 0.1.", other);
                 0.1 // Default value from C++ params
             }
         };
@@ -527,7 +499,6 @@ impl CommandManager {
         let lag_time_ms = match params.get_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME) {
             ParamValue::Int(val) => val as u32,
             other => {
-                // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
                 200 // Default value from C++ params
             }
         };
@@ -593,7 +564,6 @@ impl CommandManager {
         let throttle_axis_idx = match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
             ParamValue::Int(val) => val as u32,
             other => {
-                // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
                 200 // Default value from C++ params
             }
         };
@@ -613,10 +583,7 @@ impl CommandManager {
                 let take_min = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE)
                 {
                     ParamValue::Bool(val) => val,
-                    other => {
-                        // println!("Error: PARAM_OVERRIDE_LAG_TIME is not an Int, but {:?}! Defaulting to 200ms.", other);
-                        true
-                    }
+                    other => true,
                 };
 
                 if take_min {

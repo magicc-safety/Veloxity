@@ -203,8 +203,6 @@ impl Logger {
 // crate::log_debug!("DEBUG TEST");
 // crate::log_warn!("\0");
 // crate::log_error!("Error test");
-
-// use crate::log_info;
 // log_info!("Example with import!");
 
 #[macro_export]

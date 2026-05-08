@@ -4238,3 +4238,30 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Stale Comment Cleanup
+
+Reason for this change:
+
+- After the HList/ROSFlight/params cleanup, active source still contained commented-out imports, commented debug statements, and obsolete migration comments.
+- Those comments made it harder to distinguish real remaining work from old scaffolding.
+
+Design now implemented:
+
+- Removed commented-out imports/modules and commented debug print statements from active source.
+- Removed obsolete comments that referenced already-completed logging or old scheduler movement.
+- Kept real unresolved TODOs, such as RC-loss handling, board LED updates, VCP priority, and PixRacerPro PWM telemetry.
+
+Current status after this slice:
+
+- Active source no longer carries commented-out import/module/debug scaffolding.
+- Remaining TODO scan hits represent actual unresolved work or ordinary explanatory comments.
+
+Validation:
+
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.

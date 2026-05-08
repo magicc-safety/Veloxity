@@ -43,7 +43,6 @@ use rustflight_core::errors; // Assuming errors is in core
 use rustflight_core::packets; // Assuming packets is in core
 use rustflight_core::pwm::{PwmDriver, PwmError}; // Import updated trait and error
 // Use the re-exported path from rustflight_core if needed by other parts of the file
-// use rustflight_core::micro_algebra::stack::vector::Vector;
 
 use cdr::{CdrLe, Infinite};
 use tokio::io::ErrorKind;
@@ -55,7 +54,6 @@ use zenoh::handlers::FifoChannelHandler;
 use zenoh::pubsub::{Publisher, Subscriber};
 use zenoh::sample::Sample;
 use zenoh::session::Session;
-// use zenoh::session::Session; // Already imported via prelude
 
 const NUM_SIM_CHANNELS: usize = 14; // Match OutputRaw array size
 
@@ -144,7 +142,6 @@ impl PwmDriver for SimPwmDriver {
         }
         // Optional: Set to idle (1000us) on enable
         // self.current_values[channel] = 1000.0;
-        //println!("SimPwmDriver: Enabled channel {}", channel);
         Ok(())
     }
 
@@ -154,7 +151,6 @@ impl PwmDriver for SimPwmDriver {
         }
         // Set to 1000us (disarmed/min throttle)
         self.current_values[channel] = 1000;
-        //println!("SimPwmDriver: Disabled channel {} (set to 1000us)", channel);
         Ok(())
     }
 

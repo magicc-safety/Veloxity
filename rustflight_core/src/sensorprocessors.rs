@@ -151,15 +151,11 @@ impl ImuProcessor {
             let is_calibrating = flags.intersects(CalibrationFlags::IMU);
 
             if is_calibrating {
-                // defmt::info!("Gyro Cal Count at beginning: {}", self.calibration_state.gyro_calibration_count);
                 if flags.contains(CalibrationFlags::GYRO) {
-                    // defmt::info!("Calibrating Gyro...");
                     self.calibration_state.gyro_sum[0] += packet.gyro[0] as f64;
                     self.calibration_state.gyro_sum[1] += packet.gyro[1] as f64;
                     self.calibration_state.gyro_sum[2] += packet.gyro[2] as f64;
                     self.calibration_state.gyro_calibration_count += 1;
-
-                    // defmt::info!("Gyro Cal Count: {}", self.calibration_state.gyro_calibration_count);
                     if self.calibration_state.gyro_calibration_count > 1000 {
                         let count = self.calibration_state.gyro_calibration_count as f64;
                         let bias_x = self.calibration_state.gyro_sum[0] / count;
@@ -183,12 +179,10 @@ impl ImuProcessor {
                         self.calibration_state.gyro_calibration_count = 0;
                         flags.remove(CalibrationFlags::GYRO);
                         log_info!("Gyro Calibration complete!");
-                        //defmt::info!("Gyro calibration complete.")
                     }
                 }
 
                 if flags.contains(CalibrationFlags::ACCEL) {
-                    // defmt::info!("Calibrating Accel...");
                     const GRAVITY: f64 = 9.80665;
                     self.calibration_state.accel_sum[0] += packet.accel[0] as f64;
                     self.calibration_state.accel_sum[1] += packet.accel[1] as f64;
@@ -208,8 +202,6 @@ impl ImuProcessor {
                         self.calibration_state.max_accel[2].max(packet.accel[2] as f64);
                     self.calibration_state.min_accel[2] =
                         self.calibration_state.min_accel[2].min(packet.accel[2] as f64);
-
-                    // defmt::info!("Accel Cal Count: {}", self.calibration_state.accel_calibration_count);
                     if self.calibration_state.accel_calibration_count > 1000 {
                         let max_delta = ((self.calibration_state.max_accel[0]
                             - self.calibration_state.min_accel[0])
@@ -269,8 +261,6 @@ impl ImuProcessor {
                                 ParamValue::Float(bias_z as f32),
                             );
                         } else {
-                            //defmt::warn!("Too much movement for IMU calibration.");
-                            // defmt::info!("Max Accel Delta: {}", max_delta);
                         }
 
                         self.calibration_state.accel_sum = [0.0; 3];
@@ -280,14 +270,10 @@ impl ImuProcessor {
                         self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
                         flags.remove(CalibrationFlags::ACCEL);
                         log_info!("Accelerometer Calibration Complete!");
-                        //defmt::info!("IMU calibration complete.")
                     }
                 }
-                // defmt::info!("Gyro Cal Count at end of cal: {}", self.calibration_state.gyro_calibration_count);
-                // defmt::info!("IMU data used for calibration.");
                 // return None; // Removed this so we don't get IMU errors while calibrating
             }
-            // defmt::info!("Did I make it to here?");
             // --- Correction Logic (Not Calibrating) ---
             if let ParamValue::Float(bias) = params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) {
                 packet.gyro[0] -= bias as f64;
@@ -318,11 +304,8 @@ impl ImuProcessor {
             ) {
                 packet.accel[2] -= (comp as f64 * temp + bias as f64);
             }
-
-            // defmt::info!("IMU data processed");
             Some(packet)
         } else {
-            // defmt::info!("No IMU data this cycle.");
             None
         }
     }
@@ -393,9 +376,7 @@ impl BaroProcessor {
                             ParamId::PARAM_GROUND_LEVEL,
                             ParamValue::Float(ground_alt as f32),
                         );
-                        //defmt::info!("Barometer calibration successful!");
                     } else {
-                        //defmt::warn!("Too much movement for barometer calibration.");
                     }
 
                     // Reset state and remove the flag to end the calibration process.
@@ -488,9 +469,7 @@ impl PitotProcessor {
                             ParamValue::Float(self.calibration_state.mean as f32),
                         );
                         self.calibration_state.calibrated = true;
-                        //defmt::info!("Airspeed calibration successful!");
                     } else {
-                        //defmt::info!("Too much movement for diff pressure calibration.");
                     }
 
                     self.calibration_state = PitotCalibrationState::default();

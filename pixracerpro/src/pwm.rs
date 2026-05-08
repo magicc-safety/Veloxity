@@ -38,8 +38,6 @@
 // **/
 use rustflight_core::board::BoardIo;
 use rustflight_core::pwm::{self, PwmDriver, PwmError};
-//use stm_32::defmt;
-// use crate::ros_messages::{OutputRaw, Header, Time};
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 
 const NUM_HW_CHANNELS: usize = 7;
@@ -125,14 +123,12 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
             return Err(PwmError::ChannelOutOfRange);
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
-        // defmt::info!("Channel: {} Duty: {} PWM_US: {}, Raw PWM: {}", channel, duty, pwm_us, raw_pwm);
         //self.current_values[channel] = pwm_us;
 
         let max_duty = self.max_duty_counts[channel] as f32;
         let raw_pwm = pwm_us / 2500.0 * max_duty;
         //let raw_pwm = (pwm_us - 1000.0) / 1000.0 * max_duty;
         //let raw_pwm = ((pwm_us - 1000.0) / 1000.0 * max_duty) * 1000.0 / 2500.0 + 1000.0;
-        //defmt::info!("Channel: {} Duty: {} MAX_DUTY: {}, PWM_OUT: {}", channel, duty, max_duty, raw_pwm);
 
         self.servos
             .set_duty_cycle(channel, raw_pwm as u16)
@@ -161,10 +157,7 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         for i in 0..count {
             let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
             let _ = self.set_duty_cycle(i, duty_u16);
-            // defmt::info!("PWM Channel {} set to duty {}", i, duty_u16);
         }
-        // defmt::info!("\x1B[2J\x1B[1;1H"); // Clear terminal
-        // defmt::info!("PWM commands sent: {:?}", &commands_slice[0..count]);
         self.flush(board);
     }
 }

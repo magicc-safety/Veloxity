@@ -34,7 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-// use defmt;
 use crate::comm_manager::{comm_link_trait::CommInterface, mavlink_parser};
 use crate::comm_messages::{Messages, Store, enums as comm_enums, messages as comm_messages};
 use crate::mavlink::dialects::rosflight::{
@@ -89,7 +88,6 @@ impl MavlinkInterface {
         let frame = match self.frame_builder(system_id, msg) {
             Ok(f) => f,
             Err(_) => {
-                // defmt::debug!("Error with FrameBuilder!");
                 return;
             }
         };
@@ -98,7 +96,6 @@ impl MavlinkInterface {
         let mut buf = [0u8; MAVLINK_V1_MESSAGE_SIZE];
 
         if frame.body_length() > buf.len() {
-            // defmt::debug!("Body Length Error");
             return;
         }
 
@@ -135,56 +132,25 @@ impl MavlinkInterface {
     fn process_rosflight_message(&mut self, message: Rosflight, msgs: &mut Messages) {
         match (message) {
             Rosflight::ExternalAttitude(es) => {
-                // defmt::debug!("External attitude: qw={}, qx={}, qy={}, qz={}", es.qw, es.qx, es.qy, es.qz);
-                //println!("Message: ExternalAttitude");
                 msgs.store(comm_messages::ExternalAttitudeMsg::from(es))
             }
-            Rosflight::Timesync(ts) => {
-                //println!("Message: Timesync");
-                // defmt::debug!("Timesync: tc1={} ts1={} ", ts.tc1, ts.ts1);
-                msgs.store(comm_messages::TimesyncMsg::from(ts))
-            }
-            Rosflight::RosflightCmd(cmd) => {
-                //println!("Message: RosflightCmd");
-                //println!("Rosflight command: {}", cmd.command as u8);
-                msgs.store(comm_messages::RosflightCmdMsg::from(cmd))
-            }
+            Rosflight::Timesync(ts) => msgs.store(comm_messages::TimesyncMsg::from(ts)),
+            Rosflight::RosflightCmd(cmd) => msgs.store(comm_messages::RosflightCmdMsg::from(cmd)),
             Rosflight::RosflightAuxCmd(aux_cmd) => {
-                //println!("Message: RosflightAuxCmd");
-                // defmt::debug!("Rosflight aux command: type={}, aux_cmd={}", aux_cmd.type_array.map(|t| t as u8), aux_cmd.aux_cmd_array);
                 msgs.store(comm_messages::RosflightAuxCmdMsg::from(aux_cmd))
             }
             Rosflight::OffboardControl(oc) => {
-                //println!("Message: OffboardControl");
-                // defmt::debug!("Offboard control: mode={}, ignore={}, qx={}, qy={}, qz={}", oc.mode as u8, oc.ignore as u8, oc.qx, oc.qy, oc.qz);
                 msgs.store(comm_messages::OffboardControlMsg::from(oc))
             }
             Rosflight::ParamRequestRead(pr) => {
-                //println!("Message: ParamRequestRead");
                 msgs.store(comm_messages::ParamRequestReadMsg::from(pr))
             }
-            Rosflight::ParamSet(ps) => {
-                //println!("Message: ParamSet: param_value: {:?}", ps.param_value);
-                msgs.store(comm_messages::ParamSetMsg::from(ps))
-            }
+            Rosflight::ParamSet(ps) => msgs.store(comm_messages::ParamSetMsg::from(ps)),
             Rosflight::ParamRequestList(pl) => {
-                //println!("Message: ParamRequestList");
                 msgs.store(comm_messages::ParamRequestListMsg::from(pl))
             }
-            Rosflight::Heartbeat(hb) => {
-                // defmt::debug!(
-                //     "🎉 Heartbeat: autopilot={}, mode={}, status={}, custom_mode: {}",
-                //     hb.autopilot,
-                //     hb.base_mode,
-                //     hb.system_status,
-                //     hb.custom_mode,
-                // );
-                //println!("Message: Heartbeat");
-                msgs.store(comm_messages::HeartbeatMsg::from(hb))
-            }
-            _ => {
-                // defmt::debug!("System: Other ROSflight message received");
-            }
+            Rosflight::Heartbeat(hb) => msgs.store(comm_messages::HeartbeatMsg::from(hb)),
+            _ => {}
         }
     }
 }
@@ -194,10 +160,8 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         let mut buf = [0u8; RX_BUFF_SIZE];
         match board.serial_rx_read(&mut buf) {
             Some(Ok(n)) => {
-                // defmt::debug!("got {} bytes", n);
                 for i in 0..n {
                     if let Some(frame) = self.mav_parser.feed_byte(buf[i]) {
-                        // defmt::debug!("got a frame!");
                         if let Some(message) = mavlink_parser::process_mavlink_frame(frame) {
                             self.process_rosflight_message(message, msgs);
                         }

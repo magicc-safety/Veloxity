@@ -34,9 +34,6 @@
 // *
 // ******************************************************************************
 // **/
-//use crate::errors;
-//use defmt::Format;
-
 //pub static PAYLOAD_SIZE: usize = 448;
 pub static PARAM_PACKET_SIZE: usize = 2048;
 //pub static LOG_MESSAGE_SIZE: usize = 64;
@@ -115,9 +112,7 @@ impl GNSSFixType {
 // #[derive(Debug, Clone, Copy, Default, Format)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RosflightPacketHeader {
-    // pub timestamp: crate::sensors::Instant, TODO removed this because it's hard to serailize...
-    // the packets shouldn't have embassy specific types in them. Make this known in the next
-    // meeting. I'll just construct it with the timestamp.as_micros() function everywhere...
+    // Microseconds; packets avoid board-specific timestamp types.
     pub timestamp: u64,
     pub status: u16,
 }

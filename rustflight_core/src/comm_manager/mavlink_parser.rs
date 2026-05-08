@@ -50,20 +50,11 @@ pub struct CompleteFrame {
 }
 
 pub fn process_mavlink_frame(frame: CompleteFrame) -> Option<Rosflight> {
-    //defmt::trace!("MAVLink frame: {} bytes", frame.len);
-
     let reader = EmbeddedIoReader::new(&frame.data[..frame.len]);
     let mut receiver = Receiver::new::<V1>(reader);
 
     match receiver.recv() {
         Ok(parsed_frame) => {
-            //defmt::trace!(
-            //    "Frame - SysID: {}, CompID: {}, MsgID: {}",
-            //    parsed_frame.header().system_id(),
-            //    parsed_frame.header().component_id(),
-            //    parsed_frame.header().message_id()
-            //);
-
             if let Ok(message) = parsed_frame.decode::<Rosflight>() {
                 return Some(message);
             } else {
@@ -71,7 +62,6 @@ pub fn process_mavlink_frame(frame: CompleteFrame) -> Option<Rosflight> {
             }
         }
         Err(_) => {
-            //defmt::trace!("System: Failed to parse Mavlink frame");
             return None;
         }
     }
@@ -112,8 +102,6 @@ impl MavlinkParser {
         // MAVLink uses a message-specific CRC extra byte
         let msg_id = self.frame_buf[5];
 
-        //defmt::trace!("Got msg_id: {}", msg_id);
-
         let crc_extra = match msg_id {
             // Must define for all messages in the future
             0 => 50,    // HEARTBEAT
@@ -143,7 +131,6 @@ impl MavlinkParser {
             253 => 83,  // STATUSTEXT
             _ => {
                 // Unknown message, will fail CRC
-                //defmt::trace!("Unknown message ID: {}", msg_id);
                 0
             }
         };
@@ -167,7 +154,6 @@ impl MavlinkParser {
         match self.state {
             ParseState::WaitingForStart => {
                 if byte == 0xFE {
-                    //defmt::trace!("Got start byte!!!");
                     self.frame_buf[0] = byte;
                     self.frame_pos = 1;
                     self.state = ParseState::ReadingHeader;
@@ -175,7 +161,6 @@ impl MavlinkParser {
                 None
             }
             ParseState::ReadingHeader => {
-                //defmt::trace!("Got header!");
                 self.frame_buf[self.frame_pos] = byte;
                 self.frame_pos += 1;
 
@@ -200,7 +185,6 @@ impl MavlinkParser {
                 None
             }
             ParseState::ReadingPayload { expected_len } => {
-                //defmt::trace!("Got to payload");
                 self.frame_buf[self.frame_pos] = byte;
                 self.frame_pos += 1;
                 let payload_bytes_read = self.frame_pos - 6;
@@ -211,12 +195,10 @@ impl MavlinkParser {
                 None
             }
             ParseState::ReadingChecksum { bytes_remaining } => {
-                //defmt::trace!("Got to reading checksum!");
                 self.frame_buf[self.frame_pos] = byte;
                 self.frame_pos += 1;
 
                 if bytes_remaining == 1 {
-                    //defmt::trace!("Got structurally complete frame!");
                     // Frame structurally complete, validate checksum
                     let payload_len = self.frame_buf[1] as usize;
                     let crc_low = self.frame_buf[self.frame_pos - 2];
@@ -224,8 +206,6 @@ impl MavlinkParser {
                     let received_crc = (crc_high as u16) << 8 | (crc_low as u16);
 
                     let calculated_crc = self.calculate_crc(payload_len);
-
-                    //defmt::trace!(
                     //    "Got received crc: {}, calculated crc: {}",
                     //    received_crc,
                     //    calculated_crc
@@ -244,13 +224,10 @@ impl MavlinkParser {
                             frame.data[i] = self.frame_buf[i];
                         }
 
-                        //defmt::trace!("Got frame: copied {} bytes!!!", frame_len);
-
                         self.reset();
                         Some(frame)
                     } else {
                         // Invalid CRC, this is not a valid frame
-                        //defmt::trace!(
                         //    "CRC mismatch: got {:04x}, expected {:04x}",
                         //    received_crc,
                         //    calculated_crc

@@ -66,8 +66,6 @@ const BATTERY_INTERVAL_US: u64 = 1_000_000; // 1 Hz
 const GNSS_INTERVAL_US: u64 = 200_000; // 5 Hz
 const RC_INTERVAL_US: u64 = 50_000; // 20 Hz
 const OUTPUT_RAW_INTERVAL_US: u64 = 50_000; // 20 Hz
-
-// used for converting names of ParamValues ("id" during creation in params.cpp) to null-terminated characters
 pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
     let mut buffer = [0u8; 16];
     let input_bytes = input.as_bytes();
@@ -436,9 +434,6 @@ where
 
         let cmd_msg_opt = self.msgs.cmd.take();
         if let Some(msg) = cmd_msg_opt {
-            // println!("Processing ROSflight command: {:?}", msg.command);
-            //defmt::info!("Processing ROSflight command.");
-
             // Assume failure unless explicitly set to success
             let mut success = RosflightCmdResponse::RosflightCmdFailed;
             let mut send_ack_now = true;
@@ -456,7 +451,6 @@ where
                     }
                 }
                 RosflightCmd::AccelCalibration => {
-                    //defmt::info!("Starting Accelerometer Calibration.");
                     if command_events
                         .calibration_requests
                         .push(CalibrationRequested {
@@ -468,7 +462,6 @@ where
                     }
                 }
                 RosflightCmd::GyroCalibration => {
-                    //defmt::info!("Starting Gyro Calibration.");
                     if command_events
                         .calibration_requests
                         .push(CalibrationRequested {
@@ -480,7 +473,6 @@ where
                     }
                 }
                 RosflightCmd::BaroCalibration => {
-                    //defmt::info!("Starting Baro Calibration.");
                     if command_events
                         .calibration_requests
                         .push(CalibrationRequested {
@@ -492,7 +484,6 @@ where
                     }
                 }
                 RosflightCmd::AirspeedCalibration => {
-                    //defmt::info!("Starting Airspeed Calibration.");
                     if command_events
                         .calibration_requests
                         .push(CalibrationRequested {
@@ -526,7 +517,6 @@ where
                     }
                 }
                 RosflightCmd::SetParamDefaults => {
-                    //defmt::info!("Setting parameters to defaults.");
                     if command_events
                         .param_defaults_requests
                         .push(ParamDefaultsRequested {

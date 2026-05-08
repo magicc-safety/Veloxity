@@ -45,8 +45,6 @@ use crate::{
 };
 use bitflags::bitflags;
 use core::{error, mem::take};
-// use std::default;
-// use defmt::println; // do we want to print logs when running on embedded targets? We may need to build-gate this import
 
 // Events that trigger state transitions
 #[derive(Debug, Clone, Copy)]
@@ -213,24 +211,15 @@ impl Preflight {
                     let is_calibrated = {
                         let x_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
-                            other => {
-                                // defmt::info!("Error: PARAM_GYRO_X_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
-                                false
-                            }
+                            other => false,
                         };
                         let y_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
-                            other => {
-                                // defmt::info!("Error: PARAM_GYRO_Y_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
-                                false
-                            }
+                            other => false,
                         };
                         let z_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) {
                             ParamValue::Float(val) => val != 0.0f32,
-                            other => {
-                                // defmt::info!("Error: PARAM_GYRO_Z_BIAS is not a Float, but {:?}! Assuming uncalibrated.", other);
-                                false
-                            }
+                            other => false,
                         };
 
                         x_calibrated || y_calibrated || z_calibrated
@@ -365,11 +354,7 @@ impl StateManager {
 
     // The main update loop. Takes an event and applies it to the internal state machine.
     pub fn update(&mut self, event: Event, params: &Params) {
-        let start_state = self.machine;
         self.machine.update(event, params);
-        if start_state != self.machine {
-            // println!("Update: Armed {} | Failsafe {} | ErrorState {} | Errors {:b}", self.is_armed(), self.is_in_failsafe(), self.is_in_error_state(), self.get_errors().bits());
-        }
     }
 
     pub fn run(&mut self, params: &Params) {
