@@ -119,11 +119,9 @@ impl BoardIo for Board {
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         match self.mavlink_socket.try_send(bytes) {
             Ok(n) => Some(Ok(n)),
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                Some(Err(errors::TelemError::GenericTelemError(
-                    "MAVLink UDP socket send buffer full",
-                )))
-            }
+            Err(e) if e.kind() == ErrorKind::WouldBlock => Some(Err(
+                errors::TelemError::GenericTelemError("MAVLink UDP socket send buffer full"),
+            )),
             Err(_) => Some(Err(errors::TelemError::GenericTelemError(
                 "error writing MAVLink UDP socket",
             ))),
@@ -154,7 +152,10 @@ fn param_store_path() -> PathBuf {
 }
 
 fn write_params_to_path(path: &Path, params: &Params) -> io::Result<()> {
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)?;
     }
 
@@ -431,7 +432,11 @@ mod tests {
 
     fn test_param_path(name: &str) -> PathBuf {
         let mut path = env::temp_dir();
-        path.push(format!("rustflight_sim_{}_{}.params", name, std::process::id()));
+        path.push(format!(
+            "rustflight_sim_{}_{}.params",
+            name,
+            std::process::id()
+        ));
         let _ = fs::remove_file(&path);
         path
     }

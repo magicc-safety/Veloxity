@@ -1,9 +1,6 @@
 use crate::{
     board::BoardIo,
-    comm_messages::{
-        enums::RosflightAuxCmdType,
-        messages::RosflightAuxCmdMsg,
-    },
+    comm_messages::{enums::RosflightAuxCmdType, messages::RosflightAuxCmdMsg},
     mixer::MixerOutputType,
     params2::{ParamId, ParamValue, Params},
     pwm::{PwmDriver, PwmError},
@@ -308,7 +305,10 @@ mod tests {
     fn compose_pwm_outputs_preserves_primary_and_applies_aux_to_unused_channels() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
-        params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Bool(true));
+        params.set_by_id(
+            ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED,
+            ParamValue::Bool(true),
+        );
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);

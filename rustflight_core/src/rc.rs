@@ -331,11 +331,7 @@ impl Rc {
         }
     }
 
-    pub fn param_change_callback(
-        &mut self,
-        param_id: ParamId,
-        params: &Params,
-    ) {
+    pub fn param_change_callback(&mut self, param_id: ParamId, params: &Params) {
         match param_id {
             // ... (PARAM_RC_TYPE case is removed)
             ParamId::PARAM_RC_X_CHANNEL

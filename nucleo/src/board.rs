@@ -574,9 +574,6 @@ impl Board {
             Output::new(p.PG0, Level::Low, Speed::Low),
         ];
 
-        (
-            Board { probe, start_time },
-            BoardPwmDriver::new(servos),
-        )
+        (Board { probe, start_time }, BoardPwmDriver::new(servos))
     }
 }

@@ -2,12 +2,12 @@ use crate::{
     comm_manager::str_to_fixed_bytes,
     comm_messages::{enums::ParamIdentifier, messages::ParamValueMsg},
     events::{
-        CommResponse, COMM_RESPONSE_QUEUE_CAPACITY, PARAM_CHANGED_QUEUE_CAPACITY,
+        COMM_RESPONSE_QUEUE_CAPACITY, CommResponse, PARAM_CHANGED_QUEUE_CAPACITY,
         PARAM_LIST_REQUEST_QUEUE_CAPACITY, PARAM_READ_REQUEST_QUEUE_CAPACITY,
         PARAM_SET_REQUEST_QUEUE_CAPACITY, ParamChanged, ParamListRequested, ParamReadRequested,
         ParamSetRequested,
     },
-    params2::{PARAMS_COUNT, PARAM_DEFINITIONS, ParamId},
+    params2::{PARAM_DEFINITIONS, PARAMS_COUNT, ParamId},
     ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
 };
 

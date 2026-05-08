@@ -549,14 +549,12 @@ impl CommandManager {
         if !self.offboard_command.qx.active {
             override_mask |= OVERRIDE_OFFBOARD_X_INACTIVE;
         }
-        self.combined_command.qx = if switch_override
-            || x_stick_deviated
-            || !self.offboard_command.qx.active
-        {
-            self.rc_command.qx
-        } else {
-            self.offboard_command.qx
-        };
+        self.combined_command.qx =
+            if switch_override || x_stick_deviated || !self.offboard_command.qx.active {
+                self.rc_command.qx
+            } else {
+                self.offboard_command.qx
+            };
 
         let y_stick_deviated =
             self.attitude_stick_deviated(rc, Stick::Y, deviation_param, lag_time_ms, now_ms);
@@ -566,14 +564,12 @@ impl CommandManager {
         if !self.offboard_command.qy.active {
             override_mask |= OVERRIDE_OFFBOARD_Y_INACTIVE;
         }
-        self.combined_command.qy = if switch_override
-            || y_stick_deviated
-            || !self.offboard_command.qy.active
-        {
-            self.rc_command.qy
-        } else {
-            self.offboard_command.qy
-        };
+        self.combined_command.qy =
+            if switch_override || y_stick_deviated || !self.offboard_command.qy.active {
+                self.rc_command.qy
+            } else {
+                self.offboard_command.qy
+            };
 
         let z_stick_deviated =
             self.attitude_stick_deviated(rc, Stick::Z, deviation_param, lag_time_ms, now_ms);
@@ -583,14 +579,12 @@ impl CommandManager {
         if !self.offboard_command.qz.active {
             override_mask |= OVERRIDE_OFFBOARD_Z_INACTIVE;
         }
-        self.combined_command.qz = if switch_override
-            || z_stick_deviated
-            || !self.offboard_command.qz.active
-        {
-            self.rc_command.qz
-        } else {
-            self.offboard_command.qz
-        };
+        self.combined_command.qz =
+            if switch_override || z_stick_deviated || !self.offboard_command.qz.active {
+                self.rc_command.qz
+            } else {
+                self.offboard_command.qz
+            };
 
         override_mask
     }
@@ -699,7 +693,7 @@ impl From<ControlType> for OffboardControlMode {
 mod tests {
     use super::*;
     use crate::{
-        packets::{RcPacket, RosflightPacketHeader, RC_PACKET_CHANNELS},
+        packets::{RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
         test_support::TestBoard,
     };
 

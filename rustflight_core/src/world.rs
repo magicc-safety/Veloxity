@@ -4,18 +4,18 @@ use crate::{
     board::BoardIo,
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
-    companion_system::{
-        self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
-        ExternalAttitudeCtx, ExternalAttitudeState,
-    },
     command_manager::CommandManager,
     command_system::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
         ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
+    companion_system::{
+        self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
+        ExternalAttitudeCtx, ExternalAttitudeState,
+    },
     controller::{Controller, RcTrimCalibrator},
-    events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     estimator::{AttitudeStateTrait, NamedEstimator},
+    events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     log_system::{self, LogDrainCtx},
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
@@ -23,9 +23,7 @@ use crate::{
     params2::Params,
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
-    pwm_system::{
-        PwmOutputState, compose_pwm_outputs, sync_pwm_output_state, write_pwm_commands,
-    },
+    pwm_system::{PwmOutputState, compose_pwm_outputs, sync_pwm_output_state, write_pwm_commands},
     rc::Rc,
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
@@ -178,12 +176,13 @@ where
             state: &mut self.external_attitude,
         });
 
-        let started_calibration = command_system::apply_calibration_requests(CalibrationRequestCtx {
-            requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-            state: &self.state,
-            flags: &mut self.cal_flags,
-        });
+        let started_calibration =
+            command_system::apply_calibration_requests(CalibrationRequestCtx {
+                requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
+                responses: EventEmitPort::new(&mut self.comm_events.responses),
+                state: &self.state,
+                flags: &mut self.cal_flags,
+            });
         self.comm.set_pending_calibration_ack(started_calibration);
         command_system::apply_offboard_control_requests(OffboardControlCtx {
             requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
@@ -418,8 +417,8 @@ mod tests {
                 ParamRequestReadMsg, ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
             },
         },
+        packets::{ImuPacket, RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
         params2::{ParamId, ParamValue},
-        packets::{ImuPacket, RcPacket, RosflightPacketHeader, RC_PACKET_CHANNELS},
         pwm::{PwmDriver, PwmError},
         test_support::{RecordingCommLink, TestBoard},
     };
@@ -851,7 +850,10 @@ mod tests {
         assert_eq!(world.board.update_count, 1);
         assert!(world.raw_sensors.imu.is_none());
         assert!(world.raw_sensors.rc.is_none());
-        assert_eq!(world.processed_sensors.imu.unwrap().header.timestamp, 25_000);
+        assert_eq!(
+            world.processed_sensors.imu.unwrap().header.timestamp,
+            25_000
+        );
         assert_eq!(world.processed_sensors.rc.unwrap().chan[0], 0.5);
         assert!(
             !world
@@ -903,7 +905,12 @@ mod tests {
 
         world.run_rc_command_state_stages();
 
-        assert!(!world.state.get_errors().contains(crate::state_machine::ErrorFlag::RC_LOST));
+        assert!(
+            !world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::RC_LOST)
+        );
     }
 
     #[test]
@@ -913,7 +920,10 @@ mod tests {
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
         params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
-        params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Bool(true));
+        params.set_by_id(
+            ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED,
+            ParamValue::Bool(true),
+        );
         let comm_link = RecordingCommLink::new();
         let state = StateManager::new();
         let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
@@ -982,7 +992,13 @@ mod tests {
         assert_eq!(world.pwm.send_count, 1);
         assert_eq!(world.comm.comm_link().output_raw_count, 1);
 
-        world.processed_sensors.imu.as_mut().unwrap().header.timestamp = 2;
+        world
+            .processed_sensors
+            .imu
+            .as_mut()
+            .unwrap()
+            .header
+            .timestamp = 2;
 
         assert!(world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 2);
@@ -1516,5 +1532,4 @@ mod tests {
             RosflightCmdResponse::RosflightCmdFailed
         ));
     }
-
 }

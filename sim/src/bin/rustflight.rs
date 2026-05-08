@@ -1,12 +1,7 @@
 use rustflight_core::{
-    bodytype::quadrotor::Quadrotor,
-    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
-    controller::quad_controller::QuadController,
-    estimator::quad_estimator::QuadEstimator,
-    mixer::quad_mixer::QuadMixer,
-    params2::Params,
-    pwm::PwmDriver,
-    state_machine::StateManager,
+    bodytype::quadrotor::Quadrotor, comm_manager::comm_link_trait::mavlink::MavlinkInterface,
+    controller::quad_controller::QuadController, estimator::quad_estimator::QuadEstimator,
+    mixer::quad_mixer::QuadMixer, params2::Params, pwm::PwmDriver, state_machine::StateManager,
     world::World,
 };
 use sim::{board::Board, pwm::SimPwmDriver};

@@ -446,5 +446,4 @@ mod tests {
         assert!(!failure);
         assert_eq!(p.get_by_name("NON_EXISTENT"), None);
     }
-
 }

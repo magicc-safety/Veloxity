@@ -216,8 +216,7 @@ pub struct CommEventQueues {
 pub struct CompanionEventQueues {
     pub heartbeats: EventQueue<CompanionHeartbeatReceived, COMPANION_HEARTBEAT_QUEUE_CAPACITY>,
     pub aux_commands: EventQueue<AuxCommandReceived, AUX_COMMAND_QUEUE_CAPACITY>,
-    pub external_attitudes:
-        EventQueue<ExternalAttitudeReceived, EXTERNAL_ATTITUDE_QUEUE_CAPACITY>,
+    pub external_attitudes: EventQueue<ExternalAttitudeReceived, EXTERNAL_ATTITUDE_QUEUE_CAPACITY>,
 }
 
 #[derive(Default)]
@@ -234,8 +233,7 @@ pub struct CommandEventQueues {
     pub version_requests: EventQueue<VersionRequested, VERSION_REQUEST_QUEUE_CAPACITY>,
     pub reset_origin_requests:
         EventQueue<ResetOriginRequested, RESET_ORIGIN_REQUEST_QUEUE_CAPACITY>,
-    pub config_info_requests:
-        EventQueue<ConfigInfoRequested, CONFIG_INFO_REQUEST_QUEUE_CAPACITY>,
+    pub config_info_requests: EventQueue<ConfigInfoRequested, CONFIG_INFO_REQUEST_QUEUE_CAPACITY>,
 }
 
 impl ParamEventQueues {

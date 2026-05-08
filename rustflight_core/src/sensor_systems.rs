@@ -32,17 +32,8 @@ pub struct SensorProcessorSet<
     pub attitude: AttitudeProc,
 }
 
-impl<
-    ImuProc,
-    MagProc,
-    BaroProc,
-    PitotProc,
-    RangeProc,
-    GnssProc,
-    BatteryProc,
-    RcProc,
-    AttitudeProc,
-> Default
+impl<ImuProc, MagProc, BaroProc, PitotProc, RangeProc, GnssProc, BatteryProc, RcProc, AttitudeProc>
+    Default
     for SensorProcessorSet<
         ImuProc,
         MagProc,
@@ -125,7 +116,9 @@ pub fn process_sensor_bus<
     processed.gnss = processors.gnss.process(&mut raw.gnss, flags, params);
     processed.battery = processors.battery.process(&mut raw.battery, flags, params);
     processed.rc = processors.rc.process(&mut raw.rc, flags, params);
-    processed.attitude = processors.attitude.process(&mut raw.attitude, flags, params);
+    processed.attitude = processors
+        .attitude
+        .process(&mut raw.attitude, flags, params);
 }
 
 #[cfg(test)]

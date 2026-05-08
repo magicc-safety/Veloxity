@@ -34,11 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{
-    controller::Controller,
-    estimator::NamedEstimator,
-    mixer::Mixer,
-};
+use crate::{controller::Controller, estimator::NamedEstimator, mixer::Mixer};
 
 pub mod quadrotor;
 

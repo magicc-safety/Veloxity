@@ -41,16 +41,10 @@ use cortex_m_rt::entry;
 use nucleo::*;
 use panic_halt as _;
 use rustflight_core::{
-    bodytype::quadrotor::Quadrotor,
-    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
-    controller::Controller,
-    controller::quad_controller::QuadController,
-    estimator::quad_estimator::QuadEstimator,
-    mixer::Mixer,
-    mixer::quad_mixer::QuadMixer,
-    params2::Params,
-    state_machine::StateManager,
-    world::World,
+    bodytype::quadrotor::Quadrotor, comm_manager::comm_link_trait::mavlink::MavlinkInterface,
+    controller::Controller, controller::quad_controller::QuadController,
+    estimator::quad_estimator::QuadEstimator, mixer::Mixer, mixer::quad_mixer::QuadMixer,
+    params2::Params, state_machine::StateManager, world::World,
 };
 use stm_32::*;
 

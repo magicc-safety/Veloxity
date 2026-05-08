@@ -431,13 +431,8 @@ impl RcTrimCalibrator for QuadController {
         let mut controller = *self;
         controller.update_gains(params);
         controller.reset_pids();
-        let output = controller.run_pid_control(
-            &AttitudeState::default(),
-            rc_control,
-            params,
-            0.0,
-            false,
-        );
+        let output =
+            controller.run_pid_control(&AttitudeState::default(), rc_control, params, 0.0, false);
 
         [
             output.torques[0] as f32,

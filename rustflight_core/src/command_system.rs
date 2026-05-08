@@ -209,9 +209,11 @@ pub fn apply_version_requests<const N: usize>(mut ctx: VersionRequestCtx<'_, N>)
         let mut version_bytes = [0u8; 50];
         let len = version_str.len().min(version_bytes.len());
         version_bytes[..len].copy_from_slice(version_str.as_bytes());
-        let _ = ctx.responses.emit(CommResponse::Version(RosflightVersionMsg {
-            version: version_bytes,
-        }));
+        let _ = ctx
+            .responses
+            .emit(CommResponse::Version(RosflightVersionMsg {
+                version: version_bytes,
+            }));
         emit_cmd_ack(
             &mut ctx.responses,
             request.command,
@@ -252,11 +254,11 @@ pub fn apply_config_info_requests<const N: usize>(mut ctx: ConfigInfoCtx<'_, N>)
 mod tests {
     use super::*;
     use crate::{
-        controller::quad_controller::QuadController,
         comm_messages::{
             enums::{OffboardControlIgnore, OffboardControlMode},
             messages::OffboardControlMsg,
         },
+        controller::quad_controller::QuadController,
         events::{
             BOARD_COMMAND_REQUEST_QUEUE_CAPACITY, CALIBRATION_REQUEST_QUEUE_CAPACITY,
             COMM_RESPONSE_QUEUE_CAPACITY, CONFIG_INFO_REQUEST_QUEUE_CAPACITY, EventQueue,
@@ -366,7 +368,10 @@ mod tests {
             params: &mut params,
         });
 
-        assert_eq!(params.get_by_id(ParamId::PARAM_SYSTEM_ID), ParamValue::Int(1));
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(1)
+        );
         match responses.pop().unwrap() {
             CommResponse::CmdAck(ack) => {
                 assert!(matches!(ack.command, RosflightCmd::SetParamDefaults));

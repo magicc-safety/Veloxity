@@ -98,40 +98,20 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         true
     }
 
-    fn send_named_value(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        msg: ParamValueMsg,
-    ) {
+    fn send_named_value(&mut self, _board: &mut TestBoard, _system_id: u8, msg: ParamValueMsg) {
         self.record_param_value(msg);
     }
 
-    fn send_status(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        msg: RosflightStatusMsg,
-    ) {
+    fn send_status(&mut self, _board: &mut TestBoard, _system_id: u8, msg: RosflightStatusMsg) {
         self.status_count += 1;
         self.last_status = Some(msg);
     }
 
-    fn send_timesync(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        _msg: TimesyncMsg,
-    ) -> bool {
+    fn send_timesync(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: TimesyncMsg) -> bool {
         true
     }
 
-    fn send_version(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        msg: RosflightVersionMsg,
-    ) {
+    fn send_version(&mut self, _board: &mut TestBoard, _system_id: u8, msg: RosflightVersionMsg) {
         self.version_count += 1;
         self.last_version = Some(msg);
     }
@@ -171,34 +151,19 @@ impl CommInterface<TestBoard> for RecordingCommLink {
 
     fn send_mag(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallMagMsg) {}
 
-    fn send_rc_raw(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        _msg: RosflightOutputRawMsg,
-    ) {
+    fn send_rc_raw(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: RosflightOutputRawMsg) {
     }
 
     fn send_range(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallRangeMsg) {}
 
     fn send_gnss(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: RosflightGnssMsg) {}
 
-    fn send_cmd_ack(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        msg: RosflightCmdAckMsg,
-    ) {
+    fn send_cmd_ack(&mut self, _board: &mut TestBoard, _system_id: u8, msg: RosflightCmdAckMsg) {
         self.cmd_ack_count += 1;
         self.last_cmd_ack = Some(msg);
     }
 
-    fn send_rc_channels(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        msg: RcChannelsMsg,
-    ) {
+    fn send_rc_channels(&mut self, _board: &mut TestBoard, _system_id: u8, msg: RcChannelsMsg) {
         self.rc_channels_count += 1;
         self.last_rc_channels = Some(msg);
     }
@@ -211,12 +176,7 @@ impl CommInterface<TestBoard> for RecordingCommLink {
     ) {
     }
 
-    fn send_statustext(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        msg: StatustextMsg,
-    ) {
+    fn send_statustext(&mut self, _board: &mut TestBoard, _system_id: u8, msg: StatustextMsg) {
         self.statustext_count += 1;
         self.last_statustext = Some(msg);
     }

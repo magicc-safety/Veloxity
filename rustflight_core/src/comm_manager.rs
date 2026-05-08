@@ -39,6 +39,7 @@ pub mod mavlink_parser;
 use crate::board;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
+use crate::estimator::AttitudeStateTrait;
 use crate::events::{
     AuxCommandReceived, BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
     CommandEventQueues, CompanionEventQueues, CompanionHeartbeatReceived, ConfigInfoRequested,
@@ -46,7 +47,6 @@ use crate::events::{
     ParamListRequested, ParamReadRequested, ParamSetRequested, RcTrimCalibrationRequested,
     ResetOriginRequested, VersionRequested,
 };
-use crate::estimator::AttitudeStateTrait;
 use crate::mavlink::dialects::Rosflight;
 use crate::packets::RC_PACKET_CHANNELS;
 use crate::params2::{ParamId, ParamValue, Params};
@@ -337,7 +337,13 @@ where
         for (dst, src) in values.iter_mut().zip(actuator_commands.as_ref().iter()) {
             *dst = *src as f32;
         }
-        self.send_rosflight_output_raw(board, RosflightOutputRawMsg { stamp: now_us, values });
+        self.send_rosflight_output_raw(
+            board,
+            RosflightOutputRawMsg {
+                stamp: now_us,
+                values,
+            },
+        );
     }
 
     pub fn queue_completed_calibration_ack(
@@ -596,14 +602,9 @@ where
                 let _ = comm_events.responses.push(CommResponse::CmdAck(ack_msg));
             }
         } // end if let Some(msg)
-
     }
 
-    pub fn send_comm_responses(
-        &mut self,
-        board: &mut B,
-        comm_events: &mut CommEventQueues,
-    ) {
+    pub fn send_comm_responses(&mut self, board: &mut B, comm_events: &mut CommEventQueues) {
         while let Some(response) = comm_events.responses.pop() {
             match response {
                 CommResponse::ParamValue(msg) => {
@@ -678,7 +679,6 @@ where
     pub fn send_rosflight_output_raw(&mut self, board: &mut B, msg: RosflightOutputRawMsg) {
         self.comm_link.send_output_raw(board, self.sysid, msg);
     }
-
 }
 
 #[cfg(test)]
@@ -686,8 +686,6 @@ mod tests {
     use super::*;
     use crate::{
         board::BoardIo,
-        command_manager::CommandManager,
-        command_system::{self, CalibrationRequestCtx},
         comm_messages::{
             enums::{
                 OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightAuxCmdType,
@@ -698,8 +696,10 @@ mod tests {
                 ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
             },
         },
+        command_manager::CommandManager,
+        command_system::{self, CalibrationRequestCtx},
         events::{
-            CommEventQueues, CommandEventQueues, CommResponse, CompanionEventQueues,
+            CommEventQueues, CommResponse, CommandEventQueues, CompanionEventQueues,
             ParamEventQueues,
         },
         param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
@@ -1061,8 +1061,8 @@ mod tests {
         let mut rc_packet = crate::packets::RcPacket::default();
         rc_packet.n_chan = RC_PACKET_CHANNELS as u32;
         let test_channels = [
-            -1.0, -0.5, 0.0, 0.5, 1.0, 0.25, -0.25, 0.75, 0.33, 0.44, 0.55, 0.66, 0.77,
-            0.88, 0.99, -0.99, 1.0, -1.0,
+            -1.0, -0.5, 0.0, 0.5, 1.0, 0.25, -0.25, 0.75, 0.33, 0.44, 0.55, 0.66, 0.77, 0.88, 0.99,
+            -0.99, 1.0, -1.0,
         ];
         rc_packet.chan[..test_channels.len()].copy_from_slice(&test_channels);
         processed_sensors.rc = Some(rc_packet);
@@ -1214,8 +1214,16 @@ mod tests {
 
         let request = command_events.offboard_control_requests.pop().unwrap();
         assert_eq!(request.now_us, 55_000);
-        assert_eq!(request.msg.mode, OffboardControlMode::ModeRollPitchYawrateThrottle);
-        assert!(request.msg.ignore.contains(OffboardControlIgnore::IGNORE_FY));
+        assert_eq!(
+            request.msg.mode,
+            OffboardControlMode::ModeRollPitchYawrateThrottle
+        );
+        assert!(
+            request
+                .msg
+                .ignore
+                .contains(OffboardControlIgnore::IGNORE_FY)
+        );
         assert_eq!(request.msg.qx, 0.1);
     }
 
@@ -1272,12 +1280,7 @@ mod tests {
         ));
         assert_eq!(aux_event.msg.aux_cmd_array[1], 0.4);
         assert_eq!(
-            companion_events
-                .external_attitudes
-                .pop()
-                .unwrap()
-                .msg
-                .qz,
+            companion_events.external_attitudes.pop().unwrap().msg.qz,
             0.3
         );
     }

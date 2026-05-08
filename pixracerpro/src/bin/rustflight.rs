@@ -43,15 +43,9 @@ use panic_halt as _;
 use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
 use rustflight_core::{
-    bodytype::BodyType,
-    bodytype::quadrotor::Quadrotor,
-    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
-    controller::Controller,
-    mixer::Mixer,
-    params2::Params,
-    pwm,
-    state_machine::StateManager,
-    world::World,
+    bodytype::BodyType, bodytype::quadrotor::Quadrotor,
+    comm_manager::comm_link_trait::mavlink::MavlinkInterface, controller::Controller, mixer::Mixer,
+    params2::Params, pwm, state_machine::StateManager, world::World,
 };
 use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
 
