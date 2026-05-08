@@ -7,7 +7,7 @@ use crate::{
         PARAM_SET_REQUEST_QUEUE_CAPACITY, ParamChanged, ParamListRequested, ParamReadRequested,
         ParamSetRequested,
     },
-    params2::{PARAM_DEFINITIONS, PARAMS_COUNT, ParamId},
+    params::{PARAM_DEFINITIONS, PARAMS_COUNT, ParamId},
     ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
 };
 
@@ -136,7 +136,7 @@ mod tests {
     use super::*;
     use crate::{
         events::{EventQueue, ParamListRequested, ParamReadRequested, ParamSetRequested},
-        params2::{ParamId, ParamValue, Params},
+        params::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
     };
 

@@ -1,6 +1,6 @@
 use crate::{
     events::{EventQueue, EventQueueError},
-    params2::{ParamId, ParamValue, Params},
+    params::{ParamId, ParamValue, Params},
 };
 
 pub struct ParamsReadPort<'a> {

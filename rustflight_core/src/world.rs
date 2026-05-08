@@ -20,7 +20,7 @@ use crate::{
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
-    params2::Params,
+    params::Params,
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
     pwm_system::{PwmOutputState, compose_pwm_outputs, sync_pwm_output_state, write_pwm_commands},
@@ -418,7 +418,7 @@ mod tests {
             },
         },
         packets::{ImuPacket, RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
-        params2::{ParamId, ParamValue},
+        params::{ParamId, ParamValue},
         pwm::{PwmDriver, PwmError},
         test_support::{RecordingCommLink, TestBoard},
     };

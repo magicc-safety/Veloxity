@@ -35,7 +35,7 @@
 // ******************************************************************************
 // **/
 use crate::{
-    comm_messages::messages::ExternalAttitudeMsg, params2::Params, sensors::ProcessedSensors,
+    comm_messages::messages::ExternalAttitudeMsg, params::Params, sensors::ProcessedSensors,
 };
 pub mod quad_estimator;
 

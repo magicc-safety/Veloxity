@@ -41,7 +41,7 @@ mod tests;
 
 use crate::{
     comm_manager::CommManager,
-    params2::{ParamId, ParamValue, Params},
+    params::{ParamId, ParamValue, Params},
 };
 use bitflags::bitflags;
 use core::{error, mem::take};

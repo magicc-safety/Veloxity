@@ -38,7 +38,7 @@
 use super::{Controller, RcTrimCalibrator};
 use crate::command_manager::{CombinedControl, ControlType};
 use crate::estimator::quad_estimator::AttitudeState;
-use crate::params2::{ParamId, ParamValue, Params};
+use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::StateManager;
 use libm::{atan2, cos, sin};
 use micro_algebra::stack::quaternion::Quaternion;

@@ -49,7 +49,7 @@ use crate::events::{
 };
 use crate::mavlink::dialects::Rosflight;
 use crate::packets::RC_PACKET_CHANNELS;
-use crate::params2::{ParamId, ParamValue, Params};
+use crate::params::{ParamId, ParamValue, Params};
 use crate::sensorprocessors::CalibrationFlags;
 use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
@@ -703,7 +703,7 @@ mod tests {
             ParamEventQueues,
         },
         param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
-        params2::{ParamId, ParamValue, Params},
+        params::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
         sensorprocessors::CalibrationFlags,
         sensors::ProcessedSensors,

@@ -36,7 +36,7 @@
 // **/
 pub mod quad_controller;
 use crate::command_manager::CombinedControl;
-use crate::params2::Params;
+use crate::params::Params;
 use crate::state_machine::StateManager;
 
 pub trait Controller {

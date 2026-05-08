@@ -99,7 +99,7 @@ impl_store!(ExternalAttitudeMsg, external_attitude, "external_attitude");
 
 pub mod messages {
     use super::enums::*;
-    use crate::{packets::GNSSFixType, params2::ParamValue, state_machine::ErrorFlag};
+    use crate::{packets::GNSSFixType, params::ParamValue, state_machine::ErrorFlag};
     // Heartbeat
     // I don't think we need all these fields for the generic message but I'm leaving them for now
     #[derive(Debug, Clone, Copy)]

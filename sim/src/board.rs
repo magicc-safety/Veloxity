@@ -10,7 +10,7 @@ use chrono::{Datelike, TimeZone, Timelike, Utc};
 use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
 use rustflight_core::packets::{self, RC_PACKET_CHANNELS};
-use rustflight_core::params2::{PARAM_DEFINITIONS, ParamValue, Params};
+use rustflight_core::params::{PARAM_DEFINITIONS, ParamValue, Params};
 use rustflight_core::sensors::SensorBus;
 use tokio::io::ErrorKind;
 use tokio::net::UdpSocket;
@@ -403,7 +403,7 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustflight_core::params2::ParamId;
+    use rustflight_core::params::ParamId;
     use std::time::Instant;
 
     fn stamp(sec: i32, nanosec: u32) -> ros_messages::Time {

@@ -52,7 +52,7 @@ pub mod mixer;
 pub mod packets;
 pub mod param_reactions;
 pub mod param_system;
-pub mod params2;
+pub mod params;
 pub mod ports;
 pub mod pwm;
 pub mod pwm_system;

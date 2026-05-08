@@ -1,6 +1,6 @@
 use crate::{
     packets::*,
-    params2::Params,
+    params::Params,
     sensorprocessors::{
         CalibrationFlags, ImuProcessor, MagProcessor, PassthroughAttitudeProcessor,
         PassthroughBaroProcessor, PassthroughBatteryProcessor, PassthroughGNSSProcessor,

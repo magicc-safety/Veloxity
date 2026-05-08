@@ -3051,7 +3051,7 @@ Remaining `BoardTrait` references:
 - `comm_manager.rs` keeps a local bound for the legacy HList telemetry method.
 - `rosflight.rs` remains the legacy HList scheduler/reference path.
 - `board/dummy.rs` remains the legacy HList dummy board.
-- `params.rs` is not exported by `lib.rs`; the active parameter module is `params2.rs`.
+- `params.rs` is not exported by `lib.rs`; the active parameter module is `params.rs`.
 
 Validation:
 
@@ -3919,7 +3919,7 @@ Current status after this slice:
 - `params_iter` is gone from `World`.
 - `params_iter` is gone from legacy `ROSFlight`.
 - `params_iter` is gone from `CommManager`.
-- `Params::iter` and `ParamIter` have since been removed from `params2`; parameter listing now flows through `PARAM_DEFINITIONS` and the explicit request/event path.
+- `Params::iter` and `ParamIter` have since been removed from `params`; parameter listing now flows through `PARAM_DEFINITIONS` and the explicit request/event path.
 
 ## Stale Params Iterator Removal Progress
 
@@ -3937,7 +3937,7 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core params2::tests --lib` passes.
+- `cargo test -p rustflight_core params::tests --lib` passes.
 - `cargo test -p rustflight_core param_system::tests --lib` passes.
 - `cargo test -p rustflight_core comm_manager::tests --lib` passes.
 - `cargo test -p rustflight_core world::tests --lib` passes.
@@ -4101,7 +4101,7 @@ Validation:
 
 Reason for this change:
 
-- `params2` is the active parameter API used by core, sim, PixRacerPro, and Nucleo.
+- `params` is the active parameter API used by core, sim, PixRacerPro, and Nucleo.
 - The old `rustflight_core/src/params.rs` file was no longer exported and had no live call sites.
 - Keeping the stale module made the parameter boundary look duplicated after the event/port parameter migration.
 
@@ -4113,12 +4113,12 @@ Design now implemented:
 
 Current status after this slice:
 
-- `params2` is the only parameter module in active source.
+- `params` is the only parameter module in active source.
 - No active source imports `crate::params`.
 
 Validation:
 
-- `rg -n "params::|pub mod params|mod params|params\\.rs|crate::params" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns only `params2` matches.
+- `rg -n "params::|pub mod params|mod params|params\\.rs|crate::params" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns only `params` matches.
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p rustflight_core world::tests --lib` passes.
@@ -4159,7 +4159,7 @@ Validation:
 Reason for this change:
 
 - The old `rustflight_core/src/params/param_types.rs` scaffolding was not exported.
-- Active parameter IDs, values, defaults, and definitions now live in `params2`.
+- Active parameter IDs, values, defaults, and definitions now live in `params`.
 - Keeping the stale directory left a second, inactive parameter model beside the active one.
 
 Design now implemented:
@@ -4169,11 +4169,39 @@ Design now implemented:
 Current status after this slice:
 
 - The old `params/` source directory is gone.
-- Active source uses `params2` for parameter values and definitions.
+- Active source uses `params` for parameter values and definitions.
 
 Validation:
 
 - `rg --files rustflight_core/src | sort` shows no `rustflight_core/src/params/...` files.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Params Module Rename
+
+Reason for this change:
+
+- After removing the stale old `params` module and `params/` scaffolding, the active parameter API was still named `params2`.
+- That name was a migration artifact and made the completed parameter path look temporary.
+
+Design now implemented:
+
+- Renamed `rustflight_core/src/params2.rs` to `rustflight_core/src/params.rs`.
+- Updated core, sim, PixRacerPro, and Nucleo imports from `params2` to `params`.
+- Updated the architecture log references for the current active parameter module.
+
+Current status after this slice:
+
+- `params` is the active parameter module.
+- No active source reference to `params2` remains.
+
+Validation:
+
+- `rg -n "params2|crate::params2|pub mod params2" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns no matches.
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p rustflight_core world::tests --lib` passes.

@@ -6,7 +6,7 @@ use crate::{
             RosflightAuxCmdMsg, RosflightCmdAckMsg, RosflightVersionMsg, StatustextMsg,
         },
     },
-    params2::{ParamId, ParamValue},
+    params::{ParamId, ParamValue},
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

@@ -484,7 +484,7 @@ impl From<mav_messages::ParamRequestList> for comm_messages::ParamRequestListMsg
 
 impl From<mav_messages::ParamSet> for comm_messages::ParamSetMsg {
     fn from(msg: mav_messages::ParamSet) -> Self {
-        use crate::params2::ParamValue;
+        use crate::params::ParamValue;
         use mav_enums::MavParamType::*;
         Self {
             target_system: msg.target_system,
@@ -693,7 +693,7 @@ impl From<comm_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
 
 impl From<comm_messages::ParamValueMsg> for mav_messages::ParamValue {
     fn from(msg: comm_messages::ParamValueMsg) -> Self {
-        use crate::params2::ParamValue as CommParamValue;
+        use crate::params::ParamValue as CommParamValue;
         use mav_enums::MavParamType;
         let (value_f32, value_type) = match msg.param_value {
             // Should the ParamValue type be updated to support smaller types?

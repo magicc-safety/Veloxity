@@ -1,7 +1,7 @@
 use crate::{
     command_manager::CommandManager,
     events::{PARAM_CHANGED_QUEUE_CAPACITY, ParamChanged},
-    params2::ParamId,
+    params::ParamId,
     ports::{EventReadPort, ParamsReadPort},
     rc::Rc,
     state_machine::StateManager,
@@ -44,7 +44,7 @@ mod tests {
     use crate::{
         command_manager::CommandManager,
         events::EventQueue,
-        params2::{ParamValue, Params},
+        params::{ParamValue, Params},
         state_machine::ErrorFlag,
     };
 

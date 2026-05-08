@@ -11,7 +11,7 @@ use crate::{
         ConfigInfoRequested, OffboardControlRequested, ParamDefaultsRequested,
         RcTrimCalibrationRequested, ResetOriginRequested, VersionRequested,
     },
-    params2::{ParamId, ParamValue, Params},
+    params::{ParamId, ParamValue, Params},
     ports::{EventDrainPort, EventEmitPort},
     sensorprocessors::CalibrationFlags,
     state_machine::StateManager,

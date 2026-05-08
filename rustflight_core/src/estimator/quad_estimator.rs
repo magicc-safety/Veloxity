@@ -39,7 +39,7 @@ use super::AttitudeStateTrait;
 use super::NamedEstimator;
 use crate::comm_messages::messages::ExternalAttitudeMsg;
 use crate::packets;
-use crate::params2::{ParamId, ParamValue, Params};
+use crate::params::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
 
 use micro_algebra::stack::{quaternion::Quaternion, vector::Vector};

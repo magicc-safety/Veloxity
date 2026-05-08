@@ -34,7 +34,7 @@
 // *
 // ******************************************************************************
 // **/
-use crate::{errors, params2::Params, sensors::SensorBus};
+use crate::{errors, params::Params, sensors::SensorBus};
 pub mod dummy;
 
 pub trait BoardIo {

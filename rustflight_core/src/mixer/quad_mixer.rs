@@ -37,7 +37,7 @@
 
 use crate::controller::quad_controller::MixerInput;
 use crate::mixer::{Mixer, MixerOutputType};
-use crate::params2::{ParamId, ParamValue, Params};
+use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::StateManager;
 use libm::{cos, fabs, sin};
 use micro_algebra::linalg::pinv;

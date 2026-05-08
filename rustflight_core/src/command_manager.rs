@@ -43,7 +43,7 @@ use crate::comm_messages::{
     messages::OffboardControlMsg,
 };
 use crate::mavlink::dialects::rosflight::enums::offboard_control_ignore;
-use crate::params2::{ParamId, ParamValue, Params};
+use crate::params::{ParamId, ParamValue, Params};
 use crate::rc::{Rc, Stick, Switch};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
 

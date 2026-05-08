@@ -2,7 +2,7 @@ use crate::{
     board::BoardIo,
     comm_messages::{enums::RosflightAuxCmdType, messages::RosflightAuxCmdMsg},
     mixer::MixerOutputType,
-    params2::{ParamId, ParamValue, Params},
+    params::{ParamId, ParamValue, Params},
     pwm::{PwmDriver, PwmError},
     state_machine::StateManager,
 };
@@ -157,7 +157,7 @@ mod tests {
     use super::*;
     use crate::{
         errors,
-        params2::{ParamId, ParamValue, Params},
+        params::{ParamId, ParamValue, Params},
         state_machine::Event,
     };
 

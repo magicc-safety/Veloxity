@@ -40,7 +40,7 @@ use core::default;
 use crate::errors;
 use crate::log_info;
 use crate::packets::*;
-use crate::params2::{ParamId, ParamValue, Params};
+use crate::params::{ParamId, ParamValue, Params};
 use bitflags::bitflags;
 use num_traits::Float;
 
