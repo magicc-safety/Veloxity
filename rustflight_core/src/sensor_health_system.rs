@@ -1,19 +1,40 @@
 use crate::{
     params::{ParamId, ParamValue, Params},
+    sensors::ProcessedSensors,
     state_machine::{ErrorFlag, Event, StateManager},
 };
 
-pub struct ImuCalibrationHealthCtx<'a> {
+pub struct SensorHealthCtx<'a> {
+    pub now_us: u64,
+    pub sensors: &'a ProcessedSensors,
     pub params: &'a Params,
     pub state: &'a mut StateManager,
+    pub last_imu_seen: &'a mut u64,
+    pub imu_timeout_us: u64,
 }
 
-pub fn update_imu_calibration_error(ctx: ImuCalibrationHealthCtx<'_>) {
+pub fn update_sensor_health(ctx: SensorHealthCtx<'_>) {
+    if ctx.sensors.imu.is_some() {
+        *ctx.last_imu_seen = ctx.now_us;
+        ctx.state.update(
+            Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING),
+            ctx.params,
+        );
+        update_imu_calibration_error(ctx.state, ctx.params);
+    } else if ctx.now_us > *ctx.last_imu_seen + ctx.imu_timeout_us {
+        ctx.state.update(
+            Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING),
+            ctx.params,
+        );
+    }
+}
+
+fn update_imu_calibration_error(state: &mut StateManager, params: &Params) {
     let error = ErrorFlag::UNCALIBRATED_IMU;
-    if imu_bias_params_are_all_zero(ctx.params) {
-        ctx.state.update(Event::ERROR_OCCURRED(error), ctx.params);
+    if imu_bias_params_are_all_zero(params) {
+        state.update(Event::ERROR_OCCURRED(error), params);
     } else {
-        ctx.state.update(Event::ERROR_CLEARED(error), ctx.params);
+        state.update(Event::ERROR_CLEARED(error), params);
     }
 }
 
@@ -33,19 +54,45 @@ fn imu_bias_params_are_all_zero(params: &Params) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::packets::{ImuPacket, RosflightPacketHeader};
+
+    const TEST_IMU_TIMEOUT_US: u64 = 100_000;
+
+    fn imu_packet(timestamp: u64) -> ImuPacket {
+        ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        }
+    }
 
     #[test]
     fn imu_calibration_health_sets_uncalibrated_error_when_all_bias_params_are_zero() {
         let params = Params::new();
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
+        let mut last_imu_seen = 0;
+        let sensors = ProcessedSensors {
+            imu: Some(imu_packet(1)),
+            ..ProcessedSensors::default()
+        };
 
-        update_imu_calibration_error(ImuCalibrationHealthCtx {
+        update_sensor_health(SensorHealthCtx {
+            now_us: 1,
+            sensors: &sensors,
             params: &params,
             state: &mut state,
+            last_imu_seen: &mut last_imu_seen,
+            imu_timeout_us: TEST_IMU_TIMEOUT_US,
         });
 
         assert!(state.get_errors().contains(ErrorFlag::UNCALIBRATED_IMU));
+        assert_eq!(last_imu_seen, 1);
     }
 
     #[test]
@@ -55,12 +102,70 @@ mod tests {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
         state.update(Event::ERROR_OCCURRED(ErrorFlag::UNCALIBRATED_IMU), &params);
+        let mut last_imu_seen = 0;
+        let sensors = ProcessedSensors {
+            imu: Some(imu_packet(1)),
+            ..ProcessedSensors::default()
+        };
 
-        update_imu_calibration_error(ImuCalibrationHealthCtx {
+        update_sensor_health(SensorHealthCtx {
+            now_us: 1,
+            sensors: &sensors,
             params: &params,
             state: &mut state,
+            last_imu_seen: &mut last_imu_seen,
+            imu_timeout_us: TEST_IMU_TIMEOUT_US,
         });
 
         assert!(!state.get_errors().contains(ErrorFlag::UNCALIBRATED_IMU));
+    }
+
+    #[test]
+    fn sensor_health_sets_imu_not_responding_after_timeout_without_imu_sample() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        let mut last_imu_seen = 0;
+        let sensors = ProcessedSensors::default();
+
+        update_sensor_health(SensorHealthCtx {
+            now_us: TEST_IMU_TIMEOUT_US + 1,
+            sensors: &sensors,
+            params: &params,
+            state: &mut state,
+            last_imu_seen: &mut last_imu_seen,
+            imu_timeout_us: TEST_IMU_TIMEOUT_US,
+        });
+
+        assert!(state.get_errors().contains(ErrorFlag::IMU_NOT_RESPONDING));
+        assert_eq!(last_imu_seen, 0);
+    }
+
+    #[test]
+    fn sensor_health_clears_imu_not_responding_when_imu_sample_returns() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update(
+            Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING),
+            &params,
+        );
+        let mut last_imu_seen = 0;
+        let sensors = ProcessedSensors {
+            imu: Some(imu_packet(5)),
+            ..ProcessedSensors::default()
+        };
+
+        update_sensor_health(SensorHealthCtx {
+            now_us: 5,
+            sensors: &sensors,
+            params: &params,
+            state: &mut state,
+            last_imu_seen: &mut last_imu_seen,
+            imu_timeout_us: TEST_IMU_TIMEOUT_US,
+        });
+
+        assert!(!state.get_errors().contains(ErrorFlag::IMU_NOT_RESPONDING));
+        assert_eq!(last_imu_seen, 5);
     }
 }

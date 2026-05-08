@@ -4385,33 +4385,42 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
-## IMU Calibration Health System Progress
+## Sensor Health System Progress
 
 Reason for this change:
 
 - After moving calibration knowledge out of the state machine, the missing parity piece was to produce and clear `UNCALIBRATED_IMU` from the sensor health path.
 - Upstream ROSflight 2.x sets the uncalibrated IMU error from the sensor path when all six accel and gyro bias params are zero.
-- IMU health is safety-critical enough that this should be a named system/context, not an incidental helper hidden in `World`.
+- IMU health is safety-critical enough that timeout and calibration status should be owned by a named system/context, not split between `World` conditionals and a small helper.
 
 Design now implemented:
 
-- Added `sensor_health_system::ImuCalibrationHealthCtx`.
-- Added `sensor_health_system::update_imu_calibration_error`.
-- `World::update_sensor_health_and_calibration` now delegates IMU calibration error ownership to that system when a processed IMU sample is present.
+- Added `sensor_health_system::SensorHealthCtx`.
+- Added `sensor_health_system::update_sensor_health`.
+- `World::update_sensor_health_and_calibration` now delegates sensor health to that system after sensor processing.
+- The context borrows:
+  - `ProcessedSensors`
+  - `Params`
+  - `StateManager`
+  - `last_imu_seen`
+  - current time and the IMU timeout threshold
+- The system clears `IMU_NOT_RESPONDING` and updates `last_imu_seen` when a processed IMU sample is present.
+- The system sets `IMU_NOT_RESPONDING` when no processed IMU sample has arrived before the timeout.
 - The system sets `ErrorFlag::UNCALIBRATED_IMU` when all six bias params are zero:
   - `ACC_X_BIAS`
   - `ACC_Y_BIAS`
   - `ACC_Z_BIAS`
   - `GYRO_X_BIAS`
-  - `GYRO_Y_BIAS`
-  - `GYRO_Z_BIAS`
+- `GYRO_Y_BIAS`
+- `GYRO_Z_BIAS`
 - The system clears `ErrorFlag::UNCALIBRATED_IMU` when any of those bias params is nonzero.
-- The no-IMU path remains owned by `IMU_NOT_RESPONDING`; calibration status is only updated after valid IMU processing.
+- Calibration status is updated only when a processed IMU sample is present.
 
 Current status after this slice:
 
-- The sensor health system now owns the upstream-style calibration error production/clear behavior.
+- The sensor health system now owns IMU timeout and upstream-style calibration error production/clear behavior.
 - State machine remains responsible only for transitions based on existing errors.
+- `World` remains responsible for scheduling sensor health and then handling calibration completion/ACK flow.
 - Full core library tests remain green.
 
 Validation:

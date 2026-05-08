@@ -29,7 +29,7 @@ use crate::{
     pwm_system::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
     rc_system::{RcCommandStateCtx, run_rc_command_state},
-    sensor_health_system::{ImuCalibrationHealthCtx, update_imu_calibration_error},
+    sensor_health_system::{SensorHealthCtx, update_sensor_health},
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
@@ -315,22 +315,14 @@ where
     }
 
     fn update_sensor_health_and_calibration(&mut self, now_us: u64) {
-        if self.processed_sensors.imu.is_some() {
-            self.last_imu_seen = now_us;
-            self.state.update(
-                Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING),
-                &self.params,
-            );
-            update_imu_calibration_error(ImuCalibrationHealthCtx {
-                params: &self.params,
-                state: &mut self.state,
-            });
-        } else if now_us > self.last_imu_seen + IMU_TIMEOUT_US {
-            self.state.update(
-                Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING),
-                &self.params,
-            );
-        }
+        update_sensor_health(SensorHealthCtx {
+            now_us,
+            sensors: &self.processed_sensors,
+            params: &self.params,
+            state: &mut self.state,
+            last_imu_seen: &mut self.last_imu_seen,
+            imu_timeout_us: IMU_TIMEOUT_US,
+        });
 
         if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
             self.state.update(Event::CALIBRATION_COMPLETE, &self.params);
