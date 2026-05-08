@@ -59,6 +59,7 @@ pub mod pwm;
 pub mod pwm_system;
 pub mod rc;
 pub mod rc_system;
+pub mod sensor_health_system;
 pub mod sensor_systems;
 pub mod sensorprocessors;
 pub mod sensors;

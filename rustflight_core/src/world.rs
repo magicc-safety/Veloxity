@@ -23,12 +23,13 @@ use crate::{
     mixer::Mixer,
     param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
-    params::Params,
+    params::{ParamId, ParamValue, Params},
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
     pwm_system::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
     rc_system::{RcCommandStateCtx, run_rc_command_state},
+    sensor_health_system::{ImuCalibrationHealthCtx, update_imu_calibration_error},
     sensor_systems::{SensorProcessorSet, process_sensor_bus},
     sensorprocessors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
@@ -320,6 +321,10 @@ where
                 Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING),
                 &self.params,
             );
+            update_imu_calibration_error(ImuCalibrationHealthCtx {
+                params: &self.params,
+                state: &mut self.state,
+            });
         } else if now_us > self.last_imu_seen + IMU_TIMEOUT_US {
             self.state.update(
                 Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING),
@@ -982,6 +987,63 @@ mod tests {
                 .state
                 .get_errors()
                 .contains(crate::state_machine::ErrorFlag::IMU_NOT_RESPONDING)
+        );
+    }
+
+    #[test]
+    fn world_sensor_health_sets_uncalibrated_imu_when_all_bias_params_are_zero() {
+        let mut world = test_world();
+        world.processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        world.update_sensor_health_and_calibration(world.board.clock_micros());
+
+        assert!(
+            world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::UNCALIBRATED_IMU)
+        );
+    }
+
+    #[test]
+    fn world_sensor_health_clears_uncalibrated_imu_when_any_bias_param_is_nonzero() {
+        let mut world = test_world();
+        world.state.update(
+            crate::state_machine::Event::ERROR_OCCURRED(
+                crate::state_machine::ErrorFlag::UNCALIBRATED_IMU,
+            ),
+            &world.params,
+        );
+        world
+            .params
+            .set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(0.01));
+        world.processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        world.update_sensor_health_and_calibration(world.board.clock_micros());
+
+        assert!(
+            !world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::UNCALIBRATED_IMU)
         );
     }
 
