@@ -4153,3 +4153,30 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Stale Param Types Removal
+
+Reason for this change:
+
+- The old `rustflight_core/src/params/param_types.rs` scaffolding was not exported.
+- Active parameter IDs, values, defaults, and definitions now live in `params2`.
+- Keeping the stale directory left a second, inactive parameter model beside the active one.
+
+Design now implemented:
+
+- Removed `rustflight_core/src/params/param_types.rs`.
+
+Current status after this slice:
+
+- The old `params/` source directory is gone.
+- Active source uses `params2` for parameter values and definitions.
+
+Validation:
+
+- `rg --files rustflight_core/src | sort` shows no `rustflight_core/src/params/...` files.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
