@@ -432,6 +432,16 @@ fn test_unable_to_arm_without_rc() {
 }
 
 #[test]
+fn test_unable_to_arm_with_uncalibrated_imu_error() {
+    let (mut sm, params) = setup_sm();
+    sm.update(Event::ERROR_OCCURRED(ErrorFlag::UNCALIBRATED_IMU), &params);
+    sm.update(Event::REQUEST_ARM, &params);
+    assert!(!sm.is_armed());
+    assert_eq!(sm.get_errors(), ErrorFlag::UNCALIBRATED_IMU);
+    assert_state!(sm, StateMachine::ErrorPresent);
+}
+
+#[test]
 fn test_able_to_arm_after_rc_recovery() {
     let (mut sm, params) = setup_sm();
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), &params);

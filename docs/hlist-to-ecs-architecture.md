@@ -4346,3 +4346,41 @@ Validation:
 Known unrelated test status:
 
 - `cargo test -p rustflight_core --lib` still hits the pre-existing state-machine `UNCALIBRATED_IMU` failures documented earlier; the affected World, RC, PWM, event, and port tests pass.
+
+## State Machine Calibration Boundary Fix
+
+Reason for this change:
+
+- The next blocker was the long-standing `state_machine::tests` failure set.
+- Those failures came from local `REQUEST_ARM` logic inspecting gyro bias params and inserting `UNCALIBRATED_IMU` directly inside the state machine.
+- That made the state manager responsible for sensor calibration knowledge and kept full core validation red.
+
+Upstream behavior checked:
+
+- Current upstream `rosflight_firmware` main was inspected at commit `099a9846406d9f20b2bae08a2ea3dda74a01cf59`.
+- Upstream `src/sensors.cpp` sets `ERROR_UNCALIBRATED_IMU` when all accel and gyro bias params are zero:
+  `ACC_X_BIAS`, `ACC_Y_BIAS`, `ACC_Z_BIAS`, `GYRO_X_BIAS`, `GYRO_Y_BIAS`, and `GYRO_Z_BIAS`.
+- Upstream `src/state_manager.cpp` does not compute IMU calibration from params on arm. It refuses arming through the existing error state when `ERROR_UNCALIBRATED_IMU` is already present.
+
+Design now implemented:
+
+- Removed the local state-machine gyro-bias inspection from `Preflight::REQUEST_ARM`.
+- Kept `CAL_GYRO_ARM` behavior: when requested, arming enters `Calibrating` and `CALIBRATION_COMPLETE` transitions to `Armed`.
+- Added a focused test proving an existing `UNCALIBRATED_IMU` error blocks arming.
+- Cleaned up overflow-helper tests so warning logs do not leak into `log_system` tests when the full lib suite runs in parallel.
+
+Current status after this slice:
+
+- State-machine tests now match the upstream ownership boundary: sensors own calibration error production; state machine owns state transitions based on existing errors.
+- Full `rustflight_core` library tests are green.
+- The remaining calibration parity work is to move the upstream six-bias `UNCALIBRATED_IMU` production/clear behavior into the sensor/World path, not back into `StateMachine`.
+
+Validation:
+
+- `cargo test -p rustflight_core state_machine::tests --lib` passes.
+- `cargo test -p rustflight_core --lib` passes.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.

@@ -197,7 +197,6 @@ impl Preflight {
     fn on_event(self, sm: State<Self>, event: Event, params: &Params) -> StateMachine {
         match event {
             Event::REQUEST_ARM => {
-                //if let ParamValue::Bool(true) = Params::get_calibrate_gyro_on_arm(params) {
                 if let ParamValue::Bool(true) =
                     params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM)
                 {
@@ -208,40 +207,10 @@ impl Preflight {
                         error_flags: error_flags,
                     })
                 } else {
-                    let is_calibrated = {
-                        let x_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_X_BIAS) {
-                            ParamValue::Float(val) => val != 0.0f32,
-                            other => false,
-                        };
-                        let y_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Y_BIAS) {
-                            ParamValue::Float(val) => val != 0.0f32,
-                            other => false,
-                        };
-                        let z_calibrated = match params.get_by_id(ParamId::PARAM_GYRO_Z_BIAS) {
-                            ParamValue::Float(val) => val != 0.0f32,
-                            other => false,
-                        };
-
-                        x_calibrated || y_calibrated || z_calibrated
-                    };
-
-                    if is_calibrated {
-                        // We are calibrated! Go to Armed.
-                        StateMachine::Armed(State {
-                            state: Armed,
-                            error_flags: sm.error_flags,
-                        })
-                    } else {
-                        // We are not calibrated, and we are not set to calibrate.
-                        // This is an error. Set the flag. The `state_manager.run()`
-                        // function will see this flag and move to ErrorPresent.
-                        let mut error_flags = sm.error_flags;
-                        error_flags.insert(ErrorFlag::UNCALIBRATED_IMU);
-                        StateMachine::Preflight(State {
-                            state: Preflight,
-                            error_flags: error_flags,
-                        })
-                    }
+                    StateMachine::Armed(State {
+                        state: Armed,
+                        error_flags: sm.error_flags,
+                    })
                 }
             }
             Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State {

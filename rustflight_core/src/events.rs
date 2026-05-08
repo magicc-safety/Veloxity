@@ -271,6 +271,7 @@ impl CompanionEventQueues {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logger::Logger;
 
     #[test]
     fn event_queue_preserves_fifo_order_across_wraparound() {
@@ -314,5 +315,7 @@ mod tests {
 
         assert_eq!(queue.pop(), Some(1));
         assert_eq!(queue.pop(), None);
+
+        while Logger::pop().is_some() {}
     }
 }
