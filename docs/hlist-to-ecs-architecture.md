@@ -4125,3 +4125,31 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+
+## Stale Units Module Removal
+
+Reason for this change:
+
+- `rustflight_core/src/units.rs` was no longer exported.
+- Active source had no references to `crate::units` or the old `ROSFlightTimestamp` type.
+- Keeping the file left another unused pre-`World` API surface in core.
+
+Design now implemented:
+
+- Removed `rustflight_core/src/units.rs`.
+- Removed the stale commented module line from `rustflight_core/src/lib.rs`.
+
+Current status after this slice:
+
+- Core has no active or commented `units` module export.
+- The remaining ROSflight timestamp handling is owned by the MAVLink/protocol path.
+
+Validation:
+
+- `rg -n "units::|mod units|pub mod units|pub\\(crate\\) mod units|ROSFlightTimestamp|crate::units" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns no matches.
+- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo test -p rustflight_core world::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
