@@ -42,7 +42,6 @@ use crate::comm_messages::{
     },
     messages::OffboardControlMsg,
 };
-use crate::mavlink::dialects::rosflight::enums::offboard_control_ignore;
 use crate::params::{ParamId, ParamValue, Params};
 use crate::rc::{Rc, Stick, Switch};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
@@ -97,6 +96,7 @@ pub struct CombinedControl {
     pub fx: ControlChannel,
     pub fy: ControlChannel,
     pub fz: ControlChannel,
+    pub passthrough: [ControlChannel; 4],
 }
 
 #[derive(Default)]
@@ -123,12 +123,12 @@ impl CommandManager {
             multirotor_failsafe_command: CombinedControl {
                 qx: ControlChannel {
                     active: true,
-                    control_type: ControlType::Rate,
+                    control_type: ControlType::Angle,
                     value: 0.0,
                 },
                 qy: ControlChannel {
                     active: true,
-                    control_type: ControlType::Rate,
+                    control_type: ControlType::Angle,
                     value: 0.0,
                 },
                 qz: ControlChannel {
@@ -136,9 +136,19 @@ impl CommandManager {
                     control_type: ControlType::Rate,
                     value: 0.0,
                 },
+                fx: ControlChannel {
+                    active: true,
+                    control_type: ControlType::Throttle,
+                    value: 0.0,
+                },
+                fy: ControlChannel {
+                    active: true,
+                    control_type: ControlType::Throttle,
+                    value: 0.0,
+                },
                 fz: ControlChannel {
                     active: true,
-                    control_type: ControlType::Passthrough,
+                    control_type: ControlType::Throttle,
                     value: 0.0,
                 },
                 ..Default::default()
@@ -164,6 +174,16 @@ impl CommandManager {
                     control_type: ControlType::Passthrough,
                     value: 0.0,
                 },
+                fy: ControlChannel {
+                    active: true,
+                    control_type: ControlType::Passthrough,
+                    value: 0.0,
+                },
+                fz: ControlChannel {
+                    active: true,
+                    control_type: ControlType::Passthrough,
+                    value: 0.0,
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -181,7 +201,7 @@ impl CommandManager {
         };
 
         let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
-            ParamValue::Bool(val) => val,
+            ParamValue::Int(val) => val != 0,
             other => false,
         };
 
@@ -191,6 +211,10 @@ impl CommandManager {
         } else {
             state_manager.update(Event::ERROR_CLEARED(ErrorFlag::INVALID_FAILSAFE), params);
         }
+
+        self.multirotor_failsafe_command.fx.value = 0.0;
+        self.multirotor_failsafe_command.fy.value = 0.0;
+        self.multirotor_failsafe_command.fz.value = 0.0;
 
         match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
             // The "happy path": it's an Int, as expected
@@ -209,8 +233,9 @@ impl CommandManager {
             }
         }
 
-        // This line is fine as-is
-        self.fixedwing_failsafe_command.fx.value = failsafe_throttle as f64;
+        self.fixedwing_failsafe_command.fx.value = 0.0;
+        self.fixedwing_failsafe_command.fy.value = 0.0;
+        self.fixedwing_failsafe_command.fz.value = 0.0;
     }
 
     pub fn run(
@@ -226,7 +251,7 @@ impl CommandManager {
         // This is the highest priority. If in failsafe, override all commands.
         if state_manager.is_in_failsafe() {
             let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
-                ParamValue::Bool(val) => val,
+                ParamValue::Int(val) => val != 0,
                 other => false,
             };
             self.combined_command = if is_fixed_wing {
@@ -261,6 +286,9 @@ impl CommandManager {
                 self.offboard_command.fx.active = false;
                 self.offboard_command.fy.active = false;
                 self.offboard_command.fz.active = false;
+                for channel in &mut self.offboard_command.passthrough {
+                    channel.active = false;
+                }
             }
 
             // --- 4. Muxing (C++ lines 253-256) ---
@@ -288,6 +316,15 @@ impl CommandManager {
         self.offboard_command.fx.value = msg.fx as f64;
         self.offboard_command.fy.value = msg.fy as f64;
         self.offboard_command.fz.value = msg.fz as f64;
+        for (channel, value) in self
+            .offboard_command
+            .passthrough
+            .iter_mut()
+            .zip(msg.passthrough.iter())
+        {
+            channel.value = *value as f64;
+            channel.control_type = ControlType::Passthrough;
+        }
 
         self.offboard_command.qx.active = !msg.ignore.contains(OffboardControlIgnore::IGNORE_QX);
         self.offboard_command.qy.active = !msg.ignore.contains(OffboardControlIgnore::IGNORE_QY);
@@ -295,6 +332,14 @@ impl CommandManager {
         self.offboard_command.fx.active = !msg.ignore.contains(OffboardControlIgnore::IGNORE_FX);
         self.offboard_command.fy.active = !msg.ignore.contains(OffboardControlIgnore::IGNORE_FY);
         self.offboard_command.fz.active = !msg.ignore.contains(OffboardControlIgnore::IGNORE_FZ);
+        self.offboard_command.passthrough[0].active =
+            !msg.ignore.contains(OffboardControlIgnore::IGNORE_PASS_0);
+        self.offboard_command.passthrough[1].active =
+            !msg.ignore.contains(OffboardControlIgnore::IGNORE_PASS_1);
+        self.offboard_command.passthrough[2].active =
+            !msg.ignore.contains(OffboardControlIgnore::IGNORE_PASS_2);
+        self.offboard_command.passthrough[3].active =
+            !msg.ignore.contains(OffboardControlIgnore::IGNORE_PASS_3);
 
         match msg.mode {
             OffboardControlMode::ModePassThrough => {
@@ -376,7 +421,7 @@ impl CommandManager {
 
         // C++: lines 130-153
         let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
-            ParamValue::Bool(val) => val,
+            ParamValue::Int(val) => val != 0,
             other => {
                 // This is a param definition error. Default to the safer
                 // (non-fixed-wing) case.
@@ -431,7 +476,7 @@ impl CommandManager {
                         other => 1.0,
                     };
                     self.rc_command.qx.value *= max_rollrate;
-                    self.rc_command.qx.value *= max_pitchrate;
+                    self.rc_command.qy.value *= max_pitchrate;
                 }
                 ControlType::Angle => {
                     let max_roll = match params.get_by_id(ParamId::PARAM_RC_MAX_ROLL) {
@@ -443,7 +488,7 @@ impl CommandManager {
                         other => 1.0,
                     };
                     self.rc_command.qx.value *= max_roll;
-                    self.rc_command.qx.value *= max_pitch;
+                    self.rc_command.qy.value *= max_pitch;
                 }
                 _ => {}
             }
@@ -469,6 +514,7 @@ impl CommandManager {
         self.rc_override = attitude_override | throttle_override;
         self.rc_attitude_override = attitude_override != OVERRIDE_NO_OVERRIDE;
         self.rc_throttle_override = throttle_override != OVERRIDE_NO_OVERRIDE;
+        self.combined_command.passthrough = self.offboard_command.passthrough;
     }
 
     fn attitude_stick_deviated(
@@ -582,7 +628,7 @@ impl CommandManager {
             if offboard_throttle_channel.active {
                 let take_min = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE)
                 {
-                    ParamValue::Bool(val) => val,
+                    ParamValue::Int(val) => val != 0,
                     other => true,
                 };
 
@@ -677,19 +723,16 @@ mod tests {
         state: &mut StateManager,
         channels: [f32; RC_PACKET_CHANNELS],
     ) {
-        rc.receive(
-            &RcPacket {
-                header: RosflightPacketHeader {
-                    timestamp: 100_000,
-                    status: 0,
-                },
-                n_chan: 8,
-                chan: channels,
-                lol: false,
+        rc.receive(&RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 100_000,
+                status: 0,
             },
-            params,
-            state,
-        );
+            n_chan: 8,
+            chan: channels,
+            lol: false,
+        });
+        rc.run(100, params, state);
     }
 
     #[test]
@@ -713,6 +756,7 @@ mod tests {
                 fx: 0.8,
                 fy: 0.8,
                 fz: 0.8,
+                passthrough: [0.0; 4],
             },
             &params,
         );
@@ -742,6 +786,7 @@ mod tests {
                 fx: 0.0,
                 fy: 0.0,
                 fz: 0.8,
+                passthrough: [0.0; 4],
             },
             &params,
         );
@@ -754,5 +799,103 @@ mod tests {
             OVERRIDE_OFFBOARD_Y_INACTIVE | OVERRIDE_OFFBOARD_T_INACTIVE
         );
         assert!(command.rc_override_active());
+    }
+
+    #[test]
+    fn rc_roll_and_pitch_scale_on_their_own_axes() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[0] = 0.75;
+        channels[1] = 0.25;
+
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.interpret_rc(&rc, &params);
+
+        assert_eq!(command.rc_control().qx.control_type, ControlType::Angle);
+        assert_eq!(command.rc_control().qy.control_type, ControlType::Angle);
+        assert!((command.rc_control().qx.value - 0.393).abs() < 1e-6);
+        assert!((command.rc_control().qy.value + 0.393).abs() < 1e-6);
+    }
+
+    #[test]
+    fn offboard_passthrough_channels_survive_muxing() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModePassThrough,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.5,
+                passthrough: [0.6, 0.7, 0.8, 0.9],
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        let passthrough = command.combined_control().passthrough;
+        for (channel, expected) in passthrough.iter().zip([0.6, 0.7, 0.8, 0.9]) {
+            assert!((channel.value - expected).abs() < 1e-6);
+        }
+        assert!(passthrough.iter().all(|channel| channel.active));
+        assert!(
+            passthrough
+                .iter()
+                .all(|channel| channel.control_type == ControlType::Passthrough)
+        );
+    }
+
+    #[test]
+    fn failsafe_commands_match_rosflight_channel_types() {
+        let command = CommandManager::new();
+
+        assert_eq!(
+            command.multirotor_failsafe_command.fx.control_type,
+            ControlType::Throttle
+        );
+        assert_eq!(
+            command.multirotor_failsafe_command.fy.control_type,
+            ControlType::Throttle
+        );
+        assert_eq!(
+            command.multirotor_failsafe_command.fz.control_type,
+            ControlType::Throttle
+        );
+        assert_eq!(
+            command.multirotor_failsafe_command.qx.control_type,
+            ControlType::Angle
+        );
+        assert_eq!(
+            command.multirotor_failsafe_command.qy.control_type,
+            ControlType::Angle
+        );
+        assert_eq!(
+            command.multirotor_failsafe_command.qz.control_type,
+            ControlType::Rate
+        );
+        assert!(command.multirotor_failsafe_command.fx.active);
+        assert!(command.multirotor_failsafe_command.fy.active);
+        assert!(command.multirotor_failsafe_command.fz.active);
+
+        assert!(command.fixedwing_failsafe_command.fx.active);
+        assert!(command.fixedwing_failsafe_command.fy.active);
+        assert!(command.fixedwing_failsafe_command.fz.active);
+        assert_eq!(
+            command.fixedwing_failsafe_command.fz.control_type,
+            ControlType::Passthrough
+        );
     }
 }

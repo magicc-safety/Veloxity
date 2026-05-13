@@ -36,9 +36,11 @@
 // **/
 use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
+use rustflight_core::params::Params;
 use rustflight_core::sensors::SensorBus;
 
 use embassy_time::Delay;
+use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
 use stm_32::embassy_stm32::lptim::timer::Timer;
 use stm_32::peripherals;
@@ -47,11 +49,14 @@ use stm_32::*;
 
 include!("../../stm_32/stm32h7x3_common.rs");
 
+static mut PARAM_STORE: Option<Params> = None;
+
 pub struct Board {
     probe: [Output<'static>; 3], // PixRacerPro exposes three probe pins.
     pub start_time: embassy_time::Instant,
     test_pin_1: Output<'static>,
     test_pin_2: Output<'static>,
+    pending_reset_to_bootloader: Option<bool>,
 }
 
 impl BoardIo for Board {
@@ -136,6 +141,39 @@ impl BoardIo for Board {
 
     fn clock_micros(&self) -> u64 {
         self.start_time.elapsed().as_micros() as u64
+    }
+
+    fn read_params(&mut self, params: &mut Params) -> bool {
+        let Some(stored) = (unsafe { PARAM_STORE }) else {
+            return false;
+        };
+        *params = stored;
+        true
+    }
+
+    fn write_params(&mut self, params: &Params) -> bool {
+        unsafe {
+            PARAM_STORE = Some(*params);
+        }
+        true
+    }
+
+    fn reboot(&mut self) -> bool {
+        self.pending_reset_to_bootloader = Some(false);
+        true
+    }
+
+    fn reboot_to_bootloader(&mut self) -> bool {
+        self.pending_reset_to_bootloader = Some(true);
+        true
+    }
+
+    fn run_deferred_board_actions(&mut self) {
+        if self.pending_reset_to_bootloader.take().is_some() {
+            let mut delay = Delay;
+            delay.delay_ms(20u32);
+            stm_32::cortex_m::peripheral::SCB::sys_reset();
+        }
     }
 }
 
@@ -500,19 +538,28 @@ impl Board {
 
         let mut timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4];
 
-        let mut servos: peripherals::pwm::PixRacerProServoMonstrosity =
-            peripherals::pwm::PixRacerProServoMonstrosity {
-                timers,
-                chan_list: [
-                    (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4
-                    (0, peripherals::pwm::TimerChannel::Ch2), // -
-                    (0, peripherals::pwm::TimerChannel::Ch3), // -
-                    (0, peripherals::pwm::TimerChannel::Ch4), // -
-                    (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
-                    (2, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
-                    (2, peripherals::pwm::TimerChannel::Ch3), // -
-                ],
-            };
+        let mut servos = peripherals::pwm::PixRacerProServoMonstrosity::with_timer_kinds_and_dma(
+            timers,
+            [
+                (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4
+                (0, peripherals::pwm::TimerChannel::Ch2), // -
+                (0, peripherals::pwm::TimerChannel::Ch3), // -
+                (0, peripherals::pwm::TimerChannel::Ch4), // -
+                (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
+                (2, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
+                (2, peripherals::pwm::TimerChannel::Ch3), // -
+            ],
+            [
+                peripherals::pwm::PwmTimerBlockKind::DshotCapable,
+                peripherals::pwm::PwmTimerBlockKind::StandardOnly,
+                peripherals::pwm::PwmTimerBlockKind::StandardOnly,
+            ],
+            [
+                Some(peripherals::pwm::DshotDma::Dma2Ch0(p.DMA2_CH0)),
+                None,
+                None,
+            ],
+        );
 
         // Test PWM pins
         let mut test_pin_1 = Output::new(p.PD11, Level::Low, Speed::VeryHigh);
@@ -533,6 +580,7 @@ impl Board {
                 start_time,
                 test_pin_1,
                 test_pin_2,
+                pending_reset_to_bootloader: None,
             },
             servos,
         )

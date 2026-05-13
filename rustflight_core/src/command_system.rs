@@ -33,6 +33,7 @@ pub struct CalibrationRequestCtx<'a, const N: usize> {
     pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
     pub state: &'a StateManager,
     pub flags: &'a mut CalibrationFlags,
+    pub params: &'a mut Params,
 }
 
 pub fn apply_calibration_requests<const N: usize>(
@@ -50,15 +51,42 @@ pub fn apply_calibration_requests<const N: usize>(
         }
 
         match request.command {
-            RosflightCmd::AccelCalibration => ctx.flags.insert(CalibrationFlags::ACCEL),
-            RosflightCmd::GyroCalibration => ctx.flags.insert(CalibrationFlags::GYRO),
-            RosflightCmd::BaroCalibration => ctx.flags.insert(CalibrationFlags::BARO),
-            RosflightCmd::AirspeedCalibration => ctx.flags.insert(CalibrationFlags::PITOT),
+            RosflightCmd::AccelCalibration => {
+                ctx.flags.insert(CalibrationFlags::IMU);
+                zero_gyro_biases(ctx.params);
+                zero_accel_biases(ctx.params);
+            }
+            RosflightCmd::GyroCalibration => {
+                ctx.flags.insert(CalibrationFlags::GYRO);
+                zero_gyro_biases(ctx.params);
+            }
+            RosflightCmd::BaroCalibration => {
+                ctx.flags.insert(CalibrationFlags::BARO);
+                ctx.params
+                    .set_by_id(ParamId::PARAM_BARO_BIAS, ParamValue::Float(0.0));
+            }
+            RosflightCmd::AirspeedCalibration => {
+                ctx.flags.insert(CalibrationFlags::PITOT);
+                ctx.params
+                    .set_by_id(ParamId::PARAM_DIFF_PRESS_BIAS, ParamValue::Float(0.0));
+            }
             _ => {}
         }
         started = Some(request.command);
     }
     started
+}
+
+fn zero_gyro_biases(params: &mut Params) {
+    params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.0));
+    params.set_by_id(ParamId::PARAM_GYRO_Y_BIAS, ParamValue::Float(0.0));
+    params.set_by_id(ParamId::PARAM_GYRO_Z_BIAS, ParamValue::Float(0.0));
+}
+
+fn zero_accel_biases(params: &mut Params) {
+    params.set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(0.0));
+    params.set_by_id(ParamId::PARAM_ACC_Y_BIAS, ParamValue::Float(0.0));
+    params.set_by_id(ParamId::PARAM_ACC_Z_BIAS, ParamValue::Float(0.0));
 }
 
 pub struct OffboardControlCtx<'a, const N: usize> {
@@ -306,6 +334,9 @@ mod tests {
         let mut requests =
             EventQueue::<CalibrationRequested, CALIBRATION_REQUEST_QUEUE_CAPACITY>::new();
         let mut flags = CalibrationFlags::empty();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.4));
+        params.set_by_id(ParamId::PARAM_BARO_BIAS, ParamValue::Float(1000.0));
 
         let _ = requests.push(CalibrationRequested {
             command: RosflightCmd::GyroCalibration,
@@ -321,13 +352,56 @@ mod tests {
             responses: EventEmitPort::new(&mut responses),
             state: &state,
             flags: &mut flags,
+            params: &mut params,
         });
 
         assert!(matches!(started, Some(RosflightCmd::BaroCalibration)));
         assert!(flags.contains(CalibrationFlags::GYRO));
         assert!(flags.contains(CalibrationFlags::BARO));
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
+            ParamValue::Float(0.0)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_BARO_BIAS),
+            ParamValue::Float(0.0)
+        );
         assert!(responses.is_empty());
         assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn accel_calibration_starts_full_imu_calibration_and_zeros_biases() {
+        let mut requests =
+            EventQueue::<CalibrationRequested, CALIBRATION_REQUEST_QUEUE_CAPACITY>::new();
+        let mut flags = CalibrationFlags::empty();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.4));
+        params.set_by_id(ParamId::PARAM_ACC_Z_BIAS, ParamValue::Float(-0.2));
+        let _ = requests.push(CalibrationRequested {
+            command: RosflightCmd::AccelCalibration,
+        });
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+        let state = initialized_state();
+
+        let started = apply_calibration_requests(CalibrationRequestCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &state,
+            flags: &mut flags,
+            params: &mut params,
+        });
+
+        assert!(matches!(started, Some(RosflightCmd::AccelCalibration)));
+        assert!(flags.contains(CalibrationFlags::IMU));
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
+            ParamValue::Float(0.0)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_ACC_Z_BIAS),
+            ParamValue::Float(0.0)
+        );
     }
 
     #[test]
@@ -348,6 +422,7 @@ mod tests {
                 fx: 0.4,
                 fy: 0.5,
                 fz: 0.6,
+                passthrough: [0.0; 4],
             },
         });
 
@@ -452,19 +527,16 @@ mod tests {
         channels[0] = 0.55;
         channels[1] = 0.45;
         channels[3] = 0.60;
-        rc.receive(
-            &RcPacket {
-                header: RosflightPacketHeader {
-                    timestamp: 1,
-                    status: 0,
-                },
-                n_chan: 4,
-                chan: channels,
-                lol: false,
+        rc.receive(&RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
             },
-            &params,
-            &mut state,
-        );
+            n_chan: 4,
+            chan: channels,
+            lol: false,
+        });
+        rc.run(0, &params, &mut state);
         let mut command = CommandManager::new();
         command.run(0, &params, &mut rc, &mut state);
         let mut controller = QuadController::default();
@@ -518,6 +590,8 @@ mod tests {
         let armed = armed_state();
         let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
         let mut flags = CalibrationFlags::empty();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.4));
         let mut calibration_requests =
             EventQueue::<CalibrationRequested, CALIBRATION_REQUEST_QUEUE_CAPACITY>::new();
         let _ = calibration_requests.push(CalibrationRequested {
@@ -529,10 +603,15 @@ mod tests {
             responses: EventEmitPort::new(&mut responses),
             state: &armed,
             flags: &mut flags,
+            params: &mut params,
         });
 
         assert!(started.is_none());
         assert!(!flags.contains(CalibrationFlags::GYRO));
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
+            ParamValue::Float(0.4)
+        );
         match responses.pop().unwrap() {
             CommResponse::CmdAck(ack) => {
                 assert!(matches!(ack.command, RosflightCmd::GyroCalibration));

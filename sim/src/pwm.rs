@@ -39,7 +39,9 @@ use std::time::Instant;
 use crate::ros_messages;
 use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
-use rustflight_core::pwm::{PwmDriver, PwmError};
+use rustflight_core::pwm::{
+    PwmDriver, PwmError, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
+};
 
 use cdr::{CdrLe, Infinite};
 use tokio::io::ErrorKind;
@@ -60,6 +62,8 @@ pub struct SimPwmDriver {
     sender: mpsc::Sender<ros_messages::PwmOutput>,
     // Internal state to hold the current PWM value (1000-2000us) for each channel
     current_values: [u16; NUM_SIM_CHANNELS],
+    output_rates_hz: [f64; NUM_SIM_CHANNELS],
+    output_protocols: [PwmOutputProtocol; NUM_SIM_CHANNELS],
     // Optional: Track enabled state if needed, otherwise enable/disable just sets value
     // enabled_mask: u16, // Example using a bitmask for 14 channels
 }
@@ -97,6 +101,8 @@ impl SimPwmDriver {
             sender,
             // Initialize all channels to the minimum value (disarmed/disabled state)
             current_values: [1000u16; NUM_SIM_CHANNELS],
+            output_rates_hz: [50.0; NUM_SIM_CHANNELS],
+            output_protocols: [PwmOutputProtocol::StandardPwm; NUM_SIM_CHANNELS],
             // enabled_mask: 0, // Initialize if using mask
         }
     }
@@ -183,7 +189,19 @@ impl PwmDriver for SimPwmDriver {
         let _ = self.sender.try_send(msg);
     }
 
-    fn send_commands<B: BoardIo>(&mut self, board: &mut B, commands_slice: &[f64]) {
+    fn configure_output_rates(&mut self, rates_hz: &[f64]) -> Result<(), PwmError> {
+        for (index, rate) in rates_hz.iter().take(NUM_SIM_CHANNELS).enumerate() {
+            self.output_protocols[index] = output_protocol_for_rate(*rate)?;
+            self.output_rates_hz[index] = effective_output_rate_hz(*rate)?;
+        }
+        Ok(())
+    }
+
+    fn send_commands<B: BoardIo>(
+        &mut self,
+        board: &mut B,
+        commands_slice: &[f64],
+    ) -> Result<(), PwmError> {
         let num_channels_to_write = commands_slice.len().min(self.len());
 
         for i in 0..num_channels_to_write {
@@ -198,6 +216,7 @@ impl PwmDriver for SimPwmDriver {
         }
 
         self.flush(board);
+        Ok(())
     }
 }
 
@@ -235,12 +254,16 @@ mod tests {
         let mut driver = SimPwmDriver {
             sender,
             current_values: [1000u16; NUM_SIM_CHANNELS],
+            output_rates_hz: [50.0; NUM_SIM_CHANNELS],
+            output_protocols: [PwmOutputProtocol::StandardPwm; NUM_SIM_CHANNELS],
         };
         let mut board = TestBoard {
             elapsed_us: 1_234_567,
         };
 
-        driver.send_commands(&mut board, &[-0.25, 0.0, 0.5, 1.0, 1.25]);
+        driver
+            .send_commands(&mut board, &[-0.25, 0.0, 0.5, 1.0, 1.25])
+            .unwrap();
 
         let msg = receiver.try_recv().expect("PWM output should be queued");
         assert_eq!(msg.header.stamp.sec, 1);
@@ -259,10 +282,65 @@ mod tests {
         let mut driver = SimPwmDriver {
             sender,
             current_values: [1500u16; NUM_SIM_CHANNELS],
+            output_rates_hz: [50.0; NUM_SIM_CHANNELS],
+            output_protocols: [PwmOutputProtocol::StandardPwm; NUM_SIM_CHANNELS],
         };
 
         driver.disable(3).unwrap();
 
         assert_eq!(driver.current_values[3], 1000);
+    }
+
+    #[test]
+    fn configure_output_rates_records_mixer_rates() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut driver = SimPwmDriver {
+            sender,
+            current_values: [1000u16; NUM_SIM_CHANNELS],
+            output_rates_hz: [50.0; NUM_SIM_CHANNELS],
+            output_protocols: [PwmOutputProtocol::StandardPwm; NUM_SIM_CHANNELS],
+        };
+
+        driver
+            .configure_output_rates(&[490.0, 490.0, 50.0])
+            .unwrap();
+
+        assert_eq!(driver.output_rates_hz[0], 490.0);
+        assert_eq!(driver.output_rates_hz[1], 490.0);
+        assert_eq!(driver.output_rates_hz[2], 50.0);
+        assert_eq!(driver.output_rates_hz[3], 50.0);
+    }
+
+    #[test]
+    fn configure_output_rates_classifies_dshot_rates() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut driver = SimPwmDriver {
+            sender,
+            current_values: [1000u16; NUM_SIM_CHANNELS],
+            output_rates_hz: [50.0; NUM_SIM_CHANNELS],
+            output_protocols: [PwmOutputProtocol::StandardPwm; NUM_SIM_CHANNELS],
+        };
+
+        driver.configure_output_rates(&[300_000.0]).unwrap();
+
+        assert_eq!(driver.output_protocols[0], PwmOutputProtocol::Dshot);
+        assert_eq!(driver.output_protocols[1], PwmOutputProtocol::StandardPwm);
+    }
+
+    #[test]
+    fn configure_output_rates_treats_zero_as_default_standard_pwm() {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut driver = SimPwmDriver {
+            sender,
+            current_values: [1000u16; NUM_SIM_CHANNELS],
+            output_rates_hz: [490.0; NUM_SIM_CHANNELS],
+            output_protocols: [PwmOutputProtocol::Dshot; NUM_SIM_CHANNELS],
+        };
+
+        driver.configure_output_rates(&[0.0]).unwrap();
+
+        assert_eq!(driver.output_protocols[0], PwmOutputProtocol::StandardPwm);
+        assert_eq!(driver.output_rates_hz[0], 50.0);
+        assert_eq!(driver.output_rates_hz[1], 490.0);
     }
 }

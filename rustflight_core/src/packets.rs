@@ -238,22 +238,24 @@ pub struct RangePacket {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GNSSPacket {
     pub header: RosflightPacketHeader, // timestamp and device specific status
-    pub lat: f64,                      // radians
-    pub lon: f64,                      // radians
-    pub height: f32,                   // m/s above ellipsoid
-    pub vel_n: f32,                    // m/s north
-    pub vel_e: f32,                    // m/s east
-    pub vel_d: f32,                    // m/s down
-    pub h_acc: f32,                    // m north/east
-    pub v_acc: f32,                    // m down
-    pub s_acc: f32,                    // m/s
-    pub month: u8,                     // 0-11
-    pub year: u16,                     // 0-65535 UTC
-    pub day: u8,                       // 0-31 UTS day of month
-    pub hour: u8,                      // 0-23 UTC
-    pub min: u8,                       // 0-59 UTC
-    pub sec: u8,                       // 0-59 UTC
-    pub nano: i32,                     // adjustment +/1 to seconds
+    pub unix_seconds: i64,             // Unix time, in seconds
+    pub unix_nanos: i32,
+    pub lat: f64,    // radians
+    pub lon: f64,    // radians
+    pub height: f32, // m/s above ellipsoid
+    pub vel_n: f32,  // m/s north
+    pub vel_e: f32,  // m/s east
+    pub vel_d: f32,  // m/s down
+    pub h_acc: f32,  // m north/east
+    pub v_acc: f32,  // m down
+    pub s_acc: f32,  // m/s
+    pub month: u8,   // 0-11
+    pub year: u16,   // 0-65535 UTC
+    pub day: u8,     // 0-31 UTS day of month
+    pub hour: u8,    // 0-23 UTC
+    pub min: u8,     // 0-59 UTC
+    pub sec: u8,     // 0-59 UTC
+    pub nano: i32,   // adjustment +/1 to seconds
     pub fix_type: GNSSFixType,
     pub num_sats: u8, // 0-255
     pub mag_dec: f32, // Magnetic Declination ??

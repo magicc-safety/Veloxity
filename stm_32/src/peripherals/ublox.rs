@@ -52,6 +52,19 @@ use rustflight_core::packets;
 
 const BUFFER_LEN: usize = 512;
 
+fn unix_seconds_from_utc(year: u16, month: u8, day: u8, hour: u8, min: u8, sec: u8) -> i64 {
+    let mut y = year as i32;
+    let m = month as i32;
+    y -= (m <= 2) as i32;
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = m + if m > 2 { -3 } else { 9 };
+    let doy = (153 * mp + 2) / 5 + day as i32 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    days as i64 * 86_400 + hour as i64 * 3_600 + min as i64 * 60 + sec as i64
+}
+
 pub static GNSS_SIGNAL: Signal<
     CriticalSectionRawMutex,
     Result<packets::GNSSPacket, errors::SensorError>,
@@ -623,6 +636,15 @@ impl UbloxSensor {
                                 let pi = 3.141592654;
                                 let pvt_packet = packets::GNSSPacket {
                                     header: header,
+                                    unix_seconds: unix_seconds_from_utc(
+                                        unsafe { pvt.packet }.year,
+                                        unsafe { pvt.packet }.month,
+                                        unsafe { pvt.packet }.day,
+                                        unsafe { pvt.packet }.hour,
+                                        unsafe { pvt.packet }.min,
+                                        unsafe { pvt.packet }.sec,
+                                    ),
+                                    unix_nanos: unsafe { pvt.packet }.nano,
                                     lat: (unsafe { pvt.packet }.lat as f64) * 1.7453292519943296e-9,
                                     lon: (unsafe { pvt.packet }.lon as f64) * 1.7453292519943296e-9,
                                     height: (unsafe { pvt.packet }.height as f32) / 1000.0,

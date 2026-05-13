@@ -1,4 +1,5 @@
 use crate::{errors::SensorError, packets::*};
+use libm::pow;
 
 #[derive(Default)]
 pub struct SensorBus {
@@ -52,6 +53,12 @@ impl ProcessedSensors {
         self.rc = None;
         self.attitude = None;
     }
+
+    pub fn air_density(&self) -> f64 {
+        self.baro
+            .map(|baro| 1.225 * pow(baro.pressure as f64 / 101_325.0, 0.809736894596450))
+            .unwrap_or(1.225)
+    }
 }
 
 #[cfg(test)]
@@ -67,5 +74,19 @@ mod tests {
         assert!(raw.rc.is_none());
         assert!(processed.imu.is_none());
         assert!(processed.rc.is_none());
+    }
+
+    #[test]
+    fn processed_sensors_reports_rosflight_air_density_from_baro_pressure() {
+        let mut processed = ProcessedSensors::default();
+        assert_eq!(processed.air_density(), 1.225);
+
+        processed.baro = Some(BaroPacket {
+            pressure: 80_000.0,
+            ..Default::default()
+        });
+
+        let expected = 1.225 * libm::pow(80_000.0 / 101_325.0, 0.809736894596450);
+        assert!((processed.air_density() - expected).abs() < 1e-12);
     }
 }

@@ -757,23 +757,23 @@ Focused unit checks for the new modules pass:
 
 Additional status:
 
-- `cargo test -p rustflight_core --lib` currently runs 42 library tests.
-- 30 pass and 12 fail.
-- The failures are in existing `state_machine::tests`, mostly around arming and `UNCALIBRATED_IMU` expectations.
-- These failures are not introduced by the new parameter event path, but they confirm that the current test suite needs cleanup as part of the core test rebuild.
+- This historical note is superseded by the Compatibility List Item 4 test cleanup.
+- `cargo test -p rustflight_core` now passes, including the migrated controller, estimator, and mixer integration tests.
 
 Formatting status:
 
-- `cargo fmt` could not run because `cargo-fmt`/`rustfmt` is not installed for the current `stable-aarch64-unknown-linux-gnu` toolchain.
-- The command failed with: `error: 'cargo-fmt' is not installed for the toolchain 'stable-aarch64-unknown-linux-gnu'`.
+- `cargo fmt --check` now passes with the installed workspace toolchain.
 
-`cargo test -p rustflight_core` currently does not pass, but the failures are from legacy tests that already do not match current APIs:
+Former stale full-package test status:
 
 - mixer tests call `mixer.mix(&input)` but the current trait requires a state manager argument.
 - controller tests call `controller.control(...)` without the current `dt` argument.
 - estimator tests call `estimator.estimate(...)` without the current `dt` argument.
 
-The user has confirmed that the current testing infrastructure is not well written and should be replaced with a better dummy-board-based setup.
+- These integration tests have now been migrated to current APIs:
+  - mixer tests consume `ControllerOutput` and pass `StateManager` into the mixer,
+  - controller tests use `ControllerCtx`,
+  - estimator tests use named `ProcessedSensors` and `NamedEstimator`.
 
 ## Test Support Progress
 
@@ -4155,6 +4155,141 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
+## Compatibility List Item 8 Progress
+
+Item worked:
+
+- Compatibility List 8: telemetry compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/include/comm_manager.h`, `/tmp/rosflight_firmware_v2_0_1/src/comm_manager.cpp`, `/tmp/rosflight_firmware_v2_0_1/comms/mavlink/mavlink.cpp`, and `/tmp/rosflight_firmware_v2_0_1/include/interface/board.h` from ROSflight 2.0.1.
+- ROSflight 2.0.1 `CommManager::stream(got_flags)` sends IMU and attitude whenever `got.imu` is true.
+- ROSflight 2.0.1 sends raw outputs on the first IMU sample and every eighth IMU sample after that.
+- ROSflight 2.0.1 sends diff-pressure, baro, mag, range, battery, and GNSS telemetry only when the corresponding `got_flags` field is true.
+- ROSflight 2.0.1 heartbeat/status timing is 1 Hz heartbeat and 10 Hz status.
+- ROSflight 2.0.1 sends RC raw telemetry outside `stream(got_flags)` when RC receive produces a new packet, packed as MAVLink `RC_CHANNELS` with the first eight normalized channels scaled to `channel * 1000 + 1000`.
+- ROSflight 2.0.1 GNSS telemetry uses Unix seconds/nanoseconds from the board GNSS struct, plus the firmware packet timestamp.
+
+Design now implemented:
+
+- `CommManager::send_named_telemetry_streams` now follows the upstream got-flag model represented by `ProcessedSensors` options instead of local fixed per-sensor stream intervals.
+- Status telemetry now uses the upstream 10 Hz cadence.
+- Output raw telemetry is now tied to IMU-produced control passes and follows the upstream every-eighth-IMU rule.
+- IMU telemetry now carries processed IMU temperature instead of a placeholder.
+- Baro telemetry now carries processed altitude instead of a placeholder.
+- Pitot/diff-pressure telemetry is now emitted from processed pitot packets.
+- Range telemetry now carries the packet range type and min/max range values.
+- GNSS packets now carry Unix seconds/nanoseconds across the packet boundary, and telemetry sends those fields.
+- RC telemetry now routes through `send_rc_raw` with an `RC_CHANNELS` payload shape, matching ROSflight 2.0.1's interface naming and wire message.
+- Heartbeat vehicle type now reflects `FIXED_WING`, matching the upstream fixed-wing vs quadrotor heartbeat behavior.
+
+Current status:
+
+- Compatibility List 8 is complete for the core telemetry compatibility surface.
+- Buffered log replay, parameter streaming, and hardware serial QoS still depend on board/runtime ownership and should remain under Compatibility List item 9 if they require hardware-specific changes.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::tests --lib` passes with 19 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib -- --test-threads=1` passes with 142 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Compatibility List Item 9 Progress
+
+Item worked:
+
+- Compatibility List 9: hardware board command/runtime compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/src/rosflight.cpp`, `/tmp/rosflight_firmware_v2_0_1/src/comm_manager.cpp`, `/tmp/rosflight_firmware_v2_0_1/src/param.cpp`, and `/tmp/rosflight_firmware_v2_0_1/include/interface/board.h` from ROSflight 2.0.1.
+- ROSflight 2.0.1 initializes parameters by reading board memory; if the read or validation fails, it restores defaults and writes them.
+- ROSflight 2.0.1 sends a command ACK before delaying 20 ms and resetting for reboot/bootloader commands.
+- ROSflight 2.0.1 keeps sensor production at the board boundary through per-sensor read functions and pushes only the resulting `got_flags` into the core loop.
+- ROSflight 2.0.1 owns PWM hardware state at the board boundary through `pwm_init`, `pwm_disable`, and `pwm_write`.
+
+Design now implemented:
+
+- Added explicit board hooks for serial flush and deferred board actions.
+- `World` now sends queued comm responses, flushes the board serial boundary, then runs deferred board actions. This preserves the upstream ACK-before-reset ordering for reboot commands.
+- PixRacerPro and Nucleo now load params at startup with the upstream pattern: read board params first; if unavailable, restore defaults and write them through the board hook.
+- PixRacerPro and Nucleo now implement board-owned read/write param command hooks. The current implementation is a board-local store so command behavior and startup flow are compatible; assigning a true flash sector is a hardware-storage follow-up before relying on persistence across power cycles.
+- PixRacerPro and Nucleo now implement reboot and reboot-to-bootloader command hooks as deferred reset requests. The reset is delayed until after command responses are sent.
+- The existing PixRacerPro and Nucleo PWM drivers remain board-owned producers/consumers: boot starts disabled, enable/disable state is tracked, per-channel output rates are applied through the board timer abstraction, and DSHOT support is owned by the PixRacerPro TIM1/DMA capability.
+- Sensor task outputs remain board-owned signal producers, and `World` consumes them through `BoardIo::update_sensor_bus` without reintroducing HList coupling.
+
+Current status:
+
+- Compatibility List 9 is complete for the code migration and software-visible board/runtime surface.
+- Hardware bench validation is still required for persistence across power cycles, bootloader-entry behavior, physical sensor task rates, PWM/DSHOT waveforms, and telemetry UART timing. Those are validation tasks, not remaining architecture migration work.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core command_system::tests --lib` passes with 10 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib -- --test-threads=1` passes with 142 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Compatibility List Item 7 Progress
+
+Item worked:
+
+- Compatibility List 7: estimator compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/include/estimator.h` and `/tmp/rosflight_firmware_v2_0_1/src/estimator.cpp` from ROSflight 2.0.1.
+- ROSflight 2.0.1 initializes the estimator on the first IMU sample by recording the current IMU timestamp and returning without propagation.
+- It low-pass filters accel and gyro with `ACC_LPF`, `GYRO_XY_LPF`, and `GYRO_Z_LPF`.
+- It uses accelerometer correction only when `FILT_USE_ACC` is enabled and filtered accel norm is inside the `FILT_ACC_MARGIN` band around `1g`.
+- It treats external attitude as a correction term for the next estimator run, not as a direct attitude replacement. External attitude correction uses DCM row cross products and `FILT_EXT_KP`.
+- It scales external-attitude correction by the external-attitude update interval divided by the IMU loop `dt`.
+- It boosts `FILT_ACC_KP` and `FILT_KI` by `10x` while the IMU timestamp is less than `FILT_INIT_T` milliseconds.
+- It integrates adaptive gyro bias with `bias -= ki * w_err * dt`.
+- It optionally smooths gyro with quadratic interpolation when `FILT_QUAD_INT` is enabled.
+- It optionally propagates attitude with matrix-exponential integration when `FILT_MAT_EXP` is enabled; otherwise it uses Euler quaternion integration.
+- It reports the estimator unhealthy when accelerometer correction has not run for more than `0.5 s`, accelerometer use is enabled, and fixed-wing mode is disabled.
+
+Design now implemented:
+
+- `QuadEstimator` now owns ROSflight-style estimator state:
+  - last accel-update timestamp,
+  - last external-attitude timestamp,
+  - quadratic interpolation history,
+  - pending external-attitude quaternion.
+- External attitude is now queued as a one-shot correction input instead of replacing `q_hat`.
+- Added ROSflight-compatible DCM-row external-attitude correction.
+- Added `FILT_EXT_KP` consumption and external-attitude correction `dt` scaling.
+- Added `FILT_USE_ACC`, `FILT_QUAD_INT`, `FILT_MAT_EXP`, `FILT_INIT_T`, and `FIXED_WING` behavioral gates in the estimator path.
+- Added ROSflight-compatible quadratic gyro interpolation.
+- Added ROSflight-compatible matrix-exponential quaternion propagation, keeping Euler propagation for the disabled flag path.
+- Added estimator unhealthy reporting for stale accel correction.
+- Added explicit `reset_state` and `reset_adaptive_bias` helpers matching upstream concepts for future calibration/estimator integration use.
+
+Current status:
+
+- Compatibility List 7 is complete for the core software estimator surface.
+- Remaining estimator-adjacent work is outside item 7:
+  - state-manager error propagation is already handled by the control system from `AttitudeState::is_healthy`,
+  - board/runtime scheduling stays under item 9,
+  - telemetry formatting and stream timing stay under item 8.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes with 4 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --test estimator_test` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes with 141 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
 ## Stale Param Types Removal
 
 Reason for this change:
@@ -4343,9 +4478,10 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
-Known unrelated test status:
+Former known unrelated test status:
 
-- `cargo test -p rustflight_core --lib` still hits the pre-existing state-machine `UNCALIBRATED_IMU` failures documented earlier; the affected World, RC, PWM, event, and port tests pass.
+- The earlier full-core `UNCALIBRATED_IMU` state-machine failures have been resolved by moving calibration error production into the sensor health path.
+- `cargo test -p rustflight_core --lib` is now green as of the Sensor Health System slice.
 
 ## State Machine Calibration Boundary Fix
 
@@ -4411,8 +4547,8 @@ Design now implemented:
   - `ACC_Y_BIAS`
   - `ACC_Z_BIAS`
   - `GYRO_X_BIAS`
-- `GYRO_Y_BIAS`
-- `GYRO_Z_BIAS`
+  - `GYRO_Y_BIAS`
+  - `GYRO_Z_BIAS`
 - The system clears `ErrorFlag::UNCALIBRATED_IMU` when any of those bias params is nonzero.
 - Calibration status is updated only when a processed IMU sample is present.
 
@@ -4430,6 +4566,859 @@ Validation:
 - `cargo test -p rustflight_core --lib` passes.
 - `cargo check -p rustflight_core --lib` passes.
 - `cargo check -p sim` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Remaining Transition Work
+
+Current status of the five concrete items:
+
+1. Done: prove the simulator path with a sim-owned smoke test, not only `cargo check -p sim`.
+2. Done: align RC-loss/failsafe health with ROSflight 2.0 release behavior while keeping it behind the named RC context boundary.
+3. Done: review command/ACK leftovers, especially `ResetOrigin`, `SendAllConfigInfos`, and offboard-command behavior, against the pinned ROSflight 2.0 release checkout.
+4. Done in this cleanup pass: update stale architecture notes from items 1-3 so they point at the pinned ROSflight 2.0 release, corrected offboard wire schema, and current validation state.
+5. Done for the first hardware surface pass: PixRacerPro and Nucleo now compile against the new architecture with aligned entrypoint, telemetry, and PWM-state behavior.
+
+Pinned ROSflight 2.0 reference:
+
+- The local pinned ROSflight 2.0 release checkout is `/tmp/rosflight_firmware_v2_0_1`.
+- `/tmp/rosflight_firmware_v2_0_1` is checked out at exact tag `v2.0.1`, commit `cd787430a960aadbb59cef07ad1f2abc0e8cc0ae`, dated 2026-03-11.
+- The base ROSflight 2.0 release tag `v2.0.0`, commit `54c28877df9872731b105dcb0907c119430d8265`, dated 2026-02-03, is also fetched into that checkout for release-to-release comparison.
+- Prefer `/tmp/rosflight_firmware_v2_0_1` for future ROSflight 2.0 compatibility checks unless the goal is explicitly to compare against floating upstream `main`.
+- A floating upstream `origin/main` snapshot was also inspected at commit `099a9846406d9f20b2bae08a2ea3dda74a01cf59`, but it is not the compatibility target for this transition slice.
+- For the command/offboard files inspected in this slice, `git diff v2.0.0..v2.0.1 -- comms/mavlink/mavlink.cpp src/comm_manager.cpp src/command_manager.cpp include/comm_link.h include/command_manager.h include/comm_manager.h` is empty inside `/tmp/rosflight_firmware_v2_0_1`, so the command/offboard behavior used here matches both ROSflight 2.0.0 and the pinned ROSflight 2.0.1 release for those files.
+- For this slice, the relevant ROSflight 2.0 release files were:
+  - `/tmp/rosflight_firmware_v2_0_1/src/rosflight.cpp`
+  - `/tmp/rosflight_firmware_v2_0_1/src/rc.cpp`
+  - `/tmp/rosflight_firmware_v2_0_1/src/state_manager.cpp`
+  - `/tmp/rosflight_firmware_v2_0_1/include/state_manager.h`
+  - `/tmp/rosflight_firmware_v2_0_1/comms/mavlink/mavlink.cpp`
+  - `/tmp/rosflight_firmware_v2_0_1/comms/mavlink/rosflight.xml`
+  - `/tmp/rosflight_firmware_v2_0_1/src/comm_manager.cpp`
+  - `/tmp/rosflight_firmware_v2_0_1/src/command_manager.cpp`
+  - `/tmp/rosflight_firmware_v2_0_1/include/comm_link.h`
+  - `/tmp/rosflight_firmware_v2_0_1/include/command_manager.h`
+  - `/tmp/rosflight_firmware_v2_0_1/include/comm_manager.h`
+
+## Sim Smoke Progress
+
+Reason for this change:
+
+- `cargo check -p sim` proved the simulator crate compiled, but it did not prove that the simulator board conversion layer could run through the current `World` scheduler shape.
+- The simulator should move alongside core because it does not require hardware and gives fast feedback on the architecture boundary.
+
+Design now implemented:
+
+- Added a sim-owned smoke test that constructs the simulator `Board` directly with queued ROS-style IMU and RC messages.
+- The smoke test builds a real `World<Board, Quadrotor, MavlinkInterface, SmokePwm>` and runs one scheduler tick.
+- The test avoids requiring a live Zenoh router by injecting the board queues directly inside the sim crate test module.
+- Because the smoke world starts disarmed, the expected PWM behavior is disarmed output synchronization: the PWM driver is flushed once and no actuator command write is sent.
+- The sim test build now enables `critical-section/std` as a dev-dependency, matching core host tests when the sim crate exercises core logging through `World`.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+
+## RC Loss Health Progress
+
+Upstream behavior checked:
+
+- ROSflight 2.0 `ROSflight::run()` calls `state_manager_.run()` and then processes RC only when `rc_.receive()` returns true.
+- ROSflight 2.0 `RC::run()` calls `check_rc_lost()` first.
+- ROSflight 2.0 `RC::check_rc_lost()` sets `EVENT_RC_LOST` when `frameLost` or `failsafeActivated` is set, or when any channel up to `PARAM_RC_NUM_CHANNELS` is outside `[-0.25, 1.25]`.
+- If RC is lost, ROSflight 2.0 `RC::run()` returns immediately and does not normalize sticks, interpret switches, look for arming/disarming, or set `new_command_`.
+- If RC is healthy, ROSflight 2.0 clears RC lost with `EVENT_RC_FOUND`, then normalizes sticks/switches, checks arming/disarming, and sets `new_command_`.
+
+Functional gap found in RustFlight:
+
+- RustFlight already had the same status-bit and channel-range checks, plus an extra timeout check.
+- The missing upstream behavior was the health gate placement: `Rc::receive` normalized sticks/switches and set `new_command` before `Rc::run` checked health.
+- That meant a lost or failsafe RC frame could still be consumed by `CommandManager` in the same scheduler tick.
+
+Design now implemented:
+
+- `Rc::receive` now only stores the raw RC packet and status bits.
+- `Rc::run` owns the health gate:
+  - healthy RC clears `RC_LOST`, normalizes sticks/switches, marks `new_command`, and checks arming/disarming;
+  - unhealthy RC clears pending `new_command` and raises `RC_LOST`.
+- The named `rc_system::RcCommandStateCtx` remains the producer/consumer boundary between processed sensor RC packets, the RC resource, command manager, state manager, and params.
+
+Compatibility note:
+
+- RustFlight still has a timeout-based RC health check, while ROSflight 2.0 does not implement a core RC timeout in `RC::check_rc_lost`; ROSflight 2.0 depends on board-reported `frameLost`/`failsafeActivated` and only calls `RC::run()` after a board receive.
+- Keep this difference documented before changing it: the Rust timeout is stricter safety behavior, but it is not a direct upstream formula.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core rc_system::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Command ACK and Offboard Parity Progress
+
+Reason for this change:
+
+- Remaining work item 3 was to review command/ACK leftovers against the pinned ROSflight 2.0 release checkout.
+- The obvious candidates were `ResetOrigin`, `SendAllConfigInfos`, and offboard-command placeholder behavior.
+
+Upstream behavior checked:
+
+- The exact ROSflight 2.0.0 release tag is `v2.0.0` at commit `54c28877df9872731b105dcb0907c119430d8265`.
+- The exact pinned ROSflight 2.0 release checkout for future comparisons is `/tmp/rosflight_firmware_v2_0_1` at tag `v2.0.1`, commit `cd787430a960aadbb59cef07ad1f2abc0e8cc0ae`.
+- The command/offboard files compared for this slice are unchanged between `v2.0.0` and `v2.0.1`; they also matched floating `origin/main` at the inspected commit, but the pinned release checkout is the compatibility target.
+- Upstream `comms/mavlink/mavlink.cpp` maps only these ROSflight command messages into `CommLinkInterface::Command`:
+  - read params
+  - write params
+  - set param defaults
+  - accel/gyro/baro/airspeed calibration
+  - RC calibration
+  - reboot
+  - reboot to bootloader
+  - send version
+- Upstream treats unsupported ROSflight command enum values in the MAVLink decode layer by immediately sending `ROSFLIGHT_CMD_FAILED` and returning before `CommManager::command_callback`.
+- Therefore `ResetOrigin` and `SendAllConfigInfos` remain unsupported in ROSflight 2.0. RustFlight's failed ACK behavior for those commands is externally compatible, although RustFlight routes them through explicit command-system request queues before producing the failed ACK.
+- Upstream `CommManager::command_callback` rejects supported command actions while armed and sends a failed command ACK.
+- Upstream offboard control decode accepts `MODE_PASS_THROUGH`, `MODE_ROLLRATE_PITCHRATE_YAWRATE_THROTTLE`, and `MODE_ROLL_PITCH_YAWRATE_THROTTLE`; invalid modes are ignored before the callback.
+- Upstream ROSflight 2.0 `OFFBOARD_CONTROL` is a 10-DOF wire message:
+  - `uint8_t mode`
+  - `uint16_t ignore`
+  - `float[10] u`
+- Upstream maps `u[0..2]` as throttle/force channels and `u[3..5]` as attitude channels for the currently supported offboard modes.
+- Upstream offboard decode treats ignore fields as one-bit-per-`u`-index bit flags, including `IGNORE_VALUE0 = 0x01` through `IGNORE_VALUE9 = 0x200`.
+
+Functional gaps found in RustFlight:
+
+- Incoming MAVLink `MODE_ROLL_PITCH_YAWRATE_THROTTLE` was converted to local `ModePassThrough` instead of `ModeRollPitchYawrateThrottle`.
+- Local `rosflight.xml` still described the older six-field `OFFBOARD_CONTROL` wire schema (`Qx`, `Qy`, `Qz`, `Fx`, `Fy`, `Fz`) instead of the ROSflight 2.0 ten-value `u` array.
+- Local `rosflight.xml` had malformed offboard ignore enum values for value 5 and value 6 (`22` and `50`), and it lacked ROSflight 2.0's `IGNORE_VALUE0`, `IGNORE_VALUE7`, `IGNORE_VALUE8`, and `IGNORE_VALUE9`.
+
+Design now implemented:
+
+- Incoming MAVLink offboard conversion now preserves `ModeRollPitchYawrateThrottle`.
+- Local `rosflight.xml` now matches ROSflight 2.0's `OFFBOARD_CONTROL` wire schema: `uint16_t ignore` and `float[10] u`.
+- Local `rosflight.xml` now matches ROSflight 2.0's ignore bit values from `IGNORE_VALUE0 = 0x01` through `IGNORE_VALUE9 = 0x200`.
+- The MAVLink conversion maps the ROSflight 2.0 wire layout into RustFlight's current six-axis internal command shape:
+  - `u[0]`, `u[1]`, `u[2]` become `Fx`, `Fy`, `Fz`;
+  - `u[3]`, `u[4]`, `u[5]` become `Qx`, `Qy`, `Qz`;
+  - `IGNORE_VALUE0..2` become force ignores;
+  - `IGNORE_VALUE3..5` become attitude ignores.
+- Added focused MAVLink conversion tests proving:
+  - roll/pitch/yawrate/throttle mode survives conversion,
+  - ignore value 5 maps only to local `IGNORE_QZ`.
+
+Compatibility notes:
+
+- RustFlight still has a six-axis internal offboard resource (`Qx`, `Qy`, `Qz`, `Fx`, `Fy`, `Fz`), while ROSflight 2.0 stores ten offboard values internally. The wire schema now matches ROSflight 2.0, and the conversion intentionally keeps only the six axes the current RustFlight controller boundary can consume.
+- Unsupported `ResetOrigin` and `SendAllConfigInfos` are intentionally left as failed ACK paths. A real implementation should only be added if local estimator/navigation or config-info resources exist.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p rustflight_core --lib` passes.
+
+## Architecture Notes Cleanup Progress
+
+Reason for this change:
+
+- Remaining work item 4 was to clean stale architecture notes as the first three concrete items were resolved.
+- The current transition notes should make the pinned ROSflight 2.0 release checkout the default comparison point, not floating upstream `main`.
+
+Cleanup now done:
+
+- The remaining-work list now records current status instead of presenting completed items 1-3 as future work.
+- The ROSflight reference section now leads with `/tmp/rosflight_firmware_v2_0_1` at exact tag `v2.0.1`.
+- The floating `origin/main` snapshot is documented only as extra context, not as the compatibility target.
+- The RC-loss notes now say ROSflight 2.0 explicitly where the checked behavior came from the pinned release.
+- The command/offboard notes now record the corrected ROSflight 2.0 `OFFBOARD_CONTROL` wire schema and the intentional six-axis internal RustFlight mapping.
+
+Current next step:
+
+- Continue hardware follow-through by checking for board-specific runtime assumptions that compile checks cannot prove, especially sensor task rates, boot-time PWM state, and telemetry behavior on actual PixRacerPro/Nucleo hardware.
+
+## Hardware Surface Progress
+
+Reason for this change:
+
+- Remaining work item 5 was to bring PixRacerPro and Nucleo forward after core and sim were green.
+- Hardware crates should remain thin producers/consumers around the core `World`, not reintroduce direct scheduler or subsystem coupling.
+
+Design now implemented:
+
+- Nucleo's firmware entrypoint now constructs estimator, controller, and mixer through the `Quadrotor` `BodyType` associated types, matching PixRacerPro and the core architecture boundary.
+- Nucleo now treats an empty telemetry pipe as `Ok(0)`, matching PixRacerPro and the MAVLink interface expectation that "no bytes right now" is not a telemetry fault.
+- Nucleo's PWM driver now reports enabled only when every configured output channel is enabled, matching the core `PwmOutputState` assumption.
+- PixRacerPro's PWM driver now updates its enabled-channel mask through `enable`/`disable` during `enable_all`/`disable_all`, so its hardware state and reported state stay consistent.
+- PixRacerPro now records the current PWM microsecond value when a channel duty cycle is written, preserving the driver-side output state for future telemetry/debug use.
+- Fixed Nucleo probe-low behavior so `probe_lo` actually drives the selected probe pin low.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+
+## Compatibility List
+
+Compatibility target:
+
+- The fixed compatibility target is the pinned ROSflight 2.0.1 checkout at `/tmp/rosflight_firmware_v2_0_1`, tag `v2.0.1`, commit `cd787430a960aadbb59cef07ad1f2abc0e8cc0ae`.
+- This list is the current migration gate. Do not move to real simulator-in-the-loop testing until every numbered item is either made compatible or explicitly documented as an accepted intentional difference.
+- Progress reports should reference the affected Compatibility List item numbers.
+
+1. MAVLink XML compatibility.
+   - Local `rustflight_core/mavlink_definitions/rosflight.xml` must match the ROSflight 2.0.1 dialect surface.
+   - Known gaps: missing `ROSFLIGHT_ERROR_INVALID_FAILSAFE`, local-only `UBLOX_FIX_TYPE`, expanded `MAV_COMPONENT`, unsigned `ROSFLIGHT_GNSS.seconds/nanos`, and status enum metadata drift.
+2. Parameter surface compatibility.
+   - Parameter names, counts, ordering, types, and defaults must match ROSflight 2.0.1 where exposed through MAVLink.
+   - Known gaps: missing 10x10 mixer rows/columns, renamed battery/filter/RC/fixed-wing/mag params, missing IMU/mag orientation params.
+3. Command/control compatibility.
+   - Command resources, failsafe commands, RC command scaling, and offboard control must match ROSflight 2.0.1 behavior.
+   - Status: complete for the known command-manager boundary gaps. The internal command resource now preserves the ROSflight 2.0.1 ten-channel shape with named force/torque fields plus passthrough channels.
+4. Controller compatibility.
+   - Controller math, passthrough behavior, PID integrator behavior, and thrust scaling must match ROSflight 2.0.1.
+   - Status: complete for the known controller boundary and behavior gaps.
+5. Mixer compatibility.
+   - Mixer behavior must cover ROSflight 2.0.1's 10-output primary/secondary mixer model, fixed-wing/multirotor paths, aux propagation, canned mixer selection, and motor-param mixing.
+   - Status: complete for the software compatibility surface now tracked under item 5. Hardware DSHOT waveform validation is intentionally deferred to bench testing.
+6. Sensor processing compatibility.
+   - IMU, mag, baro, pitot, battery, GNSS, range, and calibration formulas must match ROSflight 2.0.1 where present.
+   - Status: complete for the core software sensor-processing surface now tracked under item 6. Board-specific runtime sensor scheduling and ADC multiplier plumbing remain item 9 hardware/runtime concerns.
+7. Estimator compatibility.
+   - Estimator update, external attitude handling, integration modes, accel gating, bias correction, and estimator health behavior must match ROSflight 2.0.1.
+   - Status: complete for the core software estimator surface now tracked under item 7.
+8. Telemetry compatibility.
+   - Telemetry message types, stream timing, stream gating, and RC/raw output interfaces must match ROSflight 2.0.1.
+   - Status: complete for the core telemetry surface. Telemetry now follows upstream got-flag streaming, RC raw message packing, status/heartbeat cadence, output raw cadence, and known sensor payload mappings.
+9. Hardware board command/runtime compatibility.
+   - Board parameter persistence, reboot/bootloader commands, boot-time PWM state, sensor task rates, and runtime hardware assumptions must match ROSflight 2.0.1 where applicable.
+   - Status: complete for the software/hardware-runtime boundary. PixRacerPro and Nucleo now use ROSflight-compatible startup param loading, board command ACK ordering, deferred reset side effects, boot-time PWM disable behavior, and compile-validated sensor/telemetry runtime plumbing. Real nonvolatile flash partitioning and bootloader-entry validation remain hardware bench tasks.
+
+## Compatibility List Item 1 Progress
+
+Item worked:
+
+- Compatibility List 1: MAVLink XML compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison file is `/tmp/rosflight_firmware_v2_0_1/comms/mavlink/rosflight.xml` from ROSflight 2.0.1.
+- The local MAVLink Rust code is generated from `rustflight_core/mavlink_definitions/rosflight.xml` by `rustflight_core/build.rs`; generated output is not edited.
+
+Design now implemented:
+
+- Replaced the local dialect with the pinned ROSflight 2.0.1 dialect surface.
+- Restored `ROSFLIGHT_ERROR_INVALID_FAILSAFE` in `ROSFLIGHT_ERROR_CODE`.
+- Removed the local-only `UBLOX_FIX_TYPE` enum.
+- Restored ROSflight 2.0.1's narrow `MAV_COMPONENT` enum surface.
+- Restored `ROSFLIGHT_STATUS.error_code` enum metadata.
+- Restored signed `ROSFLIGHT_GNSS.seconds` and `ROSFLIGHT_GNSS.nanos` field types, and updated the handwritten Rust message/adapter types to feed the generated signed fields.
+- Added `bitmask="true"` to local `ROSFLIGHT_ERROR_CODE`. This is the only intentional XML metadata delta from the pinned file. It does not change the wire schema; it tells the Rust generator to create a bitmask type for a field ROSflight firmware already uses as combined error bits.
+
+Current status:
+
+- Compatibility List 1 is functionally complete for known MAVLink XML gaps.
+- The remaining item-1 difference is intentionally documented: local XML has `bitmask="true"` on `ROSFLIGHT_ERROR_CODE` for generator correctness, while pinned ROSflight 2.0.1 omits that metadata.
+
+Validation:
+
+- `diff -u /tmp/rosflight_firmware_v2_0_1/comms/mavlink/rosflight.xml rustflight_core/mavlink_definitions/rosflight.xml` now reports only the intentional `bitmask="true"` metadata delta.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Compatibility List Item 2 Progress
+
+Item worked:
+
+- Compatibility List 2: parameter surface compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/include/param.h` and `/tmp/rosflight_firmware_v2_0_1/src/param.cpp` from ROSflight 2.0.1.
+- The exposed compatibility surface is parameter count, order/index, name, MAVLink type, and default value.
+
+Design now implemented:
+
+- Expanded primary and secondary mixer matrix parameters from the previous local 10x6 shape to ROSflight 2.0.1's full 10x10 primary and 10x10 secondary parameter surfaces.
+- Removed the local-only `MOTOR_PWM_UPDATE` parameter that shifted the ROSflight parameter order.
+- Renamed local external parameter names to the ROSflight 2.0.1 names, including:
+  - `BATT_VOLT_MAX`
+  - `FILT_*`
+  - `ARM_CAL_GYRO`
+  - `GYRO_XY_LPF`, `GYRO_Z_LPF`, `ACC_LPF`
+  - `MAG_CAL_A00` through `MAG_CAL_A22`
+  - `RC_ARM_CHN`, `RC_OVRD_LAG_T`, `TAKE_MIN_THR`
+  - `REV_ELEVATOR`, `REV_AILERON`, `REV_RUDDER`
+  - `IMU_ROLL/PITCH/YAW` and `MAG_ROLL/PITCH/YAW`
+  - `RC_ARM_THRESHOLD`
+  - `BATT_VOLT_LPF`, `BATT_CURR_LPF`
+- Converted ROSflight int-backed boolean-like params from local `Bool` values to `Int(0/1)` so MAVLink reports `MAV_PARAM_TYPE_INT32`, matching ROSflight 2.0.1.
+- Updated internal call sites that consumed those boolean-like params to interpret nonzero `Int` values as true.
+- Updated magnetometer processor IDs to the ROSflight 2.0.1 soft-iron matrix names.
+- Added focused parameter tests for count and known compatibility names/defaults.
+
+Current status:
+
+- Compatibility List 2 is complete for the exposed parameter table surface: local and pinned ROSflight 2.0.1 both have 333 parameters, with matching order, names, exposed types, and defaults.
+- This does not complete the behavioral use of every parameter. Parameters such as the full mixer matrices, IMU/mag orientation, and filter mode flags still need their consuming systems implemented under later Compatibility List items.
+
+Validation:
+
+- A local comparison script against pinned ROSflight 2.0.1 reports `up=333 loc=333`, `name_type_mismatches=0`, and `default_mismatches=0`.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core params::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Compatibility List Item 3 Progress
+
+Item worked:
+
+- Compatibility List 3: command/control compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/include/command_manager.h` and `/tmp/rosflight_firmware_v2_0_1/src/command_manager.cpp` from ROSflight 2.0.1.
+- ROSflight 2.0.1 stores ten command channels in `control_t::u[10]`.
+- RC/mux logic actively handles six mux channels: `u[0..2]` for force/throttle and `u[3..5]` for roll, pitch, and yaw.
+- Offboard passthrough channels `u[6..9]` are preserved from offboard input into the combined command.
+- Offboard timeout deactivates all ten offboard command channels.
+- Multirotor failsafe sets `u[0..2]` to active `THROTTLE`, `u[3..4]` to active `ANGLE`, `u[5]` to active `RATE`, and `u[6..9]` to inactive `PASSTHROUGH`.
+- Fixed-wing failsafe sets `u[0..5]` to active `PASSTHROUGH` and `u[6..9]` to inactive `PASSTHROUGH`.
+- RC scaling applies roll params to `u[3]`/`qx` and pitch params to `u[4]`/`qy`.
+
+Design now implemented:
+
+- Kept RustFlight's named six-axis command fields (`qx`, `qy`, `qz`, `fx`, `fy`, `fz`) for readability at the controller boundary.
+- Added explicit `passthrough: [ControlChannel; 4]` to `CombinedControl` and `passthrough: [f32; 4]` to `OffboardControlMsg` so ROSflight `u[6..9]` is no longer dropped.
+- Updated incoming MAVLink `OFFBOARD_CONTROL` conversion so:
+  - `u[0..2]` maps to `fx`, `fy`, `fz`,
+  - `u[3..5]` maps to `qx`, `qy`, `qz`,
+  - `u[6..9]` maps to `passthrough`.
+- Updated incoming MAVLink offboard ignore conversion to preserve all ten upstream single-bit ignore values from `IGNORE_VALUE0` through `IGNORE_VALUE9`.
+- Updated offboard timeout handling to deactivate the four passthrough channels as well as the six controller channels.
+- Updated muxing to copy offboard passthrough channels into the combined command.
+- Fixed RC roll/pitch scaling so pitch uses pitch params instead of reusing the roll axis.
+- Updated multirotor and fixed-wing failsafe command types/active flags to match the ROSflight 2.0.1 channel shape.
+
+Current status:
+
+- Compatibility List 3 is complete for the known command-manager boundary gaps: command storage shape, offboard input preservation, ignore-bit mapping, RC scaling, mux passthrough propagation, and failsafe channel types.
+- This does not complete controller or mixer consumption of every command channel. Controller behavior remains Compatibility List 4, and the full 10-output mixer model remains Compatibility List 5.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core command_manager::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Compatibility List Item 4 Progress
+
+Item worked:
+
+- Compatibility List 4: controller compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/include/controller.h`, `/tmp/rosflight_firmware_v2_0_1/src/controller.cpp`, `/tmp/rosflight_firmware_v2_0_1/include/sensors.h`, and `/tmp/rosflight_firmware_v2_0_1/src/sensors.cpp` from ROSflight 2.0.1.
+- ROSflight 2.0.1 controller output is `Controller::Output { float u[10] }`.
+- Controller output channels are:
+  - `u[0..2]`: force/throttle outputs,
+  - `u[3..5]`: roll, pitch, yaw torque outputs,
+  - `u[6..9]`: passthrough channels copied from the combined command.
+- Per-axis passthrough is handled inside `run_pid_loops`; passthrough yaw uses `u[5]`, not pitch.
+- PID integrators update only when armed, throttle is high, and `dt < 0.01`.
+- Throttle channels are scaled by `PARAM_RC_MAX_THROTTLE`; `u[2]` is negated for NED thrust.
+- When `USE_MOTOR_PARAM` is enabled, throttle scaling multiplies by max thrust computed from motor/prop params and current air density.
+- ROSflight sensor air density defaults to `1.225` and updates from baro pressure as `1.225 * pow(pressure / 101325.0, 0.809736894596450)`.
+
+Design now implemented:
+
+- Replaced the old controller-to-mixer output shape with `ControllerOutput { u: [f64; 10] }`.
+- Added typed accessors on `ControllerOutput` for forces, torques, passthrough channels, and the current quad mixer's legacy positive-thrust view.
+- Introduced `ControllerCtx` so the controller consumes an explicit context: state manager, combined command resource, params, air density, and `dt`.
+- `ControlPipelineCtx` now passes air density from the processed sensor resource into `ControllerCtx`.
+- Added `ProcessedSensors::air_density()` using the ROSflight 2.0.1 baro-pressure formula.
+- Updated the quad controller so it emits all ten ROSflight controller output channels:
+  - force outputs into `u[0..2]`,
+  - torque outputs into `u[3..5]`,
+  - command passthrough into `u[6..9]`.
+- Fixed per-axis passthrough so yaw output uses the yaw command channel.
+- Implemented PID integrator terms and anti-windup behavior matching the upstream controller formula.
+- Loaded PID `I` gains from params instead of forcing them to zero.
+- Updated throttle scaling/sign behavior to match upstream controller behavior.
+- Kept the current quad mixer as a consumer of the new `ControllerOutput` resource. It still consumes only the subset it can mix today; full 10-output mixer consumption remains Compatibility List 5.
+
+Current status:
+
+- Compatibility List 4 is complete for the controller boundary and known controller behavior gaps: ten-channel controller output, passthrough propagation, PID integrator behavior, thrust scaling/sign, and air-density input.
+- Compatibility List 5 remains open because the mixer still needs the ROSflight 2.0.1 full 10-output primary/secondary mixer model.
+- The stale full-package `rustflight_core` integration tests have been migrated to the current architecture:
+  - `controller_test.rs` now uses `ControllerCtx` and `ControllerOutput`,
+  - `estimator_test.rs` now uses named `ProcessedSensors` and `NamedEstimator`,
+  - `mixer_tests.rs` now uses `ControllerOutput`, current `Params`, and the current mixer API.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core controller::quad_controller::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core sensors::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Compatibility List Item 5 Progress
+
+Item worked:
+
+- Compatibility List 5: mixer compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/include/mixer.h` and `/tmp/rosflight_firmware_v2_0_1/src/mixer.cpp` from ROSflight 2.0.1.
+- ROSflight 2.0.1 mixer output shape is ten primary mixer outputs plus four non-mixer outputs for a total output surface of fourteen channels.
+- ROSflight 2.0.1 Quad-X canned mixer uses ten controller input rows and ten output columns:
+  - `u[0..2]`: force/throttle rows,
+  - `u[3..5]`: roll, pitch, yaw torque rows,
+  - `u[6..9]`: remaining passthrough/control rows.
+- The Quad-X canned output type shape is four motors followed by six AUX-owned outputs.
+- Multirotor mixing suppresses yaw command `u[5]` when the selected throttle axis magnitude is below `PARAM_MOTOR_IDLE_THROTTLE`.
+- Primary/secondary mixer row selection is driven by `CommandManager::get_rc_override()`:
+  - attitude rows `u[3..5]` come from the primary mixer when attitude override bits are active,
+  - force rows `u[0..2]` come from the primary mixer when throttle override bits are active,
+  - otherwise those rows come from the secondary mixer.
+- When `PARAM_USE_MOTOR_PARAMETERS` is enabled, ROSflight 2.0.1 computes motor outputs from motor/prop parameters, air density, and battery voltage instead of directly using the matrix output.
+- ROSflight 2.0.1 custom mixer parameters are column-major in the parameter table: `PRI_MIXER_<row>_<col>` maps to `primary_mixer.u[row][col]`, and `SEC_MIXER_<row>_<col>` maps to `secondary_mixer.u[row][col]`.
+- ROSflight 2.0.1 output type parameter values are `AUX = 0`, `S = 1`, `M = 2`, and `G = 3`.
+- ROSflight 2.0.1 stores per-output default PWM rates and passes the rate array through `Board::pwm_init(const float * rate, uint32_t channels)`.
+- The pinned Varmint H7 PWM implementation applies those rates at timer-block granularity. Its `setRate(chan, rate)` helper explicitly notes that setting one channel rate sets the rate for all members of that timer block, so the per-output API does not guarantee independent hardware rates for outputs that share a timer.
+- ROSflight 2.0.1 inverts selected canned multirotor mixers before using them. Fixed-wing and inverted-vtail canned mixers are not inverted in the primary mixer path.
+
+Design now implemented:
+
+- Added `MixerCtx` so the mixer consumes explicit resources instead of pulling through a broad scheduler boundary:
+  - state manager,
+  - params,
+  - RC override status,
+  - processed-sensor air density,
+  - optional battery voltage.
+- Changed the quad mixer input to `ControllerOutput { u: [f64; 10] }`.
+- Changed the quad mixer actuator output to `[f64; 10]`.
+- Replaced the older quad-only allocation with the pinned ROSflight 2.0.1 canned mixer geometry and runtime multirotor inversion behavior.
+- Added typed mixer output ownership so the first four Quad-X outputs are motors and outputs `4..10` are AUX-owned.
+- Added all ROSflight 2.0.1 canned mixer choices for `PRIMARY_MIXER`, including ESC calibration, Quad Plus/X, Hex Plus/X, Octo Plus/X, Y6, X8, fixed-wing, and inverted V-tail.
+- Implemented primary/secondary row selection through the explicit `rc_override` field in `MixerCtx`.
+- Implemented low-throttle yaw suppression for multirotor mixing.
+- Implemented fixed-wing canned mixer ownership and aileron/elevator/rudder reversal handling.
+- Implemented the motor-parameter output path using params, air density, and battery voltage while keeping it `no_std` compatible for embedded targets.
+- Added `ParamId::from_index` so systems can read contiguous ROSflight parameter-table regions without hand-written string parsing.
+- Added custom primary/secondary mixer matrix loading from the ROSflight 2.0.1 parameter table when `PRIMARY_MIXER` or `SECONDARY_MIXER` is `CUSTOM`.
+- Added custom primary output type and default PWM-rate loading from `PRI_MIXER_OUT_*` and `PRI_MIXER_PWM_*`.
+- Added `MixerOutputType::Gpio` so the local output-type surface can represent ROSflight's `G` output type.
+- Exposed mixer default PWM rates through the mixer trait for the later PWM-rate ownership slice.
+- Replaced direct mixer mutation of `StateManager` with `MixerRun { commands, status }`.
+- The control pipeline now applies `MixerStatus::Healthy` / `MixerStatus::InvalidMixer` to `StateManager` as `INVALID_MIXER` clear/set events. This preserves ROSflight's observable state behavior while keeping state mutation at the system boundary.
+- Added a PWM-driver `configure_output_rates` hook and wired mixer default PWM rates through the control pipeline.
+- The sim driver records per-output mixer rates directly.
+- The STM32 hardware PWM adapters apply per-output mixer rates using the same effective limitation as ROSflight 2.0.1: rates are accepted per output, then collapsed to the shared timer block underneath. Later outputs in the passed rate array determine the final rate for a shared timer block, matching the upstream loop over channels.
+- The control pipeline logs when a PWM driver rejects a mixer rate configuration instead of ignoring the result.
+- Updated the control pipeline so processed sensor air density and battery voltage flow into the mixer through `MixerCtx`.
+- Added warning/log parity for invalid primary mixer choices and unusually large mixer outputs.
+- Added ESC calibration mixer parity for ROSflight 2.0.1's rank-deficient pseudoinverse effect instead of using the raw calibration matrix directly.
+- Added secondary fixed-wing/v-tail parity for ROSflight 2.0.1's secondary canned mixer branch: primary fixed-wing/v-tail mixers remain raw, while secondary canned fixed-wing/v-tail choices follow the upstream pseudoinverse path.
+- Added core PWM protocol classification for the ROSflight 2.0.1 rate bands:
+  - `0..=490 Hz` is standard PWM,
+  - `150000..=1200000 Hz` is DSHOT,
+  - rates outside those bands are rejected.
+- Added an explicit effective-rate rule for ROSflight's default `0 Hz` custom mixer PWM params: `0 Hz` remains accepted as standard PWM at the interface, and concrete PWM drivers apply the default standard PWM timer rate of `50 Hz`.
+- Added core DSHOT frame encoding with ROSflight 2.0.1 throttle range and checksum formula.
+- Changed the PWM output port so command writes can return `PwmError`; unsupported DSHOT is now observable by the control pipeline instead of being silently ignored.
+- The sim PWM driver records both output rates and classified output protocols.
+- The STM32 PWM resource now owns timer-block protocol classification, output protocol state, and DSHOT frame buffers below the core `PwmDriver` port.
+- The STM32 PWM resource now has a DSHOT-capable timer-block path that owns a board-provided DMA channel and emits the prepared ROSflight-compatible DSHOT frame waveform through Embassy timer waveform output.
+- PixRacerPro marks its TIM1 motor block, outputs `0..4`, as DSHOT-capable and passes `DMA2_CH0` into the PWM resource.
+- PixRacerPro TIM2/TIM4 and all current Nucleo PWM timer blocks remain standard-PWM-only. They reject DSHOT with `PwmError::UnsupportedProtocol` instead of pretending high-rate PWM is DSHOT.
+- The World control-stage test now proves custom mixer zero-rate params are still propagated as the mixer-owned resource, while sim/STM32 consumers normalize the effective timer rate at the PWM boundary.
+- Updated mixer integration tests to current ROSflight 2.0.1 conventions, including ten-output shape, low-throttle yaw suppression, canned runtime inversion, ESC calibration pseudoinverse behavior, custom parameter-loaded mixer matrices/output types, canned Hex-X output ownership, invalid mixer status, and fixed-wing reversals.
+
+Current status:
+
+- Compatibility List 5 is complete for the software compatibility surface.
+- Completed in this slice:
+  - active Quad-X mixer output shape,
+  - ROSflight 2.0.1 canned multirotor runtime inversion behavior,
+  - typed mixer output ownership for motor vs AUX channels,
+  - explicit mixer context/resource boundary,
+  - primary/secondary row selection mechanism,
+  - low-throttle yaw suppression,
+  - motor-parameter path plumbing,
+  - all ROSflight 2.0.1 canned primary mixer selections,
+  - fixed-wing mixer behavior covered by the current local fixed-wing output surface, including aileron/elevator/rudder reversals,
+  - custom primary/secondary matrix loading from parameters,
+  - custom output-type and default PWM-rate loading from parameters,
+  - local representation of ROSflight's GPIO output type,
+  - status/event boundary for invalid mixer reporting,
+  - core-to-PWM propagation path for mixer default PWM rates,
+  - sim per-output PWM rate recording,
+  - STM32 hardware timer-block PWM rate application matching ROSflight 2.0.1's effective hardware constraint,
+  - ESC calibration mixer rank-deficient pseudoinverse behavior,
+  - secondary fixed-wing/v-tail pseudoinverse behavior for the upstream secondary canned mixer branch,
+  - warning/log parity for invalid primary mixer choices and high mixer outputs,
+  - core/sim DSHOT protocol recognition and frame encoding,
+  - accepted `0 Hz` custom mixer PWM defaults with concrete drivers normalizing to the standard `50 Hz` timer rate,
+  - board-owned STM32 timer-block protocol/capability abstraction,
+  - PixRacerPro DSHOT-capable TIM1 motor block using a board-owned timer DMA channel,
+  - explicit hardware DSHOT rejection on timer blocks that do not own DSHOT-capable DMA support.
+- Deferred hardware validation:
+  - PixRacerPro hardware DSHOT output is compile-validated but not waveform-validated on real hardware. ROSflight 2.0.1 uses timer DMA burst writes across a timer block; the current Embassy path emits prepared frames through a board-owned timer DMA channel. If hardware testing shows the sequential per-output emission does not meet the same timing behavior, the next slice should replace the Embassy waveform call with a lower-level timer DMA burst implementation for exact block-wide parity.
+  - Nucleo remains standard-only because its current constructor consumes the normal DMA channels that Embassy exposes for timer waveform output. DSHOT can be added later by reallocating DMA ownership at the board boundary.
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --test mixer_tests` passes with 15 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
+
+## Compatibility List Item 6 Progress
+
+Item worked:
+
+- Compatibility List 6: sensor processing compatibility.
+
+Upstream behavior checked:
+
+- The pinned comparison files are `/tmp/rosflight_firmware_v2_0_1/include/sensors.h` and `/tmp/rosflight_firmware_v2_0_1/src/sensors.cpp` from ROSflight 2.0.1.
+- ROSflight 2.0.1 rotates IMU accel/gyro by `IMU_ROLL`, `IMU_PITCH`, and `IMU_YAW` before calibration/correction.
+- ROSflight 2.0.1 rotates magnetometer flux by `MAG_ROLL`, `MAG_PITCH`, and `MAG_YAW` before hard/soft-iron correction.
+- ROSflight 2.0.1 mag correction uses the full row-major `MAG_CAL_A00..A22` soft-iron matrix after subtracting `MAG_X/Y/Z_BIAS`.
+- ROSflight 2.0.1 baro correction computes altitude from pressure directly; `BARO_BIAS` is captured as ground pressure during calibration and is not subtracted from each pressure sample in `correct_baro`.
+- ROSflight 2.0.1 diff-pressure correction subtracts `DIFF_PRESS_BIAS` and computes signed indicated airspeed as `sign(dp) * sqrt(abs(dp) / (0.5 * 1.225))`.
+- ROSflight 2.0.1 battery processing applies first-order LPFs with `BATT_VOLT_LPF` and `BATT_CURR_LPF`, initializing previous voltage from `BATT_VOLT_MAX`.
+- ROSflight 2.0.1 accel calibration sums `accel + [0, 0, 9.80665]`, applies temperature compensation, rejects large movement and large bias norms, and clears calibration state after completion.
+- ROSflight 2.0.1 gyro calibration averages gyro samples and accepts only when the bias norm is below `1.0`.
+- ROSflight 2.0.1 baro and diff-pressure calibration wait through 128 delay cycles, collect 127 samples, gate calibration iterations at roughly 20 ms, and compare accumulated sample variance against the upstream thresholds.
+
+Design now implemented:
+
+- The default named `SensorProcessorSet` now uses real `BaroProcessor`, `PitotProcessor`, and `BatteryProcessor` instead of passthrough processors.
+- `ImuProcessor` now applies ROSflight-compatible Euler orientation rotation before calibration and correction.
+- `MagProcessor` now applies ROSflight-compatible orientation rotation before magnetic correction.
+- Fixed `MagProcessor` soft-iron correction to use the upstream `A00/A01/A02`, `A10/A11/A12`, and `A20/A21/A22` matrix layout.
+- `BaroProcessor` no longer subtracts `BARO_BIAS` from pressure during correction; altitude is computed from the measured pressure, matching upstream `correct_baro`.
+- `PitotProcessor` now keeps the ROSflight signed airspeed formula after subtracting `DIFF_PRESS_BIAS`.
+- Added `BatteryProcessor` with ROSflight-compatible LPF state and alpha params.
+- IMU accel calibration now uses the upstream gravity sign and the upstream movement/bias sanity gates.
+- Gyro calibration now applies the upstream bias-norm sanity gate.
+- Baro and pitot calibration now keep processor-owned calibration state, run with the upstream delay/sample counts, use a 20 ms packet-time gate, and clear calibration flags after completion.
+- Calibration request handling now matches upstream start behavior:
+  - accel calibration starts full IMU calibration and zeros accel plus gyro biases,
+  - gyro calibration zeros gyro biases,
+  - baro calibration zeros `BARO_BIAS`,
+  - airspeed calibration zeros `DIFF_PRESS_BIAS`.
+
+Current status:
+
+- Compatibility List 6 is complete for the core software sensor-processing surface.
+- GNSS and range remain passthrough because ROSflight 2.0.1 does not apply additional core correction formulas there.
+- Board-specific sensor scheduling, physical ADC scaling hooks for battery multipliers, and actual hardware sensor task rates remain under Compatibility List item 9 because they belong to board/runtime behavior rather than core sensor math.
+
+## Comprehensive ROSflight 2.0.1 Feature Inventory
+
+Audit date: 2026-05-13.
+
+Pinned upstream target:
+
+- Repository checkout: `/tmp/rosflight_firmware_v2_0_1`
+- Tag: `v2.0.1`
+- Commit: `cd787430a960aadbb59cef07ad1f2abc0e8cc0ae`
+
+Status legend:
+
+- `[x]` RustFlight has the ROSflight 2.0.1 feature or an interface-compatible implementation.
+- `[~]` RustFlight has the core/interface feature, but exact parity depends on board hardware validation or a deliberately abstract board backend.
+- `[!]` RustFlight is missing behavior, has a known compatibility gap, or needs a follow-up before claiming full ROSflight 2.0.1 parity.
+- `[n/a]` The item exists in the ROSflight MAVLink dialect or board interface but is not used by ROSflight 2.0.1 firmware behavior.
+
+This inventory supersedes the earlier "Compatibility List item complete" statements where a later full-pass audit found a narrower follow-up.
+
+### Firmware Lifecycle And Scheduler
+
+- `[x]` Boot initialization owns params, state, RC, command manager, comms, sensors, estimator, controller, mixer, PWM, and board runtime through explicit `World` resources.
+- `[x]` Parameter startup behavior is represented: board param read, default fallback, and board write on fallback.
+- `[x]` Fixed deterministic scheduler exists through `World::run_once` and named stage functions.
+- `[x]` IMU-gated estimator/controller/mixer/PWM pipeline matches ROSflight's control-loop dependency on new IMU data.
+- `[x]` No-IMU health path sets `IMU_NOT_RESPONDING` separately from calibration validity, matching ROSflight's sensor-owned health split.
+- `[x]` Time-going-backwards error flag exists in the state machine and tests.
+- `[!]` Time-going-backwards detection is not visibly wired into the active IMU control path in the same way as `ROSflight::check_time_going_forwards()`.
+- `[!]` Telemetry streaming is currently called from the IMU-gated control stage; ROSflight streams non-IMU sensor telemetry whenever each sensor's `got_flags` bit is set, even on loops without a new IMU.
+- `[!]` RC raw telemetry is currently tied to the named telemetry call path; ROSflight sends RC raw immediately when `rc.receive()` returns a new packet.
+- `[!]` ROSflight status `loop_time_us` is emitted as the measured control-loop time; RustFlight currently emits `0`.
+
+### MAVLink Dialect, Parser, And Wire Messages
+
+- `[x]` Local ROSflight XML is pinned to the ROSflight 2.0.1 dialect surface.
+- `[x]` `ROSFLIGHT_CMD` enum values 0 through 12 are present.
+- `[x]` `ROSFLIGHT_AUX_CMD_TYPE`, `ROSFLIGHT_CMD_RESPONSE`, `OFFBOARD_CONTROL_MODE`, `OFFBOARD_CONTROL_IGNORE`, `ROSFLIGHT_ERROR_CODE`, `ROSFLIGHT_RANGE_TYPE`, `GNSS_FIX_TYPE`, `MAV_TYPE`, `MAV_PARAM_TYPE`, `MAV_SEVERITY`, `MAV_VTOL_STATE`, and `MAV_COMPONENT` surfaces are present.
+- `[x]` `OFFBOARD_CONTROL`, `SMALL_IMU`, `SMALL_MAG`, `SMALL_BARO`, `DIFF_PRESSURE`, `SMALL_RANGE`, `ROSFLIGHT_CMD`, `ROSFLIGHT_CMD_ACK`, `ROSFLIGHT_OUTPUT_RAW`, `ROSFLIGHT_STATUS`, `ROSFLIGHT_VERSION`, `ROSFLIGHT_AUX_CMD`, `EXTERNAL_ATTITUDE`, `ROSFLIGHT_GNSS`, and `ROSFLIGHT_BATTERY_STATUS` are represented.
+- `[x]` Standard messages used by ROSflight 2.0.1 are represented: `HEARTBEAT`, `PARAM_REQUEST_READ`, `PARAM_REQUEST_LIST`, `PARAM_VALUE`, `PARAM_SET`, `ATTITUDE_QUATERNION`, `RC_CHANNELS`, `TIMESYNC`, and `STATUSTEXT`.
+- `[x]` Local XML intentionally marks `ROSFLIGHT_ERROR_CODE` as a bitmask so the Rust generator produces the intended representation; the numeric wire values remain ROSflight-compatible.
+- `[n/a]` `NAMED_VALUE_FLOAT` and `NAMED_VALUE_INT` remain dialect messages but are not active ROSflight 2.0.1 firmware behavior.
+- `[!]` `ROSFLIGHT_HARD_ERROR` is present in the message surface, but hard-fault backup recovery/reporting is not implemented in the active runtime.
+
+### Parameters
+
+- `[x]` RustFlight exposes 333 parameters matching ROSflight 2.0.1 count, order, names, types, and defaults.
+- `[x]` Int-backed boolean-like params use int MAVLink types, matching ROSflight.
+- `[x]` Full 10x10 primary and 10x10 secondary mixer parameter matrices are exposed.
+- `[x]` System ID parameter updates propagate to outbound comm system ID.
+- `[x]` Param read by name/index, param list streaming, and param set by name are implemented.
+- `[x]` Param defaults command is implemented and gated against armed state.
+- `[x]` Param read/write commands route through board persistence hooks and are gated against armed state.
+- `[~]` Param persistence is board-backend-owned. Sim, PixRacerPro, and Nucleo have software-visible hooks, but exact nonvolatile media behavior is board-specific.
+- `[!]` ROSflight's param checksum/versioned memory layout is not yet replicated as a portable core format; board hooks can be compatible, but the core does not enforce the same memory image.
+
+### Commands, Companion Inputs, And Acknowledgements
+
+- `[x]` Command ACK response path exists for all ROSflight commands.
+- `[x]` Armed-state gating for destructive/configuration commands matches ROSflight.
+- `[x]` Deferred reboot and reboot-to-bootloader board hooks preserve ACK-before-reset behavior.
+- `[x]` `SEND_VERSION` returns a version response.
+- `[x]` RC calibration routes to controller trim/equilibrium torque calculation.
+- `[x]` Accel, gyro, baro, and airspeed calibration commands route through event-driven calibration ownership.
+- `[x]` `RESET_ORIGIN` and `SEND_ALL_CONFIG_INFOS` are recognized and ACKed as unsupported/failed, matching the practical ROSflight 2.0.1 command surface.
+- `[x]` Timesync requests return board time in nanoseconds as ROSflight does.
+- `[x]` Companion heartbeat is parsed and recorded as connection state.
+- `[!]` Companion connection state is not yet used to gate/replay statustext logging exactly like ROSflight.
+
+### State Machine, Errors, Failsafe, And Arming
+
+- `[x]` State flags cover armed, failsafe, error, and error-code bitset.
+- `[x]` Error codes match ROSflight values: invalid mixer, IMU not responding, RC lost, unhealthy estimator, time going backwards, uncalibrated IMU, buffer overrun, invalid failsafe.
+- `[x]` Core FSM states are represented: init, preflight, armed, error, failsafe, calibrating.
+- `[x]` Arming/disarming requests from RC switch and stick gestures are represented.
+- `[x]` Arming gates include low throttle, failsafe/error state, and calibration-on-arm behavior.
+- `[x]` RC lost/found events trigger failsafe transitions compatible with ROSflight behavior.
+- `[x]` Calibration complete/fail events return the state machine to the expected mode.
+- `[!]` LED state outputs are not represented through board `led0`/`led1` hooks; ROSflight uses LED0 for RC override and LED1 for armed/error/failsafe blink state.
+- `[!]` Hard-fault backup memory recovery, rearm-after-hardfault behavior, and `HARD_ERROR` telemetry are not implemented.
+- `[!]` Status-change immediate telemetry update is not explicitly modeled; ROSflight can push status on state/error changes through `update_status()`.
+
+### RC Input And Command Muxing
+
+- `[x]` RC packet shape supports 24 channels, frame-lost, and failsafe status bits.
+- `[x]` RC type param is consumed by board RC initialization.
+- `[x]` RC channel mapping for X/Y/Z/F, arm, attitude override, throttle override, and attitude-control switch is implemented.
+- `[x]` Switch direction params for channels 5 through 8 are implemented.
+- `[x]` RC lost detection covers frame lost, failsafe activated, and out-of-range channel values.
+- `[x]` Stick arming/disarming gesture behavior is implemented for no-arm-switch configuration.
+- `[x]` RC command scaling covers angle/rate/throttle modes, fixed-wing passthrough, and max command params.
+- `[x]` Offboard command storage is the ROSflight ten-channel shape.
+- `[x]` Offboard ignore bits apply per channel, including all defined ignore bits, not only a single tested bit.
+- `[x]` Offboard timeout disables inactive command channels.
+- `[x]` RC override reasons match ROSflight's attitude switch, throttle switch, stick deviation, min-throttle takeover, and inactive offboard group behavior.
+- `[x]` Multirotor and fixed-wing failsafe command shapes match ROSflight.
+
+### Controller
+
+- `[x]` Controller output is a ten-channel resource compatible with ROSflight `Controller::Output`.
+- `[x]` Roll/pitch angle PID, roll/pitch/yaw rate PID, tau, and max-thrust params are consumed.
+- `[x]` Integrators update only when armed and throttle is high.
+- `[x]` Rate, angle, throttle, and passthrough command types are consumed as ROSflight does.
+- `[x]` Throttle/max-thrust scaling and sign conventions were aligned with ROSflight.
+- `[x]` Air-density input uses ROSflight's baro pressure formula.
+- `[x]` RC trim/equilibrium torque calibration is represented.
+- `[x]` PID saturation/antiwindup behavior is covered by focused tests.
+
+### Estimator
+
+- `[x]` First IMU sample initializes estimator timing and returns without propagation.
+- `[x]` Quaternion state, q-dot/angular velocity reporting, and attitude quaternion telemetry are represented.
+- `[x]` Accel and gyro LPFs match the ROSflight param surface.
+- `[x]` External attitude correction path is implemented as a one-shot companion input.
+- `[x]` Accel correction can be gated by `FILT_USE_ACC` and norm margin.
+- `[x]` Init-time gain boost, adaptive bias integration, quadratic integration, and matrix exponential options are represented.
+- `[x]` Unhealthy estimator flag behavior is represented when accel data goes stale with accel enabled on non-fixed-wing configurations.
+
+### Sensor Processing And Calibration
+
+- `[x]` Named sensor bus/resources cover IMU, mag, baro, differential pressure, range, GNSS, battery, RC, and external attitude.
+- `[x]` IMU orientation correction from `IMU_ROLL/PITCH/YAW` is implemented.
+- `[x]` IMU gyro and accel bias/temp compensation are implemented.
+- `[x]` Six-bias uncalibrated-IMU check is sensor-owned and runs only when IMU data is present.
+- `[x]` Gyro calibration sample count, averaging, and bias-norm acceptance match ROSflight.
+- `[x]` Accel calibration movement/bias gating and gravity/temp-comp formula match ROSflight.
+- `[x]` Mag orientation and hard/soft-iron correction match ROSflight.
+- `[x]` Baro altitude correction and baro calibration behavior match ROSflight.
+- `[x]` Differential pressure bias correction, signed IAS formula, and calibration behavior match ROSflight.
+- `[x]` Battery LPF behavior matches ROSflight's core formula.
+- `[x]` GNSS and range are passthrough in core, matching ROSflight's lack of additional core correction.
+- `[~]` Board physical sensor drivers, exact sampling rates, and actual ADC/GNSS hardware behavior are backend responsibilities.
+- `[!]` Battery voltage/current multiplier hooks exist as parameters and board concepts in ROSflight, but physical board scaling parity still requires backend validation/plumbing.
+- `[!]` Board sensor-init error count/message APIs are not represented in the Rust core board trait.
+
+### Mixer, Aux, PWM, And Output Protocols
+
+- `[x]` Mixer output surface is ten primary mixer outputs plus four auxiliary/non-mixer outputs for fourteen total channels.
+- `[x]` Output types match ROSflight values: AUX, servo, motor, GPIO.
+- `[x]` Primary and secondary mixer selection and parameter loading are implemented.
+- `[x]` Custom mixer matrices load from the ROSflight 10x10 parameter table.
+- `[x]` Canned mixers are represented: ESC calibration, Quad Plus/X, Hex Plus/X, Octo Plus/X, Y6, X8, fixed-wing, and inverted V-tail.
+- `[x]` ROSflight's multirotor canned mixer pseudoinverse/inversion behavior is represented.
+- `[x]` Fixed-wing and inverted V-tail reversal params are implemented.
+- `[x]` Motor-parameter mixing consumes motor, prop, air-density, battery-voltage, and motor-count params.
+- `[x]` Low-throttle yaw suppression and invalid-mixer state/error behavior are represented.
+- `[x]` Aux command mapping to disabled/servo/motor and fourteen-channel values is implemented.
+- `[x]` Raw output composition maps servo/motor/GPIO/AUX values to final output commands.
+- `[x]` Per-output PWM rate configuration exists at the core boundary.
+- `[~]` STM32 shared-timer rate collapse matches ROSflight's effective hardware constraint but needs board-level timing validation for each timer block.
+- `[~]` DSHOT frame encoding and protocol selection are implemented; PixRacerPro hardware waveform parity still requires logic-analyzer validation.
+- `[~]` GPIO output type is represented in core output composition, but board-level GPIO routing requires hardware backend work.
+
+### Telemetry Streams
+
+- `[x]` Heartbeat type switches between fixed-wing and quadrotor from the `FIXED_WING` param.
+- `[x]` Status payload fields are represented: armed, failsafe, rc override, offboard, error code, control mode, num errors, and loop time.
+- `[x]` IMU, attitude quaternion, output raw, diff-pressure, baro, mag, range, battery, GNSS, and RC raw send functions are represented.
+- `[x]` Output raw divisor is every eighth IMU sample, matching ROSflight.
+- `[x]` RC raw scaling uses the first eight normalized channels mapped to `channel * 1000 + 1000`.
+- `[x]` GNSS telemetry includes board timestamp, Unix seconds/nanos, fix, satellites, position, velocity, and accuracy fields.
+- `[!]` Status `num_errors` currently reports state error-bit count; ROSflight reports `board.sensors_errors_count()`.
+- `[!]` Status `loop_time_us` currently reports `0`; ROSflight reports measured loop time.
+- `[!]` Non-IMU telemetry stream gating is currently stricter than ROSflight because telemetry is emitted from the new-IMU control path.
+- `[!]` RC raw telemetry should be sent from the RC stage when a new RC packet is consumed, independent of IMU.
+- `[!]` Param-list streaming in Rust is event-response based; verify it sends one parameter per scheduler cycle like ROSflight's `send_next_param()`.
+- `[!]` Statustext buffering/replay is not heartbeat-connection-gated like ROSflight.
+- `[!]` `ROSFLIGHT_HARD_ERROR` telemetry is not emitted because backup recovery is not implemented.
+
+### Board Runtime Interface
+
+- `[x]` Board clock, serial RX/TX, serial flush, params read/write, reboot, reboot-to-bootloader, and deferred reset hooks exist.
+- `[x]` Board sensor production is represented as `update_sensor_bus`, keeping hardware-specific reads outside core.
+- `[x]` Board-owned PWM driver boundary exists instead of core owning hardware registers.
+- `[x]` PixRacerPro and Nucleo compile against the new board/runtime surface.
+- `[x]` Sim board tracks the core board/runtime surface for software testing.
+- `[~]` ROSflight's concrete board APIs for `imu_read`, `mag_read`, `baro_read`, `diff_pressure_read`, `range_read`, `gnss_read`, `battery_read`, `rc_read`, `pwm_init`, `pwm_write`, and `pwm_disable` are intentionally collapsed behind RustFlight's named sensor bus and PWM driver boundaries. This is architecture-compatible, but each board backend must validate exact behavior.
+- `[!]` Board LED hooks are missing.
+- `[!]` Board backup-memory hooks are missing.
+- `[!]` Board sensor-init error count/message hooks are missing.
+- `[!]` Board battery voltage/current multiplier hooks are not fully wired to physical ADC scaling behavior.
+
+### Simulator Readiness Result
+
+RustFlight is close, but this full pass found compatibility gaps that should be fixed before claiming every ROSflight 2.0.1 firmware feature is present for software-in-the-loop testing:
+
+1. Wire time-going-backwards detection into the active IMU control path.
+2. Move telemetry streaming to a scheduler stage that can emit non-IMU sensor telemetry without requiring a new IMU sample.
+3. Emit RC raw telemetry from the RC stage when a new RC packet is consumed.
+4. Populate status `num_errors` from a board sensor-error-count hook and `loop_time_us` from measured control-loop time.
+5. Gate/replay statustext logs from companion heartbeat connection state like ROSflight.
+6. Decide whether software tests require hard-fault backup memory and `ROSFLIGHT_HARD_ERROR`; if they do, add board backup-memory hooks and runtime recovery/reporting before testing.
+7. Decide whether LED and board sensor-init error message hooks are needed for the next test phase; they are real ROSflight board/runtime features even if they may not affect initial SITL dynamics.
+
+## Final Compatibility Points
+
+These points are the final compatibility list discovered by the comprehensive ROSflight 2.0.1 pass. Progress reports should refer to these numbers until all seven are complete.
+
+1. Time-going-backwards detection.
+   - ROSflight 2.0.1 calls `check_time_going_forwards()` before running estimator/controller/mixer work for a new IMU sample.
+   - RustFlight must set `TIME_GOING_BACKWARDS` and skip the control pipeline when an IMU timestamp does not advance, and clear it once time advances again.
+   - Status: complete in `run_control_pipeline_if_new_imu`; duplicate or backwards IMU timestamps set `TIME_GOING_BACKWARDS` and skip control work, and advancing timestamps clear the flag.
+
+2. Sensor telemetry scheduling.
+   - ROSflight 2.0.1 streams telemetry from `got_flags`, so baro, mag, range, GNSS, battery, and diff-pressure telemetry can emit on loops without a new IMU sample.
+   - RustFlight must move telemetry emission to a scheduler stage that consumes the current processed sensor resources without requiring a new IMU control update.
+   - Status: complete; telemetry is now a `World` scheduler stage that consumes the current `ProcessedSensors` resource, so non-IMU sensor telemetry no longer depends on a new IMU control update.
+
+3. RC raw telemetry scheduling.
+   - ROSflight 2.0.1 sends `RC_CHANNELS` when RC receive produces a new packet.
+   - RustFlight must emit RC raw from the RC stage when the current processed sensor set includes a new RC packet.
+   - Status: complete; RC raw telemetry is emitted from the same world telemetry stage after the RC packet has been produced/consumed for the current scheduler pass, independent of estimator/controller execution.
+
+4. Status `num_errors` and `loop_time_us`.
+   - ROSflight 2.0.1 status uses `board.sensors_errors_count()` and `RF_.get_loop_time_us()`.
+   - RustFlight must add a board sensor-error-count hook and store measured control-loop time for status telemetry.
+   - Status: complete; `BoardIo::sensors_errors_count()` feeds status `num_errors`, and `ControlPipelineResource::latest_loop_time_us` feeds status `loop_time_us`.
+
+5. Statustext connection gating and replay.
+   - ROSflight 2.0.1 buffers logs until companion heartbeat marks the link connected, then replays buffered logs gradually.
+   - RustFlight must use `CompanionLinkState` to avoid draining statustext before heartbeat connection.
+   - Status: complete; log draining now waits for companion heartbeat connection and replays buffered statustext entries gradually after connection.
+
+6. Hard-fault backup memory and `ROSFLIGHT_HARD_ERROR`.
+   - ROSflight 2.0.1 exposes backup-memory recovery and `ROSFLIGHT_HARD_ERROR` telemetry for hard-fault diagnostics.
+   - RustFlight must at least expose board backup-memory hooks and a comm hard-error telemetry path before this can be considered present.
+   - Status: complete for the software/runtime interface; `BoardIo` exposes backup-memory hooks, `CommInterface` exposes `send_hard_error`, `World` reads/clears pending backup data at init, attempts rearm through the normal state machine request when backup data asks for it, and sends `ROSFLIGHT_HARD_ERROR` after companion heartbeat connection.
+
+7. LED and board sensor-init diagnostics.
+   - ROSflight 2.0.1 has board LED hooks and board sensor-init error count/message diagnostics.
+   - RustFlight must expose these board-runtime hooks so board backends can preserve ROSflight behavior.
+   - Status: complete for the core board-runtime interface; `BoardIo` exposes LED0/LED1 hooks and sensor-init diagnostic hooks, and `World` drives LED0 from RC override plus LED1 from armed/error/failsafe state. Board backends can now implement the physical behavior.
+
+### Final Compatibility Points Progress
+
+- Final Compatibility Point 1: complete.
+  - Implemented in `rustflight_core/src/control_system.rs`.
+  - Covered by `world_control_stage_flags_non_advancing_imu_time`.
+
+- Final Compatibility Point 2: complete.
+  - Implemented by moving telemetry ownership to `World::run_telemetry_stage`.
+  - Covered by `world_telemetry_stage_streams_non_imu_sensor_without_control_update`.
+
+- Final Compatibility Point 3: complete.
+  - RC raw telemetry now follows the current processed sensor resource instead of the IMU control path.
+  - Existing RC raw packing coverage remains in `named_rc_telemetry_matches_upstream_raw_channel_packing`.
+
+- Final Compatibility Point 4: complete.
+  - Added `BoardIo::sensors_errors_count()` and stored latest measured control-loop time in `ControlPipelineResource`.
+  - Covered by `world_status_uses_board_error_count_and_control_loop_time`.
+
+- Final Compatibility Point 5: complete.
+  - `log_system::drain_logs_to_comm_responses` now takes companion connection state and sends at most one buffered statustext per drain.
+  - Covered by `drain_logs_waits_for_companion_connection`.
+
+- Final Compatibility Point 6: complete for the software/runtime surface.
+  - Added `BackupData`, backup-memory board hooks, `CommResponse::HardError`, `CommInterface::send_hard_error`, MAVLink conversion, and world replay after companion heartbeat.
+  - Covered by `world_replays_backup_hard_error_after_companion_heartbeat`.
+
+- Final Compatibility Point 7: complete for the core board-runtime surface.
+  - Added LED0/LED1 hooks and sensor-init diagnostics hooks to `BoardIo`.
+  - `World` now drives LED0/LED1 using the ROSflight state meanings; physical LED behavior remains board-backend-owned.
+
+Validation for this slice:
+
+- `cargo fmt --check`
+- `cargo test -p rustflight_core --lib -- --test-threads=1`
+- `cargo test -p sim --lib`
+- `cargo check -p pixracerpro --target thumbv7em-none-eabihf`
+- `cargo check -p nucleo --target thumbv7em-none-eabihf`
+
+Validation:
+
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core sensorprocessors::tests --lib` passes with 7 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core command_system::tests --lib` passes with 10 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes with 138 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.

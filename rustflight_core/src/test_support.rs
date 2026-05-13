@@ -1,5 +1,5 @@
 use crate::{
-    board::BoardIo,
+    board::{BackupData, BoardIo},
     comm_manager::comm_link_trait::CommInterface,
     comm_messages::{self, messages::*},
     errors,
@@ -9,6 +9,11 @@ use crate::{
 pub struct TestBoard {
     pub current_time_us: u64,
     pub tx_write_count: usize,
+    pub sensor_errors_count: u16,
+    pub backup_data: Option<BackupData>,
+    pub backup_clear_count: usize,
+    pub led0_high: bool,
+    pub led1_high: bool,
 }
 
 impl BoardIo for TestBoard {
@@ -28,6 +33,35 @@ impl BoardIo for TestBoard {
     fn clock_micros(&self) -> u64 {
         self.current_time_us
     }
+
+    fn sensors_errors_count(&self) -> u16 {
+        self.sensor_errors_count
+    }
+
+    fn led0_on(&mut self) {
+        self.led0_high = true;
+    }
+
+    fn led0_off(&mut self) {
+        self.led0_high = false;
+    }
+
+    fn led1_on(&mut self) {
+        self.led1_high = true;
+    }
+
+    fn led1_off(&mut self) {
+        self.led1_high = false;
+    }
+
+    fn backup_memory_read(&mut self) -> Option<BackupData> {
+        self.backup_data.take()
+    }
+
+    fn backup_memory_clear(&mut self) -> bool {
+        self.backup_clear_count += 1;
+        true
+    }
 }
 
 pub struct RecordingCommLink {
@@ -38,6 +72,17 @@ pub struct RecordingCommLink {
     pub last_status: Option<RosflightStatusMsg>,
     pub imu_count: usize,
     pub attitude_count: usize,
+    pub baro_count: usize,
+    pub diff_pressure_count: usize,
+    pub mag_count: usize,
+    pub range_count: usize,
+    pub battery_count: usize,
+    pub gnss_count: usize,
+    pub last_imu: Option<SmallImuMsg>,
+    pub last_baro: Option<SmallBaroMsg>,
+    pub last_diff_pressure: Option<DiffPressureMsg>,
+    pub last_range: Option<SmallRangeMsg>,
+    pub last_gnss: Option<RosflightGnssMsg>,
     pub rc_channels_count: usize,
     pub last_rc_channels: Option<RcChannelsMsg>,
     pub output_raw_count: usize,
@@ -48,6 +93,8 @@ pub struct RecordingCommLink {
     pub last_cmd_ack: Option<RosflightCmdAckMsg>,
     pub statustext_count: usize,
     pub last_statustext: Option<StatustextMsg>,
+    pub hard_error_count: usize,
+    pub last_hard_error: Option<RosflightHardErrorMsg>,
 }
 
 impl RecordingCommLink {
@@ -60,6 +107,17 @@ impl RecordingCommLink {
             last_status: None,
             imu_count: 0,
             attitude_count: 0,
+            baro_count: 0,
+            diff_pressure_count: 0,
+            mag_count: 0,
+            range_count: 0,
+            battery_count: 0,
+            gnss_count: 0,
+            last_imu: None,
+            last_baro: None,
+            last_diff_pressure: None,
+            last_range: None,
+            last_gnss: None,
             rc_channels_count: 0,
             last_rc_channels: None,
             output_raw_count: 0,
@@ -70,6 +128,8 @@ impl RecordingCommLink {
             last_cmd_ack: None,
             statustext_count: 0,
             last_statustext: None,
+            hard_error_count: 0,
+            last_hard_error: None,
         }
     }
 
@@ -135,28 +195,39 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         self.attitude_count += 1;
     }
 
-    fn send_baro(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallBaroMsg) {}
-
-    fn send_diff_pressure(
-        &mut self,
-        _board: &mut TestBoard,
-        _system_id: u8,
-        _msg: DiffPressureMsg,
-    ) {
+    fn send_baro(&mut self, _board: &mut TestBoard, _system_id: u8, msg: SmallBaroMsg) {
+        self.baro_count += 1;
+        self.last_baro = Some(msg);
     }
 
-    fn send_imu(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallImuMsg) {
+    fn send_diff_pressure(&mut self, _board: &mut TestBoard, _system_id: u8, msg: DiffPressureMsg) {
+        self.diff_pressure_count += 1;
+        self.last_diff_pressure = Some(msg);
+    }
+
+    fn send_imu(&mut self, _board: &mut TestBoard, _system_id: u8, msg: SmallImuMsg) {
         self.imu_count += 1;
+        self.last_imu = Some(msg);
     }
 
-    fn send_mag(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallMagMsg) {}
-
-    fn send_rc_raw(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: RosflightOutputRawMsg) {
+    fn send_mag(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallMagMsg) {
+        self.mag_count += 1;
     }
 
-    fn send_range(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: SmallRangeMsg) {}
+    fn send_rc_raw(&mut self, _board: &mut TestBoard, _system_id: u8, msg: RcChannelsMsg) {
+        self.rc_channels_count += 1;
+        self.last_rc_channels = Some(msg);
+    }
 
-    fn send_gnss(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: RosflightGnssMsg) {}
+    fn send_range(&mut self, _board: &mut TestBoard, _system_id: u8, msg: SmallRangeMsg) {
+        self.range_count += 1;
+        self.last_range = Some(msg);
+    }
+
+    fn send_gnss(&mut self, _board: &mut TestBoard, _system_id: u8, msg: RosflightGnssMsg) {
+        self.gnss_count += 1;
+        self.last_gnss = Some(msg);
+    }
 
     fn send_cmd_ack(&mut self, _board: &mut TestBoard, _system_id: u8, msg: RosflightCmdAckMsg) {
         self.cmd_ack_count += 1;
@@ -174,11 +245,22 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         _system_id: u8,
         _msg: BatteryStatusMsg,
     ) {
+        self.battery_count += 1;
     }
 
     fn send_statustext(&mut self, _board: &mut TestBoard, _system_id: u8, msg: StatustextMsg) {
         self.statustext_count += 1;
         self.last_statustext = Some(msg);
+    }
+
+    fn send_hard_error(
+        &mut self,
+        _board: &mut TestBoard,
+        _system_id: u8,
+        msg: RosflightHardErrorMsg,
+    ) {
+        self.hard_error_count += 1;
+        self.last_hard_error = Some(msg);
     }
 
     fn handle_incoming_messages(

@@ -5,13 +5,18 @@ use crate::{
     ports::EventEmitPort,
 };
 
-const MAX_LOGS_PER_DRAIN: usize = 5;
+const MAX_LOGS_PER_DRAIN: usize = 1;
 
 pub struct LogDrainCtx<'a> {
     pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    pub connected: bool,
 }
 
 pub fn drain_logs_to_comm_responses(mut ctx: LogDrainCtx<'_>) -> usize {
+    if !ctx.connected {
+        return 0;
+    }
+
     let mut drained = 0;
 
     while drained < MAX_LOGS_PER_DRAIN {
@@ -60,9 +65,10 @@ mod tests {
         let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
         let drained = drain_logs_to_comm_responses(LogDrainCtx {
             responses: EventEmitPort::new(&mut responses),
+            connected: true,
         });
 
-        assert_eq!(drained, 2);
+        assert_eq!(drained, 1);
         match responses.pop().unwrap() {
             CommResponse::Statustext(msg) => {
                 assert!(matches!(msg.severity, Severity::Info));
@@ -70,6 +76,13 @@ mod tests {
             }
             _ => panic!("expected statustext response"),
         }
+
+        let drained = drain_logs_to_comm_responses(LogDrainCtx {
+            responses: EventEmitPort::new(&mut responses),
+            connected: true,
+        });
+
+        assert_eq!(drained, 1);
         match responses.pop().unwrap() {
             CommResponse::Statustext(msg) => {
                 assert!(matches!(msg.severity, Severity::Warning));
@@ -77,5 +90,28 @@ mod tests {
             }
             _ => panic!("expected statustext response"),
         }
+    }
+
+    #[test]
+    fn drain_logs_waits_for_companion_connection() {
+        while Logger::pop().is_some() {}
+
+        log_info!("buffered");
+
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+        let drained = drain_logs_to_comm_responses(LogDrainCtx {
+            responses: EventEmitPort::new(&mut responses),
+            connected: false,
+        });
+
+        assert_eq!(drained, 0);
+        assert!(responses.is_empty());
+
+        let drained = drain_logs_to_comm_responses(LogDrainCtx {
+            responses: EventEmitPort::new(&mut responses),
+            connected: true,
+        });
+
+        assert_eq!(drained, 1);
     }
 }

@@ -36,19 +36,25 @@
 // **/
 use rustflight_core::board::BoardIo;
 use rustflight_core::errors;
+use rustflight_core::params::Params;
 use rustflight_core::pwm::{PwmDriver, PwmError};
 use rustflight_core::sensors::SensorBus;
 
+use embassy_time::Delay;
+use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
 use stm_32::peripherals;
 use stm_32::*;
 
 include!("../../stm_32/stm32h7x3_common.rs");
+
+static mut PARAM_STORE: Option<Params> = None;
 
 // we need a way of passing RcPacket from it's ROS definition to a "packet" form that we can process
 
 pub struct Board {
     probe: [Output<'static>; 4],
     pub start_time: embassy_time::Instant,
+    pending_reset_to_bootloader: Option<bool>,
 }
 
 pub struct BoardPwmDriver {
@@ -71,7 +77,7 @@ impl PwmDriver for BoardPwmDriver {
     }
 
     fn is_enabled(&self) -> bool {
-        self.enabled_chan_mask != 0
+        self.enabled_chan_mask == ((1 << self.len()) - 1)
     }
 
     fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
@@ -118,19 +124,33 @@ impl PwmDriver for BoardPwmDriver {
             .map_err(|_| PwmError::GenericError)
     }
 
+    fn configure_output_rates(&mut self, rates_hz: &[f64]) -> Result<(), PwmError> {
+        self.servos
+            .configure_output_rates(rates_hz)
+            .map_err(timer_error_to_pwm_error)
+    }
+
     fn flush<B: rustflight_core::board::BoardIo>(&mut self, _board: &mut B) {}
 
     fn send_commands<B: rustflight_core::board::BoardIo>(
         &mut self,
         board: &mut B,
         commands: &[f64],
-    ) {
-        let count = commands.len().min(self.len());
-        for i in 0..count {
-            let duty = (commands[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
-            let _ = self.set_duty_cycle(i, duty);
-        }
+    ) -> Result<(), PwmError> {
+        self.servos
+            .send_normalized_commands(commands)
+            .map_err(timer_error_to_pwm_error)?;
         self.flush(board);
+        Ok(())
+    }
+}
+
+fn timer_error_to_pwm_error(error: peripherals::pwm::TimerError) -> PwmError {
+    match error {
+        peripherals::pwm::TimerError::ChanNotSupported => PwmError::ChannelOutOfRange,
+        peripherals::pwm::TimerError::InvalidRate => PwmError::InvalidRate,
+        peripherals::pwm::TimerError::UnsupportedProtocol => PwmError::UnsupportedProtocol,
+        peripherals::pwm::TimerError::TimerNotSupported => PwmError::GenericError,
     }
 }
 
@@ -148,7 +168,10 @@ impl BoardIo for Board {
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         match peripherals::telem::TELEM_RX.try_read(buf) {
             Ok(n) => return Some(Ok(n)),
-            Err(_) => {
+            Err(embassy_sync::pipe::TryReadError::Empty) => {
+                return Some(Ok(0));
+            }
+            Err(_error) => {
                 return Some(Err(errors::TelemError::GenericTelemError(
                     "Error Reading Telem Packet",
                 )));
@@ -186,6 +209,39 @@ impl BoardIo for Board {
     fn clock_micros(&self) -> u64 {
         self.start_time.elapsed().as_micros() as u64
     }
+
+    fn read_params(&mut self, params: &mut Params) -> bool {
+        let Some(stored) = (unsafe { PARAM_STORE }) else {
+            return false;
+        };
+        *params = stored;
+        true
+    }
+
+    fn write_params(&mut self, params: &Params) -> bool {
+        unsafe {
+            PARAM_STORE = Some(*params);
+        }
+        true
+    }
+
+    fn reboot(&mut self) -> bool {
+        self.pending_reset_to_bootloader = Some(false);
+        true
+    }
+
+    fn reboot_to_bootloader(&mut self) -> bool {
+        self.pending_reset_to_bootloader = Some(true);
+        true
+    }
+
+    fn run_deferred_board_actions(&mut self) {
+        if self.pending_reset_to_bootloader.take().is_some() {
+            let mut delay = Delay;
+            delay.delay_ms(20u32);
+            stm_32::cortex_m::peripheral::SCB::sys_reset();
+        }
+    }
 }
 
 impl Board {
@@ -194,7 +250,7 @@ impl Board {
     }
 
     fn probe_lo(&mut self, id: usize) {
-        self.probe[id].set_high(); // so we can see something on the logic analyzer.
+        self.probe[id].set_low(); // so we can see something on the logic analyzer.
     }
 
     fn probe_tog(&mut self, id: usize) {
@@ -535,9 +591,9 @@ impl Board {
 
         let mut timers: [peripherals::pwm::TimerEnum; 4] = [timer1, timer2, timer3, timer4];
 
-        let mut servos: peripherals::pwm::ServoMonstrosity = peripherals::pwm::ServoMonstrosity {
+        let mut servos = peripherals::pwm::ServoMonstrosity::new(
             timers,
-            chan_list: [
+            [
                 (0, peripherals::pwm::TimerChannel::Ch1), //TIM1, channels 1-4
                 (0, peripherals::pwm::TimerChannel::Ch2), // -
                 (0, peripherals::pwm::TimerChannel::Ch3), // -
@@ -551,7 +607,7 @@ impl Board {
                 (3, peripherals::pwm::TimerChannel::Ch3), // -
                 (3, peripherals::pwm::TimerChannel::Ch4), // -
             ],
-        };
+        );
 
         // disable all channels at start
         for i in 0..servos.len() {
@@ -566,6 +622,13 @@ impl Board {
             Output::new(p.PG0, Level::Low, Speed::Low),
         ];
 
-        (Board { probe, start_time }, BoardPwmDriver::new(servos))
+        (
+            Board {
+                probe,
+                start_time,
+                pending_reset_to_bootloader: None,
+            },
+            BoardPwmDriver::new(servos),
+        )
     }
 }

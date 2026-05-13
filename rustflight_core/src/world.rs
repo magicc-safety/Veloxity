@@ -4,6 +4,7 @@ use crate::{
     board::BoardIo,
     bodytype::BodyType,
     comm_manager::{CommManager, comm_link_trait::CommInterface},
+    comm_messages::messages::RosflightHardErrorMsg,
     command_manager::CommandManager,
     command_system::{
         self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
@@ -58,6 +59,7 @@ where
     command_events: CommandEventQueues,
     companion_events: CompanionEventQueues,
     companion_link: CompanionLinkState,
+    pending_hard_error: Option<RosflightHardErrorMsg>,
     aux_commands: AuxCommandState,
     external_attitude: ExternalAttitudeState,
     comm: CommManager<B, CI>,
@@ -118,6 +120,22 @@ where
 
         let pwm_output = PwmOutputState::new(pwm.is_enabled());
 
+        let pending_hard_error = board.backup_memory_read().map(|data| {
+            let _ = board.backup_memory_clear();
+            RosflightHardErrorMsg {
+                error_code: data.error_code,
+                pc: data.pc,
+                reset_count: data.reset_count,
+                do_rearm: data.do_rearm,
+            }
+        });
+        if pending_hard_error
+            .map(|msg| msg.do_rearm != 0)
+            .unwrap_or(false)
+        {
+            state.update(Event::REQUEST_ARM, &params);
+        }
+
         Self {
             board,
             params,
@@ -127,6 +145,7 @@ where
             command_events: CommandEventQueues::default(),
             companion_events: CompanionEventQueues::default(),
             companion_link: CompanionLinkState::default(),
+            pending_hard_error,
             aux_commands: AuxCommandState::default(),
             external_attitude: ExternalAttitudeState::default(),
             comm,
@@ -152,6 +171,7 @@ where
         self.run_comm_param_sensor_stages();
         self.run_rc_command_state_stages();
         self.run_control_stages_if_new_imu();
+        self.run_telemetry_stage();
         true
     }
 
@@ -185,6 +205,13 @@ where
             requests: EventDrainPort::new(&mut self.companion_events.heartbeats),
             state: &mut self.companion_link,
         });
+        if self.companion_link.connected {
+            if let Some(msg) = self.pending_hard_error.take() {
+                self.comm_events
+                    .responses
+                    .push_or_log(crate::events::CommResponse::HardError(msg), "hard error");
+            }
+        }
         companion_system::apply_aux_commands(AuxCommandCtx {
             requests: EventDrainPort::new(&mut self.companion_events.aux_commands),
             state: &mut self.aux_commands,
@@ -202,6 +229,7 @@ where
                 responses: EventEmitPort::new(&mut self.comm_events.responses),
                 state: &self.state,
                 flags: &mut self.cal_flags,
+                params: &mut self.params,
             });
         self.comm.set_pending_calibration_ack(started_calibration);
         command_system::apply_offboard_control_requests(OffboardControlCtx {
@@ -309,9 +337,12 @@ where
     fn drain_logs_and_send_responses(&mut self) {
         log_system::drain_logs_to_comm_responses(LogDrainCtx {
             responses: EventEmitPort::new(&mut self.comm_events.responses),
+            connected: self.companion_link.connected,
         });
         self.comm
             .send_comm_responses(&mut self.board, &mut self.comm_events);
+        self.board.serial_flush();
+        self.board.run_deferred_board_actions();
     }
 
     fn update_sensor_health_and_calibration(&mut self, now_us: u64) {
@@ -343,6 +374,7 @@ where
             params: &self.params,
         });
         self.run_pwm_output_stage();
+        self.update_board_leds(now_ms);
     }
 
     pub fn run_pwm_output_stage(&mut self) -> bool {
@@ -356,9 +388,8 @@ where
     }
 
     pub fn run_control_stages_if_new_imu(&mut self) -> bool {
-        run_control_pipeline_if_new_imu::<B, BT, CI, PD>(ControlPipelineCtx {
+        run_control_pipeline_if_new_imu::<B, BT, PD>(ControlPipelineCtx {
             board: &mut self.board,
-            comm: &mut self.comm,
             params: &self.params,
             sensors: &self.processed_sensors,
             external_attitude: &mut self.external_attitude,
@@ -373,6 +404,49 @@ where
             pwm: &mut self.pwm,
             dt: Self::ESTIMATOR_DT,
         })
+    }
+
+    pub fn run_telemetry_stage(&mut self) {
+        let now_us = self.board.clock_micros();
+        let sensor_error_count = self.board.sensors_errors_count();
+        self.comm.send_named_telemetry_streams(
+            &mut self.board,
+            now_us,
+            &self.state,
+            &self.command,
+            &self.params,
+            &self.control_pipeline.latest_estimator_state,
+            &self.processed_sensors,
+            &self.control_pipeline.latest_pwm_outputs,
+            sensor_error_count,
+            self.control_pipeline.latest_loop_time_us,
+        );
+    }
+
+    fn update_board_leds(&mut self, now_ms: u32) {
+        if self.command.get_rc_override() != 0 {
+            self.board.led0_on();
+        } else {
+            self.board.led0_off();
+        }
+
+        if self.state.is_in_failsafe() {
+            if (now_ms / 100) % 2 == 0 {
+                self.board.led1_on();
+            } else {
+                self.board.led1_off();
+            }
+        } else if self.state.is_in_error_state() {
+            if (now_ms / 500) % 2 == 0 {
+                self.board.led1_on();
+            } else {
+                self.board.led1_off();
+            }
+        } else if self.state.is_armed() {
+            self.board.led1_on();
+        } else {
+            self.board.led1_off();
+        }
     }
 }
 
@@ -538,7 +612,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RosflightOutputRawMsg,
+            _msg: crate::comm_messages::messages::RcChannelsMsg,
         ) {
         }
 
@@ -590,6 +664,14 @@ mod tests {
         ) {
         }
 
+        fn send_hard_error(
+            &mut self,
+            _board: &mut SensorStageBoard,
+            _system_id: u8,
+            _msg: crate::comm_messages::messages::RosflightHardErrorMsg,
+        ) {
+        }
+
         fn handle_incoming_messages(
             &mut self,
             _board: &mut SensorStageBoard,
@@ -604,8 +686,11 @@ mod tests {
         disable_all_count: usize,
         flush_count: usize,
         send_count: usize,
+        configure_count: usize,
         last_commands: [f64; 14],
         last_command_len: usize,
+        last_rates: [f64; 10],
+        last_rate_len: usize,
     }
 
     impl TestPwm {
@@ -616,8 +701,11 @@ mod tests {
                 disable_all_count: 0,
                 flush_count: 0,
                 send_count: 0,
+                configure_count: 0,
                 last_commands: [0.0; 14],
                 last_command_len: 0,
+                last_rates: [0.0; 10],
+                last_rate_len: 0,
             }
         }
     }
@@ -660,11 +748,23 @@ mod tests {
             self.flush_count += 1;
         }
 
-        fn send_commands<Board: BoardIo>(&mut self, _board: &mut Board, commands: &[f64]) {
+        fn configure_output_rates(&mut self, rates_hz: &[f64]) -> Result<(), PwmError> {
+            self.configure_count += 1;
+            self.last_rate_len = rates_hz.len().min(self.last_rates.len());
+            self.last_rates[..self.last_rate_len].copy_from_slice(&rates_hz[..self.last_rate_len]);
+            Ok(())
+        }
+
+        fn send_commands<Board: BoardIo>(
+            &mut self,
+            _board: &mut Board,
+            commands: &[f64],
+        ) -> Result<(), PwmError> {
             self.send_count += 1;
             self.last_command_len = commands.len().min(self.last_commands.len());
             self.last_commands[..self.last_command_len]
                 .copy_from_slice(&commands[..self.last_command_len]);
+            Ok(())
         }
     }
 
@@ -873,10 +973,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
         params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
-        params.set_by_id(
-            ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED,
-            ParamValue::Bool(true),
-        );
+        params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Int(1));
         let mut world = test_world_with_params(params);
 
         world
@@ -912,6 +1009,7 @@ mod tests {
         });
 
         assert!(world.run_control_stages_if_new_imu());
+        world.run_telemetry_stage();
         assert_eq!(world.pwm.send_count, 1);
         assert_eq!(world.comm.comm_link().heartbeat_count, 1);
         assert_eq!(world.comm.comm_link().status_count, 1);
@@ -922,7 +1020,7 @@ mod tests {
         assert!(world.external_attitude.latest.is_none());
         assert_eq!(
             world.control_pipeline.latest_estimator_state.q(),
-            [0.0, 1.0, 0.0, 0.0]
+            [1.0, 0.0, 0.0, 0.0]
         );
         assert_eq!(world.pwm.last_command_len, 14);
         assert_eq!(world.pwm.last_commands[4], 0.25);
@@ -945,7 +1043,134 @@ mod tests {
 
         assert!(world.run_control_stages_if_new_imu());
         assert_eq!(world.pwm.send_count, 2);
-        assert_eq!(world.comm.comm_link().output_raw_count, 2);
+        assert_eq!(world.comm.comm_link().output_raw_count, 1);
+    }
+
+    #[test]
+    fn world_control_stage_flags_non_advancing_imu_time() {
+        let mut world = test_world();
+        world.processed_sensors.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 10,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            ..Default::default()
+        });
+
+        assert!(world.run_control_stages_if_new_imu());
+
+        world.processed_sensors.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 10,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            ..Default::default()
+        });
+
+        assert!(!world.run_control_stages_if_new_imu());
+        assert!(
+            world
+                .state
+                .get_errors()
+                .contains(ErrorFlag::TIME_GOING_BACKWARDS)
+        );
+    }
+
+    #[test]
+    fn world_telemetry_stage_streams_non_imu_sensor_without_control_update() {
+        let mut world = test_world();
+        world.board.current_time_us = 1_100_000;
+        world.processed_sensors.baro = Some(crate::packets::BaroPacket {
+            altitude: 42.0,
+            pressure: 90_000.0,
+            temperature: 21.0,
+            ..Default::default()
+        });
+
+        world.run_telemetry_stage();
+
+        assert_eq!(world.comm.comm_link().baro_count, 1);
+        assert_eq!(world.comm.comm_link().imu_count, 0);
+        assert_eq!(world.comm.comm_link().last_baro.unwrap().altitude, 42.0);
+    }
+
+    #[test]
+    fn world_status_uses_board_error_count_and_control_loop_time() {
+        let mut world = test_world();
+        world.board.current_time_us = 1_100_000;
+        world.board.sensor_errors_count = 7;
+        world.control_pipeline.latest_loop_time_us = 123;
+
+        world.run_telemetry_stage();
+
+        let status = world.comm.comm_link().last_status.unwrap();
+        assert_eq!(status.num_errors, 7);
+        assert_eq!(status.loop_time_us, 123);
+    }
+
+    #[test]
+    fn world_replays_backup_hard_error_after_companion_heartbeat() {
+        let params = Params::new();
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+        let board = TestBoard {
+            backup_data: Some(crate::board::BackupData {
+                error_code: 4,
+                pc: 0x1234,
+                reset_count: 2,
+                do_rearm: 1,
+            }),
+            ..Default::default()
+        };
+        let mut world = TestWorld::init(
+            board,
+            params,
+            RecordingCommLink::new(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        assert_eq!(world.board.backup_clear_count, 1);
+
+        world.comm.msgs.heartbeat = Some(HeartbeatMsg {
+            type_: 1,
+            autopilot: 2,
+            base_mode: 3,
+            custom_mode: 4,
+            system_status: 5,
+            mavlink_version: 6,
+        });
+        world.run_comm_param_sensor_stages();
+
+        assert_eq!(world.comm.comm_link().hard_error_count, 1);
+        assert_eq!(world.comm.comm_link().last_hard_error.unwrap().pc, 0x1234);
+    }
+
+    #[test]
+    fn world_control_stage_propagates_custom_zero_pwm_rates() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(11));
+        let mut world = test_world_with_params(params);
+        world.processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        assert!(world.run_control_stages_if_new_imu());
+
+        assert_eq!(world.pwm.configure_count, 1);
+        assert_eq!(world.pwm.last_rate_len, 10);
+        assert_eq!(world.pwm.last_rates, [0.0; 10]);
     }
 
     #[test]
@@ -1114,6 +1339,7 @@ mod tests {
             fx: 0.4,
             fy: 0.5,
             fz: 0.6,
+            passthrough: [0.0; 4],
         });
 
         world.run_comm_param_sensor_stages();
@@ -1216,6 +1442,7 @@ mod tests {
         while crate::logger::Logger::pop().is_some() {}
 
         let mut world = test_world();
+        world.companion_link.connected = true;
 
         crate::log_info!("world log");
         world.run_comm_param_sensor_stages();
@@ -1244,19 +1471,15 @@ mod tests {
         channels[0] = 0.55;
         channels[1] = 0.45;
         channels[3] = 0.60;
-        world.rc.receive(
-            &crate::packets::RcPacket {
-                header: crate::packets::RosflightPacketHeader {
-                    timestamp: 1,
-                    status: 0,
-                },
-                n_chan: 4,
-                chan: channels,
-                lol: false,
+        world.rc.receive(&crate::packets::RcPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
             },
-            &world.params,
-            &mut world.state,
-        );
+            n_chan: 4,
+            chan: channels,
+            lol: false,
+        });
         world.run_rc_command_state_stages();
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {

@@ -38,7 +38,7 @@
 // **/
 use rustflight_core::board::BoardIo;
 use rustflight_core::pwm::{self, PwmDriver, PwmError};
-use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
+use stm_32::peripherals::pwm::{PixRacerProServoMonstrosity, TimerError};
 
 const NUM_HW_CHANNELS: usize = 7;
 
@@ -106,15 +106,15 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
     }
 
     fn enable_all(&mut self) -> Result<(), PwmError> {
-        for i in 0..self.servos.len() {
-            self.servos.enable(i).map_err(|_| PwmError::GenericError)?;
+        for i in 0..NUM_HW_CHANNELS {
+            self.enable(i)?;
         }
         Ok(())
     }
 
     fn disable_all(&mut self) {
-        for i in 0..self.servos.len() {
-            self.servos.disable(i);
+        for i in 0..NUM_HW_CHANNELS {
+            let _ = self.disable(i);
         }
     }
 
@@ -123,7 +123,7 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
             return Err(PwmError::ChannelOutOfRange);
         }
         let pwm_us = Self::duty_u16_to_pwm_us(duty);
-        //self.current_values[channel] = pwm_us;
+        self.current_values[channel] = pwm_us;
 
         let max_duty = self.max_duty_counts[channel] as f32;
         let raw_pwm = pwm_us / 2500.0 * max_duty;
@@ -135,10 +135,20 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
             .map_err(|_| PwmError::GenericError)
     }
 
-    fn flush<B: BoardIo>(&mut self, board: &mut B) {
+    fn configure_output_rates(&mut self, rates_hz: &[f64]) -> Result<(), PwmError> {
+        self.servos
+            .configure_output_rates(rates_hz)
+            .map_err(timer_error_to_pwm_error)?;
+
+        for i in 0..NUM_HW_CHANNELS {
+            self.max_duty_counts[i] = self.servos.max_duty_cycle(i);
+        }
+
+        Ok(())
+    }
+
+    fn flush<B: BoardIo>(&mut self, _board: &mut B) {
         // Hardware state is already applied in set_duty_cycle.
-        // Telemetry publishing:
-        let now_us = board.clock_micros();
         // let msg = OutputRaw {
         //     header: Header {
         //         stamp: Time {
@@ -152,12 +162,24 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
         // TODO: Send via telemetry channel (similar to sim driver)
     }
 
-    fn send_commands<B: BoardIo>(&mut self, board: &mut B, commands_slice: &[f64]) {
-        let count = commands_slice.len().min(NUM_HW_CHANNELS);
-        for i in 0..count {
-            let duty_u16 = (commands_slice[i].clamp(0.0, 1.0) * (u16::MAX as f64)) as u16;
-            let _ = self.set_duty_cycle(i, duty_u16);
-        }
+    fn send_commands<B: BoardIo>(
+        &mut self,
+        board: &mut B,
+        commands_slice: &[f64],
+    ) -> Result<(), PwmError> {
+        self.servos
+            .send_normalized_commands(commands_slice)
+            .map_err(timer_error_to_pwm_error)?;
         self.flush(board);
+        Ok(())
+    }
+}
+
+fn timer_error_to_pwm_error(error: TimerError) -> PwmError {
+    match error {
+        TimerError::ChanNotSupported => PwmError::ChannelOutOfRange,
+        TimerError::InvalidRate => PwmError::InvalidRate,
+        TimerError::UnsupportedProtocol => PwmError::UnsupportedProtocol,
+        TimerError::TimerNotSupported => PwmError::GenericError,
     }
 }

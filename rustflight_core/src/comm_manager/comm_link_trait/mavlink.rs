@@ -253,17 +253,8 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             mav_messages::RosflightOutputRaw::from(msg),
         );
     }
-    fn send_rc_raw(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::RosflightOutputRawMsg,
-    ) {
-        self.send_message(
-            board,
-            system_id,
-            mav_messages::RosflightOutputRaw::from(msg),
-        );
+    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: comm_messages::RcChannelsMsg) {
+        self.send_message(board, system_id, mav_messages::RcChannels::from(msg));
     }
     fn send_range(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallRangeMsg) {
         self.send_message(board, system_id, mav_messages::SmallRange::from(msg));
@@ -304,6 +295,18 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
     }
     fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: comm_messages::StatustextMsg) {
         self.send_message(board, system_id, mav_messages::Statustext::from(msg));
+    }
+    fn send_hard_error(
+        &mut self,
+        board: &mut B,
+        system_id: u8,
+        msg: comm_messages::RosflightHardErrorMsg,
+    ) {
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::RosflightHardError::from(msg),
+        );
     }
 }
 
@@ -358,29 +361,38 @@ impl From<mav_messages::OffboardControl> for comm_messages::OffboardControlMsg {
         // --- Build the new `ignore` flags by checking the bits ---
         let mut comm_ignore = CommIgnore::empty(); // Start with no flags set
 
-        // Cast the incoming enum to a u8 to treat it as a bitmask
-        let ignore_mask = msg.ignore as u8;
+        let ignore_mask = msg.ignore as u16;
 
-        // Check each bit position using bitwise AND
-        if (ignore_mask & (MavIgnore::IgnoreValue1 as u8)) != 0 {
-            comm_ignore |= CommIgnore::IGNORE_QX;
-        }
-        if (ignore_mask & (MavIgnore::IgnoreValue2 as u8)) != 0 {
-            comm_ignore |= CommIgnore::IGNORE_QY;
-        }
-        if (ignore_mask & (MavIgnore::IgnoreValue3 as u8)) != 0 {
-            comm_ignore |= CommIgnore::IGNORE_QZ;
-        }
-        if (ignore_mask & (MavIgnore::IgnoreValue4 as u8)) != 0 {
+        if (ignore_mask & (MavIgnore::IgnoreValue0 as u16)) != 0 {
             comm_ignore |= CommIgnore::IGNORE_FX;
         }
-        if (ignore_mask & (MavIgnore::IgnoreValue5 as u8)) != 0 {
+        if (ignore_mask & (MavIgnore::IgnoreValue1 as u16)) != 0 {
             comm_ignore |= CommIgnore::IGNORE_FY;
         }
-        if (ignore_mask & (MavIgnore::IgnoreValue6 as u8)) != 0 {
+        if (ignore_mask & (MavIgnore::IgnoreValue2 as u16)) != 0 {
             comm_ignore |= CommIgnore::IGNORE_FZ;
         }
-        // --- End of flag building ---
+        if (ignore_mask & (MavIgnore::IgnoreValue3 as u16)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_QX;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue4 as u16)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_QY;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue5 as u16)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_QZ;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue6 as u16)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_PASS_0;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue7 as u16)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_PASS_1;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue8 as u16)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_PASS_2;
+        }
+        if (ignore_mask & (MavIgnore::IgnoreValue9 as u16)) != 0 {
+            comm_ignore |= CommIgnore::IGNORE_PASS_3;
+        }
 
         Self {
             mode: match msg.mode {
@@ -388,15 +400,17 @@ impl From<mav_messages::OffboardControl> for comm_messages::OffboardControlMsg {
                 MavMode::ModeRollratePitchrateYawrateThrottle => {
                     CommMode::ModeRollratePitchrateYawrateThrottle
                 }
+                MavMode::ModeRollPitchYawrateThrottle => CommMode::ModeRollPitchYawrateThrottle,
                 _ => CommMode::ModePassThrough, // Default for other modes
             },
             ignore: comm_ignore, // Use the flags we just built
-            qx: msg.qx,
-            qy: msg.qy,
-            qz: msg.qz,
-            fx: msg.fx,
-            fy: msg.fy,
-            fz: msg.fz,
+            qx: msg.u[3],
+            qy: msg.u[4],
+            qz: msg.u[5],
+            fx: msg.u[0],
+            fy: msg.u[1],
+            fz: msg.u[2],
+            passthrough: [msg.u[6], msg.u[7], msg.u[8], msg.u[9]],
         }
     }
 }
@@ -485,7 +499,9 @@ impl From<comm_messages::RosflightStatusMsg> for mav_messages::RosflightStatus {
             failsafe: msg.failsafe,
             rc_override: msg.rc_override,
             offboard: msg.offboard,
-            error_code: msg.error_code.bits() as u8,
+            error_code: mav_enums::RosflightErrorCode::from_bits_truncate(
+                msg.error_code.bits() as u8
+            ),
             control_mode: msg.control_mode.into(),
             num_errors: msg.num_errors,
             loop_time_us: msg.loop_time_us,
@@ -822,6 +838,17 @@ impl From<comm_messages::StatustextMsg> for mav_messages::Statustext {
     }
 }
 
+impl From<comm_messages::RosflightHardErrorMsg> for mav_messages::RosflightHardError {
+    fn from(msg: comm_messages::RosflightHardErrorMsg) -> Self {
+        Self {
+            error_code: msg.error_code,
+            pc: msg.pc,
+            reset_count: msg.reset_count,
+            do_rearm: msg.do_rearm,
+        }
+    }
+}
+
 impl From<comm_enums::Severity> for mav_enums::MavSeverity {
     fn from(val: comm_enums::Severity) -> Self {
         use comm_enums::Severity;
@@ -836,5 +863,105 @@ impl From<comm_enums::Severity> for mav_enums::MavSeverity {
             Severity::Info => MavSeverity::Info,
             Severity::Debug => MavSeverity::Debug,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn offboard_control_conversion_preserves_roll_pitch_mode() {
+        let msg = mav_messages::OffboardControl {
+            mode: mav_enums::OffboardControlMode::ModeRollPitchYawrateThrottle,
+            ignore: mav_enums::OffboardControlIgnore::IgnoreNone,
+            u: [0.4, 0.5, 0.6, 0.1, 0.2, 0.3, 0.7, 0.8, 0.9, 1.0],
+        };
+
+        let converted = comm_messages::OffboardControlMsg::from(msg);
+
+        assert_eq!(
+            converted.mode,
+            comm_enums::OffboardControlMode::ModeRollPitchYawrateThrottle
+        );
+        assert!(converted.ignore.is_empty());
+        assert_eq!(converted.qx, 0.1);
+        assert_eq!(converted.fz, 0.6);
+        assert_eq!(converted.passthrough, [0.7, 0.8, 0.9, 1.0]);
+    }
+
+    #[test]
+    fn offboard_control_conversion_maps_ignore_bits_one_to_one() {
+        let mappings = [
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue0,
+                comm_enums::OffboardControlIgnore::IGNORE_FX,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue1,
+                comm_enums::OffboardControlIgnore::IGNORE_FY,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue2,
+                comm_enums::OffboardControlIgnore::IGNORE_FZ,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue3,
+                comm_enums::OffboardControlIgnore::IGNORE_QX,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue4,
+                comm_enums::OffboardControlIgnore::IGNORE_QY,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue5,
+                comm_enums::OffboardControlIgnore::IGNORE_QZ,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue6,
+                comm_enums::OffboardControlIgnore::IGNORE_PASS_0,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue7,
+                comm_enums::OffboardControlIgnore::IGNORE_PASS_1,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue8,
+                comm_enums::OffboardControlIgnore::IGNORE_PASS_2,
+            ),
+            (
+                mav_enums::OffboardControlIgnore::IgnoreValue9,
+                comm_enums::OffboardControlIgnore::IGNORE_PASS_3,
+            ),
+        ];
+
+        for (mav_ignore, expected_comm_ignore) in mappings {
+            let msg = mav_messages::OffboardControl {
+                mode: mav_enums::OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: mav_ignore,
+                u: [0.0; 10],
+            };
+
+            let converted = comm_messages::OffboardControlMsg::from(msg);
+
+            assert_eq!(converted.ignore, expected_comm_ignore);
+        }
+    }
+
+    #[test]
+    fn offboard_control_conversion_preserves_auxiliary_values_and_ignore_bits() {
+        let msg = mav_messages::OffboardControl {
+            mode: mav_enums::OffboardControlMode::ModePassThrough,
+            ignore: mav_enums::OffboardControlIgnore::IgnoreValue9,
+            u: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.6, 0.7, 0.8, 0.9],
+        };
+
+        let converted = comm_messages::OffboardControlMsg::from(msg);
+
+        assert_eq!(converted.passthrough, [0.6, 0.7, 0.8, 0.9]);
+        assert_eq!(
+            converted.ignore,
+            comm_enums::OffboardControlIgnore::IGNORE_PASS_3
+        );
     }
 }

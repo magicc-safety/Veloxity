@@ -36,31 +36,33 @@
 // *
 // ******************************************************************************
 // **/
-use cortex_m;
 use cortex_m_rt::entry;
 use panic_halt as _;
 use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
 use rustflight_core::{
-    bodytype::BodyType, bodytype::quadrotor::Quadrotor,
+    board::BoardIo, bodytype::BodyType, bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface, controller::Controller, mixer::Mixer,
-    params::Params, pwm, state_machine::StateManager, world::World,
+    params::Params, state_machine::StateManager, world::World,
 };
-use stm_32::{peripherals::pwm::PixRacerProServoMonstrosity, *};
+use stm_32::*;
 
 #[entry]
 fn main() -> ! {
     // board implementation & servos object
     let (mut board, mut servos) = board::Board::new();
+    let mut params = Params::default();
+    if !board.read_params(&mut params) {
+        params.set_defaults();
+        let _ = board.write_params(&params);
+    }
 
     // body type instantiations
     let estimator =
         <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
     let controller =
         <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
-    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(
-        &Params::default(),
-    );
+    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&params);
 
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
@@ -73,7 +75,7 @@ fn main() -> ! {
 
     let mut world = World::<_, Quadrotor, _, _>::init(
         board,
-        Params::default(),
+        params,
         mavlink,
         state_manager,
         estimator,

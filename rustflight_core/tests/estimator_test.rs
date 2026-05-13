@@ -41,21 +41,9 @@ use std::fs::File;
 
 // Import the necessary items from your actual library crate
 use rustflight_core::{
-    estimator::Estimator,
-    estimator::quad_estimator::AttitudeState,
-    estimator::quad_estimator::QuadEstimator,
-    hlist::{HCons, HNil},
-    // You'll also need to make your Quaternion and Vector structs public
-    // and import them, e.g., from `rustflight_core::algebra::...`
-    hlist_type,
-    packets::ImuPacket,
-    packets::MagPacket,
-    params2::Params,
+    estimator::NamedEstimator, estimator::quad_estimator::QuadEstimator, packets::ImuPacket,
+    params::Params, sensors::ProcessedSensors,
 };
-
-type Inputs = hlist_type![Option<ImuPacket>, Option<MagPacket>];
-
-use micro_algebra::stack::{quaternion::Quaternion, vector::Vector};
 
 // Struct to deserialize a row from the input CSV (with truth values)
 #[derive(Debug, Deserialize)]
@@ -124,6 +112,7 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
     );
 
     // --- Processing Loop ---
+    let mut previous_time = None;
     for result in rdr.deserialize() {
         let record: ImuRecord = result?;
 
@@ -134,10 +123,16 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
             ..ImuPacket::default()
         };
 
-        // We call the estimator's method directly.
-        let inputs = HCons(Some(imu_packet), HCons(None, HNil));
+        let dt = previous_time
+            .map(|previous| record.time - previous)
+            .filter(|dt| *dt > 0.0)
+            .unwrap_or(1.0 / 400.0);
+        previous_time = Some(record.time);
 
-        let state = estimator.estimate(&inputs, &params);
+        let mut sensors = ProcessedSensors::default();
+        sensors.imu = Some(imu_packet);
+
+        let state = estimator.estimate_named(&sensors, &params, dt);
 
         let euler_angles = state.q_hat.to_euler_angles();
 

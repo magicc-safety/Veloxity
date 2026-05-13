@@ -61,17 +61,17 @@ pub fn write_pwm_commands<B, P>(
     pwm: &mut P,
     output: &PwmOutputState,
     commands: &[f64],
-) -> bool
+) -> Result<bool, PwmError>
 where
     B: BoardIo,
     P: PwmDriver,
 {
     if !output.is_enabled() {
-        return false;
+        return Ok(false);
     }
 
-    pwm.send_commands(board, commands);
-    true
+    pwm.send_commands(board, commands)?;
+    Ok(true)
 }
 
 pub fn compose_pwm_outputs(
@@ -86,7 +86,7 @@ pub fn compose_pwm_outputs(
         _ => 0.0,
     };
     let spin_when_armed = match params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) {
-        ParamValue::Bool(value) => value,
+        ParamValue::Int(value) => value != 0,
         _ => false,
     };
 
@@ -142,6 +142,13 @@ fn raw_output_for_type(
     match output_type {
         MixerOutputType::Aux => 0.0,
         MixerOutputType::Servo => value.clamp(-1.0, 1.0) * 0.5 + 0.5,
+        MixerOutputType::Gpio => {
+            if value > 0.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
         MixerOutputType::Motor => {
             if !state.is_armed() {
                 0.0
@@ -247,8 +254,13 @@ mod tests {
             self.flush_count += 1;
         }
 
-        fn send_commands<Board: BoardIo>(&mut self, _board: &mut Board, _commands: &[f64]) {
+        fn send_commands<Board: BoardIo>(
+            &mut self,
+            _board: &mut Board,
+            _commands: &[f64],
+        ) -> Result<(), PwmError> {
             self.send_count += 1;
+            Ok(())
         }
     }
 
@@ -322,20 +334,16 @@ mod tests {
         let disabled = PwmOutputState::new(false);
         let enabled = PwmOutputState::new(true);
 
-        assert!(!write_pwm_commands(
-            &mut board,
-            &mut pwm,
-            &disabled,
-            &[0.1, 0.2]
-        ));
+        assert_eq!(
+            write_pwm_commands(&mut board, &mut pwm, &disabled, &[0.1, 0.2]),
+            Ok(false)
+        );
         assert_eq!(pwm.send_count, 0);
 
-        assert!(write_pwm_commands(
-            &mut board,
-            &mut pwm,
-            &enabled,
-            &[0.1, 0.2]
-        ));
+        assert_eq!(
+            write_pwm_commands(&mut board, &mut pwm, &enabled, &[0.1, 0.2]),
+            Ok(true)
+        );
         assert_eq!(pwm.send_count, 1);
     }
 
@@ -343,10 +351,7 @@ mod tests {
     fn compose_pwm_outputs_preserves_primary_and_applies_aux_to_unused_channels() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
-        params.set_by_id(
-            ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED,
-            ParamValue::Bool(true),
-        );
+        params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Int(1));
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);

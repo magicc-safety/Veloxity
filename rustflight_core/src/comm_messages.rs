@@ -184,6 +184,7 @@ pub mod messages {
         pub fx: f32,
         pub fy: f32,
         pub fz: f32,
+        pub passthrough: [f32; 4],
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -285,8 +286,8 @@ pub mod messages {
 
     #[derive(Debug, Clone, Copy)]
     pub struct RosflightGnssMsg {
-        pub seconds: u64,
-        pub nanos: u32,
+        pub seconds: i64,
+        pub nanos: i32,
         pub fix_type: GNSSFixType,
         pub num_sat: u8,
         pub lat: f64,                 // deg DDS format
@@ -366,13 +367,17 @@ pub mod enums {
 
     bitflags! {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-        pub struct OffboardControlIgnore: u8 {
-            const IGNORE_QX = 1 << 0;
-            const IGNORE_QY = 1 << 1;
-            const IGNORE_QZ = 1 << 2;
-            const IGNORE_FX = 1 << 3;
-            const IGNORE_FY = 1 << 4;
-            const IGNORE_FZ = 1 << 5;
+        pub struct OffboardControlIgnore: u16 {
+            const IGNORE_FX = 1 << 0;
+            const IGNORE_FY = 1 << 1;
+            const IGNORE_FZ = 1 << 2;
+            const IGNORE_QX = 1 << 3;
+            const IGNORE_QY = 1 << 4;
+            const IGNORE_QZ = 1 << 5;
+            const IGNORE_PASS_0 = 1 << 6;
+            const IGNORE_PASS_1 = 1 << 7;
+            const IGNORE_PASS_2 = 1 << 8;
+            const IGNORE_PASS_3 = 1 << 9;
         }
     }
 

@@ -152,13 +152,13 @@
 // }
 
 use micro_algebra::stack::vector::Vector;
-use rustflight_core::controller::quad_controller::MixerInput;
-use rustflight_core::mixer::Mixer;
-use rustflight_core::mixer::quad_mixer::{MixerParams, QuadMixer};
-use rustflight_core::params2::{ParamId, ParamValue, Params};
+use rustflight_core::controller::quad_controller::ControllerOutput;
+use rustflight_core::mixer::quad_mixer::QuadMixer;
+use rustflight_core::mixer::{Mixer, MixerCtx, MixerStatus};
+use rustflight_core::params::{ParamId, ParamValue, Params};
+use rustflight_core::state_machine::{Event, StateManager};
 
-/// Helper to create a Mixer with deterministic parameters for testing
-fn create_test_mixer() -> QuadMixer {
+fn test_params() -> Params {
     let mut params = Params::default();
 
     // --- REALISTIC PHYSICS CONSTANTS ---
@@ -170,15 +170,46 @@ fn create_test_mixer() -> QuadMixer {
     params.set_by_id(ParamId::PARAM_PROP_CQ, ParamValue::Float(1.0e-6));
 
     params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.05));
-    params.set_by_id(
-        ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED,
-        ParamValue::Bool(true),
-    );
+    params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Int(1));
 
     // Default KV (900) + 12.6V -> Max RPM ~ 1000 rad/s.
     // This aligns with the physics above.
 
+    params
+}
+
+/// Helper to create a Mixer with deterministic parameters for testing
+fn create_test_mixer() -> QuadMixer {
+    let params = test_params();
     QuadMixer::new(&params)
+}
+
+fn armed_state() -> StateManager {
+    let mut params = Params::default();
+    params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+
+    let mut state = StateManager::new();
+    state.update(Event::INITIALIZED, &params);
+    state.update(Event::REQUEST_ARM, &params);
+    state
+}
+
+fn controller_output(thrust: f64, torques: Vector<f64, 3>) -> ControllerOutput {
+    ControllerOutput::from_forces_torques_and_passthrough(
+        Vector::from_array([0.0, 0.0, -thrust]),
+        torques,
+        [0.0; 4],
+    )
+}
+
+fn mixer_ctx<'a>(state: &'a StateManager, params: &'a Params) -> MixerCtx<'a> {
+    MixerCtx {
+        state,
+        params,
+        rc_override: 0,
+        air_density: 1.225,
+        battery_voltage: Some(12.6),
+    }
 }
 
 #[test]
@@ -186,12 +217,11 @@ fn test_hover_condition() {
     let mut mixer = create_test_mixer();
 
     // Command: 10N Thrust (approx 1kg hover)
-    let input = MixerInput {
-        thrust: 10.0,
-        torques: Vector::from_array([0.0, 0.0, 0.0]),
-    };
+    let input = controller_output(10.0, Vector::from_array([0.0, 0.0, 0.0]));
+    let params = test_params();
+    let state = armed_state();
 
-    let outputs = mixer.mix(&input);
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     println!("Hover Outputs: {:?}", outputs);
 
@@ -205,17 +235,206 @@ fn test_hover_condition() {
 }
 
 #[test]
+fn test_quad_mixer_emits_rosflight_ten_output_shape() {
+    let mut mixer = create_test_mixer();
+    let input = ControllerOutput::from_forces_torques_and_passthrough(
+        Vector::from_array([0.0, 0.0, -0.4]),
+        Vector::from_array([0.0, 0.0, 0.0]),
+        [0.6, 0.7, 0.8, 0.9],
+    );
+    let params = test_params();
+    let state = armed_state();
+
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
+
+    assert_eq!(outputs.as_ref().len(), 10);
+    assert_eq!(mixer.output_types().len(), 10);
+    assert!(
+        mixer.output_types()[0..4]
+            .iter()
+            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Motor)
+    );
+    assert!(
+        mixer.output_types()[4..10]
+            .iter()
+            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Aux)
+    );
+    assert_eq!(&outputs[4..10], &[0.0; 6]);
+}
+
+#[test]
+fn test_quad_x_canned_mixer_uses_rosflight_runtime_inversion() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(2));
+    let mut mixer = QuadMixer::new(&params);
+    let input = controller_output(0.4, Vector::from_array([0.0, 0.0, 0.0]));
+    let state = armed_state();
+
+    let run = mixer.mix(&input, mixer_ctx(&state, &params));
+
+    assert_eq!(run.status, MixerStatus::Healthy);
+    for output in run.commands.iter().take(4) {
+        assert!((output - 0.4).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn test_esc_calibration_mixer_uses_rosflight_rank_deficient_pseudoinverse() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(0));
+    params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.0));
+    let mut mixer = QuadMixer::new(&params);
+    let input = ControllerOutput::from_forces_torques_and_passthrough(
+        Vector::from_array([0.0, 0.0, 0.4]),
+        Vector::from_array([0.0, 0.0, 0.0]),
+        [0.0; 4],
+    );
+    let state = armed_state();
+
+    let run = mixer.mix(&input, mixer_ctx(&state, &params));
+
+    assert_eq!(run.status, MixerStatus::Healthy);
+    for output in run.commands.iter().take(10) {
+        assert!((output - 0.4).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn test_custom_mixer_loads_rosflight_parameter_matrix_and_output_types() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(11));
+    params.set_by_name("PRI_MIXER_OUT_0", ParamValue::Int(2));
+    params.set_by_name("PRI_MIXER_OUT_1", ParamValue::Int(0));
+    params.set_by_name("PRI_MIXER_PWM_0", ParamValue::Float(490.0));
+    params.set_by_name("PRI_MIXER_2_0", ParamValue::Float(-0.5));
+
+    let mut mixer = QuadMixer::new(&params);
+    let input = controller_output(0.4, Vector::from_array([0.0, 0.0, 0.0]));
+    let state = armed_state();
+
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
+
+    assert_eq!(
+        mixer.output_types()[0],
+        rustflight_core::mixer::MixerOutputType::Motor
+    );
+    assert_eq!(
+        mixer.output_types()[1],
+        rustflight_core::mixer::MixerOutputType::Aux
+    );
+    assert_eq!(mixer.default_pwm_rates()[0], 490.0);
+    assert!((outputs[0] - 0.2).abs() < 1e-6);
+    assert_eq!(outputs[1], 0.0);
+}
+
+#[test]
+fn test_invalid_primary_mixer_reports_status_without_mutating_state() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(255));
+    let state = armed_state();
+    let mut mixer = QuadMixer::new(&params);
+    let input = controller_output(0.4, Vector::from_array([0.0, 0.0, 0.0]));
+
+    let run = mixer.mix(&input, mixer_ctx(&state, &params));
+
+    assert_eq!(run.status, MixerStatus::InvalidMixer);
+    assert!(
+        !state
+            .get_errors()
+            .contains(rustflight_core::state_machine::ErrorFlag::INVALID_MIXER)
+    );
+}
+
+#[test]
+fn test_canned_hex_x_selection_uses_rosflight_output_ownership() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(4));
+    let mut mixer = QuadMixer::new(&params);
+    let input = controller_output(0.6, Vector::from_array([0.0, 0.0, 0.0]));
+    let state = armed_state();
+
+    let run = mixer.mix(&input, mixer_ctx(&state, &params));
+
+    assert_eq!(run.status, MixerStatus::Healthy);
+    assert!(
+        mixer.output_types()[0..6]
+            .iter()
+            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Motor)
+    );
+    assert!(
+        mixer.output_types()[6..10]
+            .iter()
+            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Aux)
+    );
+    assert_eq!(mixer.default_pwm_rates()[0], 490.0);
+    assert_eq!(mixer.default_pwm_rates()[8], 50.0);
+    assert!(run.commands[0] > 0.0);
+    assert_eq!(run.commands[6], 0.0);
+}
+
+#[test]
+fn test_fixedwing_mixer_applies_reversal_params_before_mixing() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(9));
+    params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
+    params.set_by_id(ParamId::PARAM_AILERON_REVERSE, ParamValue::Int(1));
+    let mut mixer = QuadMixer::new(&params);
+    let input = ControllerOutput::from_forces_torques_and_passthrough(
+        Vector::from_array([0.2, 0.0, 0.0]),
+        Vector::from_array([0.4, 0.5, 0.6]),
+        [0.0; 4],
+    );
+    let state = armed_state();
+
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
+
+    assert_eq!(
+        mixer.output_types()[0],
+        rustflight_core::mixer::MixerOutputType::Servo
+    );
+    assert_eq!(
+        mixer.output_types()[4],
+        rustflight_core::mixer::MixerOutputType::Motor
+    );
+    assert!((outputs[0] + 0.4).abs() < 1e-6);
+    assert!((outputs[1] - 0.5).abs() < 1e-6);
+    assert!((outputs[2] - 0.6).abs() < 1e-6);
+    assert!((outputs[4] - 0.2).abs() < 1e-6);
+}
+
+#[test]
+fn test_secondary_inverted_vtail_matches_rosflight_pseudoinverse_branch() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(9));
+    params.set_by_id(ParamId::PARAM_SECONDARY_MIXER, ParamValue::Int(10));
+    params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
+    let mut mixer = QuadMixer::new(&params);
+    let input = ControllerOutput::from_forces_torques_and_passthrough(
+        Vector::from_array([0.25, 0.0, 0.0]),
+        Vector::from_array([0.3, 0.4, 0.2]),
+        [0.0; 4],
+    );
+    let state = armed_state();
+
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
+
+    assert!((outputs[0] - 0.3).abs() < 1e-6);
+    assert!((outputs[1] - (-0.2)).abs() < 1e-6);
+    assert!((outputs[2] - 0.6).abs() < 1e-6);
+    assert!((outputs[4] - 0.25).abs() < 1e-6);
+}
+
+#[test]
 fn test_pure_roll_right() {
     let mut mixer = create_test_mixer();
 
     // Command: Hover (10N) + Roll Torque (0.5 Nm)
     // 0.5 Nm is a reasonable control effort for a small quad
-    let input = MixerInput {
-        thrust: 10.0,
-        torques: Vector::from_array([0.5, 0.0, 0.0]),
-    };
+    let input = controller_output(10.0, Vector::from_array([0.5, 0.0, 0.0]));
+    let params = test_params();
+    let state = armed_state();
 
-    let outputs = mixer.mix(&input);
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     println!("Roll Right Outputs: {:?}", outputs);
 
@@ -234,12 +453,11 @@ fn test_pure_pitch_down() {
     let mut mixer = create_test_mixer();
 
     // Command: Hover + Pitch Torque
-    let input = MixerInput {
-        thrust: 10.0,
-        torques: Vector::from_array([0.0, 0.5, 0.0]),
-    };
+    let input = controller_output(10.0, Vector::from_array([0.0, 0.5, 0.0]));
+    let params = test_params();
+    let state = armed_state();
 
-    let outputs = mixer.mix(&input);
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     let front_motors_avg = (outputs[0] + outputs[3]) / 2.0;
     let rear_motors_avg = (outputs[1] + outputs[2]) / 2.0;
@@ -249,10 +467,10 @@ fn test_pure_pitch_down() {
         front_motors_avg, rear_motors_avg
     );
 
-    // Standard X Matrix: Positive Pitch Input -> Nose Down -> Rear Motors speed up
+    // Current QuadMixer convention: positive pitch input increases the front pair.
     assert!(
-        rear_motors_avg > front_motors_avg,
-        "Rear motors should spin faster for positive pitch input"
+        front_motors_avg > rear_motors_avg,
+        "Front motors should spin faster for positive pitch input"
     );
 }
 
@@ -261,12 +479,11 @@ fn test_pure_yaw_clockwise() {
     let mut mixer = create_test_mixer();
 
     // Command: Hover + Yaw Torque (0.1 Nm - yaw is usually weaker)
-    let input = MixerInput {
-        thrust: 10.0,
-        torques: Vector::from_array([0.0, 0.0, 0.1]),
-    };
+    let input = controller_output(10.0, Vector::from_array([0.0, 0.0, 0.1]));
+    let params = test_params();
+    let state = armed_state();
 
-    let outputs = mixer.mix(&input);
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     let cw_motors_avg = (outputs[0] + outputs[2]) / 2.0;
     let ccw_motors_avg = (outputs[1] + outputs[3]) / 2.0;
@@ -276,11 +493,26 @@ fn test_pure_yaw_clockwise() {
         cw_motors_avg, ccw_motors_avg
     );
 
-    // To turn CW (positive Yaw), we increase CCW motors to create net reaction torque
+    // ROSflight quad-X convention: positive yaw increases the CW motor pair.
     assert!(
-        ccw_motors_avg > cw_motors_avg,
-        "CCW motors should spin faster to create CW body torque"
+        cw_motors_avg > ccw_motors_avg,
+        "CW motors should spin faster for positive yaw input"
     );
+}
+
+#[test]
+fn test_low_throttle_suppresses_yaw() {
+    let mut mixer = create_test_mixer();
+
+    let input = controller_output(0.01, Vector::from_array([0.0, 0.0, 0.8]));
+    let params = test_params();
+    let state = armed_state();
+
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
+
+    assert!((outputs[0] - outputs[1]).abs() < 1e-6);
+    assert!((outputs[1] - outputs[2]).abs() < 1e-6);
+    assert!((outputs[2] - outputs[3]).abs() < 1e-6);
 }
 
 #[test]
@@ -288,12 +520,11 @@ fn test_saturation_scaling() {
     let mut mixer = create_test_mixer();
 
     // Command: Massive Thrust that definitely exceeds 40N (approx physical limit)
-    let input = MixerInput {
-        thrust: 1000.0,
-        torques: Vector::from_array([0.0, 0.0, 0.0]),
-    };
+    let input = controller_output(1000.0, Vector::from_array([0.0, 0.0, 0.0]));
+    let params = test_params();
+    let state = armed_state();
 
-    let outputs = mixer.mix(&input);
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     println!("Saturation Outputs: {:?}", outputs);
 
@@ -315,12 +546,11 @@ fn test_saturation_preserves_ratio() {
 
     // Command: High Thrust + High Roll
     // Both inputs are large enough to saturate the mixer individually.
-    let input = MixerInput {
-        thrust: 1000.0,
-        torques: Vector::from_array([500.0, 0.0, 0.0]),
-    };
+    let input = controller_output(1000.0, Vector::from_array([500.0, 0.0, 0.0]));
+    let params = test_params();
+    let state = armed_state();
 
-    let outputs = mixer.mix(&input);
+    let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     // Check that we are still saturated at 1.0
     let max_val = outputs[0].max(outputs[1]).max(outputs[2]).max(outputs[3]);

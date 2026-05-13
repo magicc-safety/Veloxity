@@ -3182,6 +3182,7 @@ version = "0.1.0"
 dependencies = [
  "cdr",
  "chrono",
+ "critical-section",
  "rustflight_core",
  "serde",
  "tokio",

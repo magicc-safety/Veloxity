@@ -37,10 +37,11 @@
 
 use super::{Controller, RcTrimCalibrator};
 use crate::command_manager::{CombinedControl, ControlType};
+use crate::controller::ControllerCtx;
 use crate::estimator::quad_estimator::AttitudeState;
 use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::StateManager;
-use libm::{atan2, cos, sin};
+use libm::{atan2, cos, pow, sin, sqrt};
 use micro_algebra::stack::quaternion::Quaternion;
 use micro_algebra::stack::vector::Vector;
 
@@ -59,17 +60,35 @@ fn clamp(value: f64, min: f64, max: f64) -> f64 {
 
 // ============== PID Controller (Unchanged) ==============
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct Pid {
     pub p: f64,
     pub i: f64,
     pub d: f64,
-    pub max_i: f64,
+    pub max: f64,
+    pub min: f64,
     pub tau: f64,
     pub integrator: f64,
     pub differentiator: f64,
     pub prev_x: f64,
     pub prev_t: f64,
+}
+
+impl Default for Pid {
+    fn default() -> Self {
+        Self {
+            p: 0.0,
+            i: 0.0,
+            d: 0.0,
+            max: f64::INFINITY,
+            min: -f64::INFINITY,
+            tau: 0.05,
+            integrator: 0.0,
+            differentiator: 0.0,
+            prev_x: 0.0,
+            prev_t: -1.0,
+        }
+    }
 }
 
 impl Pid {
@@ -78,7 +97,8 @@ impl Pid {
             p,
             i,
             d,
-            max_i,
+            max: max_i,
+            min: -max_i,
             tau,
             integrator: 0.0,
             differentiator: 0.0,
@@ -87,48 +107,17 @@ impl Pid {
         }
     }
     pub fn run(&mut self, x: f64, x_c: f64, dt: f64, enable_integrator: bool) -> f64 {
-        let error = x_c - x;
-
-        // P Term
-        let p_term = self.p * error;
-
-        // I Term (commented out - not currently used)
-        // if enable_integrator {
-        //     self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
-        // }
-        // let i_term = self.i * self.integrator;
-
-        // D Term using β-filter (dirty derivative from PDF Chapter 10, pages 11-12)
-        // PDF notation mapping:
-        //   dt ≡ Ts (sample time)
-        //   self.tau ≡ σ (filter time constant)
-        //   x ≡ ξ[n] (current state)
-        //   self.prev_x ≡ ξ[n-1] (previous state)
-        //   self.differentiator ≡ u_D[n] (filtered derivative output)
-        let d_term = if self.prev_t < 0.0 {
-            // First call - initialize
-            self.prev_x = x;
-            self.prev_t = 0.0;
-            0.0
+        let xdot = if dt > 0.0001 {
+            self.differentiator = (2.0 * self.tau - dt) / (2.0 * self.tau + dt)
+                * self.differentiator
+                + 2.0 / (2.0 * self.tau + dt) * (x - self.prev_x);
+            self.differentiator
         } else {
-            // β = (2σ - Ts) / (2σ + Ts)
-            let beta = (2.0 * self.tau - dt) / (2.0 * self.tau + dt);
-
-            // (1 - β) = 2*Ts / (2σ + Ts)
-            let one_minus_beta = 1.0 - beta;
-
-            // (ξ[n] - ξ[n-1]) / Ts
-            let derivative_estimate = (x - self.prev_x) / dt;
-
-            // u_D[n] = β * u_D[n-1] + (1-β) * ((ξ[n] - ξ[n-1]) / Ts)
-            self.differentiator = beta * self.differentiator + one_minus_beta * derivative_estimate;
-            self.prev_x = x;
-
-            self.d * self.differentiator
+            0.0
         };
+        self.prev_x = x;
 
-        // Output (no I term currently)
-        p_term - d_term
+        self.run_with_derivative(x, x_c, xdot, dt, enable_integrator)
     }
 
     pub fn run_with_derivative(
@@ -141,19 +130,23 @@ impl Pid {
     ) -> f64 {
         let error = x_c - x;
 
-        // P Term
         let p_term = self.p * error;
+        let d_term = if self.d > 0.0 { self.d * xdot } else { 0.0 };
 
-        // I Term
-        //if enable_integrator {
-        //    self.integrator = clamp(self.integrator + error * dt, -self.max_i, self.max_i);
-        //}
-        //let i_term = self.i * self.integrator;
+        let mut i_term = 0.0;
+        if self.i > 0.0 && enable_integrator {
+            self.integrator += error * dt;
+            i_term = self.i * self.integrator;
+        }
 
-        let d_term = self.d * xdot;
+        let output = p_term - d_term + i_term;
+        let saturated = clamp(output, self.min, self.max);
 
-        //p_term + i_term - d_term
-        p_term - d_term
+        if output != saturated && self.i > 0.0 && i_term.abs() > (output - p_term + d_term).abs() {
+            self.integrator = (saturated - p_term + d_term) / self.i;
+        }
+
+        saturated
     }
 
     pub fn reset(&mut self) {
@@ -174,10 +167,54 @@ impl Pid {
 //     pub commanded_thrust: f64,
 // }
 
-#[derive(Debug, Clone, Copy)]
-pub struct MixerInput {
-    pub torques: Vector<f64, 3>,
-    pub thrust: f64,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControllerOutput {
+    pub u: [f64; 10],
+}
+
+impl ControllerOutput {
+    pub fn from_forces_torques_and_passthrough(
+        forces: Vector<f64, 3>,
+        torques: Vector<f64, 3>,
+        passthrough: [f64; 4],
+    ) -> Self {
+        Self {
+            u: [
+                forces[0],
+                forces[1],
+                forces[2],
+                torques[0],
+                torques[1],
+                torques[2],
+                passthrough[0],
+                passthrough[1],
+                passthrough[2],
+                passthrough[3],
+            ],
+        }
+    }
+
+    pub fn forces(&self) -> Vector<f64, 3> {
+        Vector::from_array([self.u[0], self.u[1], self.u[2]])
+    }
+
+    pub fn torques(&self) -> Vector<f64, 3> {
+        Vector::from_array([self.u[3], self.u[4], self.u[5]])
+    }
+
+    pub fn passthrough(&self) -> [f64; 4] {
+        [self.u[6], self.u[7], self.u[8], self.u[9]]
+    }
+
+    pub fn legacy_quad_thrust(&self) -> f64 {
+        -self.u[2]
+    }
+}
+
+impl Default for ControllerOutput {
+    fn default() -> Self {
+        Self { u: [0.0; 10] }
+    }
 }
 
 // ============== Quadcopter Controller Implementation ==============
@@ -223,67 +260,55 @@ impl QuadController {
         params: &Params,
         dt: f64,
         add_equilibrium_torques: bool,
-    ) -> MixerInput {
-        if command.qx.control_type == ControlType::Passthrough {
-            return MixerInput {
-                torques: Vector::from_array([
-                    command.qx.value as f64,
-                    command.qy.value as f64,
-                    command.qy.value as f64,
-                ]),
-                thrust: command.fz.value as f64,
-            };
-        }
-
-        let enable_integrator = false;
-        let q_hat = state.q_hat;
+        update_integrators: bool,
+        air_density: f64,
+    ) -> ControllerOutput {
         let current_rates = state.body_rate;
-        let mut rate_setpoints = Vector::from_array([0.0, 0.0, 0.0, 0.0]);
+        let euler: Vector<f64, 3> = state.into();
 
-        if command.qx.control_type == ControlType::Angle {
-            let current_yaw = get_yaw(q_hat);
-            let q_target = quaternion_from_euler(
+        let mut torque_x = match command.qx.control_type {
+            ControlType::Rate => self.roll_rate_pid.run(
+                current_rates[0],
                 command.qx.value as f64,
-                command.qy.value as f64,
-                current_yaw,
-            );
-
-            let mut q_err = q_hat.conjugate() * q_target;
-
-            if q_err.get_w() < 0.0 {
-                q_err = q_err * -1.0;
-            }
-
-            rate_setpoints[0] = self.roll_angle_pid.run_with_derivative(
-                0.0,
-                2.0 * q_err.get_x(),
+                dt,
+                update_integrators,
+            ),
+            ControlType::Angle => self.roll_angle_pid.run_with_derivative(
+                euler[0],
+                command.qx.value as f64,
                 current_rates[0],
                 dt,
-                enable_integrator,
-            );
-            rate_setpoints[1] = self.pitch_angle_pid.run_with_derivative(
-                0.0,
-                2.0 * q_err.get_y(),
+                update_integrators,
+            ),
+            _ => command.qx.value as f64,
+        };
+
+        let mut torque_y = match command.qy.control_type {
+            ControlType::Rate => self.pitch_rate_pid.run(
+                current_rates[1],
+                command.qy.value as f64,
+                dt,
+                update_integrators,
+            ),
+            ControlType::Angle => self.pitch_angle_pid.run_with_derivative(
+                euler[1],
+                command.qy.value as f64,
                 current_rates[1],
                 dt,
-                enable_integrator,
-            )
-        } else {
-            rate_setpoints[0] = command.qx.value as f64;
-            rate_setpoints[1] = command.qy.value as f64;
-        }
+                update_integrators,
+            ),
+            _ => command.qy.value as f64,
+        };
 
-        rate_setpoints[2] = command.qz.value as f64;
-
-        let mut torque_x =
-            self.roll_rate_pid
-                .run(current_rates[0], rate_setpoints[0], dt, enable_integrator);
-        let mut torque_y =
-            self.pitch_rate_pid
-                .run(current_rates[1], rate_setpoints[1], dt, enable_integrator);
-        let mut torque_z =
-            self.yaw_rate_pid
-                .run(current_rates[2], rate_setpoints[2], dt, enable_integrator);
+        let mut torque_z = match command.qz.control_type {
+            ControlType::Rate => self.yaw_rate_pid.run(
+                current_rates[2],
+                command.qz.value as f64,
+                dt,
+                update_integrators,
+            ),
+            _ => command.qz.value as f64,
+        };
 
         if add_equilibrium_torques {
             torque_x += param_float(params, ParamId::PARAM_X_EQ_TORQUE) as f64;
@@ -291,16 +316,46 @@ impl QuadController {
             torque_z += param_float(params, ParamId::PARAM_Z_EQ_TORQUE) as f64;
         }
 
-        MixerInput {
-            torques: Vector::from_array([torque_x, torque_y, torque_z]),
-            thrust: command.fz.value as f64,
-        }
+        let forces = Vector::from_array([
+            force_output(
+                command.fx.value as f64,
+                command.fx.control_type,
+                params,
+                false,
+                air_density,
+            ),
+            force_output(
+                command.fy.value as f64,
+                command.fy.control_type,
+                params,
+                false,
+                air_density,
+            ),
+            force_output(
+                command.fz.value as f64,
+                command.fz.control_type,
+                params,
+                true,
+                air_density,
+            ),
+        ]);
+
+        ControllerOutput::from_forces_torques_and_passthrough(
+            forces,
+            Vector::from_array([torque_x, torque_y, torque_z]),
+            [
+                command.passthrough[0].value as f64,
+                command.passthrough[1].value as f64,
+                command.passthrough[2].value as f64,
+                command.passthrough[3].value as f64,
+            ],
+        )
     }
 }
 
 impl Controller for QuadController {
     type State = AttitudeState;
-    type ControlOutput = MixerInput;
+    type ControlOutput = ControllerOutput;
 
     fn update_gains(&mut self, params: &Params) {
         // Roll Rate
@@ -309,8 +364,7 @@ impl Controller for QuadController {
             other => 0.0,
         };
         self.roll_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_I) {
-            // ParamValue::Float(val) => val as f64,
-            // other => {
+            ParamValue::Float(val) => val as f64,
             _ => 0.0,
         };
         self.roll_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_D) {
@@ -328,8 +382,7 @@ impl Controller for QuadController {
             _ => 0.0,
         };
         self.pitch_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_I) {
-            // ParamValue::Float(val) => val as f64,
-            // other => {
+            ParamValue::Float(val) => val as f64,
             _ => 0.0,
         };
         self.pitch_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_D) {
@@ -347,8 +400,7 @@ impl Controller for QuadController {
             other => 0.0,
         };
         self.yaw_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_I) {
-            // ParamValue::Float(val) => val as f64,
-            // other => {
+            ParamValue::Float(val) => val as f64,
             _ => 0.0,
         };
         self.yaw_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_D) {
@@ -366,8 +418,7 @@ impl Controller for QuadController {
             other => 0.0,
         };
         self.roll_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_I) {
-            // ParamValue::Float(val) => val as f64,
-            // other => {
+            ParamValue::Float(val) => val as f64,
             _ => 0.0,
         };
         self.roll_angle_pid.d = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_D) {
@@ -385,8 +436,7 @@ impl Controller for QuadController {
             other => 0.0,
         };
         self.pitch_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_I) {
-            // ParamValue::Float(val) => val as f64,
-            // other => {
+            ParamValue::Float(val) => val as f64,
             _ => 0.0,
         };
         self.pitch_angle_pid.d = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_D) {
@@ -399,25 +449,24 @@ impl Controller for QuadController {
         };
     }
 
-    fn control(
-        &mut self,
-        state: &Self::State,
-        state_manager: &mut StateManager,
-        command: &CombinedControl,
-        params: &Params,
-        dt: f64,
-    ) -> Self::ControlOutput {
-        self.update_gains(params);
+    fn control(&mut self, state: &Self::State, ctx: ControllerCtx<'_>) -> Self::ControlOutput {
+        self.update_gains(ctx.params);
 
-        if !state_manager.is_armed() {
+        if !ctx.state_manager.is_armed() {
             self.reset_pids();
 
-            MixerInput {
-                torques: Vector::from_array([0.0f64, 0.0f64, 0.0f64]),
-                thrust: 0.0f64,
-            }
+            ControllerOutput::default()
         } else {
-            self.run_pid_control(state, command, params, dt, true)
+            let update_integrators = controller_should_update_integrators(ctx.command, ctx.dt);
+            self.run_pid_control(
+                state,
+                ctx.command,
+                ctx.params,
+                ctx.dt,
+                true,
+                update_integrators,
+                ctx.air_density,
+            )
         }
     }
 }
@@ -431,14 +480,17 @@ impl RcTrimCalibrator for QuadController {
         let mut controller = *self;
         controller.update_gains(params);
         controller.reset_pids();
-        let output =
-            controller.run_pid_control(&AttitudeState::default(), rc_control, params, 0.0, false);
+        let output = controller.run_pid_control(
+            &AttitudeState::default(),
+            rc_control,
+            params,
+            0.0,
+            false,
+            false,
+            1.225,
+        );
 
-        [
-            output.torques[0] as f32,
-            output.torques[1] as f32,
-            output.torques[2] as f32,
-        ]
+        [output.u[3] as f32, output.u[4] as f32, output.u[5] as f32]
     }
 }
 
@@ -447,6 +499,59 @@ fn param_float(params: &Params, id: ParamId) -> f32 {
         ParamValue::Float(value) => value,
         _ => 0.0,
     }
+}
+
+fn param_int(params: &Params, id: ParamId) -> i32 {
+    match params.get_by_id(id) {
+        ParamValue::Int(value) => value,
+        _ => 0,
+    }
+}
+
+fn force_output(
+    value: f64,
+    control_type: ControlType,
+    params: &Params,
+    is_fz: bool,
+    air_density: f64,
+) -> f64 {
+    if control_type != ControlType::Throttle {
+        return value;
+    }
+
+    let sign = if is_fz { -1.0 } else { 1.0 };
+    let mut output = sign * value * param_float(params, ParamId::PARAM_RC_MAX_THROTTLE) as f64;
+
+    if param_int(params, ParamId::PARAM_USE_MOTOR_PARAMETERS) != 0 {
+        output *= calculate_max_thrust(params, air_density);
+    }
+
+    output
+}
+
+fn calculate_max_thrust(params: &Params, air_density: f64) -> f64 {
+    let resistance = param_float(params, ParamId::PARAM_MOTOR_RESISTANCE) as f64;
+    let diameter = param_float(params, ParamId::PARAM_PROP_DIAMETER) as f64;
+    let cq = param_float(params, ParamId::PARAM_PROP_CQ) as f64;
+    let ct = param_float(params, ParamId::PARAM_PROP_CT) as f64;
+    let kv = param_float(params, ParamId::PARAM_MOTOR_KV) as f64;
+    let no_load_current = param_float(params, ParamId::PARAM_NO_LOAD_CURRENT) as f64;
+    let num_motors = param_int(params, ParamId::PARAM_NUM_MOTORS) as f64;
+    let max_voltage = param_float(params, ParamId::PARAM_VOLT_MAX) as f64;
+
+    let a = resistance * air_density * pow(diameter, 5.0) * cq
+        / (4.0 * pow(core::f64::consts::PI, 2.0) * kv);
+    let b = kv;
+    let c = no_load_current * resistance - max_voltage;
+    let omega = (-b + sqrt(pow(b, 2.0) - 4.0 * a * c)) / (2.0 * a);
+
+    air_density * pow(diameter, 4.0) * ct * pow(omega, 2.0)
+        / (4.0 * pow(core::f64::consts::PI, 2.0))
+        * num_motors
+}
+
+fn controller_should_update_integrators(command: &CombinedControl, dt: f64) -> bool {
+    dt < 0.01 && (command.fx.value > 0.1 || command.fy.value > 0.1 || command.fz.value > 0.1)
 }
 
 /// Constructs a Quaternion from Euler angles (Roll, Pitch, Yaw) ZYX sequence
@@ -489,6 +594,34 @@ mod tests {
         state_machine::Event,
     };
 
+    fn armed_state(params: &Params) -> StateManager {
+        let mut state_manager = StateManager::new();
+        state_manager.update(Event::INITIALIZED, params);
+        state_manager.update(Event::REQUEST_ARM, params);
+        state_manager
+    }
+
+    fn control_with_density(
+        controller: &mut QuadController,
+        state: &AttitudeState,
+        state_manager: &mut StateManager,
+        command: &CombinedControl,
+        params: &Params,
+        dt: f64,
+        air_density: f64,
+    ) -> ControllerOutput {
+        controller.control(
+            state,
+            ControllerCtx {
+                state_manager,
+                command,
+                params,
+                air_density,
+                dt,
+            },
+        )
+    }
+
     #[test]
     fn controller_adds_equilibrium_torque_params_to_control_output() {
         let mut params = Params::new();
@@ -497,9 +630,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_Z_EQ_TORQUE, ParamValue::Float(0.3));
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
 
-        let mut state_manager = StateManager::new();
-        state_manager.update(Event::INITIALIZED, &params);
-        state_manager.update(Event::REQUEST_ARM, &params);
+        let mut state_manager = armed_state(&params);
 
         let mut controller = QuadController::default();
         let state = AttitudeState::default();
@@ -527,12 +658,20 @@ mod tests {
             ..Default::default()
         };
 
-        let output = controller.control(&state, &mut state_manager, &command, &params, 0.0025);
+        let output = control_with_density(
+            &mut controller,
+            &state,
+            &mut state_manager,
+            &command,
+            &params,
+            0.0025,
+            1.225,
+        );
 
-        assert_eq!(output.torques[0], 0.10000000149011612);
-        assert_eq!(output.torques[1], -0.20000000298023224);
-        assert_eq!(output.torques[2], 0.30000001192092896);
-        assert_eq!(output.thrust, 0.4);
+        assert_eq!(output.u[3], 0.10000000149011612);
+        assert_eq!(output.u[4], -0.20000000298023224);
+        assert_eq!(output.u[5], 0.30000001192092896);
+        assert!((output.u[2] + 0.28).abs() < 1e-6);
     }
 
     #[test]
@@ -575,5 +714,176 @@ mod tests {
         assert_eq!(torques[0], 0.2);
         assert_eq!(torques[1], -0.3);
         assert_eq!(torques[2], 0.8);
+    }
+
+    #[test]
+    fn controller_output_preserves_rosflight_ten_channel_shape() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+
+        let mut state_manager = armed_state(&params);
+        let mut controller = QuadController::default();
+        let state = AttitudeState::default();
+        let command = CombinedControl {
+            qx: ControlChannel {
+                active: true,
+                control_type: ControlType::Passthrough,
+                value: 0.1,
+            },
+            qy: ControlChannel {
+                active: true,
+                control_type: ControlType::Passthrough,
+                value: 0.2,
+            },
+            qz: ControlChannel {
+                active: true,
+                control_type: ControlType::Passthrough,
+                value: 0.3,
+            },
+            fx: ControlChannel {
+                active: true,
+                control_type: ControlType::Passthrough,
+                value: 0.4,
+            },
+            fy: ControlChannel {
+                active: true,
+                control_type: ControlType::Passthrough,
+                value: 0.5,
+            },
+            fz: ControlChannel {
+                active: true,
+                control_type: ControlType::Passthrough,
+                value: 0.6,
+            },
+            passthrough: [
+                ControlChannel {
+                    active: true,
+                    control_type: ControlType::Passthrough,
+                    value: 0.7,
+                },
+                ControlChannel {
+                    active: true,
+                    control_type: ControlType::Passthrough,
+                    value: 0.8,
+                },
+                ControlChannel {
+                    active: true,
+                    control_type: ControlType::Passthrough,
+                    value: 0.9,
+                },
+                ControlChannel {
+                    active: true,
+                    control_type: ControlType::Passthrough,
+                    value: 1.0,
+                },
+            ],
+            stamp_ms: 0,
+        };
+
+        let output = control_with_density(
+            &mut controller,
+            &state,
+            &mut state_manager,
+            &command,
+            &params,
+            0.0025,
+            1.225,
+        );
+
+        assert_eq!(output.u, [0.4, 0.5, 0.6, 0.1, 0.2, 0.3, 0.7, 0.8, 0.9, 1.0]);
+    }
+
+    #[test]
+    fn pid_integrator_updates_only_when_rosflight_gate_allows_it() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_P, ParamValue::Float(0.0));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_I, ParamValue::Float(2.0));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_RATE_D, ParamValue::Float(0.0));
+
+        let state = AttitudeState::default();
+        let command = CombinedControl {
+            qx: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: 1.0,
+            },
+            fz: ControlChannel {
+                active: true,
+                control_type: ControlType::Throttle,
+                value: 0.2,
+            },
+            ..Default::default()
+        };
+
+        let mut gated_out_state = armed_state(&params);
+        let mut gated_out_controller = QuadController::default();
+        let gated_out = control_with_density(
+            &mut gated_out_controller,
+            &state,
+            &mut gated_out_state,
+            &command,
+            &params,
+            0.02,
+            1.225,
+        );
+        assert_eq!(gated_out.u[3], 0.0);
+
+        let mut gated_in_state = armed_state(&params);
+        let mut gated_in_controller = QuadController::default();
+        let gated_in = control_with_density(
+            &mut gated_in_controller,
+            &state,
+            &mut gated_in_state,
+            &command,
+            &params,
+            0.005,
+            1.225,
+        );
+
+        assert!((gated_in.u[3] - 0.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn motor_param_thrust_scaling_uses_controller_air_density_context() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_USE_MOTOR_PARAMETERS, ParamValue::Int(1));
+
+        let state = AttitudeState::default();
+        let command = CombinedControl {
+            fz: ControlChannel {
+                active: true,
+                control_type: ControlType::Throttle,
+                value: 0.4,
+            },
+            ..Default::default()
+        };
+
+        let mut lower_density_state = armed_state(&params);
+        let mut lower_density_controller = QuadController::default();
+        let lower_density_output = control_with_density(
+            &mut lower_density_controller,
+            &state,
+            &mut lower_density_state,
+            &command,
+            &params,
+            0.005,
+            1.0,
+        );
+
+        let mut higher_density_state = armed_state(&params);
+        let mut higher_density_controller = QuadController::default();
+        let higher_density_output = control_with_density(
+            &mut higher_density_controller,
+            &state,
+            &mut higher_density_state,
+            &command,
+            &params,
+            0.005,
+            1.3,
+        );
+
+        assert!(higher_density_output.u[2] < lower_density_output.u[2]);
     }
 }

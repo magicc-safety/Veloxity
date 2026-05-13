@@ -48,7 +48,7 @@ use crate::events::{
     ResetOriginRequested, VersionRequested,
 };
 use crate::mavlink::dialects::Rosflight;
-use crate::packets::RC_PACKET_CHANNELS;
+use crate::packets::{RC_PACKET_CHANNELS, RangeType};
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensorprocessors::CalibrationFlags;
 use crate::sensors::ProcessedSensors;
@@ -56,16 +56,10 @@ use crate::state_machine::StateManager;
 use core::marker::PhantomData;
 
 const HEARTBEAT_INTERVAL_US: u64 = 1_000_000; // 1 second = 1,000,000 microseconds
-const STATUS_INTERVAL_US: u64 = 500_000; // 2 Hz
-const ATTITUDE_INTERVAL_US: u64 = 10_000; // 100 Hz
-const IMU_INTERVAL_US: u64 = 2500; // 400 Hz
-const BARO_INTERVAL_US: u64 = 20_000; // 50 Hz
-const MAG_INTERVAL_US: u64 = 50_000; // 20 Hz
-const SONAR_INTERVAL_US: u64 = 100_000; // 10 Hz
-const BATTERY_INTERVAL_US: u64 = 1_000_000; // 1 Hz
-const GNSS_INTERVAL_US: u64 = 200_000; // 5 Hz
-const RC_INTERVAL_US: u64 = 50_000; // 20 Hz
-const OUTPUT_RAW_INTERVAL_US: u64 = 50_000; // 20 Hz
+const STATUS_INTERVAL_US: u64 = 100_000; // 10 Hz
+const MAV_TYPE_FIXED_WING: u8 = 1;
+const MAV_TYPE_QUADROTOR: u8 = 2;
+const OUTPUT_RAW_IMU_DIVISOR: u64 = 8;
 pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
     let mut buffer = [0u8; 16];
     let input_bytes = input.as_bytes();
@@ -101,6 +95,13 @@ fn calibration_command_is_complete(command: RosflightCmd, flags: CalibrationFlag
     }
 }
 
+fn param_int(params: &Params, id: ParamId) -> i32 {
+    match params.get_by_id(id) {
+        ParamValue::Int(value) => value,
+        _ => 0,
+    }
+}
+
 pub struct CommManager<B, T>
 where
     B: board::BoardIo,
@@ -108,15 +109,7 @@ where
 {
     last_heartbeat_us: u64,
     last_status_send_us: u64,
-    last_imu_send_us: u64,
-    last_attitude_send_us: u64,
-    last_baro_send_us: u64,
-    last_mag_send_us: u64,
-    last_sonar_send_us: u64,
-    last_battery_send_us: u64,
-    last_gnss_send_us: u64,
-    last_rc_send_us: u64,
-    last_output_raw_us: u64,
+    output_raw_imu_count: u64,
 
     pub sysid: u8,
     comm_link: T,
@@ -134,15 +127,7 @@ where
         CommManager {
             last_heartbeat_us: now_us,
             last_status_send_us: now_us,
-            last_imu_send_us: now_us,
-            last_attitude_send_us: now_us,
-            last_baro_send_us: now_us,
-            last_mag_send_us: now_us,
-            last_sonar_send_us: now_us,
-            last_battery_send_us: now_us,
-            last_gnss_send_us: now_us,
-            last_rc_send_us: now_us,
-            last_output_raw_us: now_us,
+            output_raw_imu_count: 0,
 
             sysid: 0,
             comm_link,
@@ -172,9 +157,12 @@ where
         now_us: u64,
         state_manager: &StateManager,
         command_manager: &CommandManager,
+        params: &Params,
         estimator_state: &S,
         processed_sensors: &ProcessedSensors,
         actuator_commands: &A,
+        sensor_error_count: u16,
+        loop_time_us: u16,
     ) where
         S: AttitudeStateTrait,
         A: AsRef<[f64]>,
@@ -188,7 +176,11 @@ where
                     custom_mode: 0,
                     mavlink_version: 0,
                     system_status: 0,
-                    type_: 0,
+                    type_: if param_int(params, ParamId::PARAM_FIXED_WING) != 0 {
+                        MAV_TYPE_FIXED_WING
+                    } else {
+                        MAV_TYPE_QUADROTOR
+                    },
                 },
             );
             self.last_heartbeat_us = now_us;
@@ -204,8 +196,8 @@ where
                     offboard: command_manager.is_offboard_active() as u8,
                     error_code: state_manager.get_errors(),
                     control_mode: command_manager.get_control_mode().into(),
-                    num_errors: state_manager.get_errors().bits().count_ones() as i16,
-                    loop_time_us: 0,
+                    num_errors: sensor_error_count as i16,
+                    loop_time_us: loop_time_us as i16,
                 },
             );
             self.last_status_send_us = now_us;
@@ -215,7 +207,7 @@ where
             self.send_rosflight_small_imu(
                 board,
                 SmallImuMsg {
-                    temperature: 0.0,
+                    temperature: imu_packet.temperature,
                     time_boot_us: imu_packet.header.timestamp,
                     xacc: imu_packet.accel[0] as f32,
                     yacc: imu_packet.accel[1] as f32,
@@ -245,13 +237,29 @@ where
                     yawspeed,
                 },
             );
+
+            if self.output_raw_imu_count % OUTPUT_RAW_IMU_DIVISOR == 0 {
+                self.send_output_raw(board, actuator_commands);
+            }
+            self.output_raw_imu_count = self.output_raw_imu_count.wrapping_add(1);
+        }
+
+        if let Some(packet) = processed_sensors.pitot {
+            self.send_rosflight_diff_pressure(
+                board,
+                DiffPressureMsg {
+                    velocity: packet.indicated_airspeed,
+                    diff_pressure: packet.differential_pressure,
+                    temperature: packet.temperature,
+                },
+            );
         }
 
         if let Some(packet) = processed_sensors.baro {
             self.send_rosflight_small_baro(
                 board,
                 SmallBaroMsg {
-                    altitude: 0.0,
+                    altitude: packet.altitude,
                     pressure: packet.pressure,
                     temperature: packet.temperature,
                 },
@@ -273,10 +281,13 @@ where
             self.send_rosflight_small_range(
                 board,
                 SmallRangeMsg {
-                    type_: RosflightRangeType::RosflightRangeSonar,
+                    type_: match packet.range_type {
+                        RangeType::Sonar => RosflightRangeType::RosflightRangeSonar,
+                        RangeType::Lidar => RosflightRangeType::RosflightRangeLidar,
+                    },
                     range: packet.range,
-                    max_range: 0.0,
-                    min_range: 0.0,
+                    max_range: packet.max_range,
+                    min_range: packet.min_range,
                 },
             );
         }
@@ -296,8 +307,8 @@ where
                 board,
                 RosflightGnssMsg {
                     rosflight_timestamp: packet.header.timestamp,
-                    seconds: packet.sec as u64,
-                    nanos: packet.nano as u32,
+                    seconds: packet.unix_seconds,
+                    nanos: packet.unix_nanos,
                     fix_type: packet.fix_type,
                     num_sat: packet.num_sats,
                     lat: packet.lat,
@@ -320,7 +331,7 @@ where
                 *dst = (*src * 1000.0 + 1000.0) as u16;
             }
 
-            self.send_rosflight_rc_channels(
+            self.send_rosflight_rc_raw(
                 board,
                 RcChannelsMsg {
                     time_boot_ms: board.clock_millis(),
@@ -330,7 +341,12 @@ where
                 },
             );
         }
+    }
 
+    fn send_output_raw<A>(&mut self, board: &mut B, actuator_commands: &A)
+    where
+        A: AsRef<[f64]>,
+    {
         let mut values = [0.0f32; 14];
         for (dst, src) in values.iter_mut().zip(actuator_commands.as_ref().iter()) {
             *dst = *src as f32;
@@ -338,7 +354,7 @@ where
         self.send_rosflight_output_raw(
             board,
             RosflightOutputRawMsg {
-                stamp: now_us,
+                stamp: board.clock_millis() as u64,
                 values,
             },
         );
@@ -610,6 +626,9 @@ where
                 CommResponse::Statustext(msg) => {
                     self.comm_link.send_statustext(board, self.sysid, msg);
                 }
+                CommResponse::HardError(msg) => {
+                    self.comm_link.send_hard_error(board, self.sysid, msg);
+                }
             }
         }
     }
@@ -642,6 +661,10 @@ where
         self.comm_link.send_baro(board, self.sysid, msg);
     }
 
+    pub fn send_rosflight_diff_pressure(&mut self, board: &mut B, msg: DiffPressureMsg) {
+        self.comm_link.send_diff_pressure(board, self.sysid, msg);
+    }
+
     pub fn send_rosflight_small_mag(&mut self, board: &mut B, msg: SmallMagMsg) {
         self.comm_link.send_mag(board, self.sysid, msg);
     }
@@ -658,8 +681,8 @@ where
         self.comm_link.send_gnss(board, self.sysid, msg);
     }
 
-    pub fn send_rosflight_rc_channels(&mut self, board: &mut B, msg: RcChannelsMsg) {
-        self.comm_link.send_rc_channels(board, self.sysid, msg);
+    pub fn send_rosflight_rc_raw(&mut self, board: &mut B, msg: RcChannelsMsg) {
+        self.comm_link.send_rc_raw(board, self.sysid, msg);
     }
 
     pub fn send_rosflight_output_raw(&mut self, board: &mut B, msg: RosflightOutputRawMsg) {
@@ -989,10 +1012,12 @@ mod tests {
         let mut board = TestBoard {
             current_time_us: 1_100_000,
             tx_write_count: 0,
+            ..Default::default()
         };
         let mut manager = CommManager::new(RecordingCommLink::new(), 0);
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
+        let params = Params::new();
         let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
         let actuator_commands = [0.1, 0.2, 0.3, 0.4];
         let mut processed_sensors = ProcessedSensors::default();
@@ -1006,6 +1031,35 @@ mod tests {
             temperature: 25.0,
             seq: 1,
         });
+        processed_sensors.pitot = Some(crate::packets::PitotPacket {
+            differential_pressure: 12.5,
+            indicated_airspeed: 8.25,
+            temperature: 24.0,
+            ..Default::default()
+        });
+        processed_sensors.baro = Some(crate::packets::BaroPacket {
+            altitude: 123.0,
+            pressure: 95_000.0,
+            temperature: 22.0,
+            ..Default::default()
+        });
+        processed_sensors.range = Some(crate::packets::RangePacket {
+            range: 3.5,
+            min_range: 0.25,
+            max_range: 8.0,
+            range_type: crate::packets::RangeType::Lidar,
+            ..Default::default()
+        });
+        processed_sensors.gnss = Some(crate::packets::GNSSPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 77_000,
+                status: 0,
+            },
+            unix_seconds: 1_700_000_001,
+            unix_nanos: 123_456_789,
+            num_sats: 9,
+            ..Default::default()
+        });
 
         let now_us = board.clock_micros();
 
@@ -1014,19 +1068,42 @@ mod tests {
             now_us,
             &state_manager,
             &command_manager,
+            &params,
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
+            0,
+            0,
         );
 
         assert_eq!(manager.comm_link().heartbeat_count, 1);
         assert_eq!(manager.comm_link().status_count, 1);
         assert_eq!(manager.comm_link().imu_count, 1);
         assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().diff_pressure_count, 1);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().range_count, 1);
+        assert_eq!(manager.comm_link().gnss_count, 1);
         assert_eq!(manager.comm_link().output_raw_count, 1);
+        assert_eq!(manager.comm_link().last_imu.unwrap().temperature, 25.0);
+        assert_eq!(
+            manager.comm_link().last_diff_pressure.unwrap().velocity,
+            8.25
+        );
+        assert_eq!(manager.comm_link().last_baro.unwrap().altitude, 123.0);
+        let range = manager.comm_link().last_range.unwrap();
+        assert!(matches!(
+            range.type_,
+            RosflightRangeType::RosflightRangeLidar
+        ));
+        assert_eq!(range.min_range, 0.25);
+        assert_eq!(range.max_range, 8.0);
+        let gnss = manager.comm_link().last_gnss.unwrap();
+        assert_eq!(gnss.seconds, 1_700_000_001);
+        assert_eq!(gnss.nanos, 123_456_789);
 
         let output = manager.comm_link().last_output_raw.unwrap();
-        assert_eq!(output.stamp, 1_100_000);
+        assert_eq!(output.stamp, 1100);
         assert_eq!(output.values[0], 0.1);
         assert_eq!(output.values[1], 0.2);
         assert_eq!(output.values[2], 0.3);
@@ -1034,14 +1111,70 @@ mod tests {
     }
 
     #[test]
-    fn named_rc_telemetry_matches_upstream_raw_channel_packing() {
+    fn named_telemetry_matches_upstream_output_raw_every_eighth_imu_sample() {
         let mut board = TestBoard {
-            current_time_us: 1_234_000,
+            current_time_us: 1_100_000,
             tx_write_count: 0,
+            ..Default::default()
         };
         let mut manager = CommManager::new(RecordingCommLink::new(), 0);
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
+        let mut processed_sensors = ProcessedSensors::default();
+        processed_sensors.imu = Some(crate::packets::ImuPacket::default());
+
+        for i in 0..8 {
+            board.current_time_us = 1_100_000 + i;
+            let now_us = board.clock_micros();
+            manager.send_named_telemetry_streams(
+                &mut board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &processed_sensors,
+                &[0.0; 4],
+                0,
+                0,
+            );
+        }
+
+        assert_eq!(manager.comm_link().imu_count, 8);
+        assert_eq!(manager.comm_link().attitude_count, 8);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
+
+        board.current_time_us += 1;
+        let now_us = board.clock_micros();
+        manager.send_named_telemetry_streams(
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &params,
+            &estimator_state,
+            &processed_sensors,
+            &[0.0; 4],
+            0,
+            0,
+        );
+
+        assert_eq!(manager.comm_link().output_raw_count, 2);
+    }
+
+    #[test]
+    fn named_rc_telemetry_matches_upstream_raw_channel_packing() {
+        let mut board = TestBoard {
+            current_time_us: 1_234_000,
+            tx_write_count: 0,
+            ..Default::default()
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
         let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
         let mut processed_sensors = ProcessedSensors::default();
         let mut rc_packet = crate::packets::RcPacket::default();
@@ -1059,9 +1192,12 @@ mod tests {
             now_us,
             &state_manager,
             &command_manager,
+            &params,
             &estimator_state,
             &processed_sensors,
             &[0.0; 4],
+            0,
+            0,
         );
 
         let msg = manager.comm_link().last_rc_channels.unwrap();
@@ -1081,6 +1217,7 @@ mod tests {
         let mut board = TestBoard {
             current_time_us: 1_100_000,
             tx_write_count: 0,
+            ..Default::default()
         };
         let mut manager = CommManager::new(RecordingCommLink::new(), 0);
         let state_manager = StateManager::new();
@@ -1101,6 +1238,7 @@ mod tests {
                 fx: 0.0,
                 fy: 0.0,
                 fz: 0.0,
+                passthrough: [0.0; 4],
             },
             &params,
         );
@@ -1110,9 +1248,12 @@ mod tests {
             1_100_000,
             &state_manager,
             &command_manager,
+            &params,
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
+            0,
+            0,
         );
 
         let status = manager.comm_link().last_status.unwrap();
@@ -1128,6 +1269,7 @@ mod tests {
         let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
         let mut cal_flags = CalibrationFlags::empty();
+        let mut params = Params::new();
 
         manager.msgs.cmd = Some(RosflightCmdMsg {
             command: RosflightCmd::GyroCalibration,
@@ -1147,6 +1289,7 @@ mod tests {
             responses: EventEmitPort::new(&mut comm_events.responses),
             state: &initialized_state(),
             flags: &mut cal_flags,
+            params: &mut params,
         });
         manager.set_pending_calibration_ack(started);
 
@@ -1173,6 +1316,7 @@ mod tests {
         let mut board = TestBoard {
             current_time_us: 55_000,
             tx_write_count: 0,
+            ..Default::default()
         };
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
         let mut param_events = ParamEventQueues::default();
@@ -1188,6 +1332,7 @@ mod tests {
             fx: 0.4,
             fy: 0.5,
             fz: 0.6,
+            passthrough: [0.0; 4],
         });
 
         manager.act_on_messages(

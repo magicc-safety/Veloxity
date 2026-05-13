@@ -2,10 +2,9 @@ use crate::{
     packets::*,
     params::Params,
     sensorprocessors::{
-        CalibrationFlags, ImuProcessor, MagProcessor, PassthroughAttitudeProcessor,
-        PassthroughBaroProcessor, PassthroughBatteryProcessor, PassthroughGNSSProcessor,
-        PassthroughPitotProcessor, PassthroughRangeProcessor, PassthroughRcProcessor,
-        SensorPacketProcessor,
+        BaroProcessor, BatteryProcessor, CalibrationFlags, ImuProcessor, MagProcessor,
+        PassthroughAttitudeProcessor, PassthroughGNSSProcessor, PassthroughRangeProcessor,
+        PassthroughRcProcessor, PitotProcessor, SensorPacketProcessor,
     },
     sensors::{ProcessedSensors, SensorBus},
 };
@@ -13,11 +12,11 @@ use crate::{
 pub struct SensorProcessorSet<
     ImuProc = ImuProcessor,
     MagProc = MagProcessor,
-    BaroProc = PassthroughBaroProcessor,
-    PitotProc = PassthroughPitotProcessor,
+    BaroProc = BaroProcessor,
+    PitotProc = PitotProcessor,
     RangeProc = PassthroughRangeProcessor,
     GnssProc = PassthroughGNSSProcessor,
-    BatteryProc = PassthroughBatteryProcessor,
+    BatteryProc = BatteryProcessor,
     RcProc = PassthroughRcProcessor,
     AttitudeProc = PassthroughAttitudeProcessor,
 > {
@@ -126,7 +125,10 @@ mod tests {
     use super::*;
     use crate::{
         packets::RosflightPacketHeader,
-        sensorprocessors::{PassthroughImuProcessor, PassthroughMagProcessor},
+        sensorprocessors::{
+            PassthroughBaroProcessor, PassthroughBatteryProcessor, PassthroughImuProcessor,
+            PassthroughMagProcessor, PassthroughPitotProcessor,
+        },
     };
 
     #[test]

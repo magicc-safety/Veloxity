@@ -41,12 +41,9 @@ use std::error::Error;
 // Import your library components
 use rustflight_core::{
     command_manager::{CombinedControl, ControlChannel, ControlType},
-    controller::{
-        Controller,
-        quad_controller::{MixerInput, Pid, QuadController},
-    },
+    controller::{Controller, ControllerCtx, quad_controller::QuadController},
     estimator::quad_estimator::AttitudeState,
-    params2::{ParamId, ParamValue, Params},
+    params::{ParamId, ParamValue, Params},
     state_machine::{Event, StateManager},
 };
 
@@ -93,6 +90,7 @@ fn create_mock_command() -> CombinedControl {
             control_type: ControlType::Throttle,
             active: true,
         },
+        passthrough: Default::default(),
     }
 }
 
@@ -291,9 +289,19 @@ fn run_mixed_mode_simulation() -> Result<(), Box<dyn Error>> {
             is_healthy: true,
         };
 
-        let mixer_input = controller.control(&state, &mut state_manager, &command, &params);
+        let mixer_input = controller.control(
+            &state,
+            ControllerCtx {
+                state_manager: &mut state_manager,
+                command: &command,
+                params: &params,
+                air_density: 1.225,
+                dt: DT,
+            },
+        );
 
-        dynamics.update(&mixer_input.torques, DT);
+        let torques = mixer_input.torques();
+        dynamics.update(&torques, DT);
 
         let euler = dynamics.orientation.to_euler_angles();
 
@@ -309,9 +317,9 @@ fn run_mixed_mode_simulation() -> Result<(), Box<dyn Error>> {
             act_p_rad_s: dynamics.p,
             act_q_rad_s: dynamics.q,
             act_r_rad_s: dynamics.r,
-            torque_x: mixer_input.torques[0],
-            torque_y: mixer_input.torques[1],
-            torque_z: mixer_input.torques[2],
+            torque_x: torques[0],
+            torque_y: torques[1],
+            torque_z: torques[2],
         })?;
 
         if last_mode == ControlType::Rate && mode == ControlType::Angle {

@@ -353,6 +353,8 @@ impl From<ros_messages::GNSS> for packets::GNSSPacket {
                 timestamp: msg.rosflight_timestamp as u64,
                 status: 0,
             },
+            unix_seconds: msg.header.stamp.sec as i64,
+            unix_nanos: msg.header.stamp.nanosec as i32,
             lat: msg.lat.to_radians(),
             lon: msg.lon.to_radians(),
             height: msg.alt,
@@ -403,7 +405,18 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustflight_core::params::ParamId;
+    use rustflight_core::{
+        bodytype::{BodyType, quadrotor::Quadrotor},
+        comm_manager::comm_link_trait::mavlink::MavlinkInterface,
+        controller::quad_controller::QuadController,
+        estimator::quad_estimator::QuadEstimator,
+        params::ParamId,
+        pwm::{PwmDriver, PwmError},
+        state_machine::StateManager,
+        world::World,
+    };
+    use std::cell::Cell;
+    use std::rc::Rc;
     use std::time::Instant;
 
     fn stamp(sec: i32, nanosec: u32) -> ros_messages::Time {
@@ -441,19 +454,65 @@ mod tests {
         path
     }
 
+    struct SmokePwm {
+        flushed: Rc<Cell<usize>>,
+        sent: Rc<Cell<usize>>,
+    }
+
+    impl PwmDriver for SmokePwm {
+        fn len(&self) -> usize {
+            14
+        }
+
+        fn is_enabled(&self) -> bool {
+            true
+        }
+
+        fn enable(&mut self, _channel: usize) -> Result<(), PwmError> {
+            Ok(())
+        }
+
+        fn disable(&mut self, _channel: usize) -> Result<(), PwmError> {
+            Ok(())
+        }
+
+        fn enable_all(&mut self) -> Result<(), PwmError> {
+            Ok(())
+        }
+
+        fn disable_all(&mut self) {}
+
+        fn set_duty_cycle(&mut self, _channel: usize, _duty: u16) -> Result<(), PwmError> {
+            Ok(())
+        }
+
+        fn flush<B: BoardIo>(&mut self, _board: &mut B) {
+            self.flushed.set(self.flushed.get() + 1);
+        }
+
+        fn send_commands<B: BoardIo>(
+            &mut self,
+            _board: &mut B,
+            _commands: &[f64],
+        ) -> Result<(), PwmError> {
+            self.sent.set(self.sent.get() + 1);
+            Ok(())
+        }
+    }
+
     #[test]
     fn sim_param_store_round_trips_known_param_values() {
         let path = test_param_path("round_trip");
         let mut written = Params::new();
         written.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
-        written.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Bool(true));
+        written.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
         written.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(0.25));
 
         write_params_to_path(&path, &written).unwrap();
 
         let mut read = Params::new();
         read.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(7));
-        read.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Bool(false));
+        read.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(0));
         read.set_by_id(ParamId::PARAM_X_EQ_TORQUE, ParamValue::Float(-0.5));
 
         read_params_from_path(&path, &mut read).unwrap();
@@ -464,7 +523,7 @@ mod tests {
         );
         assert_eq!(
             read.get_by_id(ParamId::PARAM_FIXED_WING),
-            ParamValue::Bool(true)
+            ParamValue::Int(1)
         );
         assert_eq!(
             read.get_by_id(ParamId::PARAM_X_EQ_TORQUE),
@@ -484,7 +543,7 @@ mod tests {
         .unwrap();
 
         let mut params = Params::new();
-        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Bool(true));
+        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
 
         read_params_from_path(&path, &mut params).unwrap();
 
@@ -494,7 +553,7 @@ mod tests {
         );
         assert_eq!(
             params.get_by_id(ParamId::PARAM_FIXED_WING),
-            ParamValue::Bool(true)
+            ParamValue::Int(1)
         );
 
         let _ = fs::remove_file(path);
@@ -598,5 +657,72 @@ mod tests {
         assert_eq!(rc.header.timestamp, 5_000_125);
         assert_eq!(rc.n_chan, 8);
         assert_eq!(&rc.chan[..8], &[0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 0.0, 0.1]);
+    }
+
+    #[tokio::test]
+    async fn sim_board_runs_one_world_tick_with_queued_sensor_messages() {
+        let (imu_tx, imu_rx) = mpsc::channel(1);
+        let (_mag_tx, mag_rx) = mpsc::channel(1);
+        let (_baro_tx, baro_rx) = mpsc::channel(1);
+        let (_gnss_tx, gnss_rx) = mpsc::channel(1);
+        let (rc_tx, rc_rx) = mpsc::channel(1);
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        socket.connect("127.0.0.1:9").await.unwrap();
+        let param_store_path = test_param_path("world_smoke");
+
+        imu_tx
+            .try_send(ros_messages::ImuData {
+                header: header(0, 1_000_000),
+                orientation: quaternion(),
+                orientation_covariance: [0.0; 9],
+                angular_velocity: vector(0.0, 0.0, 0.0),
+                angular_velocity_covariance: [0.0; 9],
+                linear_acceleration: vector(0.0, 0.0, 9.80665),
+                linear_acceleration_covariance: [0.0; 9],
+            })
+            .unwrap();
+        rc_tx
+            .try_send(ros_messages::RCRaw {
+                header: header(0, 1_000_000),
+                values: [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000],
+            })
+            .unwrap();
+
+        let board = Board {
+            start_time: Instant::now(),
+            mavlink_socket: socket,
+            imu_rx,
+            mag_rx,
+            baro_rx,
+            gnss_rx,
+            rc_rx,
+            param_store_path,
+        };
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(8));
+        let flushed_pwm = Rc::new(Cell::new(0));
+        let sent_pwm = Rc::new(Cell::new(0));
+        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+        let mut world = World::<Board, Quadrotor, MavlinkInterface, SmokePwm>::init(
+            board,
+            params,
+            MavlinkInterface::new(),
+            StateManager::new(),
+            QuadEstimator::default(),
+            QuadController::default(),
+            mixer,
+            SmokePwm {
+                flushed: flushed_pwm.clone(),
+                sent: sent_pwm.clone(),
+            },
+        );
+
+        assert!(world.run_once());
+        assert_eq!(flushed_pwm.get(), 1);
+        assert_eq!(sent_pwm.get(), 0);
+
+        let _ = fs::remove_file(test_param_path("world_smoke"));
     }
 }

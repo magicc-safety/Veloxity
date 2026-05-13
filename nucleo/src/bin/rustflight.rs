@@ -40,9 +40,8 @@ use cortex_m_rt::entry;
 use nucleo::*;
 use panic_halt as _;
 use rustflight_core::{
-    bodytype::quadrotor::Quadrotor, comm_manager::comm_link_trait::mavlink::MavlinkInterface,
-    controller::Controller, controller::quad_controller::QuadController,
-    estimator::quad_estimator::QuadEstimator, mixer::Mixer, mixer::quad_mixer::QuadMixer,
+    board::BoardIo, bodytype::BodyType, bodytype::quadrotor::Quadrotor,
+    comm_manager::comm_link_trait::mavlink::MavlinkInterface, controller::Controller, mixer::Mixer,
     params::Params, state_machine::StateManager, world::World,
 };
 use stm_32::*;
@@ -50,13 +49,19 @@ use stm_32::*;
 #[entry]
 fn main() -> ! {
     // board implementation
-    let (board, pwm_driver) = board::Board::new();
-    let params = Params::default();
+    let (mut board, pwm_driver) = board::Board::new();
+    let mut params = Params::default();
+    if !board.read_params(&mut params) {
+        params.set_defaults();
+        let _ = board.write_params(&params);
+    }
 
     // body type instantiations
-    let estimator = QuadEstimator::default();
-    let controller = QuadController::default();
-    let mixer = QuadMixer::new(&params);
+    let estimator =
+        <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
+    let controller =
+        <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
+    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&params);
 
     // comm_link implementation
     let mavlink = MavlinkInterface::new();

@@ -331,12 +331,7 @@ impl Rc {
         }
     }
 
-    pub fn receive(
-        &mut self,
-        packet: &RcPacket, // <-- Takes the packet
-        params: &Params,
-        state_manager: &mut StateManager,
-    ) {
+    pub fn receive(&mut self, packet: &RcPacket) {
         // 1. Copy data from the packet into the internal rc_struct: We assume it has been normalized before this point
         // Get the number of channels
         let len = (packet.n_chan as usize).min(self.rc.chan.len());
@@ -349,14 +344,9 @@ impl Rc {
         let status = packet.header.status;
         self.rc.frame_lost = (status & 1) != 0;
         self.rc.failsafe_activated = (status & 2) != 0;
-
-        self.process_sticks_and_switches();
-        self.new_command = true;
     }
 
     fn process_sticks_and_switches(&mut self) {
-        // TODO add back in check for rc lost... no need to process switches if rc lost...
-
         // STICKS
         for channel in 0..STICKS_COUNT {
             let config = &self.sticks[channel];
@@ -432,9 +422,13 @@ impl Rc {
         if self.check_rc_health(now_us, params) {
             state_manager.update(Event::ERROR_CLEARED(ErrorFlag::RC_LOST), params);
 
+            self.process_sticks_and_switches();
+            self.new_command = true;
+
             // only run arming logic if rc is healthy
             self.look_for_arm_disarm_signal(now_ms, params, state_manager);
         } else {
+            self.new_command = false;
             state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
         }
     }

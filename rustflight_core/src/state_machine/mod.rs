@@ -197,9 +197,10 @@ impl Preflight {
     fn on_event(self, sm: State<Self>, event: Event, params: &Params) -> StateMachine {
         match event {
             Event::REQUEST_ARM => {
-                if let ParamValue::Bool(true) =
-                    params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM)
-                {
+                if matches!(
+                    params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM),
+                    ParamValue::Int(value) if value != 0
+                ) {
                     let mut error_flags = sm.error_flags;
                     error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
                     StateMachine::Calibrating(State {
