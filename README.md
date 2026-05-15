@@ -1,5 +1,5 @@
 <h1>
-  <img src="assets/voloxide-logo.svg" alt="Voloxide logo" width="96" height="96" align="center">
+  <img src="assets/voloxide-logo.svg" alt="Voloxide logo" width="144" height="144" align="center">
   Voloxide
 </h1>
 
