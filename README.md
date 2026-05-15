@@ -1,6 +1,6 @@
 <h1>
   <img src="assets/voloxide-logo.svg" alt="Voloxide logo" width="250" height="250" align="center">
-  _Voloxide_
+  <img src="assets/voloxide-text.svg" alt="Voloxide" width="250" style="vertical-align: middle;">
 </h1>
 
 **Voloxide** is a Rust-based port of the **ROSFlight** project, bringing real-time, high-performance flight control to the Rust ecosystem. This project leverages Rust's safety and concurrency features to create reliable, maintainable flight control firmware.
