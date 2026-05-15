@@ -7,11 +7,11 @@ use std::time::Instant;
 
 use cdr::CdrLe;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
-use rustflight_core::board::BoardIo;
-use rustflight_core::errors;
-use rustflight_core::packets::{self, RC_PACKET_CHANNELS};
-use rustflight_core::params::{PARAM_DEFINITIONS, ParamValue, Params};
-use rustflight_core::sensors::SensorBus;
+use voloxide_core::board::BoardIo;
+use voloxide_core::errors;
+use voloxide_core::packets::{self, RC_PACKET_CHANNELS};
+use voloxide_core::params::{PARAM_DEFINITIONS, ParamValue, Params};
+use voloxide_core::sensors::SensorBus;
 use tokio::io::ErrorKind;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -24,8 +24,8 @@ use crate::ros_messages;
 const DEFAULT_ZENOH_ENDPOINT: &str = "tcp/127.0.0.1:7447";
 const DEFAULT_MAVLINK_BIND: &str = "127.0.0.1:14557";
 const DEFAULT_MAVLINK_REMOTE: &str = "127.0.0.1:14520";
-const DEFAULT_PARAM_STORE: &str = "rustflight_sim.params";
-const PARAM_STORE_ENV: &str = "RUSTFLIGHT_SIM_PARAM_STORE";
+const DEFAULT_PARAM_STORE: &str = "voloxide_sim.params";
+const PARAM_STORE_ENV: &str = "VOLOXIDE_SIM_PARAM_STORE";
 
 pub struct Board {
     start_time: Instant,
@@ -230,7 +230,7 @@ where
 
 async fn open_zenoh_session() -> Session {
     let endpoint =
-        env::var("RUSTFLIGHT_ZENOH_ENDPOINT").unwrap_or_else(|_| DEFAULT_ZENOH_ENDPOINT.into());
+        env::var("VOLOXIDE_ZENOH_ENDPOINT").unwrap_or_else(|_| DEFAULT_ZENOH_ENDPOINT.into());
     let mut config = Config::default();
     config.insert_json5("mode", "\"client\"").unwrap();
     config
@@ -240,11 +240,11 @@ async fn open_zenoh_session() -> Session {
 }
 
 async fn open_mavlink_socket() -> UdpSocket {
-    let bind_addr: SocketAddr = env::var("RUSTFLIGHT_MAVLINK_BIND")
+    let bind_addr: SocketAddr = env::var("VOLOXIDE_MAVLINK_BIND")
         .unwrap_or_else(|_| DEFAULT_MAVLINK_BIND.into())
         .parse()
         .unwrap();
-    let remote_addr: SocketAddr = env::var("RUSTFLIGHT_MAVLINK_REMOTE")
+    let remote_addr: SocketAddr = env::var("VOLOXIDE_MAVLINK_REMOTE")
         .unwrap_or_else(|_| DEFAULT_MAVLINK_REMOTE.into())
         .parse()
         .unwrap();
@@ -405,7 +405,7 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustflight_core::{
+    use voloxide_core::{
         bodytype::{BodyType, quadrotor::Quadrotor},
         comm_manager::comm_link_trait::mavlink::MavlinkInterface,
         controller::quad_controller::QuadController,
@@ -446,7 +446,7 @@ mod tests {
     fn test_param_path(name: &str) -> PathBuf {
         let mut path = env::temp_dir();
         path.push(format!(
-            "rustflight_sim_{}_{}.params",
+            "voloxide_sim_{}_{}.params",
             name,
             std::process::id()
         ));

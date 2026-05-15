@@ -42,7 +42,7 @@ edition = "2024"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-rustflight_core = { workspace = true }
+voloxide_core = { workspace = true }
 
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.45" }
@@ -54,7 +54,7 @@ critical-section = { version = "1.2.0", features = ["std"] }
 [dev-dependencies]
 
 [[bin]]
-name = "rustflight"
+name = "voloxide"
 test = false
 bench = false
 

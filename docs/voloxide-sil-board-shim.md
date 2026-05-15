@@ -1,10 +1,10 @@
-# Rust SIL Board Shim
+# Voloxide SIL Board Shim
 
 ## Purpose
 
-RustFlight needs to replace the upstream ROSflight `sil_board` process during simulator testing
+Voloxide needs to replace the upstream ROSflight `sil_board` process during simulator testing
 without modifying ROSflight packages. The replacement must look like the same ROS graph participant
-to `rosflight_sim`, `rosflight_sil_manager`, and `rosflight_io`, while running the RustFlight
+to `rosflight_sim`, `rosflight_sil_manager`, and `rosflight_io`, while running the Voloxide
 firmware core instead of the C++ ROSFlight firmware.
 
 The chosen boundary is a small C++ `rclcpp` shim:
@@ -14,11 +14,11 @@ rosflight_sim standalone multirotor
         |
         | ROS 2 topics/services over rmw_zenoh_cpp
         v
-rust_sil_board_shim, node name rust_sil_board
+voloxide_sil_board_shim, node name voloxide_sil_board
         |
         | C ABI FFI boundary
         v
-RustFlight firmware core
+Voloxide firmware core
         |
         | UDP MAVLink
         v
@@ -33,14 +33,14 @@ firmware behavior in Rust.
 
 This avoids depending on private `rmw_zenoh_cpp` wire details. Zenoh remains the ROS middleware
 backend selected by `RMW_IMPLEMENTATION=rmw_zenoh_cpp`; it is not treated as an application protocol
-that RustFlight must reverse engineer.
+that Voloxide must reverse engineer.
 
 ## Package Location
 
 The shim package lives in this repository:
 
 ```bash
-ros2/rust_sil_board_shim
+ros2/voloxide_sil_board_shim
 ```
 
 It is not part of the external ROSflight workspace. Build it as a local overlay after sourcing the
@@ -50,7 +50,7 @@ installed ROSflight workspace.
 
 The shim currently provides:
 
-- node name: `rust_sil_board`
+- node name: `voloxide_sil_board`
 - service: `sil_board/run`
 - publisher: `sim/pwm_output`
 - subscriptions:
@@ -64,22 +64,22 @@ The shim currently provides:
   - `sim/sensors/battery`
 
 The service name intentionally stays `sil_board/run` because `rosflight_sil_manager` calls that
-service. The node name can be `rust_sil_board` because service discovery depends on the service
+service. The node name can be `voloxide_sil_board` because service discovery depends on the service
 name, not the executable name.
 
 ## Current State
 
-The shim compiles, starts, and links against the RustFlight `sim` crate as a Rust `staticlib`.
+The shim compiles, starts, and links against the Voloxide `sim` crate as a Rust `staticlib`.
 The ROS 2 shim build always invokes `cargo build -p sim --lib` before linking so Rust source
-changes are reflected in the installed `rust_sil_board` executable.
+changes are reflected in the installed `voloxide_sil_board` executable.
 
 Its `sil_board/run` service handler now:
 
 - converts the latest ROS sensor messages into plain C FFI structs
-- timestamps the RustFlight sensor snapshot with monotonic firmware-clock time
-- passes those snapshots into RustFlight
-- runs one RustFlight firmware iteration
-- reads back RustFlight PWM outputs
+- timestamps the Voloxide sensor snapshot with monotonic firmware-clock time
+- passes those snapshots into Voloxide
+- runs one Voloxide firmware iteration
+- reads back Voloxide PWM outputs
 - publishes those outputs on `sim/pwm_output`
 
 The Rust side owns the UDP MAVLink socket with default bind `127.0.0.1:14525` and default remote
@@ -89,41 +89,41 @@ This has been build- and smoke-tested. A bounded ROS 2 service call through `rmw
 returned:
 
 ```text
-success=True, message='RustFlight SIL iteration completed'
+success=True, message='Voloxide SIL iteration completed'
 ```
 
 The full standalone multirotor launch has also been validated with `rmw_zenohd`, `rosflight_io`,
-`rosflight_sil_manager`, standalone sensors/dynamics/forces, RC, and `rust_sil_board` running
+`rosflight_sil_manager`, standalone sensors/dynamics/forces, RC, and `voloxide_sil_board` running
 together. Observed validation signals:
 
 - `rosflight_io` connected over UDP to `localhost:14525` from `localhost:14520`.
-- `rosflight_io` received RustFlight heartbeat and reported connected.
-- `rosflight_io` received all parameters from RustFlight.
+- `rosflight_io` received Voloxide heartbeat and reported connected.
+- `rosflight_io` received all parameters from Voloxide.
 - `/status` was published by `rosflight_io` and consumed by `standalone_sensors`.
 - `/sim/sensors/imu/data` was published by the standalone simulator.
-- `/sim/pwm_output` was published by `rust_sil_board` and consumed by
+- `/sim/pwm_output` was published by `voloxide_sil_board` and consumed by
   `multirotor_forces_and_moments`.
 
 The first full run exposed repeated `Time going backwards` autopilot errors because the shim was
-forwarding ROS wall-clock sensor timestamps into RustFlight. The shim now passes monotonic FCU-time
+forwarding ROS wall-clock sensor timestamps into Voloxide. The shim now passes monotonic FCU-time
 timestamps for FFI sensor snapshots; the repeated time-backwards errors did not reappear in the
 second validation run.
 
 Remaining expected runtime warnings:
 
 - `ROSflight version does not match firmware version`, because the firmware reports
-  `RustFlight Alpha 0.1`.
+  `Voloxide 0.1`.
 - initial `Uncalibrated IMU` and short RC lost/recovered messages during startup.
 
 ## Build
 
 ```bash
 source /opt/ros/jazzy/setup.zsh
-source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source /home/skink/projects/voloxide_setup/workspace/install/setup.zsh
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 
 colcon --log-base target/ros2/log build \
-  --base-paths ros2/rust_sil_board_shim \
+  --base-paths ros2/voloxide_sil_board_shim \
   --build-base target/ros2/build \
   --install-base target/ros2/install
 
@@ -146,19 +146,19 @@ missing. In successful runs, cross-process topics and services still flow after 
 In another shell with the same sourced environment:
 
 ```bash
-ros2 launch rust_sil_board_shim rust_sil_board.launch.py
+ros2 launch voloxide_sil_board_shim voloxide_sil_board.launch.py
 ```
 
 For the current standalone multirotor validation target, launch the local overlay file:
 
 ```bash
-ros2 launch rust_sil_board_shim multirotor_standalone_rust.launch.py
+ros2 launch voloxide_sil_board_shim multirotor_standalone_voloxide.launch.py
 ```
 
 For deterministic RC spoofing, disable the built-in `rosflight_sim` RC node:
 
 ```bash
-ros2 launch rust_sil_board_shim multirotor_standalone_rust.launch.py use_builtin_rc:=false
+ros2 launch voloxide_sil_board_shim multirotor_standalone_voloxide.launch.py use_builtin_rc:=false
 ```
 
 Do not run the upstream `rosflight_sim` `sil_board` node at the same time. It embeds the C++
@@ -172,9 +172,9 @@ ROSflight's existing `vimfly` RC frontend.
 Terminal 1, start the ROS 2 Zenoh router:
 
 ```bash
-cd /home/skink/projects/rustflight_setup/Voloxide
+cd /home/skink/projects/voloxide_setup/Voloxide
 source /opt/ros/jazzy/setup.zsh
-source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source /home/skink/projects/voloxide_setup/workspace/install/setup.zsh
 source target/ros2/install/setup.zsh
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 ros2 run rmw_zenoh_cpp rmw_zenohd
@@ -183,25 +183,25 @@ ros2 run rmw_zenoh_cpp rmw_zenohd
 Terminal 2, launch the Rust-backed standalone multirotor stack with vimfly enabled:
 
 ```bash
-cd /home/skink/projects/rustflight_setup/Voloxide
+cd /home/skink/projects/voloxide_setup/Voloxide
 source /opt/ros/jazzy/setup.zsh
-source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source /home/skink/projects/voloxide_setup/workspace/install/setup.zsh
 source target/ros2/install/setup.zsh
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-ros2 launch rust_sil_board_shim multirotor_standalone_rust.launch.py use_vimfly:=true
+ros2 launch voloxide_sil_board_shim multirotor_standalone_voloxide.launch.py use_vimfly:=true
 ```
 
 Terminal 3, load the upstream ROSflight multirotor firmware parameters through unmodified
 `rosflight_io`:
 
 ```bash
-cd /home/skink/projects/rustflight_setup/Voloxide
+cd /home/skink/projects/voloxide_setup/Voloxide
 source /opt/ros/jazzy/setup.zsh
-source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source /home/skink/projects/voloxide_setup/workspace/install/setup.zsh
 source target/ros2/install/setup.zsh
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 ros2 service call /param_load_from_file rosflight_msgs/srv/ParamFile \
-  "{filename: /home/skink/projects/rustflight_setup/workspace/install/rosflight_sim/share/rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml}"
+  "{filename: /home/skink/projects/voloxide_setup/workspace/install/rosflight_sim/share/rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml}"
 ros2 service call /calibrate_imu std_srvs/srv/Trigger
 ros2 service call /param_write std_srvs/srv/Trigger
 ```
@@ -242,7 +242,7 @@ Required sim setup:
 
 ```bash
 ros2 service call /param_load_from_file rosflight_msgs/srv/ParamFile \
-  "{filename: /home/skink/projects/rustflight_setup/workspace/install/rosflight_sim/share/rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml}"
+  "{filename: /home/skink/projects/voloxide_setup/workspace/install/rosflight_sim/share/rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml}"
 ros2 service call /calibrate_imu std_srvs/srv/Trigger
 ros2 service call /param_write std_srvs/srv/Trigger
 ```
@@ -250,7 +250,7 @@ ros2 service call /param_write std_srvs/srv/Trigger
 The YAML file sets `FAILSAFE_THR=0.0` and the multirotor mixer/controller/motor parameters. The
 IMU calibration service is the intended path for producing nonzero IMU bias params and clearing the
 uncalibrated-IMU gate. Earlier validation used `ACC_X_BIAS=0.01` as a temporary shortcut; keep that
-only as a debugging fallback if the RustFlight calibration command path is under investigation.
+only as a debugging fallback if the Voloxide calibration command path is under investigation.
 
 RC arming input:
 
@@ -295,9 +295,9 @@ channel values as vimfly:
 Test setup:
 
 ```bash
-ros2 launch rust_sil_board_shim multirotor_standalone_rust.launch.py use_builtin_rc:=false
+ros2 launch voloxide_sil_board_shim multirotor_standalone_voloxide.launch.py use_builtin_rc:=false
 ros2 service call /param_load_from_file rosflight_msgs/srv/ParamFile \
-  "{filename: /home/skink/projects/rustflight_setup/workspace/install/rosflight_sim/share/rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml}"
+  "{filename: /home/skink/projects/voloxide_setup/workspace/install/rosflight_sim/share/rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml}"
 ros2 service call /calibrate_imu std_srvs/srv/Trigger
 ros2 topic pub -r 50 /sim/RC rosflight_msgs/msg/RCRaw \
   "{values: [1500, 1500, 1000, 2000, 1000, 1000, 1000, 1000]}"
@@ -315,7 +315,7 @@ after, then return to neutral. The standalone simulator reports NED truth state,
 acceptance criterion is parity with upstream C `sil_board`, not an independent reinterpretation of
 the vimfly labels.
 
-The same scripted test has been run against RustFlight and upstream C `sil_board`. Both produced
+The same scripted test has been run against Voloxide and upstream C `sil_board`. Both produced
 the same sign pattern within noise:
 
 - `pitch_forward_ch1_2000`: negative north velocity delta.
@@ -335,9 +335,9 @@ Pass criteria:
 Automated command:
 
 ```bash
-cd /home/skink/projects/rustflight_setup/Voloxide
+cd /home/skink/projects/voloxide_setup/Voloxide
 source /opt/ros/jazzy/setup.zsh
-source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source /home/skink/projects/voloxide_setup/workspace/install/setup.zsh
 source target/ros2/install/setup.zsh
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 python3 scripts/sim_directional_acceptance.py --baseline rust --use-rviz
@@ -351,7 +351,7 @@ waypoints through the `/path_planner` services. The Rust-backed version follows 
 without changing ROSflight or ROScopter packages:
 
 ```text
-rosflight_sim standalone multirotor + rust_sil_board
+rosflight_sim standalone multirotor + voloxide_sil_board
         |
         | /status, /imu/data, /gnss, /baro, /command, /sim/truth_state
         v
@@ -361,14 +361,14 @@ roscopter estimator/controller/path_manager/path_planner
 The first waypoint smoke test uses service-published NED waypoints instead of editing the upstream
 mission YAML. It starts RViz, starts the Rust-backed standalone stack, loads the standard multirotor
 firmware parameters, calibrates, arms with spoofed RC, starts ROScopter, publishes a small NED target,
-and checks that the ROScopter command chain reaches RustFlight and produces non-idle PWM.
+and checks that the ROScopter command chain reaches Voloxide and produces non-idle PWM.
 
 Automated command:
 
 ```bash
-cd /home/skink/projects/rustflight_setup/Voloxide
+cd /home/skink/projects/voloxide_setup/Voloxide
 source /opt/ros/jazzy/setup.zsh
-source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source /home/skink/projects/voloxide_setup/workspace/install/setup.zsh
 source target/ros2/install/setup.zsh
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 python3 scripts/sim_roscopter_waypoint_acceptance.py --use-rviz
@@ -377,18 +377,18 @@ python3 scripts/sim_roscopter_waypoint_acceptance.py --use-rviz
 The script launches:
 
 - `rmw_zenoh_cpp/rmw_zenohd`
-- `rust_sil_board_shim multirotor_standalone_rust.launch.py use_builtin_rc:=false use_rviz:=true`
+- `voloxide_sil_board_shim multirotor_standalone_voloxide.launch.py use_builtin_rc:=false use_rviz:=true`
 - ROScopter controller/path nodes, `roscopter_gcs rviz_waypoint_publisher`, and
   `roscopter_sim sim_state_transcriber`
 
 Acceptance criteria:
 
 - `rosflight_io` reports armed and no failsafe.
-- RustFlight reports offboard control active and no RC override bits.
+- Voloxide reports offboard control active and no RC override bits.
 - ROScopter publishes `/waypoints`, `/trajectory_command`, `/high_level_command`, and `/command`
   after a waypoint is added.
 - The commanded target is NED `[4.0, 0.0, -3.0]`.
-- `/command` carries a nonzero thrust command and RustFlight publishes non-idle PWM.
+- `/command` carries a nonzero thrust command and Voloxide publishes non-idle PWM.
 - The NED distance to the target decreases during the test window.
 
 Latest observed result:
@@ -405,7 +405,7 @@ last_command: mode=0 ignore=0 u0_3=[0.0, 0.0, -22.978, 0.001]
 ROSCOPTER WAYPOINT RESPONSE OK
 ```
 
-This proves the ROScopter waypoint command chain reaches RustFlight as offboard control, clears RC
+This proves the ROScopter waypoint command chain reaches Voloxide as offboard control, clears RC
 override, drives actuator outputs, and moves the simulated vehicle substantially toward the waypoint
 within the test window.
 
@@ -417,11 +417,11 @@ distance_start=5.000 distance_end=4.997
 last_command: mode=2 ignore=0 u0_3=[0.0, 0.0, 0.85, 0.0]
 ```
 
-Root cause: RustFlight's handwritten MAVLink byte parser used CRC extra `190` for
+Root cause: Voloxide's handwritten MAVLink byte parser used CRC extra `190` for
 `OFFBOARD_CONTROL` message ID `180`, while the ROSflight C MAVLink headers and Rust generated
 dialect both use CRC extra `90`. The bad CRC table entry caused incoming offboard frames from
 unmodified `rosflight_io` to be rejected before they reached `CommManager`. The parser now uses CRC
-extra `90`, and `cargo test -p rustflight_core offboard_control_wire_frame_passes_crc_and_decodes`
+extra `90`, and `cargo test -p voloxide_core offboard_control_wire_frame_passes_crc_and_decodes`
 covers this wire-frame path.
 
 ## ROScopter Tutorial Mission Test
@@ -430,7 +430,7 @@ The same script can run the first four NED waypoints from the ROScopter tutorial
 mission YAML is installed with the shim package at:
 
 ```bash
-ros2/rust_sil_board_shim/config/roscopter_four_waypoints.yaml
+ros2/voloxide_sil_board_shim/config/roscopter_four_waypoints.yaml
 ```
 
 The waypoints are:
@@ -443,9 +443,9 @@ The waypoints are:
 Automated command:
 
 ```bash
-cd /home/skink/projects/rustflight_setup/Voloxide
+cd /home/skink/projects/voloxide_setup/Voloxide
 source /opt/ros/jazzy/setup.zsh
-source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source /home/skink/projects/voloxide_setup/workspace/install/setup.zsh
 source target/ros2/install/setup.zsh
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 python3 scripts/sim_roscopter_waypoint_acceptance.py \

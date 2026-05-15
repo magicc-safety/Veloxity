@@ -47,8 +47,8 @@ use embassy_time::Instant;
 
 //use defmt::trace;
 
-use rustflight_core::errors;
-use rustflight_core::packets;
+use voloxide_core::errors;
+use voloxide_core::packets;
 
 pub static SD_WRITE_SIGNAL: Signal<
     CriticalSectionRawMutex,

@@ -42,8 +42,8 @@ use embassy_sync::signal::Signal;
 use embassy_time::Duration;
 use embassy_time::Instant;
 
-use rustflight_core::errors;
-use rustflight_core::packets;
+use voloxide_core::errors;
+use voloxide_core::packets;
 
 pub static RC_SIGNAL: Signal<
     CriticalSectionRawMutex,

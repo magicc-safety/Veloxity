@@ -44,8 +44,8 @@ use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 use embassy_time::Timer;
 
-use rustflight_core::errors;
-use rustflight_core::packets;
+use voloxide_core::errors;
+use voloxide_core::packets;
 
 use core::module_path;
 // use defmt::info;

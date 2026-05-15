@@ -36,8 +36,8 @@
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::board::BoardIo;
-use rustflight_core::pwm::{self, PwmDriver, PwmError};
+use voloxide_core::board::BoardIo;
+use voloxide_core::pwm::{self, PwmDriver, PwmError};
 use stm_32::peripherals::pwm::{PixRacerProServoMonstrosity, TimerError};
 
 const NUM_HW_CHANNELS: usize = 7;

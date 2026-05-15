@@ -34,9 +34,9 @@
 // *
 // ******************************************************************************
 // **/
-// use rustflight_core::mixer::Mixer;
-// use rustflight_core::mixer::quad_mixer::{QuadMixer};
-// use rustflight_core::controller::quad_controller::MixerInput;
+// use voloxide_core::mixer::Mixer;
+// use voloxide_core::mixer::quad_mixer::{QuadMixer};
+// use voloxide_core::controller::quad_controller::MixerInput;
 // use micro_algebra::stack::{
 //     vector::Vector,
 // };
@@ -152,11 +152,11 @@
 // }
 
 use micro_algebra::stack::vector::Vector;
-use rustflight_core::controller::quad_controller::ControllerOutput;
-use rustflight_core::mixer::quad_mixer::QuadMixer;
-use rustflight_core::mixer::{Mixer, MixerCtx, MixerStatus};
-use rustflight_core::params::{ParamId, ParamValue, Params};
-use rustflight_core::state_machine::{Event, StateManager};
+use voloxide_core::controller::quad_controller::ControllerOutput;
+use voloxide_core::mixer::quad_mixer::QuadMixer;
+use voloxide_core::mixer::{Mixer, MixerCtx, MixerStatus};
+use voloxide_core::params::{ParamId, ParamValue, Params};
+use voloxide_core::state_machine::{Event, StateManager};
 
 fn test_params() -> Params {
     let mut params = Params::default();
@@ -252,12 +252,12 @@ fn test_quad_mixer_emits_rosflight_ten_output_shape() {
     assert!(
         mixer.output_types()[0..4]
             .iter()
-            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Motor)
+            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Motor)
     );
     assert!(
         mixer.output_types()[4..10]
             .iter()
-            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Aux)
+            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Aux)
     );
     assert_eq!(&outputs[4..10], &[0.0; 6]);
 }
@@ -316,11 +316,11 @@ fn test_custom_mixer_loads_rosflight_parameter_matrix_and_output_types() {
 
     assert_eq!(
         mixer.output_types()[0],
-        rustflight_core::mixer::MixerOutputType::Motor
+        voloxide_core::mixer::MixerOutputType::Motor
     );
     assert_eq!(
         mixer.output_types()[1],
-        rustflight_core::mixer::MixerOutputType::Aux
+        voloxide_core::mixer::MixerOutputType::Aux
     );
     assert_eq!(mixer.default_pwm_rates()[0], 490.0);
     assert!((outputs[0] - 0.2).abs() < 1e-6);
@@ -341,7 +341,7 @@ fn test_invalid_primary_mixer_reports_status_without_mutating_state() {
     assert!(
         !state
             .get_errors()
-            .contains(rustflight_core::state_machine::ErrorFlag::INVALID_MIXER)
+            .contains(voloxide_core::state_machine::ErrorFlag::INVALID_MIXER)
     );
 }
 
@@ -359,12 +359,12 @@ fn test_canned_hex_x_selection_uses_rosflight_output_ownership() {
     assert!(
         mixer.output_types()[0..6]
             .iter()
-            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Motor)
+            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Motor)
     );
     assert!(
         mixer.output_types()[6..10]
             .iter()
-            .all(|kind| *kind == rustflight_core::mixer::MixerOutputType::Aux)
+            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Aux)
     );
     assert_eq!(mixer.default_pwm_rates()[0], 490.0);
     assert_eq!(mixer.default_pwm_rates()[8], 50.0);
@@ -390,11 +390,11 @@ fn test_fixedwing_mixer_applies_reversal_params_before_mixing() {
 
     assert_eq!(
         mixer.output_types()[0],
-        rustflight_core::mixer::MixerOutputType::Servo
+        voloxide_core::mixer::MixerOutputType::Servo
     );
     assert_eq!(
         mixer.output_types()[4],
-        rustflight_core::mixer::MixerOutputType::Motor
+        voloxide_core::mixer::MixerOutputType::Motor
     );
     assert!((outputs[0] + 0.4).abs() < 1e-6);
     assert!((outputs[1] - 0.5).abs() < 1e-6);

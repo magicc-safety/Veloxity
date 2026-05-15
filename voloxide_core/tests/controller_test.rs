@@ -39,7 +39,7 @@ use serde::Serialize;
 use std::error::Error;
 
 // Import your library components
-use rustflight_core::{
+use voloxide_core::{
     command_manager::{CombinedControl, ControlChannel, ControlType},
     controller::{Controller, ControllerCtx, quad_controller::QuadController},
     estimator::quad_estimator::AttitudeState,
@@ -249,7 +249,7 @@ fn run_mixed_mode_simulation() -> Result<(), Box<dyn Error>> {
     let mut dynamics = QuadcopterDynamics::new(0.007, 0.007, 0.012);
 
     std::fs::create_dir_all("tests/controller")?;
-    let output_path = "tests/controller/rust_controller_results.csv";
+    let output_path = "tests/controller/voloxide_controller_results.csv";
     let mut wtr = WriterBuilder::new().from_path(output_path)?;
     println!(
         "\nRunning Mixed Mode simulation (Rate -> Angle Sine -> Angle Square) and writing to '{}'...",

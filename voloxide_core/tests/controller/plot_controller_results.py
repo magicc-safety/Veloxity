@@ -168,5 +168,5 @@ def plot_results(csv_path):
 
 if __name__ == "__main__":
     # Default path relative to crate root
-    path = "rust_controller_results.csv"
+    path = "voloxide_controller_results.csv"
     plot_results(path)

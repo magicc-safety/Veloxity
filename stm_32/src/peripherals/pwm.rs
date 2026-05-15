@@ -44,7 +44,7 @@ use embassy_stm32::peripherals::{
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel as EmbassyTimerChannel;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
-use rustflight_core::pwm::{
+use voloxide_core::pwm::{
     DshotCommand, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
 };
 

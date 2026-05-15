@@ -37,9 +37,9 @@
 use std::time::Instant;
 
 use crate::ros_messages;
-use rustflight_core::board::BoardIo;
-use rustflight_core::errors;
-use rustflight_core::pwm::{
+use voloxide_core::board::BoardIo;
+use voloxide_core::errors;
+use voloxide_core::pwm::{
     PwmDriver, PwmError, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
 };
 
@@ -223,7 +223,7 @@ impl PwmDriver for SimPwmDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustflight_core::{board::BoardIo, errors};
+    use voloxide_core::{board::BoardIo, errors};
     use std::time::Duration;
 
     struct TestBoard {

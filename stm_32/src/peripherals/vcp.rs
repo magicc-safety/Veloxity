@@ -42,8 +42,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
 use embassy_usb::Builder;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-use rustflight_core::comm_manager::comm_link_trait::EmbeddedComInterface;
-use rustflight_core::errors::SensorError;
+use voloxide_core::comm_manager::comm_link_trait::EmbeddedComInterface;
+use voloxide_core::errors::SensorError;
 // use defmt;
 
 pub const VCP_TX_BUFF_SIZE: usize = 2048;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch ROSflight standalone sim and verify RustFlight directional signs.
+"""Launch ROSflight standalone sim and verify Voloxide directional signs.
 
 Run from an environment with Jazzy, the ROSflight workspace, this overlay, and
 RMW_IMPLEMENTATION=rmw_zenoh_cpp sourced/exported.
@@ -186,7 +186,7 @@ def start_processes(baseline: str, use_rviz: bool) -> list[subprocess.Popen]:
     launch_file = (
         "multirotor_standalone_upstream_baseline.launch.py"
         if baseline == "upstream"
-        else "multirotor_standalone_rust.launch.py"
+        else "multirotor_standalone_voloxide.launch.py"
     )
     processes = [
         subprocess.Popen(["ros2", "run", "rmw_zenoh_cpp", "rmw_zenohd"]),
@@ -194,7 +194,7 @@ def start_processes(baseline: str, use_rviz: bool) -> list[subprocess.Popen]:
             [
                 "ros2",
                 "launch",
-                "rust_sil_board_shim",
+                "voloxide_sil_board_shim",
                 launch_file,
                 "use_builtin_rc:=false" if baseline == "rust" else "use_sim_time:=false",
                 f"use_rviz:={'true' if use_rviz else 'false'}",

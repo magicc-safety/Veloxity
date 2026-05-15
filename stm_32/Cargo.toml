@@ -39,7 +39,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rustflight_core = { workspace = true }
+voloxide_core = { workspace = true }
 
 embassy-executor = { version = "0.7.0", features = [
   "task-arena-size-32768",

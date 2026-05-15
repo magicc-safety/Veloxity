@@ -34,11 +34,11 @@
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::board::BoardIo;
-use rustflight_core::errors;
-use rustflight_core::params::Params;
-use rustflight_core::pwm::{PwmDriver, PwmError};
-use rustflight_core::sensors::SensorBus;
+use voloxide_core::board::BoardIo;
+use voloxide_core::errors;
+use voloxide_core::params::Params;
+use voloxide_core::pwm::{PwmDriver, PwmError};
+use voloxide_core::sensors::SensorBus;
 
 use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
@@ -130,9 +130,9 @@ impl PwmDriver for BoardPwmDriver {
             .map_err(timer_error_to_pwm_error)
     }
 
-    fn flush<B: rustflight_core::board::BoardIo>(&mut self, _board: &mut B) {}
+    fn flush<B: voloxide_core::board::BoardIo>(&mut self, _board: &mut B) {}
 
-    fn send_commands<B: rustflight_core::board::BoardIo>(
+    fn send_commands<B: voloxide_core::board::BoardIo>(
         &mut self,
         board: &mut B,
         commands: &[f64],

@@ -66,7 +66,7 @@
 #         data_log.append(row)
 #
 #     df = pd.DataFrame(data_log)
-#     output_filename = '/Users/workhorse/Coding/rust/rustflight_alpha/rustflight_core/tests/imu_sensor_data.csv'
+#     output_filename = '/Users/workhorse/Coding/rust/voloxide/voloxide_core/tests/imu_sensor_data.csv'
 #     df.to_csv(output_filename, index=False)
 #     print(f"Successfully generated full data to {output_filename}")
 #

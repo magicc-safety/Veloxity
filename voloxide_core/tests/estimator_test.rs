@@ -40,7 +40,7 @@ use std::error::Error;
 use std::fs::File;
 
 // Import the necessary items from your actual library crate
-use rustflight_core::{
+use voloxide_core::{
     estimator::NamedEstimator, estimator::quad_estimator::QuadEstimator, packets::ImuPacket,
     params::Params, sensors::ProcessedSensors,
 };
@@ -100,7 +100,7 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
 
     // Cargo runs tests from the project root, so paths are relative to that.
     let input_path = "tests/estimator/imu_sensor_data.csv";
-    let output_path = "tests/estimator/rust_estimator_results.csv";
+    let output_path = "tests/estimator/voloxide_estimator_results.csv";
 
     let file = File::open(input_path)?;
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);

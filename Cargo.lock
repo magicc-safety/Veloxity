@@ -2002,8 +2002,8 @@ name = "nucleo"
 version = "0.1.0"
 dependencies = [
  "panic-halt",
- "rustflight_core",
  "stm_32",
+ "voloxide_core",
 ]
 
 [[package]]
@@ -2294,8 +2294,8 @@ name = "pixracerpro"
 version = "0.1.0"
 dependencies = [
  "panic-halt",
- "rustflight_core",
  "stm_32",
+ "voloxide_core",
 ]
 
 [[package]]
@@ -2707,21 +2707,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver 1.0.27",
-]
-
-[[package]]
-name = "rustflight_core"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "critical-section",
- "csv",
- "libm",
- "mavio",
- "mavspec",
- "micro_algebra",
- "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -3183,9 +3168,9 @@ dependencies = [
  "cdr",
  "chrono",
  "critical-section",
- "rustflight_core",
  "serde",
  "tokio",
+ "voloxide_core",
  "zenoh",
 ]
 
@@ -3359,8 +3344,8 @@ dependencies = [
  "embedded-hal-async",
  "embedded-hal-nb",
  "embedded-io-async",
- "rustflight_core",
  "static_cell",
+ "voloxide_core",
 ]
 
 [[package]]
@@ -4004,6 +3989,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de437e2a6208b014ab52972a27e59b33fa2920d3e00fe05026167a1c509d19cc"
 dependencies = [
  "vcell",
+]
+
+[[package]]
+name = "voloxide_core"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "critical-section",
+ "csv",
+ "libm",
+ "mavio",
+ "mavspec",
+ "micro_algebra",
+ "num-traits",
+ "serde",
 ]
 
 [[package]]

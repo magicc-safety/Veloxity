@@ -35,11 +35,11 @@
 
 [workspace]
 resolver = "3"
-members = ["nucleo", "pixracerpro", "rustflight_core", "sim", "stm_32"]
+members = ["nucleo", "pixracerpro", "voloxide_core", "sim", "stm_32"]
 
 # Define your core library as a shared dependency
 [workspace.dependencies]
-rustflight_core = { path = "./rustflight_core" }
+voloxide_core = { path = "./voloxide_core" }
 stm_32 = { path = "./stm_32" }
 
 [workspace.lints.rust]

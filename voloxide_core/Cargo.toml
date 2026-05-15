@@ -34,7 +34,7 @@
 #******************************************************************************
 
 [package]
-name = "rustflight_core"
+name = "voloxide_core"
 version = "0.1.0"
 edition = "2024"
 

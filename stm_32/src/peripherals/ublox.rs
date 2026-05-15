@@ -44,8 +44,8 @@ use embassy_time::Instant;
 use embassy_time::with_timeout;
 
 use super::pps;
-use rustflight_core::errors;
-use rustflight_core::packets;
+use voloxide_core::errors;
+use voloxide_core::packets;
 
 // use defmt::info;
 //use defmt::trace;

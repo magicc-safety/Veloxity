@@ -40,7 +40,7 @@ edition = "2024"
 
 [dependencies]
 stm_32 = { workspace = true }
-rustflight_core = { workspace = true }
+voloxide_core = { workspace = true }
 
 # # for debugging stm32 devices:
 # defmt = { version = "0.3" }
@@ -51,6 +51,6 @@ panic-halt = "1.0.0"
 workspace = true
 
 [[bin]]
-name = "rustflight"
+name = "voloxide"
 test = false
 bench = false

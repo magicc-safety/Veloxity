@@ -44,8 +44,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Instant, Timer};
 use embedded_hal_async::spi::SpiDevice as _;
-use rustflight_core::errors;
-use rustflight_core::packets::{ImuPacket, RosflightPacketHeader};
+use voloxide_core::errors;
+use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
 //use defmt::info;
 
 // Device dependent

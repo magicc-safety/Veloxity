@@ -34,10 +34,10 @@
 // *
 // ******************************************************************************
 // **/
-use rustflight_core::board::BoardIo;
-use rustflight_core::errors;
-use rustflight_core::params::Params;
-use rustflight_core::sensors::SensorBus;
+use voloxide_core::board::BoardIo;
+use voloxide_core::errors;
+use voloxide_core::params::Params;
+use voloxide_core::sensors::SensorBus;
 
 use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;

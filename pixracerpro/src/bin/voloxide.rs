@@ -2,8 +2,8 @@
 #![no_main]
 // /**
 // ******************************************************************************
-// * File     : rustflight.rs
-// * Date     : May 8, 2025
+// * File     : voloxide.rs
+// * Date     : October 8, 2025
 // ******************************************************************************
 // *
 // * Copyright (c) 2023, AeroVironment, Inc.
@@ -37,9 +37,10 @@
 // ******************************************************************************
 // **/
 use cortex_m_rt::entry;
-use nucleo::*;
 use panic_halt as _;
-use rustflight_core::{
+use pixracerpro::pwm::BoardPwmDriver;
+use pixracerpro::*;
+use voloxide_core::{
     board::BoardIo, bodytype::BodyType, bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface, controller::Controller, mixer::Mixer,
     params::Params, state_machine::StateManager, world::World,
@@ -48,8 +49,8 @@ use stm_32::*;
 
 #[entry]
 fn main() -> ! {
-    // board implementation
-    let (mut board, pwm_driver) = board::Board::new();
+    // board implementation & servos object
+    let (mut board, mut servos) = board::Board::new();
     let mut params = Params::default();
     if !board.read_params(&mut params) {
         params.set_defaults();
@@ -58,15 +59,19 @@ fn main() -> ! {
 
     // body type instantiations
     let estimator =
-        <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
+        <voloxide_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
     let controller =
-        <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
-    let mixer = <rustflight_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&params);
+        <voloxide_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
+    let mixer = <voloxide_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&params);
 
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
 
+    // state_manager
     let state_manager = StateManager::new();
+
+    // PWM Driver from servos object
+    let pwm_driver = BoardPwmDriver::new(&mut servos);
 
     let mut world = World::<_, Quadrotor, _, _>::init(
         board,

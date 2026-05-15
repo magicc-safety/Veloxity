@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chrono::{Datelike, TimeZone, Timelike, Utc};
-use rustflight_core::{
+use voloxide_core::{
     board::BoardIo,
     bodytype::quadrotor::Quadrotor,
     comm_manager::comm_link_trait::mavlink::MavlinkInterface,
@@ -25,12 +25,12 @@ use rustflight_core::{
 const NUM_PWM_CHANNELS: usize = 14;
 const DEFAULT_MAVLINK_BIND: &str = "127.0.0.1:14525";
 const DEFAULT_MAVLINK_REMOTE: &str = "127.0.0.1:14520";
-const DEFAULT_PARAM_STORE: &str = "rustflight_sim.params";
-const PARAM_STORE_ENV: &str = "RUSTFLIGHT_SIM_PARAM_STORE";
+const DEFAULT_PARAM_STORE: &str = "voloxide_sim.params";
+const PARAM_STORE_ENV: &str = "VOLOXIDE_SIM_PARAM_STORE";
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiVector3 {
+pub struct VoloxideFfiVector3 {
     pub x: f64,
     pub y: f64,
     pub z: f64,
@@ -38,23 +38,23 @@ pub struct RustflightFfiVector3 {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiImu {
+pub struct VoloxideFfiImu {
     pub timestamp_us: u64,
-    pub angular_velocity: RustflightFfiVector3,
-    pub linear_acceleration: RustflightFfiVector3,
+    pub angular_velocity: VoloxideFfiVector3,
+    pub linear_acceleration: VoloxideFfiVector3,
     pub temperature_kelvin: f32,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiMag {
+pub struct VoloxideFfiMag {
     pub timestamp_us: u64,
-    pub magnetic_field: RustflightFfiVector3,
+    pub magnetic_field: VoloxideFfiVector3,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiBaro {
+pub struct VoloxideFfiBaro {
     pub timestamp_us: u64,
     pub altitude: f32,
     pub pressure: f32,
@@ -63,7 +63,7 @@ pub struct RustflightFfiBaro {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiGnss {
+pub struct VoloxideFfiGnss {
     pub timestamp_us: u64,
     pub fix_type: u8,
     pub num_sat: u8,
@@ -82,7 +82,7 @@ pub struct RustflightFfiGnss {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiAirspeed {
+pub struct VoloxideFfiAirspeed {
     pub timestamp_us: u64,
     pub differential_pressure: f32,
     pub temperature_kelvin: f32,
@@ -91,7 +91,7 @@ pub struct RustflightFfiAirspeed {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiRange {
+pub struct VoloxideFfiRange {
     pub timestamp_us: u64,
     pub range: f32,
     pub min_range: f32,
@@ -100,7 +100,7 @@ pub struct RustflightFfiRange {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiBattery {
+pub struct VoloxideFfiBattery {
     pub timestamp_us: u64,
     pub voltage: f32,
     pub current: f32,
@@ -108,12 +108,12 @@ pub struct RustflightFfiBattery {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct RustflightFfiRc {
+pub struct VoloxideFfiRc {
     pub timestamp_us: u64,
     pub values: [u16; 8],
 }
 
-impl Default for RustflightFfiRc {
+impl Default for VoloxideFfiRc {
     fn default() -> Self {
         Self {
             timestamp_us: 0,
@@ -124,28 +124,28 @@ impl Default for RustflightFfiRc {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RustflightFfiSensorSnapshot {
+pub struct VoloxideFfiSensorSnapshot {
     pub has_imu: bool,
-    pub imu: RustflightFfiImu,
+    pub imu: VoloxideFfiImu,
     pub has_mag: bool,
-    pub mag: RustflightFfiMag,
+    pub mag: VoloxideFfiMag,
     pub has_baro: bool,
-    pub baro: RustflightFfiBaro,
+    pub baro: VoloxideFfiBaro,
     pub has_gnss: bool,
-    pub gnss: RustflightFfiGnss,
+    pub gnss: VoloxideFfiGnss,
     pub has_airspeed: bool,
-    pub airspeed: RustflightFfiAirspeed,
+    pub airspeed: VoloxideFfiAirspeed,
     pub has_range: bool,
-    pub range: RustflightFfiRange,
+    pub range: VoloxideFfiRange,
     pub has_battery: bool,
-    pub battery: RustflightFfiBattery,
+    pub battery: VoloxideFfiBattery,
     pub has_rc: bool,
-    pub rc: RustflightFfiRc,
+    pub rc: VoloxideFfiRc,
 }
 
 #[derive(Default)]
 struct SharedSensors {
-    snapshot: RustflightFfiSensorSnapshot,
+    snapshot: VoloxideFfiSensorSnapshot,
 }
 
 #[derive(Clone)]
@@ -245,11 +245,11 @@ struct FfiBoard {
 
 impl FfiBoard {
     fn new(sensors: Arc<Mutex<SharedSensors>>) -> io::Result<Self> {
-        let bind_addr: SocketAddr = std::env::var("RUSTFLIGHT_MAVLINK_BIND")
+        let bind_addr: SocketAddr = std::env::var("VOLOXIDE_MAVLINK_BIND")
             .unwrap_or_else(|_| DEFAULT_MAVLINK_BIND.into())
             .parse()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-        let remote_addr: SocketAddr = std::env::var("RUSTFLIGHT_MAVLINK_REMOTE")
+        let remote_addr: SocketAddr = std::env::var("VOLOXIDE_MAVLINK_REMOTE")
             .unwrap_or_else(|_| DEFAULT_MAVLINK_REMOTE.into())
             .parse()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
@@ -451,14 +451,14 @@ impl BoardIo for FfiBoard {
 
 type FfiWorld = World<FfiBoard, Quadrotor, MavlinkInterface, FfiPwmDriver>;
 
-pub struct RustflightFfiHandle {
+pub struct VoloxideFfiHandle {
     sensors: Arc<Mutex<SharedSensors>>,
     outputs: Arc<Mutex<[u16; NUM_PWM_CHANNELS]>>,
     world: FfiWorld,
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rustflight_sim_create() -> *mut RustflightFfiHandle {
+pub extern "C" fn voloxide_sim_create() -> *mut VoloxideFfiHandle {
     let sensors = Arc::new(Mutex::new(SharedSensors::default()));
     let outputs = Arc::new(Mutex::new([1000; NUM_PWM_CHANNELS]));
 
@@ -478,7 +478,7 @@ pub extern "C" fn rustflight_sim_create() -> *mut RustflightFfiHandle {
         board, params, mavlink, state, estimator, controller, mixer, pwm,
     );
 
-    Box::into_raw(Box::new(RustflightFfiHandle {
+    Box::into_raw(Box::new(VoloxideFfiHandle {
         sensors,
         outputs,
         world,
@@ -486,16 +486,16 @@ pub extern "C" fn rustflight_sim_create() -> *mut RustflightFfiHandle {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rustflight_sim_destroy(handle: *mut RustflightFfiHandle) {
+pub unsafe extern "C" fn voloxide_sim_destroy(handle: *mut VoloxideFfiHandle) {
     if !handle.is_null() {
         drop(unsafe { Box::from_raw(handle) });
     }
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rustflight_sim_set_sensors(
-    handle: *mut RustflightFfiHandle,
-    snapshot: *const RustflightFfiSensorSnapshot,
+pub unsafe extern "C" fn voloxide_sim_set_sensors(
+    handle: *mut VoloxideFfiHandle,
+    snapshot: *const VoloxideFfiSensorSnapshot,
 ) -> bool {
     if handle.is_null() || snapshot.is_null() {
         return false;
@@ -510,7 +510,7 @@ pub unsafe extern "C" fn rustflight_sim_set_sensors(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rustflight_sim_run_once(handle: *mut RustflightFfiHandle) -> bool {
+pub unsafe extern "C" fn voloxide_sim_run_once(handle: *mut VoloxideFfiHandle) -> bool {
     if handle.is_null() {
         return false;
     }
@@ -520,8 +520,8 @@ pub unsafe extern "C" fn rustflight_sim_run_once(handle: *mut RustflightFfiHandl
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rustflight_sim_get_pwm(
-    handle: *const RustflightFfiHandle,
+pub unsafe extern "C" fn voloxide_sim_get_pwm(
+    handle: *const VoloxideFfiHandle,
     output: *mut u16,
     output_len: usize,
 ) -> usize {

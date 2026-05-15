@@ -46,9 +46,9 @@ use embassy_time::Timer;
 
 //use defmt::trace;
 
-use rustflight_core::comm_manager::comm_link_trait::EmbeddedComInterface;
-use rustflight_core::errors;
-use rustflight_core::packets;
+use voloxide_core::comm_manager::comm_link_trait::EmbeddedComInterface;
+use voloxide_core::errors;
+use voloxide_core::packets;
 
 pub static TX_BUFF_SIZE: usize = 4 * 2048;
 pub static RX_BUFF_SIZE: usize = 4 * 2048;

@@ -48,7 +48,7 @@ use embassy_time::Duration;
 use embassy_time::Timer;
 use embassy_time::with_timeout;
 use embedded_hal_async::i2c::I2c as _;
-use rustflight_core::{errors, packets};
+use voloxide_core::{errors, packets};
 
 pub static PITOT_SIGNAL: Signal<
     CriticalSectionRawMutex,

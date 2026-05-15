@@ -49,8 +49,8 @@ use embassy_time::with_timeout;
 use embedded_hal_async::spi::SpiDevice as _;
 
 use crate::synch_at;
-use rustflight_core::errors;
-use rustflight_core::packets;
+use voloxide_core::errors;
+use voloxide_core::packets;
 
 use core::module_path;
 //use defmt::info;

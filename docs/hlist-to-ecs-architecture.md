@@ -1,4 +1,4 @@
-# RustFlight World/Ports Architecture Migration Record
+# Voloxide World/Ports Architecture Migration Record
 
 ## Working Agreement
 
@@ -15,7 +15,7 @@ User requirements for ongoing work:
 - Mark each stage of the migration with what changed, why it changed, how it preserves ROSflight compatibility, and what remains.
 - Add tests for each new component or scheduler handoff introduced in the next part of the stack.
 - Run focused tests for each added component before moving on.
-- Also run broader validation checks, especially `cargo check -p rustflight_core --lib` and `cargo check -p sim`, before committing a completed slice.
+- Also run broader validation checks, especially `cargo check -p voloxide_core --lib` and `cargo check -p sim`, before committing a completed slice.
 - Preserve ROSflight/rosflight_io wire behavior while improving internal causality.
 - Treat current ROSflight 2.x behavior from `rosflight_firmware` and `rosflight_ros_pkgs/rosflight_io` as the compatibility target.
 - Responses that imply completed work should be sent after the relevant owning system completes that work.
@@ -44,13 +44,13 @@ Workflow notes for future agents:
 
 ## Current Context
 
-RustFlight formerly used HLists to encode board sensor inventory, sensor processing pipelines, body-type sensor requirements, telemetry packet access, and compile-time compatibility between boards and vehicle bodies. The active source now runs through `World`, `BoardIo`, named sensor resources, bounded event queues, and explicit systems.
+Voloxide formerly used HLists to encode board sensor inventory, sensor processing pipelines, body-type sensor requirements, telemetry packet access, and compile-time compatibility between boards and vehicle bodies. The active source now runs through `World`, `BoardIo`, named sensor resources, bounded event queues, and explicit systems.
 
 That design solved an important early problem: it let the compiler prove that a selected board could provide the packet types required by a selected body type. It also made the raw-to-processed sensor pipeline generic over different board shapes.
 
 The downside is that the type system is now carrying too much architectural bookkeeping. Adding a board/body/configuration requires positional type indices such as `There<There<There<Here>>>`, and board implementations have to write through nested tuple fields such as `sensors.1.1.1.0`. This makes the architecture hard to extend, hard to read, and brittle when sensors, telemetry streams, or body requirements change.
 
-The goal remains to keep RustFlight modular and deterministic while replacing HList rigidity with named resources, fixed-order systems, and bounded events.
+The goal remains to keep Voloxide modular and deterministic while replacing HList rigidity with named resources, fixed-order systems, and bounded events.
 
 ## Original HList Responsibilities
 
@@ -75,7 +75,7 @@ In this context, ECS means:
 - Events: bounded queues or single-slot event buffers used to decouple producers from consumers.
 - Schedule: a fixed, deterministic order for running systems each control loop.
 
-This is closer to "resources plus systems plus events" than to game-style entity/component tables. RustFlight has a small number of singleton subsystems, not thousands of similar entities.
+This is closer to "resources plus systems plus events" than to game-style entity/component tables. Voloxide has a small number of singleton subsystems, not thousands of similar entities.
 
 ## Named Sensor Resources
 
@@ -229,7 +229,7 @@ send_telemetry();
 send_comm_responses();
 ```
 
-The schedule is intentionally explicit. RustFlight should not need a dynamic scheduler for the embedded core. Fixed ordering keeps timing, side effects, and safety behavior understandable.
+The schedule is intentionally explicit. Voloxide should not need a dynamic scheduler for the embedded core. Fixed ordering keeps timing, side effects, and safety behavior understandable.
 
 ## World Shape
 
@@ -263,7 +263,7 @@ This preserves the current board/body generic structure without forcing every in
 
 ## Why Not A General ECS Crate?
 
-The core crate is `no_std`, deterministic, and embedded-oriented. General ECS crates often assume dynamic storage, allocation, runtime queries, or flexible scheduling. RustFlight does not need most of that.
+The core crate is `no_std`, deterministic, and embedded-oriented. General ECS crates often assume dynamic storage, allocation, runtime queries, or flexible scheduling. Voloxide does not need most of that.
 
 The better fit is a small static ECS-inspired architecture:
 
@@ -302,7 +302,7 @@ Subsystems should communicate through named resources and emitted events. The ma
 
 ## Ports As The Central Abstraction
 
-Ports plus a fixed schedule are the best fit for RustFlight.
+Ports plus a fixed schedule are the best fit for Voloxide.
 
 A `World` is still useful internally as the owner of all state, but modules should not receive `&mut World`. Systems should receive ports, where each port is a narrow capability: read params, write state, emit log, send comm response, read sensors, write PWM, and so on.
 
@@ -549,7 +549,7 @@ Use these rules:
 7. No dynamic subscriber registry in the embedded core.
 8. Cross-module communication uses events or ports, not arbitrary peer references.
 
-This gives RustFlight a strong architecture:
+This gives Voloxide a strong architecture:
 
 ```text
 World = ownership
@@ -589,7 +589,7 @@ This section records the current restructuring work so another engineer can resu
 
 The earlier question "Should `sim` remain the proving ground while we restructure core, or should core tests use only dummy board/test fixtures until core is stable?" means:
 
-- Option A: during core refactors, test through a fake/dummy board and keep all tests inside `rustflight_core`.
+- Option A: during core refactors, test through a fake/dummy board and keep all tests inside `voloxide_core`.
 - Option B: during core refactors, also use the `sim` crate as an integration target to prove the migrated core works in a realistic application.
 
 The current user preference is to recreate the dummy board for tests first, then finish `sim` after this core work is done.
@@ -608,7 +608,7 @@ Before this work:
 4. It returned `Option<ParamId>`.
 5. `ROSFlight::run` later called `Rc::param_change_callback` and manually updated command-manager failsafe config.
 
-That meant RustFlight could acknowledge a parameter change before all interested modules had reacted to it.
+That meant Voloxide could acknowledge a parameter change before all interested modules had reacted to it.
 
 ### New Intended Behavior
 
@@ -626,7 +626,7 @@ This is the first concrete use of the ports/events model.
 
 ### Files Added
 
-`rustflight_core/src/events.rs`
+`voloxide_core/src/events.rs`
 
 - Adds `EventQueue<T, const N: usize>`.
 - Uses a fixed-size ring buffer backed by `[Option<T>; N]`.
@@ -643,7 +643,7 @@ This is the first concrete use of the ports/events model.
 - Adds `ParamEventQueues`.
 - Adds focused unit tests for FIFO order and non-draining iteration.
 
-`rustflight_core/src/ports.rs`
+`voloxide_core/src/ports.rs`
 
 - Adds initial port types:
   - `ParamsReadPort`
@@ -654,7 +654,7 @@ This is the first concrete use of the ports/events model.
 - These are intentionally narrow capability wrappers.
 - The scheduler or high-level orchestration code is expected to construct ports from world fields.
 
-`rustflight_core/src/param_system.rs`
+`voloxide_core/src/param_system.rs`
 
 - Adds `ParamApplyCtx`.
 - Adds `apply_param_requests`.
@@ -663,14 +663,14 @@ This is the first concrete use of the ports/events model.
 
 ### Files Modified
 
-`rustflight_core/src/lib.rs`
+`voloxide_core/src/lib.rs`
 
 - Exposes new modules:
   - `events`
   - `ports`
   - `param_system`
 
-`rustflight_core/src/comm_manager.rs`
+`voloxide_core/src/comm_manager.rs`
 
 - Imports `CommResponse`, `ParamEventQueues`, and `ParamSetRequested`.
 - Changes `act_on_messages` so it no longer returns `Option<ParamId>`.
@@ -685,7 +685,7 @@ This is the first concrete use of the ports/events model.
 - Adds `send_comm_responses`, which drains `CommResponse` events and sends `PARAM_VALUE`.
 - `send_comm_responses` also updates `CommManager::sysid` when the accepted response is for `PARAM_SYSTEM_ID`, preserving existing sysid behavior while moving it to the response stage.
 
-`rustflight_core/src/rosflight.rs`
+`voloxide_core/src/rosflight.rs`
 
 - Adds a `param_events: ParamEventQueues` field to `ROSFlight`.
 - Initializes it in `ROSFlight::init`.
@@ -697,7 +697,7 @@ This is the first concrete use of the ports/events model.
 - Clears `param_events.changes` after the stage.
 - Removes the old later `if let Some(param_id) = changed_param_id` callback block.
 
-`rustflight_core/src/param_reactions.rs`
+`voloxide_core/src/param_reactions.rs`
 
 - Adds named systems for parameter-change subscribers.
 - Adds `RcParamChangedCtx`.
@@ -709,7 +709,7 @@ This is the first concrete use of the ports/events model.
 - `command_on_param_changed` preserves the existing failsafe-config update behavior for `PARAM_FAILSAFE_THROTTLE` and `PARAM_FIXED_WING`.
 - Adds focused coverage for command-manager reaction filtering.
 
-`rustflight_core/src/rc.rs`
+`voloxide_core/src/rc.rs`
 
 - `Rc::param_change_callback` no longer takes `Board` or `CommManager`.
 - `Rc::log_switch_mappings` no longer takes `CommManager`.
@@ -717,7 +717,7 @@ This is the first concrete use of the ports/events model.
 - RC mapping behavior is preserved.
 - Logging still goes through the existing global `log_info!` path for now.
 
-`rustflight_core/src/sensors.rs`
+`voloxide_core/src/sensors.rs`
 
 - Adds `SensorBus`.
 - Adds `ProcessedSensors`.
@@ -726,7 +726,7 @@ This is the first concrete use of the ports/events model.
 - Both resources have `clear` helpers.
 - Adds focused coverage that default sensor resources are empty.
 
-`rustflight_core/src/sensor_systems.rs`
+`voloxide_core/src/sensor_systems.rs`
 
 - Adds `SensorProcessorSet`.
 - Adds `process_sensor_bus`.
@@ -735,7 +735,7 @@ This is the first concrete use of the ports/events model.
 - The default processor set uses the current real IMU and magnetometer processors plus passthrough processors for the remaining sensor types.
 - Tests show a raw RC packet moving into `ProcessedSensors::rc` and being consumed from `SensorBus::rc`.
 
-`rustflight_core/src/board.rs`
+`voloxide_core/src/board.rs`
 
 - Adds default `BoardTrait::update_sensor_bus`.
 - The default implementation clears the named sensor bus.
@@ -744,21 +744,21 @@ This is the first concrete use of the ports/events model.
 
 ### Validation Status
 
-`cargo check -p rustflight_core --lib` passes after the initial parameter-path rewrite.
+`cargo check -p voloxide_core --lib` passes after the initial parameter-path rewrite.
 
 Focused unit checks for the new modules pass:
 
-- `cargo test -p rustflight_core events::tests --lib`
-- `cargo test -p rustflight_core param_system::tests --lib`
-- `cargo test -p rustflight_core comm_manager::tests --lib`
-- `cargo test -p rustflight_core param_reactions::tests --lib`
-- `cargo test -p rustflight_core sensors::tests --lib`
-- `cargo test -p rustflight_core sensor_systems::tests --lib`
+- `cargo test -p voloxide_core events::tests --lib`
+- `cargo test -p voloxide_core param_system::tests --lib`
+- `cargo test -p voloxide_core comm_manager::tests --lib`
+- `cargo test -p voloxide_core param_reactions::tests --lib`
+- `cargo test -p voloxide_core sensors::tests --lib`
+- `cargo test -p voloxide_core sensor_systems::tests --lib`
 
 Additional status:
 
 - This historical note is superseded by the Compatibility List Item 4 test cleanup.
-- `cargo test -p rustflight_core` now passes, including the migrated controller, estimator, and mixer integration tests.
+- `cargo test -p voloxide_core` now passes, including the migrated controller, estimator, and mixer integration tests.
 
 Formatting status:
 
@@ -779,7 +779,7 @@ Former stale full-package test status:
 
 A new test-only support module has been started:
 
-`rustflight_core/src/test_support.rs`
+`voloxide_core/src/test_support.rs`
 
 - Compiled only under `#[cfg(test)]`.
 - Adds `TestBoard`.
@@ -869,7 +869,7 @@ After the parameter path is stable and committed, proceed through core in this o
 
 ## Planned Crate Order
 
-1. `rustflight_core`
+1. `voloxide_core`
 2. `sim`
 3. `pixracerpro`
 4. `nucleo`
@@ -900,13 +900,13 @@ The exact order after `pixracerpro` can change based on hardware priorities, but
 - Default MAVLink bind address: `127.0.0.1:14557`.
 - Default MAVLink remote address: `127.0.0.1:14520`.
 - These can be changed with:
-  - `RUSTFLIGHT_MAVLINK_BIND`
-  - `RUSTFLIGHT_MAVLINK_REMOTE`
+  - `VOLOXIDE_MAVLINK_BIND`
+  - `VOLOXIDE_MAVLINK_REMOTE`
 - Zenoh is used as the board-layer bridge for ROS-shaped sensor messages.
 - Default Zenoh endpoint: `tcp/127.0.0.1:7447`.
-- This can be changed with `RUSTFLIGHT_ZENOH_ENDPOINT`.
+- This can be changed with `VOLOXIDE_ZENOH_ENDPOINT`.
 
-`sim/src/bin/rustflight.rs`
+`sim/src/bin/voloxide.rs`
 
 - The old `ROSFlight`/HList sim binary has been deleted and replaced.
 - The replacement binary instantiates the new `World`.
@@ -931,13 +931,13 @@ ROSflight SIL reference findings:
 - The ROSflight docs explicitly describe running `rosflight_io` in simulation with `udp:=true`.
 - Therefore, this branch should treat UDP MAVLink as the first SIL transport.
 - A virtual USB/PTY transport can still be added later if a specific colcon/ROS integration requires a serial-looking device, but it is not the ROSflight default SIL path.
-- In this RustFlight design, a Zenoh bridge is assumed to provide ROS-shaped sensor messages into the board layer.
-- The board layer interprets those Zenoh payloads as ROS message structs and converts them into RustFlight packets.
+- In this Voloxide design, a Zenoh bridge is assumed to provide ROS-shaped sensor messages into the board layer.
+- The board layer interprets those Zenoh payloads as ROS message structs and converts them into Voloxide packets.
 
 Validation:
 
 - `cargo check -p sim` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 
 Next sim step:
 
@@ -971,7 +971,7 @@ The new path must follow these rules:
 
 Migration shape:
 
-1. Add `world` module in `rustflight_core`.
+1. Add `world` module in `voloxide_core`.
 2. Add a parallel `World<B, BT, CI, PD>` type.
 3. Reuse existing modules where possible:
    - `Params`
@@ -1012,7 +1012,7 @@ Initial scheduler non-goals:
 
 Acceptance criteria for first `World` slice:
 
-- `rustflight_core` library checks.
+- `voloxide_core` library checks.
 - focused `world` tests pass.
 - existing focused parameter/sensor tests still pass.
 - old `ROSFlight` path remains available.
@@ -1027,7 +1027,7 @@ Acceptance criteria for each additional scheduler/component slice:
 
 ## World Scheduler Progress
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - Adds parallel `World<B, BT, CI, PD>`.
 - This is separate from the existing `ROSFlight` type.
@@ -1068,14 +1068,14 @@ Acceptance criteria for each additional scheduler/component slice:
   - PWM command output
 - It does not change the existing `ROSFlight::run` path.
 
-`rustflight_core/src/estimator.rs`
+`voloxide_core/src/estimator.rs`
 
 - Adds `NamedEstimator`.
 - This adapts estimators away from HList inputs in the new scheduler path.
 - The trait takes `ProcessedSensors`, `Params`, and `dt`.
 - It returns the estimator state type.
 
-`rustflight_core/src/estimator/quad_estimator.rs`
+`voloxide_core/src/estimator/quad_estimator.rs`
 
 - Implements `NamedEstimator` for `QuadEstimator`.
 - The current implementation adapts `ProcessedSensors::{imu, mag}` back into the existing estimator input HList internally.
@@ -1126,7 +1126,7 @@ Validation:
 
 ## Named Telemetry Progress
 
-`rustflight_core/src/comm_manager.rs`
+`voloxide_core/src/comm_manager.rs`
 
 - Adds `CommManager::send_named_telemetry_streams`.
 - This is the telemetry equivalent of the old HList-based `send_telemetry_streams`.
@@ -1146,7 +1146,7 @@ Validation:
 - The old HList telemetry method remains in place as the behavioral reference.
 - The new method is now called from the `World` control stage after estimator/controller/mixer/PWM output.
 
-`rustflight_core/src/test_support.rs`
+`voloxide_core/src/test_support.rs`
 
 - Extends `RecordingCommLink` to count telemetry messages.
 - Records the last output-raw message so telemetry payload mapping can be asserted in tests.
@@ -1162,14 +1162,14 @@ Tests added or extended:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Board Boundary Progress
 
-`rustflight_core/src/board.rs`
+`voloxide_core/src/board.rs`
 
 - Adds `BoardIo`.
 - `BoardIo` is the smaller board-facing trait for the new `World` path.
@@ -1182,36 +1182,36 @@ Validation:
 - Existing `BoardTrait` remains for the legacy HList path.
 - A blanket `impl<T: BoardTrait> BoardIo for T` keeps old boards working while the new path migrates.
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - `World` now requires `B: BoardIo` instead of `B: BoardTrait`.
 - This removes HList-associated board types from the `World` type boundary.
 
-`rustflight_core/src/comm_manager.rs`
+`voloxide_core/src/comm_manager.rs`
 
 - `CommManager` now requires `B: BoardIo`.
 - The legacy HList telemetry method keeps a local `B: BoardTrait` bound because it still accepts `B::ProcessedSensorSet`.
 - The named telemetry method uses `ProcessedSensors` and only needs `BoardIo`.
 
-`rustflight_core/src/pwm.rs`
+`voloxide_core/src/pwm.rs`
 
 - `PwmDriver::flush` and `PwmDriver::send_commands` now accept `B: BoardIo`.
 - This lets the new scheduler output path use a board interface without HList-associated types.
 
-`rustflight_core/src/rc.rs`
+`voloxide_core/src/rc.rs`
 
 - Removes the unnecessary `BoardTrait` bound from `Rc::init`.
 - RC initialization currently reads params and does not need board access.
 
-`rustflight_core/src/comm_manager/comm_link_trait.rs`
+`voloxide_core/src/comm_manager/comm_link_trait.rs`
 
 - `CommInterface` now accepts `B: BoardIo`.
 - The MAVLink implementation also now only requires `BoardIo`.
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `cargo test -p sim pwm::tests --lib` passes.
 - `cargo check -p sim` passes.
 
@@ -1238,7 +1238,7 @@ Validation:
 
 ## Named Estimator Progress
 
-`rustflight_core/src/estimator/quad_estimator.rs`
+`voloxide_core/src/estimator/quad_estimator.rs`
 
 - Extracts the quad estimator math into `QuadEstimator::estimate_packets`.
 - The legacy HList `Estimator::estimate` entry point now delegates into `estimate_packets`.
@@ -1253,14 +1253,14 @@ Tests added:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
-- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
+- `cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `cargo check -p sim` passes.
 
 ## World Sensor Health Progress
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - Adds IMU health tracking to the new `World` path.
 - Mirrors the legacy 100 ms `IMU_NOT_RESPONDING` timeout.
@@ -1279,8 +1279,8 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Calibration ACK Causality Progress
@@ -1293,7 +1293,7 @@ Design correction:
 - Communication ACK success is sent only after the relevant calibration flag has been cleared by processing.
 - This matches the broader plan: requests emit work, systems perform work, and responses are emitted after work completes.
 
-`rustflight_core/src/comm_manager.rs`
+`voloxide_core/src/comm_manager.rs`
 
 - Adds a pending calibration ACK slot in `CommManager`.
 - Calibration commands now set the corresponding `CalibrationFlags` and store the pending command.
@@ -1302,12 +1302,12 @@ Design correction:
 - `send_completed_calibration_ack` sends `RosflightCmdSuccess` only when the pending command's flag is no longer active.
 - Non-calibration commands still use the immediate command ACK path.
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - After sensor processing and sensor health/calibration updates, World calls `send_completed_calibration_ack`.
 - This places the success response after the stage that can observe calibration completion.
 
-`rustflight_core/src/test_support.rs`
+`voloxide_core/src/test_support.rs`
 
 - `RecordingCommLink` now records command ACK count and last command ACK.
 
@@ -1330,9 +1330,9 @@ PWM note:
 
 Validation:
 
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## PWM Output State Progress
@@ -1344,7 +1344,7 @@ Design correction:
 - The scheduler should call a PWM output system after state updates.
 - The PWM system should only touch hardware/sim output when the desired output state changes.
 
-`rustflight_core/src/pwm_system.rs`
+`voloxide_core/src/pwm_system.rs`
 
 - Adds `PwmOutputState`.
 - Adds `sync_pwm_output_state`.
@@ -1354,7 +1354,7 @@ Design correction:
 - On disable, it flushes the PWM driver so hardware/sim output receives the disabled state.
 - It returns `Ok(true)` only when it changed PWM output state.
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - Adds `pwm_output: PwmOutputState` to `World`.
 - Initializes it from `pwm.is_enabled`.
@@ -1375,9 +1375,9 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## PWM Command Write Progress
@@ -1389,14 +1389,14 @@ Design correction:
 - Telemetry can still report computed actuator commands.
 - PWM command writes should be gated by explicit `PwmOutputState`.
 
-`rustflight_core/src/pwm_system.rs`
+`voloxide_core/src/pwm_system.rs`
 
 - Adds `write_pwm_commands`.
 - `write_pwm_commands` sends commands only when `PwmOutputState` is enabled.
 - It returns `false` when output is disabled and no PWM driver write occurred.
 - It returns `true` after writing commands to the PWM driver.
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - `run_control_stages_if_new_imu` now delegates PWM writes to `write_pwm_commands`.
 - The control stage still stores `latest_actuator_commands`.
@@ -1413,9 +1413,9 @@ Tests added or extended:
 
 Validation:
 
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Current Handoff Notes
@@ -1475,18 +1475,18 @@ Most recent command slice:
 
 What to check if resuming from here:
 
-- Run `cargo test -p rustflight_core command_system::tests --lib`.
-- Run `cargo test -p rustflight_core comm_manager::tests --lib`.
-- Run `cargo test -p rustflight_core world::tests --lib`.
-- Run `cargo check -p rustflight_core --lib`.
+- Run `cargo test -p voloxide_core command_system::tests --lib`.
+- Run `cargo test -p voloxide_core comm_manager::tests --lib`.
+- Run `cargo test -p voloxide_core world::tests --lib`.
+- Run `cargo check -p voloxide_core --lib`.
 - Run `cargo check -p sim`.
 - If these pass, the command-event slice should be commit-ready.
 - If they fail, likely places to inspect are:
-  - `rustflight_core/src/events.rs`
-  - `rustflight_core/src/command_system.rs`
-  - `rustflight_core/src/comm_manager.rs::act_on_messages`
-  - `rustflight_core/src/world.rs::run_comm_param_sensor_stages_only`
-  - legacy compatibility wiring in `rustflight_core/src/rosflight.rs`
+  - `voloxide_core/src/events.rs`
+  - `voloxide_core/src/command_system.rs`
+  - `voloxide_core/src/comm_manager.rs::act_on_messages`
+  - `voloxide_core/src/world.rs::run_comm_param_sensor_stages_only`
+  - legacy compatibility wiring in `voloxide_core/src/rosflight.rs`
 
 ## Command Event Progress
 
@@ -1498,32 +1498,32 @@ Design correction:
 - A command/calibration system should apply that request to calibration resources.
 - Completion ACKs should still wait until processing clears the relevant calibration flag.
 
-`rustflight_core/src/events.rs`
+`voloxide_core/src/events.rs`
 
 - Adds `CalibrationRequested`.
 - Adds `CommandEventQueues`.
 - Adds fixed-capacity calibration request queue storage.
 
-`rustflight_core/src/command_system.rs`
+`voloxide_core/src/command_system.rs`
 
 - Adds `CalibrationRequestCtx`.
 - Adds `apply_calibration_requests`.
 - This system drains calibration request events and sets the requested `CalibrationFlags`.
 
-`rustflight_core/src/comm_manager.rs`
+`voloxide_core/src/comm_manager.rs`
 
 - `act_on_messages` now receives `CommandEventQueues`.
 - Calibration commands push `CalibrationRequested`.
 - Calibration commands no longer mutate `CalibrationFlags` directly.
 - Pending calibration ACK behavior remains deferred until completion.
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - Adds `command_events: CommandEventQueues`.
 - Schedules `command_system::apply_calibration_requests` after comm message handling and before sensor processing.
 - Existing calibration completion ACK behavior continues after sensor processing observes cleared flags.
 
-`rustflight_core/src/rosflight.rs`
+`voloxide_core/src/rosflight.rs`
 
 - Adds legacy compatibility wiring so the old loop also drains `CommandEventQueues`.
 - This keeps the legacy path compiling while the new World path matures.
@@ -1541,11 +1541,11 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Offboard Command Event Progress
@@ -1557,30 +1557,30 @@ Design correction:
 - The command system should apply the request to `CommandManager`.
 - World should schedule that command system before RC/command/state/control stages use the command state.
 
-`rustflight_core/src/events.rs`
+`voloxide_core/src/events.rs`
 
 - Adds `OffboardControlRequested`.
 - Adds fixed-capacity offboard control request queue storage to `CommandEventQueues`.
 
-`rustflight_core/src/command_system.rs`
+`voloxide_core/src/command_system.rs`
 
 - Adds `OffboardControlCtx`.
 - Adds `apply_offboard_control_requests`.
 - This system drains offboard request events and calls `CommandManager::set_new_offboard_command`.
 
-`rustflight_core/src/comm_manager.rs`
+`voloxide_core/src/comm_manager.rs`
 
 - `act_on_messages` now pushes `OffboardControlRequested` when an offboard control message is received.
 - It no longer calls `CommandManager::set_new_offboard_command` directly.
 - `act_on_messages` no longer receives `&mut CommandManager`.
 - This narrows comms access to the command subsystem and improves blame/diagnosis when command state changes.
 
-`rustflight_core/src/world.rs`
+`voloxide_core/src/world.rs`
 
 - Schedules `apply_offboard_control_requests` in `run_comm_param_sensor_stages_only`.
 - The offboard command request is applied before later command/state/control stages consume command state.
 
-`rustflight_core/src/rosflight.rs`
+`voloxide_core/src/rosflight.rs`
 
 - Adds legacy compatibility scheduling for `apply_offboard_control_requests`.
 
@@ -1595,11 +1595,11 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Compile-Time Checkability Status
@@ -1654,17 +1654,17 @@ Testing detail:
 
 - Running `world::tests` pulled in RC logging, which uses `critical-section`.
 - Host tests need a critical-section implementation.
-- Added `critical-section = { version = "1.2.0", features = ["std"] }` under `rustflight_core` dev-dependencies.
+- Added `critical-section = { version = "1.2.0", features = ["std"] }` under `voloxide_core` dev-dependencies.
 - This is test-only support for host tests and does not change the embedded library check.
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core param_system::tests --lib` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core param_reactions::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core param_system::tests --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core param_reactions::tests --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Param Defaults Command Event Progress
@@ -1694,21 +1694,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `ParamDefaultsRequested`.
   - Adds a fixed-capacity param-defaults request queue to `CommandEventQueues`.
-- `rustflight_core/src/command_system.rs`
+- `voloxide_core/src/command_system.rs`
   - Adds `ParamDefaultsCtx`.
   - Adds `apply_param_defaults_requests`.
   - Adds component coverage for default reset application.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits `ParamDefaultsRequested` for `RosflightCmd::SetParamDefaults`.
   - Stores a pending defaults ACK.
   - Sends the ACK after the scheduler confirms that defaults were applied.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Schedules default-reset request application in the World comm/param/sensor stage.
   - Sends the deferred defaults ACK after the apply stage.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the same scheduling step in the legacy compatibility path.
 
 Tests added:
@@ -1722,11 +1722,11 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -1769,21 +1769,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `ParamListRequested`.
   - Adds a fixed-capacity list request queue to `ParamEventQueues`.
-- `rustflight_core/src/param_system.rs`
+- `voloxide_core/src/param_system.rs`
   - Adds `ParamListState`.
   - Adds `ParamListCtx`.
   - Adds `service_param_list_requests`.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits list request events.
   - Removes param iterator ownership from `act_on_messages`.
   - Narrows the `act_on_messages` signature.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Owns `ParamListState`.
   - Schedules `service_param_list_requests` before comm responses are sent.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the same compatibility scheduling in the legacy path.
 
 Tests added:
@@ -1797,10 +1797,10 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core param_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core param_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Status Telemetry Command-State Progress
@@ -1808,7 +1808,7 @@ Validation:
 Reason for this change:
 
 - Current ROSflight 2.x status telemetry reports whether RC override is active and whether offboard control is active.
-- RustFlight's telemetry path still had zero placeholders for both fields.
+- Voloxide's telemetry path still had zero placeholders for both fields.
 - That made `rosflight_io` status consumers see a less faithful view of the flight stack even after offboard commands were routed through events.
 
 Design now implemented:
@@ -1832,10 +1832,10 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Replaces status telemetry placeholder fields with command-manager accessors.
   - Adds a focused test for offboard status reporting.
-- `rustflight_core/src/test_support.rs`
+- `voloxide_core/src/test_support.rs`
   - Records the latest status message so telemetry tests can assert field contents.
 
 Tests added:
@@ -1845,9 +1845,9 @@ Tests added:
 
 Validation status:
 
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Future follow-up:
@@ -1865,14 +1865,14 @@ Reason for this change:
 
 Design now implemented:
 
-- Local `rustflight_core/mavlink_definitions/rosflight.xml` now defines `ROSFLIGHT_STATUS.rc_override` as `uint16_t`.
+- Local `voloxide_core/mavlink_definitions/rosflight.xml` now defines `ROSFLIGHT_STATUS.rc_override` as `uint16_t`.
 - Local `RosflightStatusMsg` now carries `rc_override: u16`.
 - The current boolean local override state is widened at the telemetry boundary instead of truncating the field type.
 
 ROSflight compatibility:
 
 - This aligns the local wire schema with current ROSflight 2.x for `ROSFLIGHT_STATUS`.
-- It does not yet mean local RustFlight computes every upstream override reason.
+- It does not yet mean local Voloxide computes every upstream override reason.
 - It removes a blocking schema mismatch so a future command-manager slice can publish the full upstream bitmask.
 
 Compile-time boundary improvement:
@@ -1882,19 +1882,19 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/mavlink_definitions/rosflight.xml`
+- `voloxide_core/mavlink_definitions/rosflight.xml`
   - Changes `ROSFLIGHT_STATUS.rc_override` from `uint8_t` to `uint16_t`.
-- `rustflight_core/src/comm_messages.rs`
+- `voloxide_core/src/comm_messages.rs`
   - Changes `RosflightStatusMsg::rc_override` from `u8` to `u16`.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Widens the current boolean override value to `u16` when building status messages.
 
 Validation status:
 
-- `cargo test -p rustflight_core comm_manager::tests::named_status_telemetry_reports_command_manager_override_state --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests::named_status_telemetry_reports_command_manager_override_state --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Future follow-up:
@@ -1916,7 +1916,7 @@ Future follow-up:
 Reason for this change:
 
 - Current ROSflight 2.x reports `rc_override` as a `uint16_t` reason bitmask.
-- After aligning the local wire width, RustFlight still only widened a boolean override state into that field.
+- After aligning the local wire width, Voloxide still only widened a boolean override state into that field.
 - That preserved message width but did not preserve the diagnostic meaning expected by `rosflight_io` consumers.
 
 Design now implemented:
@@ -1946,26 +1946,26 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/command_manager.rs`
+- `voloxide_core/src/command_manager.rs`
   - Adds upstream-style override constants.
   - Stores and exposes `get_rc_override()`.
   - Produces a bitmask during muxing.
   - Adds focused unit tests for stick/throttle and inactive-offboard override bits.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Publishes the command-manager override bitmask in status telemetry.
 
 Validation status:
 
-- `cargo test -p rustflight_core command_manager::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_manager::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Future follow-up:
 
 - Compare the local force-channel muxing shape against upstream's `MuxChannel`/`Mixer::NUM_MIXER_OUTPUTS` model when the mixer ownership rewrite happens.
-- The current local throttle override still applies to `fx`, `fy`, and `fz` together, matching the pre-existing RustFlight behavior; upstream evaluates the selected throttle axis but then muxes by channel masks.
+- The current local throttle override still applies to `fx`, `fy`, and `fz` together, matching the pre-existing Voloxide behavior; upstream evaluates the selected throttle axis but then muxes by channel masks.
 
 ## Mixer Output Ownership Progress
 
@@ -2013,23 +2013,23 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/mixer.rs`
+- `voloxide_core/src/mixer.rs`
   - Adds `MixerOutputType`.
   - Adds `Mixer::output_types()`.
-- `rustflight_core/src/mixer/quad_mixer.rs`
+- `voloxide_core/src/mixer/quad_mixer.rs`
   - Reports four motor-owned outputs.
-- `rustflight_core/src/pwm_system.rs`
+- `voloxide_core/src/pwm_system.rs`
   - Reworks `compose_pwm_outputs` around typed ownership.
   - Adds focused tests for aux-owned slots inside the primary range and motor safety mapping.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Passes `self.mixer.output_types()` into PWM composition.
 
 Validation:
 
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Future follow-up:
@@ -2070,16 +2070,16 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Passes composed `pwm_outputs` into named telemetry instead of primary `actuator_commands`.
   - Extends the control-stage test to assert aux-composed channels are present in `ROSFLIGHT_OUTPUT_RAW`.
 
 Validation:
 
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
 - `cargo test -p sim pwm::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 RC trim compatibility note:
@@ -2087,7 +2087,7 @@ RC trim compatibility note:
 - Current upstream `Controller::calculate_equilbrium_torque_from_rc` does not write raw RC stick offsets into equilibrium torque params.
 - It runs controller PID logic once with a fake level estimator state, `dt = 0`, RC control input, and integrators disabled.
 - It then adds the resulting torque outputs to the existing `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE` params.
-- RustFlight has now been corrected to follow that ownership and calculation shape in the new command-system path.
+- Voloxide has now been corrected to follow that ownership and calculation shape in the new command-system path.
 
 ## RC Trim Controller Ownership Progress
 
@@ -2099,7 +2099,7 @@ Reason for this change:
   - controller runs PID logic once against fake level attitude,
   - resulting PID torques are added to existing equilibrium torque params,
   - command ACK succeeds when disarmed.
-- RustFlight needed to preserve the event/scheduler ownership model while matching that upstream calculation.
+- Voloxide needed to preserve the event/scheduler ownership model while matching that upstream calculation.
 
 Upstream source findings:
 
@@ -2140,18 +2140,18 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/controller.rs`
+- `voloxide_core/src/controller.rs`
   - Adds `RcTrimCalibrator`.
-- `rustflight_core/src/controller/quad_controller.rs`
+- `voloxide_core/src/controller/quad_controller.rs`
   - Adds controller-owned RC trim torque calculation.
   - Refactors normal control through a shared PID helper while preserving armed gating.
-- `rustflight_core/src/command_manager.rs`
+- `voloxide_core/src/command_manager.rs`
   - Adds read-only `rc_control()`.
-- `rustflight_core/src/command_system.rs`
+- `voloxide_core/src/command_system.rs`
   - Routes RC trim calibration through the controller and adds torque output to existing params.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Wires controller and command-manager resources into the RC trim command system.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the compatibility scheduling in the legacy path.
 
 Tests added or updated:
@@ -2165,12 +2165,12 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core controller::quad_controller::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core controller::quad_controller::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
 - `cargo test -p sim pwm::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Armed Command Compatibility Progress
@@ -2202,7 +2202,7 @@ Important upstream behavior:
 
 Reason for this change:
 
-- RustFlight command systems were correctly routed through events, but they did not yet enforce the upstream "no command actions while armed" rule.
+- Voloxide command systems were correctly routed through events, but they did not yet enforce the upstream "no command actions while armed" rule.
 - Enforcing this in `CommManager` would reintroduce parser authority over command semantics.
 - The correct place is the command-system stage, which can read state and decide whether the requested work is allowed.
 
@@ -2236,22 +2236,22 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `VersionRequested`.
   - Adds a fixed-capacity version request queue to `CommandEventQueues`.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits version requests instead of direct version/ACK responses.
   - Removes the param-defaults pending ACK slot because the command system now owns default-reset success/failure ACKs directly.
   - Keeps calibration pending ACK only for accepted calibration work whose success depends on later sensor-processing completion.
-- `rustflight_core/src/command_system.rs`
+- `voloxide_core/src/command_system.rs`
   - Adds state-read gating to command actions.
   - Adds version request handling.
   - Adds tests for armed rejection and version behavior.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Schedules version requests.
   - Passes state read access into state-gated command systems.
   - Adds a World test proving armed command rejection does not mutate params.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the state-gated command-system scheduling in the legacy loop.
 
 Tests added or updated:
@@ -2267,10 +2267,10 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2291,7 +2291,7 @@ Reason for this change:
   - heartbeat marks the companion link connected,
   - aux command updates mixer aux-command state,
   - external attitude updates estimator external-attitude state.
-- RustFlight already parsed and stored these inbound MAVLink messages in `Messages`, but `CommManager::act_on_messages` did not consume them.
+- Voloxide already parsed and stored these inbound MAVLink messages in `Messages`, but `CommManager::act_on_messages` did not consume them.
 - That meant the messages were effectively silent no-ops in the scheduler path.
 
 Design choice:
@@ -2322,7 +2322,7 @@ ROSflight compatibility:
 
 - `rosflight_io` sends `aux_command` and `external_attitude` MAVLink messages from ROS topics.
 - Upstream firmware has callbacks for these messages.
-- RustFlight now has an explicit event handoff for those same inbound messages instead of silently ignoring them.
+- Voloxide now has an explicit event handoff for those same inbound messages instead of silently ignoring them.
 - The behavior is still incomplete compared with upstream because aux commands are not yet applied to mixer output and external attitude is not yet applied to estimator state.
 - This slice is still compatibility progress because it preserves the inputs as typed scheduler facts for later owner systems.
 
@@ -2335,21 +2335,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds companion input event types.
   - Adds fixed-capacity companion input queues.
   - Adds `CompanionEventQueues`.
-- `rustflight_core/src/companion_system.rs`
+- `voloxide_core/src/companion_system.rs`
   - Adds grouped companion input state resources.
   - Adds systems to drain companion input queues and store latest facts.
-- `rustflight_core/src/lib.rs`
+- `voloxide_core/src/lib.rs`
   - Exposes the new grouped companion system module.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits companion input events for heartbeat, aux command, and external attitude messages.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Owns companion input queues and state resources.
   - Schedules companion input application after comm parsing.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors companion input scheduling in the legacy loop.
 
 Tests added:
@@ -2367,11 +2367,11 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core companion_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core companion_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2397,7 +2397,7 @@ Upstream compatibility note:
 - Upstream firmware stores the external attitude quaternion and marks it for use on the next estimator run.
 - During estimator run, upstream computes an external-attitude correction term and uses `FILTER_KP_EXT`; it does not simply mutate estimator state from the comm callback.
 - This slice preserves the ownership and scheduling semantics, but it does not yet implement the full upstream external-attitude correction math.
-- Current RustFlight `QuadEstimator` is simpler than upstream and now consumes the pending external attitude by applying the provided quaternion before its next named estimator update.
+- Current Voloxide `QuadEstimator` is simpler than upstream and now consumes the pending external attitude by applying the provided quaternion before its next named estimator update.
 - A later estimator-parity slice should replace this with the upstream-style correction term when the local estimator math is ready.
 
 Design now implemented:
@@ -2417,12 +2417,12 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/estimator.rs`
+- `voloxide_core/src/estimator.rs`
   - Adds `estimate_named_with_external_attitude` to `NamedEstimator`.
-- `rustflight_core/src/estimator/quad_estimator.rs`
+- `voloxide_core/src/estimator/quad_estimator.rs`
   - Adds external attitude consumption for the named estimator path.
   - Adds focused estimator coverage.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Passes pending external attitude into the estimator stage.
   - Proves the pending value is consumed by the scheduler.
 
@@ -2435,11 +2435,11 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core companion_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core companion_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2487,7 +2487,7 @@ ROSflight 2.x compatibility:
 
 - This matches the current ROSflight principle that aux commands are applied in the output path, not in comm parsing.
 - It also preserves motor safety behavior: aux motor output is forced low while disarmed.
-- It is not full mixer-output parity yet because RustFlight does not yet model upstream's per-channel output type ownership.
+- It is not full mixer-output parity yet because Voloxide does not yet model upstream's per-channel output type ownership.
 - The deferred parity work is explicitly to replace this simple composition with typed mixer output ownership.
 
 Compile-time boundary improvement:
@@ -2499,11 +2499,11 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/pwm_system.rs`
+- `voloxide_core/src/pwm_system.rs`
   - Adds `PWM_OUTPUT_CHANNELS`.
   - Adds `compose_pwm_outputs`.
   - Adds focused aux composition tests.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Uses `compose_pwm_outputs` before PWM writes.
   - Extends World control-stage coverage to prove aux values reach the PWM command slice.
 
@@ -2518,11 +2518,11 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core companion_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core companion_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2537,7 +2537,7 @@ Next planned migration target:
 Reason for this change:
 
 - `ResetOrigin` and `SendAllConfigInfos` were the last obvious ROSflight command arms still handled as inline placeholders inside `CommManager::act_on_messages`.
-- Even though RustFlight does not yet implement origin reset or config-info streaming, the parser should not be the place that decides and sends the failure.
+- Even though Voloxide does not yet implement origin reset or config-info streaming, the parser should not be the place that decides and sends the failure.
 - The parser should emit command intent.
 - A scheduled owning system should decide whether the command can be completed and should emit the ACK.
 
@@ -2547,7 +2547,7 @@ ROSflight compatibility:
   - `ROSFLIGHT_CMD_RESET_ORIGIN`
   - `ROSFLIGHT_CMD_SEND_ALL_CONFIG_INFOS`
 - The wire response remains `ROSFLIGHT_CMD_ACK`.
-- Because there is no current origin/navigation resource or config-info message support in RustFlight, both commands still return `RosflightCmdFailed`.
+- Because there is no current origin/navigation resource or config-info message support in Voloxide, both commands still return `RosflightCmdFailed`.
 - The externally visible unsupported behavior is preserved, but the ACK is now produced after a command-system stage runs.
 
 Design now implemented:
@@ -2570,19 +2570,19 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `ResetOriginRequested`.
   - Adds `ConfigInfoRequested`.
   - Adds fixed-capacity queues for both request types.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits reset-origin and config-info requests instead of using inline placeholder ACK logic.
-- `rustflight_core/src/command_system.rs`
+- `voloxide_core/src/command_system.rs`
   - Adds `ResetOriginCtx`.
   - Adds `ConfigInfoCtx`.
   - Adds request application systems that currently emit failed ACKs.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Schedules the new request application systems.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the same compatibility scheduling in the legacy loop.
 
 Tests added:
@@ -2602,10 +2602,10 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2649,14 +2649,14 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Changes completed-work ACK helpers to queue `CommResponse::CmdAck`.
   - Updates tests to assert ACKs are not transmitted until `send_comm_responses`.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Queues parameter-default ACKs.
   - Queues calibration-completion ACKs.
   - Moves the scheduler response flush after sensor processing so calibration completion ACKs can transmit in the same scheduler call.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors completed ACK queueing and later response flushing in the legacy loop.
 
 Tests updated:
@@ -2670,10 +2670,10 @@ Tests updated:
 
 Validation:
 
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2708,27 +2708,27 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `CommEventQueues`.
   - Removes response storage from `ParamEventQueues`.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Adds a `comm_events` resource.
   - Wires parameter response emit ports to `comm_events.responses`.
   - Sends responses from `comm_events`.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the same resource split in the legacy path.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Accepts `CommEventQueues` in command parsing.
   - Drains `CommEventQueues` in response sending.
   - Updates tests to use the distinct queue.
 
 Validation:
 
-- `cargo test -p rustflight_core events::tests --lib` passes.
-- `cargo test -p rustflight_core param_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core events::tests --lib` passes.
+- `cargo test -p voloxide_core param_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2784,21 +2784,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/board.rs`
+- `voloxide_core/src/board.rs`
   - Adds default board command hooks to `BoardIo` and `BoardTrait`.
   - Forwards hooks through the legacy `BoardTrait` to `BoardIo` blanket implementation.
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `BoardCommandRequested`.
   - Adds `board_command_requests` to `CommandEventQueues`.
-- `rustflight_core/src/command_system.rs`
+- `voloxide_core/src/command_system.rs`
   - Adds `BoardCommandCtx`.
   - Adds `apply_board_command_requests`.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits board command requests for the board/persistence command arms.
   - Defers ACK when the request is queued.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Schedules board command requests through the new command-system stage.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the same scheduling step in the legacy path.
 
 Tests added:
@@ -2812,10 +2812,10 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Next planned migration target:
@@ -2834,8 +2834,8 @@ Reason for this change:
 Design now implemented:
 
 - `sim::board::Board` now owns a parameter-store path.
-- Default store path: `rustflight_sim.params`.
-- Override environment variable: `RUSTFLIGHT_SIM_PARAM_STORE`.
+- Default store path: `voloxide_sim.params`.
+- Override environment variable: `VOLOXIDE_SIM_PARAM_STORE`.
 - `BoardIo::write_params` writes all known params to a text file as `PARAM_NAME=value`.
 - `BoardIo::read_params` reads that file back into the active `Params`.
 - Value parsing uses each parameter's static default type from `PARAM_DEFINITIONS`.
@@ -2855,7 +2855,7 @@ Compile-time boundary improvement:
 
 - Comms still only emits board command intent.
 - `command_system::apply_board_command_requests` remains the only system with board persistence authority.
-- Sim-specific file format and filesystem behavior stay in the sim board layer, not in `rustflight_core`.
+- Sim-specific file format and filesystem behavior stay in the sim board layer, not in `voloxide_core`.
 
 Files changed in this slice:
 
@@ -2875,12 +2875,12 @@ Tests added:
 Validation:
 
 - `cargo test -p sim board::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests::world_routes_board_command_and_acks_unsupported_after_apply_stage --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests::world_routes_board_command_and_acks_unsupported_after_apply_stage --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `cargo test -p sim pwm::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Log Response Queue Progress
@@ -2918,18 +2918,18 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `CommResponse::Statustext`.
-- `rustflight_core/src/log_system.rs`
+- `voloxide_core/src/log_system.rs`
   - Adds the logger-to-comm-response drain system.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Sends queued statustext responses through `send_comm_responses`.
   - Removes the direct statustext helper.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Schedules log draining before comm responses are sent.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors log draining into queued responses in the legacy loop.
-- `rustflight_core/src/test_support.rs`
+- `voloxide_core/src/test_support.rs`
   - Records statustext messages for tests.
 
 Tests added or updated:
@@ -2943,14 +2943,14 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core log_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests::send_comm_responses_sends_command_ack_and_version --lib` passes.
-- `cargo test -p rustflight_core world::tests::world_drains_logs_through_comm_response_stage --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core log_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests::send_comm_responses_sends_command_ack_and_version --lib` passes.
+- `cargo test -p voloxide_core world::tests::world_drains_logs_through_comm_response_stage --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `cargo test -p sim board::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Body Model Boundary Progress
@@ -2982,19 +2982,19 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/bodytype.rs`
+- `voloxide_core/src/bodytype.rs`
   - Adds HList-free `BodyModel`.
-- `rustflight_core/src/bodytype/quadrotor.rs`
+- `voloxide_core/src/bodytype/quadrotor.rs`
   - Implements `BodyModel` for `Quadrotor`.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Switches the scheduler body bound from `BodyType` to `BodyModel`.
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
 - `cargo test -p sim board::tests --lib` passes.
 - `cargo check -p sim` passes.
 
@@ -3020,17 +3020,17 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/test_support.rs`
+- `voloxide_core/src/test_support.rs`
   - Moves `TestBoard` from `BoardTrait` to direct `BoardIo`.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Updates test imports from `BoardTrait` to `BoardIo`.
 
 Validation:
 
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3056,12 +3056,12 @@ Remaining `BoardTrait` references:
 
 Validation:
 
-- `cargo test -p rustflight_core command_manager::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core command_manager::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core state_machine::tests --lib` still has pre-existing arming/`UNCALIBRATED_IMU` failures noted in the earlier next-steps list; this slice did not change that behavior.
+- `cargo test -p voloxide_core state_machine::tests --lib` still has pre-existing arming/`UNCALIBRATED_IMU` failures noted in the earlier next-steps list; this slice did not change that behavior.
 
 ## Dummy Board Named Sensor Progress
 
@@ -3085,10 +3085,10 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core board::dummy::tests --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3134,10 +3134,10 @@ Tests added or updated:
 
 Validation:
 
-- `cargo test -p rustflight_core comm_manager::tests::named_rc_telemetry_matches_upstream_raw_channel_packing --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests::named_rc_telemetry_matches_upstream_raw_channel_packing --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3162,9 +3162,9 @@ Compile-time boundary improvement:
 
 Validation:
 
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3203,10 +3203,10 @@ Compile-time boundary improvement:
 
 Validation:
 
-- `cargo test -p rustflight_core world::tests::world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture --lib` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core world::tests::world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3239,8 +3239,8 @@ Validation:
 
 - `cargo test -p sim board::tests::sim_board_update_sensor_bus_converts_queued_messages --lib` passes.
 - `cargo test -p sim board::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Sensor Processor Boundary Progress
@@ -3270,9 +3270,9 @@ Compile-time boundary improvement:
 
 Validation:
 
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3311,9 +3311,9 @@ Compile-time boundary improvement:
 
 Validation:
 
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3336,9 +3336,9 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3360,9 +3360,9 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3383,9 +3383,9 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3406,9 +3406,9 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p sim board::tests --lib` passes.
 
@@ -3429,23 +3429,23 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
-## Legacy RustFlight Scheduler Named Sensor Use Progress
+## Legacy Voloxide Scheduler Named Sensor Use Progress
 
 Reason for this change:
 
-- RustFlight's legacy `ROSFlight` scheduler still sculpted `BT::RequiredSensors` from the processed sensor HList to split RC input from estimator input.
+- Voloxide's legacy `ROSFlight` scheduler still sculpted `BT::RequiredSensors` from the processed sensor HList to split RC input from estimator input.
 - It also called the legacy `Estimator::estimate` entry point and legacy HList telemetry wrapper even though named equivalents now exist.
 - This kept body-required HList sculpting in the control path after the estimator and telemetry compatibility shims were already available.
 
 Design now implemented:
 
 - Added `sensors::processed_sensors_from_hlist` as the explicit compatibility bridge from legacy processed HLists to `ProcessedSensors`.
-- After legacy HList sensor processing, RustFlight's legacy `ROSFlight` scheduler converts the processed sensor HList into `ProcessedSensors` once through that helper.
+- After legacy HList sensor processing, Voloxide's legacy `ROSFlight` scheduler converts the processed sensor HList into `ProcessedSensors` once through that helper.
 - `ROSFlight` reads RC input from `ProcessedSensors::rc`.
 - `ROSFlight` calls `NamedEstimator::estimate_named` with the named processed sensor struct.
 - `ROSFlight` calls `send_named_telemetry_streams` directly.
@@ -3455,11 +3455,11 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core sensors::tests --lib` passes.
-- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core sensors::tests --lib` passes.
+- `cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Legacy HList Telemetry Wrapper Removal Progress
@@ -3484,12 +3484,12 @@ Current boundary status:
 
 Validation:
 
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
-## Legacy RustFlight Named Sensor Bus Progress
+## Legacy Voloxide Named Sensor Bus Progress
 
 Reason for this change:
 
@@ -3515,10 +3515,10 @@ Current boundary status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 
 ## BoardTrait HList Sensor Inventory Removal Progress
 
@@ -3530,7 +3530,7 @@ Reason for this change:
 Design now implemented:
 
 - Removed `RawSensorSet`, `ProcessedSensorSet`, `ProcessorHList`, and `update_sensors` from `BoardTrait`.
-- Removed the legacy HList sensor implementation from `rustflight_core::board::dummy::DummyBoard`.
+- Removed the legacy HList sensor implementation from `voloxide_core::board::dummy::DummyBoard`.
 - Updated `pixracerpro::board::Board` to populate `SensorBus` directly through `update_sensor_bus`.
 - Removed PixRacerPro board HList sensor imports and processor-list declarations.
 
@@ -3544,11 +3544,11 @@ Current boundary status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core board::dummy::tests --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `cargo check -p pixracerpro` was attempted, but the current host environment compiles `cortex-m` for the host target and fails before reaching local PixRacerPro crate code.
 
 ## Legacy Func Sensor Processor Shim Removal Progress
@@ -3574,11 +3574,11 @@ Current boundary status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
-- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 
 ## Legacy Estimator, Body Sensor Requirement, and HList Bridge Removal Progress
 
@@ -3607,11 +3607,11 @@ Current boundary status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes.
-- `cargo test -p rustflight_core sensors::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes.
+- `cargo test -p voloxide_core sensors::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 
 ## HList Removal Completion
 
@@ -3628,7 +3628,7 @@ Design now implemented:
 - Updated Nucleo's `ROSFlight::init` call to pass `Params` and the PWM driver.
 - Added Nucleo's missing `panic-halt` dependency and panic handler import.
 - Removed `pub mod hlist`.
-- Deleted `rustflight_core/src/hlist.rs`.
+- Deleted `voloxide_core/src/hlist.rs`.
 
 Current boundary status:
 
@@ -3638,10 +3638,10 @@ Current boundary status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core sensor_systems::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core sensor_systems::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
@@ -3669,11 +3669,11 @@ Current boundary status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core board::dummy::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
@@ -3701,10 +3701,10 @@ Current boundary status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core board::dummy::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core board::dummy::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
@@ -3718,12 +3718,12 @@ Source-compatibility note:
 - That service instructs firmware to calibrate RC trim values.
 - The documented behavior is to use current transmitter trim offsets to compute equilibrium/feed-forward torques.
 - Those torques are represented by `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE`.
-- Therefore RustFlight should not implement generic RC endpoint calibration for `RosflightCmd::RcCalibration`.
+- Therefore Voloxide should not implement generic RC endpoint calibration for `RosflightCmd::RcCalibration`.
 - It should implement RC trim calibration.
 
 Reason for this change:
 
-- The starting RustFlight code had the `RcCalibration` command enum and MAVLink mapping, but the command arm was a placeholder that always failed.
+- The starting Voloxide code had the `RcCalibration` command enum and MAVLink mapping, but the command arm was a placeholder that always failed.
 - `X_EQ_TORQUE`, `Y_EQ_TORQUE`, and `Z_EQ_TORQUE` existed but were not written by any RC trim calibration path.
 - The quad controller also was not consuming those equilibrium torque parameters.
 - To match ROSflight behavior, the command must set equilibrium torque params and those params must affect controller output.
@@ -3766,19 +3766,19 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `RcTrimCalibrationRequested`.
   - Adds `rc_trim_calibration_requests` to `CommandEventQueues`.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits RC trim calibration requests for `RosflightCmd::RcCalibration`.
-- `rustflight_core/src/command_system.rs`
+- `voloxide_core/src/command_system.rs`
   - Adds `RcTrimCalibrationCtx`.
   - Adds `apply_rc_trim_calibration_requests`.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Schedules RC trim calibration requests.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors scheduling in the legacy path.
-- `rustflight_core/src/controller/quad_controller.rs`
+- `voloxide_core/src/controller/quad_controller.rs`
   - Adds equilibrium torque params to armed controller output.
 
 Tests added:
@@ -3794,11 +3794,11 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core controller::quad_controller::tests --lib` passes.
-- `cargo test -p rustflight_core command_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core controller::quad_controller::tests --lib` passes.
+- `cargo test -p voloxide_core command_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Remaining question:
@@ -3838,15 +3838,15 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `CommResponse::CmdAck`.
   - Adds `CommResponse::Version`.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Enqueues version and immediate command ACK responses.
   - Sends the new response variants from `send_comm_responses`.
-- `rustflight_core/src/test_support.rs`
+- `voloxide_core/src/test_support.rs`
   - Records version messages for tests.
-- `rustflight_core/src/param_system.rs`
+- `voloxide_core/src/param_system.rs`
   - Updates tests to handle the expanded response enum.
 
 Tests added:
@@ -3858,10 +3858,10 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core param_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core param_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Param Set Name Resolution Progress
@@ -3892,12 +3892,12 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Narrows `ParamSetRequested`.
-- `rustflight_core/src/param_system.rs`
+- `voloxide_core/src/param_system.rs`
   - Moves set-request name resolution into `apply_param_requests`.
   - Reuses the same parameter-name resolution logic for request-read by name.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Removes direct parameter-definition lookup from `PARAM_SET`.
   - Removes the now-unused direct `send_param_value` helper.
 
@@ -3909,10 +3909,10 @@ Tests:
 
 Validation:
 
-- `cargo test -p rustflight_core param_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core param_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 Current status after this slice:
@@ -3938,11 +3938,11 @@ Design now implemented:
 
 Validation:
 
-- `cargo test -p rustflight_core params::tests --lib` passes.
-- `cargo test -p rustflight_core param_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core params::tests --lib` passes.
+- `cargo test -p voloxide_core param_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Param Request Read Event Progress
@@ -3976,20 +3976,20 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `rustflight_core/src/comm_messages.rs`
+- `voloxide_core/src/comm_messages.rs`
   - Derives `PartialEq` for `ParamIdentifier` so request events can be compared in tests.
-- `rustflight_core/src/events.rs`
+- `voloxide_core/src/events.rs`
   - Adds `ParamReadRequested`.
   - Adds a fixed-capacity read request queue to `ParamEventQueues`.
-- `rustflight_core/src/param_system.rs`
+- `voloxide_core/src/param_system.rs`
   - Adds `ParamReadCtx`.
   - Adds `service_param_read_requests`.
   - Adds parameter identifier resolution by index or name.
-- `rustflight_core/src/comm_manager.rs`
+- `voloxide_core/src/comm_manager.rs`
   - Emits read request events and does not directly read/send parameter values for this path.
-- `rustflight_core/src/world.rs`
+- `voloxide_core/src/world.rs`
   - Schedules request-read servicing before comm responses are sent.
-- `rustflight_core/src/rosflight.rs`
+- `voloxide_core/src/rosflight.rs`
   - Mirrors the same compatibility scheduling in the legacy path.
 
 Tests added:
@@ -4003,10 +4003,10 @@ Tests added:
 
 Validation:
 
-- `cargo test -p rustflight_core param_system::tests --lib` passes.
-- `cargo test -p rustflight_core comm_manager::tests --lib` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core param_system::tests --lib` passes.
+- `cargo test -p voloxide_core comm_manager::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 
 ## Body Type Boundary Cleanup
@@ -4032,10 +4032,10 @@ Current status after this slice:
 
 Validation:
 
-- `rg -n "BodyModel" rustflight_core/src sim/src pixracerpro/src nucleo/src` returns no matches.
-- `cargo check -p rustflight_core --lib` passes.
+- `rg -n "BodyModel" voloxide_core/src sim/src pixracerpro/src nucleo/src` returns no matches.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
@@ -4049,8 +4049,8 @@ Reason for this change:
 
 Design now implemented:
 
-- Updated `pixracerpro/src/bin/rustflight.rs` to instantiate `World`.
-- Updated `nucleo/src/bin/rustflight.rs` to instantiate `World`.
+- Updated `pixracerpro/src/bin/voloxide.rs` to instantiate `World`.
+- Updated `nucleo/src/bin/voloxide.rs` to instantiate `World`.
 - Both embedded loops now call `world.run_comm_param_sensor_stages()`, matching the sim entrypoint.
 - Removed a stale PixRacerPro board comment that referred to ROSFlight.
 
@@ -4058,14 +4058,14 @@ Current status after this slice:
 
 - Sim, PixRacerPro, and Nucleo all instantiate the same `World` scheduler architecture.
 - `ROSFlight` still exists in core for now, but it is no longer used by board or sim crates.
-- The next cleanup can focus on retiring or reducing `rustflight_core::rosflight` itself once any remaining compatibility concerns are checked.
+- The next cleanup can focus on retiring or reducing `voloxide_core::rosflight` itself once any remaining compatibility concerns are checked.
 
 Validation:
 
 - `rg -n "ROSFlight|rosflight::" pixracerpro/src nucleo/src sim/src` returns no matches.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
@@ -4074,13 +4074,13 @@ Validation:
 Reason for this change:
 
 - Sim, PixRacerPro, and Nucleo now all instantiate `World`.
-- `rustflight_core::rosflight` had no live crate call sites after the embedded entrypoint migration.
+- `voloxide_core::rosflight` had no live crate call sites after the embedded entrypoint migration.
 - Keeping the duplicate scheduler made the architecture look split and kept old compatibility code in the active core API surface.
 
 Design now implemented:
 
-- Removed `rustflight_core/src/rosflight.rs`.
-- Removed the `pub mod rosflight` export from `rustflight_core`.
+- Removed `voloxide_core/src/rosflight.rs`.
+- Removed the `pub mod rosflight` export from `voloxide_core`.
 - Updated current README wording to describe `World`, `BoardIo`, and PWM drivers instead of the old `Configuration`/`ROSFlight`/`BoardTrait` wiring.
 
 Current status after this slice:
@@ -4091,10 +4091,10 @@ Current status after this slice:
 
 Validation:
 
-- `rg -n "HList|HLIST|BoardTrait|BodyModel|pub mod rosflight|struct ROSFlight|rosflight::" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns only protocol/dialect timestamp references.
-- `cargo check -p rustflight_core --lib` passes.
+- `rg -n "HList|HLIST|BoardTrait|BodyModel|pub mod rosflight|struct ROSFlight|rosflight::" voloxide_core/src pixracerpro/src nucleo/src sim/src README.md` returns only protocol/dialect timestamp references.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 
@@ -4103,13 +4103,13 @@ Validation:
 Reason for this change:
 
 - `params` is the active parameter API used by core, sim, PixRacerPro, and Nucleo.
-- The old `rustflight_core/src/params.rs` file was no longer exported and had no live call sites.
+- The old `voloxide_core/src/params.rs` file was no longer exported and had no live call sites.
 - Keeping the stale module made the parameter boundary look duplicated after the event/port parameter migration.
 
 Design now implemented:
 
-- Removed `rustflight_core/src/params.rs`.
-- Removed the stale commented `pub mod params` line from `rustflight_core/src/lib.rs`.
+- Removed `voloxide_core/src/params.rs`.
+- Removed the stale commented `pub mod params` line from `voloxide_core/src/lib.rs`.
 - Removed a stale commented `crate::params::Params` import from `packets.rs`.
 
 Current status after this slice:
@@ -4119,10 +4119,10 @@ Current status after this slice:
 
 Validation:
 
-- `rg -n "params::|pub mod params|mod params|params\\.rs|crate::params" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns only `params` matches.
-- `cargo check -p rustflight_core --lib` passes.
+- `rg -n "params::|pub mod params|mod params|params\\.rs|crate::params" voloxide_core/src pixracerpro/src nucleo/src sim/src README.md` returns only `params` matches.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
@@ -4131,14 +4131,14 @@ Validation:
 
 Reason for this change:
 
-- `rustflight_core/src/units.rs` was no longer exported.
+- `voloxide_core/src/units.rs` was no longer exported.
 - Active source had no references to `crate::units` or the old `ROSFlightTimestamp` type.
 - Keeping the file left another unused pre-`World` API surface in core.
 
 Design now implemented:
 
-- Removed `rustflight_core/src/units.rs`.
-- Removed the stale commented module line from `rustflight_core/src/lib.rs`.
+- Removed `voloxide_core/src/units.rs`.
+- Removed the stale commented module line from `voloxide_core/src/lib.rs`.
 
 Current status after this slice:
 
@@ -4147,10 +4147,10 @@ Current status after this slice:
 
 Validation:
 
-- `rg -n "units::|mod units|pub mod units|pub\\(crate\\) mod units|ROSFlightTimestamp|crate::units" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns no matches.
-- `cargo check -p rustflight_core --lib` passes.
+- `rg -n "units::|mod units|pub mod units|pub\\(crate\\) mod units|ROSFlightTimestamp|crate::units" voloxide_core/src pixracerpro/src nucleo/src sim/src README.md` returns no matches.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4191,8 +4191,8 @@ Current status:
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::tests --lib` passes with 19 tests.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib -- --test-threads=1` passes with 142 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core comm_manager::tests --lib` passes with 19 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib -- --test-threads=1` passes with 142 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -4229,8 +4229,8 @@ Current status:
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core command_system::tests --lib` passes with 10 tests.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib -- --test-threads=1` passes with 142 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core command_system::tests --lib` passes with 10 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib -- --test-threads=1` passes with 142 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -4282,9 +4282,9 @@ Current status:
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core estimator::quad_estimator::tests --lib` passes with 4 tests.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --test estimator_test` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes with 141 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core estimator::quad_estimator::tests --lib` passes with 4 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --test estimator_test` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes with 141 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -4294,13 +4294,13 @@ Validation:
 
 Reason for this change:
 
-- The old `rustflight_core/src/params/param_types.rs` scaffolding was not exported.
+- The old `voloxide_core/src/params/param_types.rs` scaffolding was not exported.
 - Active parameter IDs, values, defaults, and definitions now live in `params`.
 - Keeping the stale directory left a second, inactive parameter model beside the active one.
 
 Design now implemented:
 
-- Removed `rustflight_core/src/params/param_types.rs`.
+- Removed `voloxide_core/src/params/param_types.rs`.
 
 Current status after this slice:
 
@@ -4309,10 +4309,10 @@ Current status after this slice:
 
 Validation:
 
-- `rg --files rustflight_core/src | sort` shows no `rustflight_core/src/params/...` files.
-- `cargo check -p rustflight_core --lib` passes.
+- `rg --files voloxide_core/src | sort` shows no `voloxide_core/src/params/...` files.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4326,7 +4326,7 @@ Reason for this change:
 
 Design now implemented:
 
-- Renamed `rustflight_core/src/params2.rs` to `rustflight_core/src/params.rs`.
+- Renamed `voloxide_core/src/params2.rs` to `voloxide_core/src/params.rs`.
 - Updated core, sim, PixRacerPro, and Nucleo imports from `params2` to `params`.
 - Updated the architecture log references for the current active parameter module.
 
@@ -4337,10 +4337,10 @@ Current status after this slice:
 
 Validation:
 
-- `rg -n "params2|crate::params2|pub mod params2" rustflight_core/src pixracerpro/src nucleo/src sim/src README.md` returns no matches.
-- `cargo check -p rustflight_core --lib` passes.
+- `rg -n "params2|crate::params2|pub mod params2" voloxide_core/src pixracerpro/src nucleo/src sim/src README.md` returns no matches.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4368,9 +4368,9 @@ Current status after this slice:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4395,9 +4395,9 @@ Current status after this slice:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4434,9 +4434,9 @@ Current status:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4467,13 +4467,13 @@ Current status after this slice:
 
 Validation:
 
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core rc_system::tests --lib` passes.
-- `cargo test -p rustflight_core pwm_system::tests --lib` passes.
-- `cargo test -p rustflight_core events::tests --lib` passes.
-- `cargo test -p rustflight_core ports::tests --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core rc_system::tests --lib` passes.
+- `cargo test -p voloxide_core pwm_system::tests --lib` passes.
+- `cargo test -p voloxide_core events::tests --lib` passes.
+- `cargo test -p voloxide_core ports::tests --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4481,7 +4481,7 @@ Validation:
 Former known unrelated test status:
 
 - The earlier full-core `UNCALIBRATED_IMU` state-machine failures have been resolved by moving calibration error production into the sensor health path.
-- `cargo test -p rustflight_core --lib` is now green as of the Sensor Health System slice.
+- `cargo test -p voloxide_core --lib` is now green as of the Sensor Health System slice.
 
 ## State Machine Calibration Boundary Fix
 
@@ -4508,14 +4508,14 @@ Design now implemented:
 Current status after this slice:
 
 - State-machine tests now match the upstream ownership boundary: sensors own calibration error production; state machine owns state transitions based on existing errors.
-- Full `rustflight_core` library tests are green.
+- Full `voloxide_core` library tests are green.
 - The remaining calibration parity work is to move the upstream six-bias `UNCALIBRATED_IMU` production/clear behavior into the sensor/World path, not back into `StateMachine`.
 
 Validation:
 
-- `cargo test -p rustflight_core state_machine::tests --lib` passes.
-- `cargo test -p rustflight_core --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core state_machine::tests --lib` passes.
+- `cargo test -p voloxide_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -4561,10 +4561,10 @@ Current status after this slice:
 
 Validation:
 
-- `cargo test -p rustflight_core world::tests --lib` passes.
-- `cargo test -p rustflight_core sensor_health_system::tests --lib` passes.
-- `cargo test -p rustflight_core --lib` passes.
-- `cargo check -p rustflight_core --lib` passes.
+- `cargo test -p voloxide_core world::tests --lib` passes.
+- `cargo test -p voloxide_core sensor_health_system::tests --lib` passes.
+- `cargo test -p voloxide_core --lib` passes.
+- `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -4630,9 +4630,9 @@ Upstream behavior checked:
 - If RC is lost, ROSflight 2.0 `RC::run()` returns immediately and does not normalize sticks, interpret switches, look for arming/disarming, or set `new_command_`.
 - If RC is healthy, ROSflight 2.0 clears RC lost with `EVENT_RC_FOUND`, then normalizes sticks/switches, checks arming/disarming, and sets `new_command_`.
 
-Functional gap found in RustFlight:
+Functional gap found in Voloxide:
 
-- RustFlight already had the same status-bit and channel-range checks, plus an extra timeout check.
+- Voloxide already had the same status-bit and channel-range checks, plus an extra timeout check.
 - The missing upstream behavior was the health gate placement: `Rc::receive` normalized sticks/switches and set `new_command` before `Rc::run` checked health.
 - That meant a lost or failsafe RC frame could still be consumed by `CommandManager` in the same scheduler tick.
 
@@ -4646,13 +4646,13 @@ Design now implemented:
 
 Compatibility note:
 
-- RustFlight still has a timeout-based RC health check, while ROSflight 2.0 does not implement a core RC timeout in `RC::check_rc_lost`; ROSflight 2.0 depends on board-reported `frameLost`/`failsafeActivated` and only calls `RC::run()` after a board receive.
+- Voloxide still has a timeout-based RC health check, while ROSflight 2.0 does not implement a core RC timeout in `RC::check_rc_lost`; ROSflight 2.0 depends on board-reported `frameLost`/`failsafeActivated` and only calls `RC::run()` after a board receive.
 - Keep this difference documented before changing it: the Rust timeout is stricter safety behavior, but it is not a direct upstream formula.
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core rc_system::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core rc_system::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4679,7 +4679,7 @@ Upstream behavior checked:
   - reboot to bootloader
   - send version
 - Upstream treats unsupported ROSflight command enum values in the MAVLink decode layer by immediately sending `ROSFLIGHT_CMD_FAILED` and returning before `CommManager::command_callback`.
-- Therefore `ResetOrigin` and `SendAllConfigInfos` remain unsupported in ROSflight 2.0. RustFlight's failed ACK behavior for those commands is externally compatible, although RustFlight routes them through explicit command-system request queues before producing the failed ACK.
+- Therefore `ResetOrigin` and `SendAllConfigInfos` remain unsupported in ROSflight 2.0. Voloxide's failed ACK behavior for those commands is externally compatible, although Voloxide routes them through explicit command-system request queues before producing the failed ACK.
 - Upstream `CommManager::command_callback` rejects supported command actions while armed and sends a failed command ACK.
 - Upstream offboard control decode accepts `MODE_PASS_THROUGH`, `MODE_ROLLRATE_PITCHRATE_YAWRATE_THROTTLE`, and `MODE_ROLL_PITCH_YAWRATE_THROTTLE`; invalid modes are ignored before the callback.
 - Upstream ROSflight 2.0 `OFFBOARD_CONTROL` is a 10-DOF wire message:
@@ -4689,7 +4689,7 @@ Upstream behavior checked:
 - Upstream maps `u[0..2]` as throttle/force channels and `u[3..5]` as attitude channels for the currently supported offboard modes.
 - Upstream offboard decode treats ignore fields as one-bit-per-`u`-index bit flags, including `IGNORE_VALUE0 = 0x01` through `IGNORE_VALUE9 = 0x200`.
 
-Functional gaps found in RustFlight:
+Functional gaps found in Voloxide:
 
 - Incoming MAVLink `MODE_ROLL_PITCH_YAWRATE_THROTTLE` was converted to local `ModePassThrough` instead of `ModeRollPitchYawrateThrottle`.
 - Local `rosflight.xml` still described the older six-field `OFFBOARD_CONTROL` wire schema (`Qx`, `Qy`, `Qz`, `Fx`, `Fy`, `Fz`) instead of the ROSflight 2.0 ten-value `u` array.
@@ -4700,7 +4700,7 @@ Design now implemented:
 - Incoming MAVLink offboard conversion now preserves `ModeRollPitchYawrateThrottle`.
 - Local `rosflight.xml` now matches ROSflight 2.0's `OFFBOARD_CONTROL` wire schema: `uint16_t ignore` and `float[10] u`.
 - Local `rosflight.xml` now matches ROSflight 2.0's ignore bit values from `IGNORE_VALUE0 = 0x01` through `IGNORE_VALUE9 = 0x200`.
-- The MAVLink conversion maps the ROSflight 2.0 wire layout into RustFlight's current six-axis internal command shape:
+- The MAVLink conversion maps the ROSflight 2.0 wire layout into Voloxide's current six-axis internal command shape:
   - `u[0]`, `u[1]`, `u[2]` become `Fx`, `Fy`, `Fz`;
   - `u[3]`, `u[4]`, `u[5]` become `Qx`, `Qy`, `Qz`;
   - `IGNORE_VALUE0..2` become force ignores;
@@ -4711,15 +4711,15 @@ Design now implemented:
 
 Compatibility notes:
 
-- RustFlight still has a six-axis internal offboard resource (`Qx`, `Qy`, `Qz`, `Fx`, `Fy`, `Fz`), while ROSflight 2.0 stores ten offboard values internally. The wire schema now matches ROSflight 2.0, and the conversion intentionally keeps only the six axes the current RustFlight controller boundary can consume.
+- Voloxide still has a six-axis internal offboard resource (`Qx`, `Qy`, `Qz`, `Fx`, `Fy`, `Fz`), while ROSflight 2.0 stores ten offboard values internally. The wire schema now matches ROSflight 2.0, and the conversion intentionally keeps only the six axes the current Voloxide controller boundary can consume.
 - Unsupported `ResetOrigin` and `SendAllConfigInfos` are intentionally left as failed ACK paths. A real implementation should only be added if local estimator/navigation or config-info resources exist.
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p voloxide_core --lib` passes.
 
 ## Architecture Notes Cleanup Progress
 
@@ -4734,7 +4734,7 @@ Cleanup now done:
 - The ROSflight reference section now leads with `/tmp/rosflight_firmware_v2_0_1` at exact tag `v2.0.1`.
 - The floating `origin/main` snapshot is documented only as extra context, not as the compatibility target.
 - The RC-loss notes now say ROSflight 2.0 explicitly where the checked behavior came from the pinned release.
-- The command/offboard notes now record the corrected ROSflight 2.0 `OFFBOARD_CONTROL` wire schema and the intentional six-axis internal RustFlight mapping.
+- The command/offboard notes now record the corrected ROSflight 2.0 `OFFBOARD_CONTROL` wire schema and the intentional six-axis internal Voloxide mapping.
 
 Current next step:
 
@@ -4761,7 +4761,7 @@ Validation:
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
 
 ## Compatibility List
@@ -4773,7 +4773,7 @@ Compatibility target:
 - Progress reports should reference the affected Compatibility List item numbers.
 
 1. MAVLink XML compatibility.
-   - Local `rustflight_core/mavlink_definitions/rosflight.xml` must match the ROSflight 2.0.1 dialect surface.
+   - Local `voloxide_core/mavlink_definitions/rosflight.xml` must match the ROSflight 2.0.1 dialect surface.
    - Known gaps: missing `ROSFLIGHT_ERROR_INVALID_FAILSAFE`, local-only `UBLOX_FIX_TYPE`, expanded `MAV_COMPONENT`, unsigned `ROSFLIGHT_GNSS.seconds/nanos`, and status enum metadata drift.
 2. Parameter surface compatibility.
    - Parameter names, counts, ordering, types, and defaults must match ROSflight 2.0.1 where exposed through MAVLink.
@@ -4809,7 +4809,7 @@ Item worked:
 Upstream behavior checked:
 
 - The pinned comparison file is `/tmp/rosflight_firmware_v2_0_1/comms/mavlink/rosflight.xml` from ROSflight 2.0.1.
-- The local MAVLink Rust code is generated from `rustflight_core/mavlink_definitions/rosflight.xml` by `rustflight_core/build.rs`; generated output is not edited.
+- The local MAVLink Rust code is generated from `voloxide_core/mavlink_definitions/rosflight.xml` by `voloxide_core/build.rs`; generated output is not edited.
 
 Design now implemented:
 
@@ -4828,10 +4828,10 @@ Current status:
 
 Validation:
 
-- `diff -u /tmp/rosflight_firmware_v2_0_1/comms/mavlink/rosflight.xml rustflight_core/mavlink_definitions/rosflight.xml` now reports only the intentional `bitmask="true"` metadata delta.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p rustflight_core --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `diff -u /tmp/rosflight_firmware_v2_0_1/comms/mavlink/rosflight.xml voloxide_core/mavlink_definitions/rosflight.xml` now reports only the intentional `bitmask="true"` metadata delta.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p voloxide_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf` passes.
@@ -4875,8 +4875,8 @@ Current status:
 Validation:
 
 - A local comparison script against pinned ROSflight 2.0.1 reports `up=333 loc=333`, `name_type_mismatches=0`, and `default_mismatches=0`.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core params::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core params::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -4901,7 +4901,7 @@ Upstream behavior checked:
 
 Design now implemented:
 
-- Kept RustFlight's named six-axis command fields (`qx`, `qy`, `qz`, `fx`, `fy`, `fz`) for readability at the controller boundary.
+- Kept Voloxide's named six-axis command fields (`qx`, `qy`, `qz`, `fx`, `fy`, `fz`) for readability at the controller boundary.
 - Added explicit `passthrough: [ControlChannel; 4]` to `CombinedControl` and `passthrough: [f32; 4]` to `OffboardControlMsg` so ROSflight `u[6..9]` is no longer dropped.
 - Updated incoming MAVLink `OFFBOARD_CONTROL` conversion so:
   - `u[0..2]` maps to `fx`, `fy`, `fz`,
@@ -4920,9 +4920,9 @@ Current status:
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core command_manager::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core comm_manager::comm_link_trait::mavlink::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core command_manager::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -4969,17 +4969,17 @@ Current status:
 
 - Compatibility List 4 is complete for the controller boundary and known controller behavior gaps: ten-channel controller output, passthrough propagation, PID integrator behavior, thrust scaling/sign, and air-density input.
 - Compatibility List 5 remains open because the mixer still needs the ROSflight 2.0.1 full 10-output primary/secondary mixer model.
-- The stale full-package `rustflight_core` integration tests have been migrated to the current architecture:
+- The stale full-package `voloxide_core` integration tests have been migrated to the current architecture:
   - `controller_test.rs` now uses `ControllerCtx` and `ControllerOutput`,
   - `estimator_test.rs` now uses named `ProcessedSensors` and `NamedEstimator`,
   - `mixer_tests.rs` now uses `ControllerOutput`, current `Params`, and the current mixer API.
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core controller::quad_controller::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core sensors::tests --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core controller::quad_controller::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core sensors::tests --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -5093,8 +5093,8 @@ Current status:
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --test mixer_tests` passes with 15 tests.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core` passes.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --test mixer_tests` passes with 15 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.
@@ -5155,9 +5155,9 @@ Pinned upstream target:
 
 Status legend:
 
-- `[x]` RustFlight has the ROSflight 2.0.1 feature or an interface-compatible implementation.
-- `[~]` RustFlight has the core/interface feature, but exact parity depends on board hardware validation or a deliberately abstract board backend.
-- `[!]` RustFlight is missing behavior, has a known compatibility gap, or needs a follow-up before claiming full ROSflight 2.0.1 parity.
+- `[x]` Voloxide has the ROSflight 2.0.1 feature or an interface-compatible implementation.
+- `[~]` Voloxide has the core/interface feature, but exact parity depends on board hardware validation or a deliberately abstract board backend.
+- `[!]` Voloxide is missing behavior, has a known compatibility gap, or needs a follow-up before claiming full ROSflight 2.0.1 parity.
 - `[n/a]` The item exists in the ROSflight MAVLink dialect or board interface but is not used by ROSflight 2.0.1 firmware behavior.
 
 This inventory supersedes the earlier "Compatibility List item complete" statements where a later full-pass audit found a narrower follow-up.
@@ -5173,7 +5173,7 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[!]` Time-going-backwards detection is not visibly wired into the active IMU control path in the same way as `ROSflight::check_time_going_forwards()`.
 - `[!]` Telemetry streaming is currently called from the IMU-gated control stage; ROSflight streams non-IMU sensor telemetry whenever each sensor's `got_flags` bit is set, even on loops without a new IMU.
 - `[!]` RC raw telemetry is currently tied to the named telemetry call path; ROSflight sends RC raw immediately when `rc.receive()` returns a new packet.
-- `[!]` ROSflight status `loop_time_us` is emitted as the measured control-loop time; RustFlight currently emits `0`.
+- `[!]` ROSflight status `loop_time_us` is emitted as the measured control-loop time; Voloxide currently emits `0`.
 
 ### MAVLink Dialect, Parser, And Wire Messages
 
@@ -5188,7 +5188,7 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 
 ### Parameters
 
-- `[x]` RustFlight exposes 333 parameters matching ROSflight 2.0.1 count, order, names, types, and defaults.
+- `[x]` Voloxide exposes 333 parameters matching ROSflight 2.0.1 count, order, names, types, and defaults.
 - `[x]` Int-backed boolean-like params use int MAVLink types, matching ROSflight.
 - `[x]` Full 10x10 primary and 10x10 secondary mixer parameter matrices are exposed.
 - `[x]` System ID parameter updates propagate to outbound comm system ID.
@@ -5318,7 +5318,7 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` Board-owned PWM driver boundary exists instead of core owning hardware registers.
 - `[x]` PixRacerPro and Nucleo compile against the new board/runtime surface.
 - `[x]` Sim board tracks the core board/runtime surface for software testing.
-- `[~]` ROSflight's concrete board APIs for `imu_read`, `mag_read`, `baro_read`, `diff_pressure_read`, `range_read`, `gnss_read`, `battery_read`, `rc_read`, `pwm_init`, `pwm_write`, and `pwm_disable` are intentionally collapsed behind RustFlight's named sensor bus and PWM driver boundaries. This is architecture-compatible, but each board backend must validate exact behavior.
+- `[~]` ROSflight's concrete board APIs for `imu_read`, `mag_read`, `baro_read`, `diff_pressure_read`, `range_read`, `gnss_read`, `battery_read`, `rc_read`, `pwm_init`, `pwm_write`, and `pwm_disable` are intentionally collapsed behind Voloxide's named sensor bus and PWM driver boundaries. This is architecture-compatible, but each board backend must validate exact behavior.
 - `[!]` Board LED hooks are missing.
 - `[!]` Board backup-memory hooks are missing.
 - `[!]` Board sensor-init error count/message hooks are missing.
@@ -5326,7 +5326,7 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 
 ### Simulator Readiness Result
 
-RustFlight is close, but this full pass found compatibility gaps that should be fixed before claiming every ROSflight 2.0.1 firmware feature is present for software-in-the-loop testing:
+Voloxide is close, but this full pass found compatibility gaps that should be fixed before claiming every ROSflight 2.0.1 firmware feature is present for software-in-the-loop testing:
 
 1. Wire time-going-backwards detection into the active IMU control path.
 2. Move telemetry streaming to a scheduler stage that can emit non-IMU sensor telemetry without requiring a new IMU sample.
@@ -5342,43 +5342,43 @@ These points are the final compatibility list discovered by the comprehensive RO
 
 1. Time-going-backwards detection.
    - ROSflight 2.0.1 calls `check_time_going_forwards()` before running estimator/controller/mixer work for a new IMU sample.
-   - RustFlight must set `TIME_GOING_BACKWARDS` and skip the control pipeline when an IMU timestamp does not advance, and clear it once time advances again.
+   - Voloxide must set `TIME_GOING_BACKWARDS` and skip the control pipeline when an IMU timestamp does not advance, and clear it once time advances again.
    - Status: complete in `run_control_pipeline_if_new_imu`; duplicate or backwards IMU timestamps set `TIME_GOING_BACKWARDS` and skip control work, and advancing timestamps clear the flag.
 
 2. Sensor telemetry scheduling.
    - ROSflight 2.0.1 streams telemetry from `got_flags`, so baro, mag, range, GNSS, battery, and diff-pressure telemetry can emit on loops without a new IMU sample.
-   - RustFlight must move telemetry emission to a scheduler stage that consumes the current processed sensor resources without requiring a new IMU control update.
+   - Voloxide must move telemetry emission to a scheduler stage that consumes the current processed sensor resources without requiring a new IMU control update.
    - Status: complete; telemetry is now a `World` scheduler stage that consumes the current `ProcessedSensors` resource, so non-IMU sensor telemetry no longer depends on a new IMU control update.
 
 3. RC raw telemetry scheduling.
    - ROSflight 2.0.1 sends `RC_CHANNELS` when RC receive produces a new packet.
-   - RustFlight must emit RC raw from the RC stage when the current processed sensor set includes a new RC packet.
+   - Voloxide must emit RC raw from the RC stage when the current processed sensor set includes a new RC packet.
    - Status: complete; RC raw telemetry is emitted from the same world telemetry stage after the RC packet has been produced/consumed for the current scheduler pass, independent of estimator/controller execution.
 
 4. Status `num_errors` and `loop_time_us`.
    - ROSflight 2.0.1 status uses `board.sensors_errors_count()` and `RF_.get_loop_time_us()`.
-   - RustFlight must add a board sensor-error-count hook and store measured control-loop time for status telemetry.
+   - Voloxide must add a board sensor-error-count hook and store measured control-loop time for status telemetry.
    - Status: complete; `BoardIo::sensors_errors_count()` feeds status `num_errors`, and `ControlPipelineResource::latest_loop_time_us` feeds status `loop_time_us`.
 
 5. Statustext connection gating and replay.
    - ROSflight 2.0.1 buffers logs until companion heartbeat marks the link connected, then replays buffered logs gradually.
-   - RustFlight must use `CompanionLinkState` to avoid draining statustext before heartbeat connection.
+   - Voloxide must use `CompanionLinkState` to avoid draining statustext before heartbeat connection.
    - Status: complete; log draining now waits for companion heartbeat connection and replays buffered statustext entries gradually after connection.
 
 6. Hard-fault backup memory and `ROSFLIGHT_HARD_ERROR`.
    - ROSflight 2.0.1 exposes backup-memory recovery and `ROSFLIGHT_HARD_ERROR` telemetry for hard-fault diagnostics.
-   - RustFlight must at least expose board backup-memory hooks and a comm hard-error telemetry path before this can be considered present.
+   - Voloxide must at least expose board backup-memory hooks and a comm hard-error telemetry path before this can be considered present.
    - Status: complete for the software/runtime interface; `BoardIo` exposes backup-memory hooks, `CommInterface` exposes `send_hard_error`, `World` reads/clears pending backup data at init, attempts rearm through the normal state machine request when backup data asks for it, and sends `ROSFLIGHT_HARD_ERROR` after companion heartbeat connection.
 
 7. LED and board sensor-init diagnostics.
    - ROSflight 2.0.1 has board LED hooks and board sensor-init error count/message diagnostics.
-   - RustFlight must expose these board-runtime hooks so board backends can preserve ROSflight behavior.
+   - Voloxide must expose these board-runtime hooks so board backends can preserve ROSflight behavior.
    - Status: complete for the core board-runtime interface; `BoardIo` exposes LED0/LED1 hooks and sensor-init diagnostic hooks, and `World` drives LED0 from RC override plus LED1 from armed/error/failsafe state. Board backends can now implement the physical behavior.
 
 ### Final Compatibility Points Progress
 
 - Final Compatibility Point 1: complete.
-  - Implemented in `rustflight_core/src/control_system.rs`.
+  - Implemented in `voloxide_core/src/control_system.rs`.
   - Covered by `world_control_stage_flags_non_advancing_imu_time`.
 
 - Final Compatibility Point 2: complete.
@@ -5408,16 +5408,16 @@ These points are the final compatibility list discovered by the comprehensive RO
 Validation for this slice:
 
 - `cargo fmt --check`
-- `cargo test -p rustflight_core --lib -- --test-threads=1`
+- `cargo test -p voloxide_core --lib -- --test-threads=1`
 - `cargo test -p sim --lib`
 - `cargo check -p pixracerpro --target thumbv7em-none-eabihf`
 - `cargo check -p nucleo --target thumbv7em-none-eabihf`
 
 Validation:
 
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core sensorprocessors::tests --lib` passes with 7 tests.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core command_system::tests --lib` passes with 10 tests.
-- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p rustflight_core --lib` passes with 138 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core sensorprocessors::tests --lib` passes with 7 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core command_system::tests --lib` passes with 10 tests.
+- `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p voloxide_core --lib` passes with 138 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo test -p sim --lib` passes with 9 tests.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check` passes.
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p pixracerpro --target thumbv7em-none-eabihf` passes.

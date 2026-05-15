@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch RustFlight standalone sim plus ROScopter and verify waypoint response.
+"""Launch Voloxide standalone sim plus ROScopter and verify waypoint response.
 
 Run from an environment with Jazzy, the ROSflight workspace, this overlay, and
 RMW_IMPLEMENTATION=rmw_zenoh_cpp sourced/exported.
@@ -328,8 +328,8 @@ def start_lower_processes(use_rviz: bool) -> list[subprocess.Popen]:
             [
                 "ros2",
                 "launch",
-                "rust_sil_board_shim",
-                "multirotor_standalone_rust.launch.py",
+                "voloxide_sil_board_shim",
+                "multirotor_standalone_voloxide.launch.py",
                 "use_builtin_rc:=false",
                 f"use_rviz:={'true' if use_rviz else 'false'}",
             ]

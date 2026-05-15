@@ -17,9 +17,9 @@
 #include <sensor_msgs/msg/temperature.hpp>
 #include <std_srvs/srv/trigger.hpp>
 
-#include "rust_sil_board_shim/rustflight_ffi.h"
+#include "voloxide_sil_board_shim/voloxide_ffi.h"
 
-namespace rust_sil_board_shim
+namespace voloxide_sil_board_shim
 {
 namespace
 {
@@ -31,17 +31,17 @@ uint64_t stamp_to_micros(const builtin_interfaces::msg::Time & stamp)
   return static_cast<uint64_t>(stamp.sec) * 1000000 + stamp.nanosec / 1000;
 }
 
-RustflightFfiVector3 vector_to_ffi(const geometry_msgs::msg::Vector3 & vector)
+VoloxideFfiVector3 vector_to_ffi(const geometry_msgs::msg::Vector3 & vector)
 {
-  return RustflightFfiVector3{vector.x, vector.y, vector.z};
+  return VoloxideFfiVector3{vector.x, vector.y, vector.z};
 }
 }
 
-class RustSilBoard final : public rclcpp::Node
+class VoloxideSilBoard final : public rclcpp::Node
 {
 public:
-  RustSilBoard()
-  : rclcpp::Node("rust_sil_board")
+  VoloxideSilBoard()
+  : rclcpp::Node("voloxide_sil_board")
   {
     declare_parameter<std::string>("simulation_host", "localhost");
     declare_parameter<int>("simulation_port", 14525);
@@ -50,11 +50,11 @@ public:
     declare_parameter<int64_t>("serial_delay_ns", 6000000);
 
     pwm_outputs_.fill(kDisabledPwmMicros);
-    firmware_.reset(rustflight_sim_create());
+    firmware_.reset(voloxide_sim_create());
     if (!firmware_) {
       RCLCPP_ERROR(
         get_logger(),
-        "failed to initialize RustFlight FFI; check MAVLink UDP port availability");
+        "failed to initialize Voloxide FFI; check MAVLink UDP port availability");
     }
 
     run_service_ = create_service<std_srvs::srv::Trigger>(
@@ -64,8 +64,8 @@ public:
         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
         (void)request;
         response->success = run_once();
-        response->message = response->success ? "RustFlight SIL iteration completed" :
-          "RustFlight SIL iteration failed";
+        response->message = response->success ? "Voloxide SIL iteration completed" :
+          "Voloxide SIL iteration failed";
       });
 
     pwm_publisher_ = create_publisher<rosflight_msgs::msg::PwmOutput>("sim/pwm_output", 1);
@@ -135,15 +135,15 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "rust_sil_board ready: service=sil_board/run, pwm=sim/pwm_output");
+      "voloxide_sil_board ready: service=sil_board/run, pwm=sim/pwm_output");
   }
 
 private:
   struct FirmwareDeleter
   {
-    void operator()(RustflightFfiHandle * handle) const
+    void operator()(VoloxideFfiHandle * handle) const
     {
-      rustflight_sim_destroy(handle);
+      voloxide_sim_destroy(handle);
     }
   };
 
@@ -154,30 +154,30 @@ private:
     }
 
     auto snapshot = build_sensor_snapshot();
-    if (!rustflight_sim_set_sensors(firmware_.get(), &snapshot)) {
-      RCLCPP_WARN(get_logger(), "failed to pass sensor snapshot to RustFlight");
+    if (!voloxide_sim_set_sensors(firmware_.get(), &snapshot)) {
+      RCLCPP_WARN(get_logger(), "failed to pass sensor snapshot to Voloxide");
       return false;
     }
 
-    if (!rustflight_sim_run_once(firmware_.get())) {
-      RCLCPP_WARN(get_logger(), "RustFlight firmware iteration failed");
+    if (!voloxide_sim_run_once(firmware_.get())) {
+      RCLCPP_WARN(get_logger(), "Voloxide firmware iteration failed");
       return false;
     }
 
     std::array<uint16_t, kPwmChannelCount> outputs{};
     outputs.fill(kDisabledPwmMicros);
-    const auto copied = rustflight_sim_get_pwm(firmware_.get(), outputs.data(), outputs.size());
+    const auto copied = voloxide_sim_get_pwm(firmware_.get(), outputs.data(), outputs.size());
     if (copied != outputs.size()) {
-      RCLCPP_WARN(get_logger(), "RustFlight returned %zu PWM channels", copied);
+      RCLCPP_WARN(get_logger(), "Voloxide returned %zu PWM channels", copied);
     }
     pwm_outputs_ = outputs;
     publish_pwm();
     return true;
   }
 
-  RustflightFfiSensorSnapshot build_sensor_snapshot() const
+  VoloxideFfiSensorSnapshot build_sensor_snapshot() const
   {
-    RustflightFfiSensorSnapshot snapshot{};
+    VoloxideFfiSensorSnapshot snapshot{};
     const auto timestamp_us = fcu_clock_micros();
 
     snapshot.has_imu = imu_available_;
@@ -305,15 +305,15 @@ private:
   bool rc_available_{false};
 
   std::array<uint16_t, kPwmChannelCount> pwm_outputs_{};
-  std::unique_ptr<RustflightFfiHandle, FirmwareDeleter> firmware_;
+  std::unique_ptr<VoloxideFfiHandle, FirmwareDeleter> firmware_;
   std::chrono::steady_clock::time_point boot_time_{std::chrono::steady_clock::now()};
 };
-}  // namespace rust_sil_board_shim
+}  // namespace voloxide_sil_board_shim
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<rust_sil_board_shim::RustSilBoard>());
+  rclcpp::spin(std::make_shared<voloxide_sil_board_shim::VoloxideSilBoard>());
   rclcpp::shutdown();
   return 0;
 }

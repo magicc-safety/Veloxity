@@ -41,7 +41,7 @@ use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 use embassy_time::Timer;
 
-use rustflight_core::packets;
+use voloxide_core::packets;
 //use defmt::trace;
 
 pub static PPS_SIGNAL: Signal<CriticalSectionRawMutex, packets::PpsPacket> =

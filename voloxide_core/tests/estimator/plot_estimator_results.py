@@ -28,7 +28,7 @@ def quat_to_euler(q):
     yaw = np.arctan2(siny_cosp, cosy_cosp)
     return np.array([roll, pitch, yaw])
 
-def plot_rust_results(filename='rust_estimator_results.csv'):
+def plot_rust_results(filename='voloxide_estimator_results.csv'):
     """Reads the CSV output from the Rust test and generates comparison plots."""
     try:
         df = pd.read_csv(filename)

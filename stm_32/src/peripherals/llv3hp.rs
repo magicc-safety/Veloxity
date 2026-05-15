@@ -42,7 +42,7 @@
 pub use embassy_stm32::mode::Async;
 pub use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 pub use embassy_sync::signal::Signal;
-use rustflight_core::{errors, packets};
+use voloxide_core::{errors, packets};
 
 // I2C Specific
 use embassy_stm32::i2c::I2c;

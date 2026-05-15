@@ -239,7 +239,7 @@ pub fn apply_version_requests<const N: usize>(mut ctx: VersionRequestCtx<'_, N>)
             continue;
         }
 
-        let version_str = "RustFlight Alpha 0.1";
+        let version_str = "Voloxide 0.1";
         let mut version_bytes = [0u8; 50];
         let len = version_str.len().min(version_bytes.len());
         version_bytes[..len].copy_from_slice(version_str.as_bytes());
