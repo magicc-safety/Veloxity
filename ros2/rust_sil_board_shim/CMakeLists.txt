@@ -10,14 +10,13 @@ find_package(std_srvs REQUIRED)
 set(RUSTFLIGHT_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(RUSTFLIGHT_SIM_STATICLIB "${RUSTFLIGHT_REPO_ROOT}/target/debug/libsim.a")
 
-add_custom_command(
-  OUTPUT "${RUSTFLIGHT_SIM_STATICLIB}"
+add_custom_target(
+  rustflight_sim_staticlib ALL
   COMMAND cargo build -p sim --lib
   WORKING_DIRECTORY "${RUSTFLIGHT_REPO_ROOT}"
   COMMENT "Building RustFlight sim static library"
+  BYPRODUCTS "${RUSTFLIGHT_SIM_STATICLIB}"
 )
-
-add_custom_target(rustflight_sim_staticlib DEPENDS "${RUSTFLIGHT_SIM_STATICLIB}")
 
 add_library(rustflight_sim STATIC IMPORTED GLOBAL)
 set_target_properties(rustflight_sim PROPERTIES
@@ -46,6 +45,10 @@ install(DIRECTORY include/
 )
 
 install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
 )
 

@@ -109,6 +109,19 @@ The IMU calibration service is the intended way to populate nonzero IMU bias par
 manual `ACC_X_BIAS=0.01` step was a temporary debugging shortcut, not the preferred operator flow.
 The next validation run should use this YAML-plus-calibration path.
 
+The YAML-plus-calibration path has since been validated against both RustFlight and upstream C
+`sil_board`. Directional scripted RC tests matched upstream C sign behavior:
+
+- channel 1 high, vimfly `k`, produced negative north velocity.
+- channel 1 low, vimfly `j`, produced positive north velocity.
+- channel 0 low, vimfly `l`, produced negative east velocity.
+- channel 0 high, vimfly `h`, produced positive east velocity.
+- channel 3 low/high, vimfly `f`/`d`, produced opposite signed yaw rates.
+
+This means RustFlight currently matches ROSflight's standalone simulator sign behavior. The vimfly
+direction labels should be interpreted through the upstream sim behavior rather than assuming
+positive NED X/Y deltas.
+
 ## Backend Work
 
 The branch does not need Zenoh for the firmware-to-`rosflight_io` MAVLink link. `rosflight_io`

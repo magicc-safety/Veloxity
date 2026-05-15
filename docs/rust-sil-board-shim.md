@@ -70,6 +70,8 @@ name, not the executable name.
 ## Current State
 
 The shim compiles, starts, and links against the RustFlight `sim` crate as a Rust `staticlib`.
+The ROS 2 shim build always invokes `cargo build -p sim --lib` before linking so Rust source
+changes are reflected in the installed `rust_sil_board` executable.
 
 Its `sil_board/run` service handler now:
 
@@ -135,6 +137,11 @@ Start the ROS 2 Zenoh router:
 ```bash
 ros2 run rmw_zenoh_cpp rmw_zenohd
 ```
+
+Some nodes may print an `rmw_zenoh_cpp` warning that they were unable to connect to a Zenoh router
+after one attempt. In the current launch order this can happen when a node starts before
+`rmw_zenohd` has finished advertising. Treat it as a startup race unless ROS graph traffic is also
+missing. In successful runs, cross-process topics and services still flow after the router comes up.
 
 In another shell with the same sourced environment:
 
@@ -273,8 +280,10 @@ Observed validation signals:
 ## Directional Acceptance Test Design
 
 The next acceptance test should prove the axis signs, not just that the vehicle moves. Run it with
-`use_builtin_rc:=false` so scripted RC commands are the only `sim/RC` source. The scripted commands
-use the same channel values as vimfly:
+`use_builtin_rc:=false` so scripted RC commands are the only `sim/RC` source. Keep RViz enabled
+during launch-based testing unless the run is explicitly headless; this lets a developer watch the
+vehicle while the script drives ROS services and RC topics. The scripted commands use the same
+channel values as vimfly:
 
 - roll right: channel 0 = `1000`, matching vimfly `l`
 - roll left: channel 0 = `2000`, matching vimfly `h`
@@ -302,25 +311,162 @@ ros2 topic pub -r 50 /sim/RC rosflight_msgs/msg/RCRaw \
 ```
 
 For each axis case, hold the command for a short fixed window, sample `/sim/truth_state` before and
-after, then return to neutral. The standalone simulator reports NED truth state, so the expected
-signs from a level initial heading are:
+after, then return to neutral. The standalone simulator reports NED truth state, but the first
+acceptance criterion is parity with upstream C `sil_board`, not an independent reinterpretation of
+the vimfly labels.
 
-- pitch forward should increase north position/velocity: `pose.position.x` and/or `twist.linear.x`
-  become more positive than the neutral baseline.
-- pitch backward should drive `pose.position.x` and/or `twist.linear.x` negative relative to the
-  forward case.
-- roll right should increase east position/velocity: `pose.position.y` and/or `twist.linear.y`
-  become more positive than the neutral baseline.
-- roll left should drive `pose.position.y` and/or `twist.linear.y` negative relative to the right
-  case.
-- yaw clockwise should produce the opposite yaw-rate sign from yaw counterclockwise. If the absolute
-  yaw sign is ambiguous in the observation tooling, the minimum pass criterion is that the two yaw
-  commands produce opposite-signed `twist.angular.z` responses.
+The same scripted test has been run against RustFlight and upstream C `sil_board`. Both produced
+the same sign pattern within noise:
+
+- `pitch_forward_ch1_2000`: negative north velocity delta.
+- `pitch_backward_ch1_1000`: positive north velocity delta.
+- `roll_right_ch0_1000`: negative east velocity delta.
+- `roll_left_ch0_2000`: positive east velocity delta.
+- `yaw_cw_ch3_1000`: negative yaw-rate delta.
+- `yaw_ccw_ch3_2000`: positive yaw-rate delta.
 
 Pass criteria:
 
 - `/status` stays `armed: true`, `failsafe: false`, and `error_code: 0`.
 - `/sim/pwm_output` remains non-idle during the maneuver windows.
-- The pitch and roll truth-state responses have the expected signs above.
-- The two yaw commands produce opposite-signed yaw-rate responses.
-- Repeating the same scripted commands against upstream C `sil_board` produces the same sign pattern.
+- The pitch, roll, and yaw truth-state responses match the upstream C `sil_board` sign pattern.
+- The paired axis commands produce opposite-signed responses.
+
+Automated command:
+
+```bash
+cd /home/skink/projects/rustflight_setup/Voloxide
+source /opt/ros/jazzy/setup.zsh
+source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source target/ros2/install/setup.zsh
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+python3 scripts/sim_directional_acceptance.py --baseline rust --use-rviz
+```
+
+## ROScopter Waypoint Acceptance Test Design
+
+ROScopter provides the waypoint-following layer above ROSflight. The ROSflight tutorial launches the
+standalone multirotor sim first, then launches `roscopter_sim sim.launch.py`, then loads or publishes
+waypoints through the `/path_planner` services. The Rust-backed version follows the same contract
+without changing ROSflight or ROScopter packages:
+
+```text
+rosflight_sim standalone multirotor + rust_sil_board
+        |
+        | /status, /imu/data, /gnss, /baro, /command, /sim/truth_state
+        v
+roscopter estimator/controller/path_manager/path_planner
+```
+
+The first waypoint smoke test uses service-published NED waypoints instead of editing the upstream
+mission YAML. It starts RViz, starts the Rust-backed standalone stack, loads the standard multirotor
+firmware parameters, calibrates, arms with spoofed RC, starts ROScopter, publishes a small NED target,
+and checks that the ROScopter command chain reaches RustFlight and produces non-idle PWM.
+
+Automated command:
+
+```bash
+cd /home/skink/projects/rustflight_setup/Voloxide
+source /opt/ros/jazzy/setup.zsh
+source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source target/ros2/install/setup.zsh
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+python3 scripts/sim_roscopter_waypoint_acceptance.py --use-rviz
+```
+
+The script launches:
+
+- `rmw_zenoh_cpp/rmw_zenohd`
+- `rust_sil_board_shim multirotor_standalone_rust.launch.py use_builtin_rc:=false use_rviz:=true`
+- ROScopter controller/path nodes, `roscopter_gcs rviz_waypoint_publisher`, and
+  `roscopter_sim sim_state_transcriber`
+
+Acceptance criteria:
+
+- `rosflight_io` reports armed and no failsafe.
+- RustFlight reports offboard control active and no RC override bits.
+- ROScopter publishes `/waypoints`, `/trajectory_command`, `/high_level_command`, and `/command`
+  after a waypoint is added.
+- The commanded target is NED `[4.0, 0.0, -3.0]`.
+- `/command` carries a nonzero thrust command and RustFlight publishes non-idle PWM.
+- The NED distance to the target decreases during the test window.
+
+Latest observed result:
+
+```text
+target_ned=(4.0, 0.0, -3.0)
+distance_start=4.456 distance_end=0.550
+max_command_thrust=26.338
+status: armed=True failsafe=False offboard=True control_mode=0 rc_override=0 error_code=0
+roscopter_counts: waypoints=1 trajectory=371 high_level=549 command=547
+last_high_level: mode=10 valid=True cmd=(0.000,-0.000,0.000,22.975)
+max_pwm_delta=786
+last_command: mode=0 ignore=0 u0_3=[0.0, 0.0, -22.978, 0.001]
+ROSCOPTER WAYPOINT RESPONSE OK
+```
+
+This proves the ROScopter waypoint command chain reaches RustFlight as offboard control, clears RC
+override, drives actuator outputs, and moves the simulated vehicle substantially toward the waypoint
+within the test window.
+
+The earlier waypoint test showed `/command` activity but no meaningful motion:
+
+```text
+status: armed=True failsafe=False offboard=False control_mode=1 rc_override=960 error_code=0
+distance_start=5.000 distance_end=4.997
+last_command: mode=2 ignore=0 u0_3=[0.0, 0.0, 0.85, 0.0]
+```
+
+Root cause: RustFlight's handwritten MAVLink byte parser used CRC extra `190` for
+`OFFBOARD_CONTROL` message ID `180`, while the ROSflight C MAVLink headers and Rust generated
+dialect both use CRC extra `90`. The bad CRC table entry caused incoming offboard frames from
+unmodified `rosflight_io` to be rejected before they reached `CommManager`. The parser now uses CRC
+extra `90`, and `cargo test -p rustflight_core offboard_control_wire_frame_passes_crc_and_decodes`
+covers this wire-frame path.
+
+## ROScopter Tutorial Mission Test
+
+The same script can run the first four NED waypoints from the ROScopter tutorial mission. The local
+mission YAML is installed with the shim package at:
+
+```bash
+ros2/rust_sil_board_shim/config/roscopter_four_waypoints.yaml
+```
+
+The waypoints are:
+
+- `GOTO [0.0, 0.0, -10.0]`, speed `4.0`
+- `GOTO [20.0, 0.0, -10.0]`, speed `4.0`
+- `HOLD [20.0, -20.0, -20.0]`, speed `4.0`, hold `5.0` seconds
+- `GOTO [0.0, -20.0, -20.0]`, speed `4.0`
+
+Automated command:
+
+```bash
+cd /home/skink/projects/rustflight_setup/Voloxide
+source /opt/ros/jazzy/setup.zsh
+source /home/skink/projects/rustflight_setup/workspace/install/setup.zsh
+source target/ros2/install/setup.zsh
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+python3 scripts/sim_roscopter_waypoint_acceptance.py \
+  --use-rviz \
+  --mission four \
+  --observe-seconds 180 \
+  --waypoint-tolerance 3.0
+```
+
+Latest observed result:
+
+```text
+targets_ned=[(0.0, 0.0, -10.0), (20.0, 0.0, -10.0), (20.0, -20.0, -20.0), (0.0, -20.0, -20.0)]
+waypoint_start_distances=[9.599, 22.193, 34.507, 28.113]
+waypoint_min_distances=[0.051, 0.099, 0.174, 0.168] tolerance=3.000
+max_command_thrust=28.868
+status: armed=True failsafe=False offboard=True control_mode=0 rc_override=0 error_code=0
+roscopter_counts: waypoints=4 trajectory=1915 high_level=2003 command=2111
+max_pwm_delta=790
+ROSCOPTER WAYPOINT RESPONSE OK
+```
+
+This demonstrates that the Rust-backed standalone multirotor follows multiple ROScopter waypoints,
+not only a single offboard command.

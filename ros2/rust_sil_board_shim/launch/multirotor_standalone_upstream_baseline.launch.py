@@ -4,8 +4,8 @@ from ament_index_python import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -21,32 +21,18 @@ def generate_launch_description():
         default_value="false",
         description="Whether the nodes will use sim time or not",
     )
-    use_vimfly_arg = DeclareLaunchArgument(
-        "use_vimfly",
-        default_value="false",
-        description="Whether the rc node will use vimfly or not",
-    )
-    use_builtin_rc_arg = DeclareLaunchArgument(
-        "use_builtin_rc",
-        default_value="true",
-        description="Whether to launch rosflight_sim rc.py. Set false when spoofing sim/RC externally.",
-    )
     use_rviz_arg = DeclareLaunchArgument(
         "use_rviz",
-        default_value="true",
+        default_value="false",
         description="Whether to launch the standalone RViz visualizer.",
     )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
-    use_vimfly = LaunchConfiguration("use_vimfly")
-    use_builtin_rc = LaunchConfiguration("use_builtin_rc")
     use_rviz = LaunchConfiguration("use_rviz")
 
     return LaunchDescription(
         [
             use_sim_time_arg,
-            use_vimfly_arg,
-            use_builtin_rc_arg,
             use_rviz_arg,
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -62,20 +48,12 @@ def generate_launch_description():
                 executable="rosflight_sil_manager",
                 name="rosflight_sil_manager",
                 output="screen",
-                parameters=[
-                    {
-                        "use_sim_time": use_sim_time,
-                        "use_timer": True,
-                        "simulation_loop_frequency": 250.0,
-                        "service_exists_timeout_ms": 50,
-                        "service_result_timeout_ms": 50,
-                    }
-                ],
+                parameters=[{"use_sim_time": use_sim_time, "use_timer": True}],
             ),
             Node(
-                package="rust_sil_board_shim",
-                executable="rust_sil_board",
-                name="rust_sil_board",
+                package="rosflight_sim",
+                executable="sil_board",
+                name="sil_board",
                 output="screen",
                 parameters=[{"use_sim_time": use_sim_time}],
             ),
@@ -92,12 +70,6 @@ def generate_launch_description():
                 name="rosflight_io",
                 output="screen",
                 parameters=[{"udp": True, "use_sim_time": use_sim_time}],
-            ),
-            Node(
-                package="rosflight_sim",
-                executable="rc.py",
-                condition=IfCondition(use_builtin_rc),
-                parameters=[{"use_vimfly": use_vimfly, "use_sim_time": use_sim_time}],
             ),
             Node(
                 package="rosflight_sim",

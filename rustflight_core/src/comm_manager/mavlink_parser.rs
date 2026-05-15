@@ -112,7 +112,7 @@ impl MavlinkParser {
             31 => 246,  // ATTITIDE_QUATERNION
             65 => 118,  // RC_CHANNELS
             111 => 34,  // TIMESYNC
-            180 => 190, // OFFBOARD_CONTROL
+            180 => 90,  // OFFBOARD_CONTROL
             181 => 67,  // SMALL_IMU
             182 => 218, // SMALL_MAG
             183 => 206, // SMALL_BARO
@@ -273,5 +273,76 @@ impl MavlinkParser {
     fn reset(&mut self) {
         self.frame_pos = 0;
         self.state = ParseState::WaitingForStart;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mavlink::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
+
+    fn offboard_control_frame_bytes() -> ([u8; 263], usize) {
+        let frame = Frame::builder()
+            .version(V1)
+            .sequence(7)
+            .system_id(1)
+            .component_id(1)
+            .message(&mav_messages::OffboardControl {
+                mode: mav_enums::OffboardControlMode::ModeRollPitchYawrateThrottle,
+                ignore: mav_enums::OffboardControlIgnore::IgnoreNone,
+                u: [0.0, 0.0, 0.85, 0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.0],
+            })
+            .unwrap()
+            .build();
+
+        let mut buf = [0u8; 263];
+        let mut pos = 0;
+        let header = frame.header();
+        let payload = frame.payload().bytes();
+        let crc = frame.checksum();
+
+        buf[pos] = 0xFE;
+        pos += 1;
+        buf[pos] = payload.len() as u8;
+        pos += 1;
+        buf[pos] = header.sequence();
+        pos += 1;
+        buf[pos] = header.system_id();
+        pos += 1;
+        buf[pos] = header.component_id();
+        pos += 1;
+        buf[pos] = header.message_id() as u8;
+        pos += 1;
+        buf[pos..pos + payload.len()].copy_from_slice(payload);
+        pos += payload.len();
+        buf[pos..pos + 2].copy_from_slice(&crc.to_le_bytes());
+        pos += 2;
+
+        (buf, pos)
+    }
+
+    #[test]
+    fn offboard_control_wire_frame_passes_crc_and_decodes() {
+        let (bytes, len) = offboard_control_frame_bytes();
+        let mut parser = MavlinkParser::new();
+        let mut parsed = None;
+
+        for byte in &bytes[..len] {
+            if let Some(frame) = parser.feed_byte(*byte) {
+                parsed = process_mavlink_frame(frame);
+            }
+        }
+
+        match parsed {
+            Some(Rosflight::OffboardControl(msg)) => {
+                assert_eq!(
+                    msg.mode,
+                    mav_enums::OffboardControlMode::ModeRollPitchYawrateThrottle
+                );
+                assert_eq!(msg.ignore, mav_enums::OffboardControlIgnore::IgnoreNone);
+                assert_eq!(msg.u[2], 0.85);
+            }
+            _ => panic!("OFFBOARD_CONTROL frame did not decode"),
+        }
     }
 }
