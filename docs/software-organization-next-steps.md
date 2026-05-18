@@ -253,4 +253,4 @@ Then reassess:
 
 
 
-As a final note, we should NO LONGER be using micro_algebra... that package is old and we should be doing all our math with a more modern, supported rust crate for linear algebra.
+As a final note, we should NO LONGER be using micro_algebra... that package is old and we should be doing all our math with a more modern, supported rust crate for linear algebra. We should also refactor or improve python scripts that were used to test the estimator, controller, or mixer, as it's not clear if the artifacts they generate are outdated or not. The old python scripts that tested these components (controller and mixer especially) require datasets (csv) to be present in the folder, but thereis no code for generating them, so it's an inflexible way of doing things in the first place and any python scripting related to that nonsense should be removed. Python scripts associated with the FFI can stay.
