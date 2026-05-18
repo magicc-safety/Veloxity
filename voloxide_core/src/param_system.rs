@@ -1,5 +1,5 @@
 use crate::{
-    comm_manager::str_to_fixed_bytes,
+    comm::str_to_fixed_bytes,
     comm_messages::{enums::ParamIdentifier, messages::ParamValueMsg},
     events::{
         COMM_RESPONSE_QUEUE_CAPACITY, CommResponse, PARAM_CHANGED_QUEUE_CAPACITY,

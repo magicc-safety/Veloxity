@@ -1,278 +1,6 @@
-use crate::comm_manager::{comm_link_trait::CommInterface, mavlink_parser};
-use crate::comm_messages::{Messages, Store, enums as comm_enums, messages as comm_messages};
-use crate::mavlink::dialects::rosflight::{
-    Rosflight, enums as mav_enums, messages as mav_messages,
-};
-use crate::{board, packets};
-use core::result::Result;
-use mavio::Frame;
-use mavio::prelude::*;
-use mavio::protocol::{DialectVersion, FrameBuilder};
-
-static RX_BUFF_SIZE: usize = 2048;
-const MAV_COMP_ID_ROSFLIGHT_FIRMWARE: u8 = 250;
-const MAVLINK_V1_MESSAGE_SIZE: usize = 263;
-
-pub struct MavlinkInterface {
-    pub component_id: u8,
-    sequence: u8,
-    mav_parser: mavlink_parser::MavlinkParser,
-}
-
-impl MavlinkInterface {
-    pub fn new() -> Self {
-        Self {
-            component_id: MAV_COMP_ID_ROSFLIGHT_FIRMWARE, // In latest rosflight_firmware this is hardcoded to 250
-            sequence: 0,
-            mav_parser: mavlink_parser::MavlinkParser::new(),
-        }
-    }
-
-    fn frame_builder<T: Message>(&mut self, system_id: u8, msg: T) -> mavio::Result<Frame<V1>> {
-        let frame = Frame::builder()
-            .version(V1)
-            .system_id(system_id)
-            .component_id(self.component_id)
-            .sequence(self.sequence)
-            .message(&msg)?
-            .build();
-
-        // Increment the sequence number, wrapping on overflow
-        self.sequence = self.sequence.wrapping_add(1);
-
-        Ok(frame)
-    }
-
-    fn send_message<B: board::BoardIo, T: Message>(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: T,
-    ) {
-        let frame = match self.frame_builder(system_id, msg) {
-            Ok(f) => f,
-            Err(_) => {
-                return;
-            }
-        };
-
-        // MAVLink V1 specification shows messages max size of 263 bytes
-        let mut buf = [0u8; MAVLINK_V1_MESSAGE_SIZE];
-
-        if frame.body_length() > buf.len() {
-            return;
-        }
-
-        let mut pos = 0;
-        let header = frame.header();
-        let payload = frame.payload().bytes();
-        let crc = frame.checksum();
-
-        // MAVLink v1 wire format
-        buf[pos] = 0xFE;
-        pos += 1; // Start marker
-        buf[pos] = payload.len() as u8;
-        pos += 1; // Payload length
-        buf[pos] = header.sequence();
-        pos += 1; // Sequence
-        buf[pos] = header.system_id();
-        pos += 1; // System ID
-        buf[pos] = header.component_id();
-        pos += 1; // Component ID
-        buf[pos] = header.message_id() as u8;
-        pos += 1; // Message ID (low byte)
-
-        // Copy payload
-        buf[pos..pos + payload.len()].copy_from_slice(payload);
-        pos += payload.len();
-
-        // CRC (little-endian)
-        buf[pos..pos + 2].copy_from_slice(&crc.to_le_bytes());
-        pos += 2;
-
-        board.serial_tx_write(&buf[..pos]);
-    }
-
-    fn process_rosflight_message(&mut self, message: Rosflight, msgs: &mut Messages) {
-        match (message) {
-            Rosflight::ExternalAttitude(es) => {
-                msgs.store(comm_messages::ExternalAttitudeMsg::from(es))
-            }
-            Rosflight::Timesync(ts) => msgs.store(comm_messages::TimesyncMsg::from(ts)),
-            Rosflight::RosflightCmd(cmd) => msgs.store(comm_messages::RosflightCmdMsg::from(cmd)),
-            Rosflight::RosflightAuxCmd(aux_cmd) => {
-                msgs.store(comm_messages::RosflightAuxCmdMsg::from(aux_cmd))
-            }
-            Rosflight::OffboardControl(oc) => {
-                msgs.store(comm_messages::OffboardControlMsg::from(oc))
-            }
-            Rosflight::ParamRequestRead(pr) => {
-                msgs.store(comm_messages::ParamRequestReadMsg::from(pr))
-            }
-            Rosflight::ParamSet(ps) => msgs.store(comm_messages::ParamSetMsg::from(ps)),
-            Rosflight::ParamRequestList(pl) => {
-                msgs.store(comm_messages::ParamRequestListMsg::from(pl))
-            }
-            Rosflight::Heartbeat(hb) => msgs.store(comm_messages::HeartbeatMsg::from(hb)),
-            _ => {}
-        }
-    }
-}
-
-impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
-    fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut Messages) {
-        let mut buf = [0u8; RX_BUFF_SIZE];
-        match board.serial_rx_read(&mut buf) {
-            Some(Ok(n)) => {
-                for i in 0..n {
-                    if let Some(frame) = self.mav_parser.feed_byte(buf[i]) {
-                        if let Some(message) = mavlink_parser::process_mavlink_frame(frame) {
-                            self.process_rosflight_message(message, msgs);
-                        }
-                    }
-                }
-            }
-            Some(Err(_)) => {}
-            None => {}
-        }
-    }
-
-    fn send_status(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::RosflightStatusMsg,
-    ) {
-        self.send_message(board, system_id, mav_messages::RosflightStatus::from(msg));
-    }
-    fn send_timesync(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::TimesyncMsg,
-    ) -> bool {
-        self.send_message(board, system_id, mav_messages::Timesync::from(msg));
-        return true;
-    }
-    fn send_named_value(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::ParamValueMsg,
-    ) {
-        self.send_message(board, system_id, mav_messages::ParamValue::from(msg));
-    }
-    fn send_heartbeat(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::HeartbeatMsg,
-    ) -> bool {
-        self.send_message(board, system_id, mav_messages::Heartbeat::from(msg));
-        return true;
-    }
-    fn send_version(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::RosflightVersionMsg,
-    ) {
-        self.send_message(board, system_id, mav_messages::RosflightVersion::from(msg));
-    }
-    fn send_diff_pressure(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::DiffPressureMsg,
-    ) {
-        self.send_message(board, system_id, mav_messages::DiffPressure::from(msg));
-    }
-    fn send_baro(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallBaroMsg) {
-        self.send_message(board, system_id, mav_messages::SmallBaro::from(msg));
-    }
-    fn send_imu(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallImuMsg) {
-        self.send_message(board, system_id, mav_messages::SmallImu::from(msg));
-    }
-    fn send_attitude(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::AttitudeQuaternionMsg,
-    ) {
-        self.send_message(
-            board,
-            system_id,
-            mav_messages::AttitudeQuaternion::from(msg),
-        );
-    }
-    fn send_output_raw(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::RosflightOutputRawMsg,
-    ) {
-        self.send_message(
-            board,
-            system_id,
-            mav_messages::RosflightOutputRaw::from(msg),
-        );
-    }
-    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: comm_messages::RcChannelsMsg) {
-        self.send_message(board, system_id, mav_messages::RcChannels::from(msg));
-    }
-    fn send_range(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallRangeMsg) {
-        self.send_message(board, system_id, mav_messages::SmallRange::from(msg));
-    }
-    fn send_mag(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallMagMsg) {
-        self.send_message(board, system_id, mav_messages::SmallMag::from(msg));
-    }
-    fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: comm_messages::RosflightGnssMsg) {
-        self.send_message(board, system_id, mav_messages::RosflightGnss::from(msg));
-    }
-    fn send_cmd_ack(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::RosflightCmdAckMsg,
-    ) {
-        self.send_message(board, system_id, mav_messages::RosflightCmdAck::from(msg));
-    }
-    fn send_rc_channels(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::RcChannelsMsg,
-    ) {
-        self.send_message(board, system_id, mav_messages::RcChannels::from(msg));
-    }
-    fn send_battery_status(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::BatteryStatusMsg,
-    ) {
-        self.send_message(
-            board,
-            system_id,
-            mav_messages::RosflightBatteryStatus::from(msg),
-        );
-    }
-    fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: comm_messages::StatustextMsg) {
-        self.send_message(board, system_id, mav_messages::Statustext::from(msg));
-    }
-    fn send_hard_error(
-        &mut self,
-        board: &mut B,
-        system_id: u8,
-        msg: comm_messages::RosflightHardErrorMsg,
-    ) {
-        self.send_message(
-            board,
-            system_id,
-            mav_messages::RosflightHardError::from(msg),
-        );
-    }
-}
+use crate::generated::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
+use voloxide_core::comm_messages::{enums as comm_enums, messages as comm_messages};
+use voloxide_core::packets;
 
 impl From<mav_enums::RosflightAuxCmdType> for comm_enums::RosflightAuxCmdType {
     fn from(val: mav_enums::RosflightAuxCmdType) -> Self {
@@ -382,7 +110,7 @@ impl From<mav_messages::OffboardControl> for comm_messages::OffboardControlMsg {
 impl From<mav_messages::RosflightAuxCmd> for comm_messages::RosflightAuxCmdMsg {
     fn from(msg: mav_messages::RosflightAuxCmd) -> Self {
         Self {
-            type_array: msg.type_array.map(|t| t.into()),
+            type_array: msg.type_array.map(comm_enums::RosflightAuxCmdType::from),
             aux_cmd_array: msg.aux_cmd_array,
         }
     }
@@ -426,8 +154,8 @@ impl From<mav_messages::ParamRequestList> for comm_messages::ParamRequestListMsg
 
 impl From<mav_messages::ParamSet> for comm_messages::ParamSetMsg {
     fn from(msg: mav_messages::ParamSet) -> Self {
-        use crate::params::ParamValue;
         use mav_enums::MavParamType::*;
+        use voloxide_core::params::ParamValue;
         Self {
             target_system: msg.target_system,
             target_component: msg.target_component,
@@ -449,7 +177,7 @@ impl From<mav_messages::ParamSet> for comm_messages::ParamSetMsg {
 
 impl From<comm_messages::TimesyncMsg> for mav_messages::Timesync {
     fn from(msg: comm_messages::TimesyncMsg) -> Self {
-        Self {
+        mav_messages::Timesync {
             tc1: msg.tc1,
             ts1: msg.ts1,
         }
@@ -458,7 +186,7 @@ impl From<comm_messages::TimesyncMsg> for mav_messages::Timesync {
 
 impl From<comm_messages::RosflightStatusMsg> for mav_messages::RosflightStatus {
     fn from(msg: comm_messages::RosflightStatusMsg) -> Self {
-        Self {
+        mav_messages::RosflightStatus {
             armed: msg.armed,
             failsafe: msg.failsafe,
             rc_override: msg.rc_override,
@@ -489,7 +217,7 @@ impl From<comm_enums::OffboardControlMode> for mav_enums::OffboardControlMode {
 
 impl From<comm_messages::RosflightVersionMsg> for mav_messages::RosflightVersion {
     fn from(msg: comm_messages::RosflightVersionMsg) -> Self {
-        Self {
+        mav_messages::RosflightVersion {
             version: msg.version,
         }
     }
@@ -497,7 +225,7 @@ impl From<comm_messages::RosflightVersionMsg> for mav_messages::RosflightVersion
 
 impl From<comm_messages::SmallImuMsg> for mav_messages::SmallImu {
     fn from(msg: comm_messages::SmallImuMsg) -> Self {
-        Self {
+        mav_messages::SmallImu {
             time_boot_us: msg.time_boot_us,
             xacc: msg.xacc,
             yacc: msg.yacc,
@@ -523,7 +251,7 @@ impl From<comm_enums::RosflightRangeType> for mav_enums::RosflightRangeType {
 
 impl From<comm_messages::SmallRangeMsg> for mav_messages::SmallRange {
     fn from(msg: comm_messages::SmallRangeMsg) -> Self {
-        Self {
+        mav_messages::SmallRange {
             type_: msg.type_.into(),
             range: msg.range,
             max_range: msg.max_range,
@@ -534,7 +262,7 @@ impl From<comm_messages::SmallRangeMsg> for mav_messages::SmallRange {
 
 impl From<comm_messages::SmallMagMsg> for mav_messages::SmallMag {
     fn from(msg: comm_messages::SmallMagMsg) -> Self {
-        Self {
+        mav_messages::SmallMag {
             xmag: msg.xmag,
             ymag: msg.ymag,
             zmag: msg.zmag,
@@ -544,7 +272,7 @@ impl From<comm_messages::SmallMagMsg> for mav_messages::SmallMag {
 
 impl From<comm_messages::SmallBaroMsg> for mav_messages::SmallBaro {
     fn from(msg: comm_messages::SmallBaroMsg) -> Self {
-        Self {
+        mav_messages::SmallBaro {
             altitude: msg.altitude,
             pressure: msg.pressure,
             temperature: msg.temperature,
@@ -554,7 +282,7 @@ impl From<comm_messages::SmallBaroMsg> for mav_messages::SmallBaro {
 
 impl From<comm_messages::HeartbeatMsg> for mav_messages::Heartbeat {
     fn from(msg: comm_messages::HeartbeatMsg) -> Self {
-        Self {
+        mav_messages::Heartbeat {
             type_: msg.type_,
             autopilot: msg.autopilot,
             base_mode: msg.base_mode,
@@ -567,7 +295,7 @@ impl From<comm_messages::HeartbeatMsg> for mav_messages::Heartbeat {
 
 impl From<comm_messages::DiffPressureMsg> for mav_messages::DiffPressure {
     fn from(msg: comm_messages::DiffPressureMsg) -> Self {
-        Self {
+        mav_messages::DiffPressure {
             velocity: msg.velocity,
             diff_pressure: msg.diff_pressure,
             temperature: msg.temperature,
@@ -577,7 +305,7 @@ impl From<comm_messages::DiffPressureMsg> for mav_messages::DiffPressure {
 
 impl From<comm_messages::AttitudeQuaternionMsg> for mav_messages::AttitudeQuaternion {
     fn from(msg: comm_messages::AttitudeQuaternionMsg) -> Self {
-        Self {
+        mav_messages::AttitudeQuaternion {
             time_boot_ms: msg.time_boot_ms,
             q1: msg.q1,
             q2: msg.q2,
@@ -592,7 +320,7 @@ impl From<comm_messages::AttitudeQuaternionMsg> for mav_messages::AttitudeQuater
 
 impl From<comm_messages::RosflightOutputRawMsg> for mav_messages::RosflightOutputRaw {
     fn from(msg: comm_messages::RosflightOutputRawMsg) -> Self {
-        Self {
+        mav_messages::RosflightOutputRaw {
             stamp: msg.stamp,
             values: msg.values,
         }
@@ -616,10 +344,10 @@ impl From<comm_enums::GnssFixType> for mav_enums::GnssFixType {
 
 impl From<comm_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
     fn from(msg: comm_messages::RosflightGnssMsg) -> Self {
-        Self {
+        mav_messages::RosflightGnss {
             seconds: msg.seconds,
             nanos: msg.nanos,
-            fix_type: msg.fix_type.into(), // This uses your From impl at line 548
+            fix_type: msg.fix_type.into(),
             num_sat: msg.num_sat,
             lat: msg.lat,
             lon: msg.lon,
@@ -637,8 +365,8 @@ impl From<comm_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
 
 impl From<comm_messages::ParamValueMsg> for mav_messages::ParamValue {
     fn from(msg: comm_messages::ParamValueMsg) -> Self {
-        use crate::params::ParamValue as CommParamValue;
         use mav_enums::MavParamType;
+        use voloxide_core::params::ParamValue as CommParamValue;
         let (value_f32, value_type) = match msg.param_value {
             // Should the ParamValue type be updated to support smaller types?
             CommParamValue::Float(f) => (f, MavParamType::Real32),
@@ -648,7 +376,7 @@ impl From<comm_messages::ParamValueMsg> for mav_messages::ParamValue {
                 (f32::from_bits(if b { 1 } else { 0 }), MavParamType::Uint32)
             } // Not sure if it's okay to pass these as floats if raw byte value is being used
         };
-        Self {
+        mav_messages::ParamValue {
             param_id: msg.param_id,
             param_value: value_f32,
             param_type: value_type,
@@ -660,7 +388,7 @@ impl From<comm_messages::ParamValueMsg> for mav_messages::ParamValue {
 
 impl From<comm_messages::RosflightCmdAckMsg> for mav_messages::RosflightCmdAck {
     fn from(msg: comm_messages::RosflightCmdAckMsg) -> Self {
-        Self {
+        mav_messages::RosflightCmdAck {
             // Convert the nested enums using their respective From impls
             command: msg.command.into(),
             success: msg.success.into(),
@@ -739,7 +467,7 @@ impl From<comm_messages::RcChannelsMsg> for mav_messages::RcChannels {
         // `msg.channels` is [u16; 16] (from RC_PACKET_CHANNELS)
         // `Self` (RcChannels) has 18 individual channel fields.
 
-        Self {
+        mav_messages::RcChannels {
             time_boot_ms: msg.time_boot_ms,
             chancount: msg.chancount,
             rssi: msg.rssi,
@@ -771,7 +499,7 @@ impl From<comm_messages::RcChannelsMsg> for mav_messages::RcChannels {
 
 impl From<comm_messages::BatteryStatusMsg> for mav_messages::RosflightBatteryStatus {
     fn from(msg: comm_messages::BatteryStatusMsg) -> Self {
-        Self {
+        mav_messages::RosflightBatteryStatus {
             battery_voltage: msg.battery_voltage,
             battery_current: msg.battery_current,
         }
@@ -795,7 +523,7 @@ impl From<packets::GNSSFixType> for mav_enums::GnssFixType {
 
 impl From<comm_messages::StatustextMsg> for mav_messages::Statustext {
     fn from(msg: comm_messages::StatustextMsg) -> Self {
-        Self {
+        mav_messages::Statustext {
             severity: msg.severity.into(),
             text: msg.text,
         }
@@ -804,7 +532,7 @@ impl From<comm_messages::StatustextMsg> for mav_messages::Statustext {
 
 impl From<comm_messages::RosflightHardErrorMsg> for mav_messages::RosflightHardError {
     fn from(msg: comm_messages::RosflightHardErrorMsg) -> Self {
-        Self {
+        mav_messages::RosflightHardError {
             error_code: msg.error_code,
             pc: msg.pc,
             reset_count: msg.reset_count,

@@ -1,7 +1,6 @@
 #![no_std]
 pub mod board;
-pub mod bodytype;
-pub mod comm_manager;
+pub mod comm;
 pub mod comm_messages;
 pub mod command_manager;
 pub mod command_system;
@@ -27,16 +26,12 @@ pub mod sensor_systems;
 pub mod sensorprocessors;
 pub mod sensors;
 pub mod state_machine;
+pub mod vehicle;
 pub mod world;
 
 pub use micro_algebra;
 
 #[cfg(test)]
 pub(crate) mod test_support;
-
-// MAVLINK Specific
-pub mod mavlink {
-    include!(concat!(env!("OUT_DIR"), "/mavlink_generated/mod.rs"));
-}
 
 pub mod logger; // make the logging macros public

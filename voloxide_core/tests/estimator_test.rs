@@ -5,7 +5,7 @@ use std::fs::File;
 
 // Import the necessary items from your actual library crate
 use voloxide_core::{
-    estimator::NamedEstimator, estimator::quad_estimator::QuadEstimator, packets::ImuPacket,
+    estimator::Estimator, estimator::quad_estimator::QuadEstimator, packets::ImuPacket,
     params::Params, sensors::ProcessedSensors,
 };
 
@@ -96,7 +96,7 @@ fn run_mahony_filter_against_python_data() -> Result<(), Box<dyn Error>> {
         let mut sensors = ProcessedSensors::default();
         sensors.imu = Some(imu_packet);
 
-        let state = estimator.estimate_named(&sensors, &params, dt);
+        let state = estimator.estimate(&sensors, &params, dt);
 
         let euler_angles = state.q_hat.to_euler_angles();
 

@@ -1,9 +1,6 @@
-use core::marker::PhantomData;
-
 use crate::{
     board::BoardIo,
-    bodytype::BodyType,
-    comm_manager::{CommManager, comm_link_trait::CommInterface},
+    comm::{CommManager, interface::CommInterface},
     comm_messages::messages::RosflightHardErrorMsg,
     command_manager::CommandManager,
     command_system::{
@@ -18,7 +15,7 @@ use crate::{
         ControlPipelineCtx, ControlPipelineResource, run_control_pipeline_if_new_imu,
     },
     controller::{Controller, RcTrimCalibrator},
-    estimator::{AttitudeStateTrait, NamedEstimator},
+    estimator::{AttitudeEstimate, Estimator},
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     log_system::{self, LogDrainCtx},
     mixer::Mixer,
@@ -39,15 +36,14 @@ use crate::{
 
 const IMU_TIMEOUT_US: u64 = 100_000;
 
-pub struct World<B, BT, CI, PD>
+pub struct World<B, E, C, M, CI, PD>
 where
     B: BoardIo,
-    BT: BodyType,
-    BT::Estimator: NamedEstimator,
-    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
-    BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
-    <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
-    <BT::Estimator as NamedEstimator>::State: Copy + Default,
+    E: Estimator,
+    C: Controller<State = E::State> + RcTrimCalibrator,
+    M: crate::mixer::Mixer<MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E::State: Copy + Default,
     CI: CommInterface<B>,
     PD: PwmDriver,
 {
@@ -70,28 +66,23 @@ where
     command: CommandManager,
     state: StateManager,
     cal_flags: CalibrationFlags,
-    estimator: BT::Estimator,
-    controller: BT::Controller,
-    mixer: BT::Mixer,
-    control_pipeline: ControlPipelineResource<
-        <BT::Estimator as NamedEstimator>::State,
-        <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands,
-    >,
+    estimator: E,
+    controller: C,
+    mixer: M,
+    control_pipeline: ControlPipelineResource<E::State, M::ActuatorCommands>,
     pwm_output: PwmOutputState,
     pwm: PD,
     last_imu_seen: u64,
-    _body_type: PhantomData<BT>,
 }
 
-impl<B, BT, CI, PD> World<B, BT, CI, PD>
+impl<B, E, C, M, CI, PD> World<B, E, C, M, CI, PD>
 where
     B: BoardIo,
-    BT: BodyType,
-    BT::Estimator: NamedEstimator,
-    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
-    BT::Mixer: crate::mixer::Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
-    <BT::Mixer as crate::mixer::Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
-    <BT::Estimator as NamedEstimator>::State: Copy + Default,
+    E: Estimator,
+    C: Controller<State = E::State> + RcTrimCalibrator,
+    M: crate::mixer::Mixer<MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E::State: Copy + Default,
     CI: CommInterface<B>,
     PD: PwmDriver,
 {
@@ -102,9 +93,9 @@ where
         mut params: Params,
         comm_link: CI,
         mut state: StateManager,
-        estimator: BT::Estimator,
-        controller: BT::Controller,
-        mixer: BT::Mixer,
+        estimator: E,
+        controller: C,
+        mixer: M,
         pwm: PD,
     ) -> Self {
         state.update(Event::INITIALIZED, &params);
@@ -163,7 +154,6 @@ where
             pwm_output,
             pwm,
             last_imu_seen: now_us,
-            _body_type: PhantomData,
         }
     }
 
@@ -388,7 +378,7 @@ where
     }
 
     pub fn run_control_stages_if_new_imu(&mut self) -> bool {
-        run_control_pipeline_if_new_imu::<B, BT, PD>(ControlPipelineCtx {
+        run_control_pipeline_if_new_imu(ControlPipelineCtx {
             board: &mut self.board,
             params: &self.params,
             sensors: &self.processed_sensors,
@@ -454,7 +444,6 @@ where
 mod tests {
     use super::*;
     use crate::{
-        bodytype::quadrotor::Quadrotor,
         comm_messages::{
             enums::{
                 OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightAuxCmdType,
@@ -469,6 +458,7 @@ mod tests {
         params::{ParamId, ParamValue},
         pwm::{PwmDriver, PwmError},
         test_support::{RecordingCommLink, TestBoard},
+        vehicle::quadrotor,
     };
 
     #[derive(Default)]
@@ -768,10 +758,17 @@ mod tests {
         }
     }
 
-    type TestWorld = World<TestBoard, Quadrotor, RecordingCommLink, TestPwm>;
+    type TestWorld = World<
+        TestBoard,
+        quadrotor::Estimator,
+        quadrotor::Controller,
+        quadrotor::Mixer,
+        RecordingCommLink,
+        TestPwm,
+    >;
 
     fn test_world_with_params(params: Params) -> TestWorld {
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+        let mixer = quadrotor::mixer(&params);
 
         TestWorld::init(
             TestBoard::default(),
@@ -793,7 +790,7 @@ mod tests {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
         state.update(Event::REQUEST_ARM, &params);
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+        let mixer = quadrotor::mixer(&params);
 
         TestWorld::init(
             TestBoard::default(),
@@ -901,9 +898,16 @@ mod tests {
             update_count: 0,
         };
         let state = StateManager::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+        let mixer = quadrotor::mixer(&params);
 
-        let mut world = World::<SensorStageBoard, Quadrotor, SensorStageCommLink, TestPwm>::init(
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator,
+            quadrotor::Controller,
+            quadrotor::Mixer,
+            SensorStageCommLink,
+            TestPwm,
+        >::init(
             board,
             params,
             SensorStageCommLink,
@@ -1113,7 +1117,7 @@ mod tests {
     #[test]
     fn world_replays_backup_hard_error_after_companion_heartbeat() {
         let params = Params::new();
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
+        let mixer = quadrotor::mixer(&params);
         let board = TestBoard {
             backup_data: Some(crate::board::BackupData {
                 error_code: 4,

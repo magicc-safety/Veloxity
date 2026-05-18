@@ -1,4 +1,4 @@
-use crate::mavlink::dialects::rosflight::Rosflight;
+use crate::generated::dialects::rosflight::Rosflight;
 use mavio::prelude::*;
 use mavio::{Frame, Receiver, Sender};
 
@@ -243,7 +243,7 @@ impl MavlinkParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mavlink::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
+    use crate::generated::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
 
     fn offboard_control_frame_bytes() -> ([u8; 263], usize) {
         let frame = Frame::builder()

@@ -8,7 +8,7 @@ use embassy_time::Timer;
 
 //use defmt::trace;
 
-use voloxide_core::comm_manager::comm_link_trait::EmbeddedComInterface;
+use voloxide_core::comm::interface::EmbeddedComInterface;
 use voloxide_core::errors;
 use voloxide_core::packets;
 

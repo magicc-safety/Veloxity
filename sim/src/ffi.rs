@@ -8,19 +8,20 @@ use std::time::Instant;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use voloxide_core::{
     board::BoardIo,
-    bodytype::quadrotor::Quadrotor,
-    comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::quad_controller::QuadController,
     errors,
     estimator::quad_estimator::QuadEstimator,
     mixer::quad_mixer::QuadMixer,
     packets,
     params::{PARAM_DEFINITIONS, ParamValue, Params},
-    pwm::{PwmDriver, PwmError, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate},
+    pwm::{
+        PwmDriver, PwmError, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
+    },
     sensors::SensorBus,
     state_machine::StateManager,
     world::World,
 };
+use voloxide_mavlink::MavlinkInterface;
 
 const NUM_PWM_CHANNELS: usize = 14;
 const DEFAULT_MAVLINK_BIND: &str = "127.0.0.1:14525";
@@ -449,7 +450,8 @@ impl BoardIo for FfiBoard {
     }
 }
 
-type FfiWorld = World<FfiBoard, Quadrotor, MavlinkInterface, FfiPwmDriver>;
+type FfiWorld =
+    World<FfiBoard, QuadEstimator, QuadController, QuadMixer, MavlinkInterface, FfiPwmDriver>;
 
 pub struct VoloxideFfiHandle {
     sensors: Arc<Mutex<SharedSensors>>,
@@ -474,7 +476,7 @@ pub extern "C" fn voloxide_sim_create() -> *mut VoloxideFfiHandle {
     let state = StateManager::new();
     let pwm = FfiPwmDriver::new(Arc::clone(&outputs));
 
-    let world = World::<FfiBoard, Quadrotor, MavlinkInterface, FfiPwmDriver>::init(
+    let world = FfiWorld::init(
         board, params, mavlink, state, estimator, controller, mixer, pwm,
     );
 

@@ -1,5 +1,5 @@
-use super::AttitudeStateTrait;
-use super::NamedEstimator;
+use super::AttitudeEstimate;
+use super::Estimator;
 use crate::comm_messages::messages::ExternalAttitudeMsg;
 use crate::packets;
 use crate::params::{ParamId, ParamValue, Params};
@@ -34,7 +34,7 @@ impl Default for AttitudeState {
     }
 }
 
-impl AttitudeStateTrait for AttitudeState {
+impl AttitudeEstimate for AttitudeState {
     fn q(&self) -> [f32; 4] {
         [
             self.q_hat.get_w() as f32,
@@ -394,19 +394,14 @@ impl QuadEstimator {
     }
 }
 
-impl NamedEstimator for QuadEstimator {
+impl Estimator for QuadEstimator {
     type State = AttitudeState;
 
-    fn estimate_named(
-        &mut self,
-        sensors: &ProcessedSensors,
-        params: &Params,
-        dt: f64,
-    ) -> Self::State {
+    fn estimate(&mut self, sensors: &ProcessedSensors, params: &Params, dt: f64) -> Self::State {
         self.estimate_packets(sensors.imu, sensors.mag, params, dt)
     }
 
-    fn estimate_named_with_external_attitude(
+    fn estimate_with_external_attitude(
         &mut self,
         sensors: &ProcessedSensors,
         params: &Params,
@@ -497,12 +492,12 @@ mod tests {
     use super::*;
     use crate::{
         comm_messages::messages::ExternalAttitudeMsg,
-        estimator::NamedEstimator,
+        estimator::Estimator,
         packets::{ImuPacket, RosflightPacketHeader},
     };
 
     #[test]
-    fn named_estimator_applies_external_attitude_as_correction_not_replacement() {
+    fn estimator_applies_external_attitude_as_correction_not_replacement() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_FILTER_USE_ACC, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_FILTER_USE_QUAD_INT, ParamValue::Int(0));
@@ -522,9 +517,9 @@ mod tests {
         });
 
         let mut estimator = QuadEstimator::default();
-        let _ = estimator.estimate_named(&sensors, &params, 1.0 / 400.0);
+        let _ = estimator.estimate(&sensors, &params, 1.0 / 400.0);
         sensors.imu.as_mut().unwrap().header.timestamp = 3_000;
-        let state = estimator.estimate_named_with_external_attitude(
+        let state = estimator.estimate_with_external_attitude(
             &sensors,
             &params,
             1.0 / 400.0,
@@ -560,7 +555,7 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate_named(&sensors, &params, 0.002);
+        let _ = estimator.estimate(&sensors, &params, 0.002);
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 601_001,
@@ -571,7 +566,7 @@ mod tests {
             ..Default::default()
         });
 
-        let state = estimator.estimate_named(&sensors, &params, 0.002);
+        let state = estimator.estimate(&sensors, &params, 0.002);
 
         assert!(!state.is_healthy());
     }
@@ -595,9 +590,9 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate_named(&sensors, &params, 0.002);
+        let _ = estimator.estimate(&sensors, &params, 0.002);
         sensors.imu.as_mut().unwrap().header.timestamp = 3_000;
-        let state = estimator.estimate_named(&sensors, &params, 0.002);
+        let state = estimator.estimate(&sensors, &params, 0.002);
 
         assert!(state.q()[3] > 0.0);
         assert!(state.q()[3] < 0.001);
@@ -623,9 +618,9 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate_named(&sensors, &params, 0.1);
+        let _ = estimator.estimate(&sensors, &params, 0.1);
         sensors.imu.as_mut().unwrap().header.timestamp = 101_000;
-        let state = estimator.estimate_named(&sensors, &params, 0.1);
+        let state = estimator.estimate(&sensors, &params, 0.1);
 
         assert!((state.q()[0] as f64 - cos(0.05)).abs() < 1e-6);
         assert!((state.q()[3] as f64 - sin(0.05)).abs() < 1e-6);

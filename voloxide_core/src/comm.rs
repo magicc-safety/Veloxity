@@ -1,10 +1,9 @@
-pub mod comm_link_trait;
-pub mod mavlink_parser;
+pub mod interface;
 
 use crate::board;
 use crate::comm_messages::{self, enums::*, messages::*};
 use crate::command_manager::CommandManager;
-use crate::estimator::AttitudeStateTrait;
+use crate::estimator::AttitudeEstimate;
 use crate::events::{
     AuxCommandReceived, BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
     CommandEventQueues, CompanionEventQueues, CompanionHeartbeatReceived, ConfigInfoRequested,
@@ -12,7 +11,6 @@ use crate::events::{
     ParamListRequested, ParamReadRequested, ParamSetRequested, RcTrimCalibrationRequested,
     ResetOriginRequested, VersionRequested,
 };
-use crate::mavlink::dialects::Rosflight;
 use crate::packets::{RC_PACKET_CHANNELS, RangeType};
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensorprocessors::CalibrationFlags;
@@ -70,7 +68,7 @@ fn param_int(params: &Params, id: ParamId) -> i32 {
 pub struct CommManager<B, T>
 where
     B: board::BoardIo,
-    T: comm_link_trait::CommInterface<B>,
+    T: interface::CommInterface<B>,
 {
     last_heartbeat_us: u64,
     last_status_send_us: u64,
@@ -86,7 +84,7 @@ where
 impl<B, T> CommManager<B, T>
 where
     B: board::BoardIo,
-    T: comm_link_trait::CommInterface<B>,
+    T: interface::CommInterface<B>,
 {
     pub fn new(comm_link: T, now_us: u64) -> Self {
         CommManager {
@@ -129,7 +127,7 @@ where
         sensor_error_count: u16,
         loop_time_us: u16,
     ) where
-        S: AttitudeStateTrait,
+        S: AttitudeEstimate,
         A: AsRef<[f64]>,
     {
         if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US {

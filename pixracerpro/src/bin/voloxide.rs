@@ -1,14 +1,14 @@
 #![no_std]
+#![no_main]
 use cortex_m_rt::entry;
 use panic_halt as _;
 use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
-use voloxide_core::{
-    board::BoardIo, bodytype::BodyType, bodytype::quadrotor::Quadrotor,
-    comm_manager::comm_link_trait::mavlink::MavlinkInterface, controller::Controller, mixer::Mixer,
-    params::Params, state_machine::StateManager, world::World,
-};
 use stm_32::*;
+use voloxide_core::{
+    board::BoardIo, params::Params, state_machine::StateManager, vehicle::quadrotor, world::World,
+};
+use voloxide_mavlink::MavlinkInterface;
 
 #[entry]
 fn main() -> ! {
@@ -21,11 +21,9 @@ fn main() -> ! {
     }
 
     // body type instantiations
-    let estimator =
-        <voloxide_core::bodytype::quadrotor::Quadrotor as BodyType>::Estimator::default();
-    let controller =
-        <voloxide_core::bodytype::quadrotor::Quadrotor as BodyType>::Controller::default();
-    let mixer = <voloxide_core::bodytype::quadrotor::Quadrotor as BodyType>::Mixer::new(&params);
+    let estimator = quadrotor::Estimator::default();
+    let controller = quadrotor::Controller::default();
+    let mixer = quadrotor::mixer(&params);
 
     // comm_link implementation
     let mavlink = MavlinkInterface::new();
@@ -36,7 +34,7 @@ fn main() -> ! {
     // PWM Driver from servos object
     let pwm_driver = BoardPwmDriver::new(&mut servos);
 
-    let mut world = World::<_, Quadrotor, _, _>::init(
+    let mut world = World::init(
         board,
         params,
         mavlink,

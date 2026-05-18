@@ -1,10 +1,13 @@
+use sim::{board::Board, pwm::SimPwmDriver};
 use voloxide_core::{
-    bodytype::quadrotor::Quadrotor, comm_manager::comm_link_trait::mavlink::MavlinkInterface,
     controller::quad_controller::QuadController, estimator::quad_estimator::QuadEstimator,
     mixer::quad_mixer::QuadMixer, params::Params, pwm::PwmDriver, state_machine::StateManager,
     world::World,
 };
-use sim::{board::Board, pwm::SimPwmDriver};
+use voloxide_mavlink::MavlinkInterface;
+
+type SimWorld =
+    World<Board, QuadEstimator, QuadController, QuadMixer, MavlinkInterface, SimPwmDriver>;
 
 #[tokio::main]
 async fn main() {
@@ -26,7 +29,7 @@ async fn main() {
     let mavlink = MavlinkInterface::new();
     let state = StateManager::new();
 
-    let mut world = World::<Board, Quadrotor, MavlinkInterface, SimPwmDriver>::init(
+    let mut world = SimWorld::init(
         board, params, mavlink, state, estimator, controller, mixer, pwm,
     );
 

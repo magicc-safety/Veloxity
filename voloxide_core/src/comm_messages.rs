@@ -23,7 +23,7 @@ pub trait Store<T> {
     fn take(&mut self) -> Option<T>;
 }
 
-// implements store function for each message type. comm_manager should only receive known messages
+// implements store function for each message type. comm should only receive known messages
 macro_rules! impl_store {
     ($ty:ty, $field:ident, $name:literal) => {
         impl Store<$ty> for Messages {

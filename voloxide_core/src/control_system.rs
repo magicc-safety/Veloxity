@@ -1,10 +1,9 @@
 use crate::{
     board::BoardIo,
-    bodytype::BodyType,
     command_manager::CommandManager,
     companion_system::{AuxCommandState, ExternalAttitudeState},
     controller::{Controller, ControllerCtx, RcTrimCalibrator},
-    estimator::{AttitudeStateTrait, NamedEstimator},
+    estimator::{AttitudeEstimate, Estimator},
     mixer::{Mixer, MixerCtx, MixerStatus},
     params::Params,
     pwm::PwmDriver,
@@ -59,15 +58,14 @@ impl<S, A> ControlPipelineResource<S, A> {
     }
 }
 
-pub struct ControlPipelineCtx<'a, B, BT, PD>
+pub struct ControlPipelineCtx<'a, B, E, C, M, PD>
 where
     B: BoardIo,
-    BT: BodyType,
-    BT::Estimator: NamedEstimator,
-    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
-    BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
-    <BT::Mixer as Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
-    <BT::Estimator as NamedEstimator>::State: Copy + Default,
+    E: Estimator,
+    C: Controller<State = E::State> + RcTrimCalibrator,
+    M: Mixer<MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E::State: Copy + Default,
     PD: PwmDriver,
 {
     pub board: &'a mut B,
@@ -77,27 +75,25 @@ where
     pub aux_commands: &'a AuxCommandState,
     pub command: &'a CommandManager,
     pub state: &'a mut StateManager,
-    pub estimator: &'a mut BT::Estimator,
-    pub controller: &'a mut BT::Controller,
-    pub mixer: &'a mut BT::Mixer,
-    pub control_pipeline: &'a mut ControlPipelineResource<
-        <BT::Estimator as NamedEstimator>::State,
-        <BT::Mixer as Mixer>::ActuatorCommands,
-    >,
+    pub estimator: &'a mut E,
+    pub controller: &'a mut C,
+    pub mixer: &'a mut M,
+    pub control_pipeline: &'a mut ControlPipelineResource<E::State, M::ActuatorCommands>,
     pub pwm_output: &'a PwmOutputState,
     pub pwm: &'a mut PD,
     pub dt: f64,
 }
 
-pub fn run_control_pipeline_if_new_imu<B, BT, PD>(ctx: ControlPipelineCtx<'_, B, BT, PD>) -> bool
+pub fn run_control_pipeline_if_new_imu<B, E, C, M, PD>(
+    ctx: ControlPipelineCtx<'_, B, E, C, M, PD>,
+) -> bool
 where
     B: BoardIo,
-    BT: BodyType,
-    BT::Estimator: NamedEstimator,
-    BT::Controller: Controller<State = <BT::Estimator as NamedEstimator>::State> + RcTrimCalibrator,
-    BT::Mixer: Mixer<MixerInput = <BT::Controller as Controller>::ControlOutput>,
-    <BT::Mixer as Mixer>::ActuatorCommands: AsRef<[f64]> + Copy,
-    <BT::Estimator as NamedEstimator>::State: Copy + Default,
+    E: Estimator,
+    C: Controller<State = E::State> + RcTrimCalibrator,
+    M: Mixer<MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E::State: Copy + Default,
     PD: PwmDriver,
 {
     let Some(imu_packet) = ctx.sensors.imu else {
@@ -121,7 +117,7 @@ where
 
     let loop_start_us = ctx.board.clock_micros();
     let external_attitude = ctx.external_attitude.latest.take();
-    let state = ctx.estimator.estimate_named_with_external_attitude(
+    let state = ctx.estimator.estimate_with_external_attitude(
         ctx.sensors,
         ctx.params,
         ctx.dt,

@@ -2004,6 +2004,7 @@ dependencies = [
  "panic-halt",
  "stm_32",
  "voloxide_core",
+ "voloxide_mavlink",
 ]
 
 [[package]]
@@ -2296,6 +2297,7 @@ dependencies = [
  "panic-halt",
  "stm_32",
  "voloxide_core",
+ "voloxide_mavlink",
 ]
 
 [[package]]
@@ -3171,6 +3173,7 @@ dependencies = [
  "serde",
  "tokio",
  "voloxide_core",
+ "voloxide_mavlink",
  "zenoh",
 ]
 
@@ -3998,12 +4001,20 @@ dependencies = [
  "bitflags",
  "critical-section",
  "csv",
+ "heapless 0.8.0",
  "libm",
- "mavio",
- "mavspec",
  "micro_algebra",
  "num-traits",
  "serde",
+]
+
+[[package]]
+name = "voloxide_mavlink"
+version = "0.1.0"
+dependencies = [
+ "mavio",
+ "mavspec",
+ "voloxide_core",
 ]
 
 [[package]]

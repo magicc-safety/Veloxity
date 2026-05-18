@@ -187,8 +187,8 @@ impl PwmDriver for SimPwmDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use voloxide_core::{board::BoardIo, errors};
     use std::time::Duration;
+    use voloxide_core::{board::BoardIo, errors};
 
     struct TestBoard {
         elapsed_us: u64,

@@ -7,14 +7,14 @@ use std::time::Instant;
 
 use cdr::CdrLe;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
+use tokio::io::ErrorKind;
+use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
 use voloxide_core::board::BoardIo;
 use voloxide_core::errors;
 use voloxide_core::packets::{self, RC_PACKET_CHANNELS};
 use voloxide_core::params::{PARAM_DEFINITIONS, ParamValue, Params};
 use voloxide_core::sensors::SensorBus;
-use tokio::io::ErrorKind;
-use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
 use zenoh::handlers::{RingChannel, RingChannelHandler};
 use zenoh::sample::Sample;
 use zenoh::{Config, pubsub::Subscriber, session::Session};
@@ -405,19 +405,19 @@ impl From<ros_messages::ImuData> for packets::ImuPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Instant;
     use voloxide_core::{
-        bodytype::{BodyType, quadrotor::Quadrotor},
-        comm_manager::comm_link_trait::mavlink::MavlinkInterface,
         controller::quad_controller::QuadController,
         estimator::quad_estimator::QuadEstimator,
+        mixer::quad_mixer::QuadMixer,
         params::ParamId,
         pwm::{PwmDriver, PwmError},
         state_machine::StateManager,
         world::World,
     };
-    use std::cell::Cell;
-    use std::rc::Rc;
-    use std::time::Instant;
+    use voloxide_mavlink::MavlinkInterface;
 
     fn stamp(sec: i32, nanosec: u32) -> ros_messages::Time {
         ros_messages::Time { sec, nanosec }
@@ -704,8 +704,15 @@ mod tests {
         params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(8));
         let flushed_pwm = Rc::new(Cell::new(0));
         let sent_pwm = Rc::new(Cell::new(0));
-        let mixer = <Quadrotor as BodyType>::Mixer::new(&params);
-        let mut world = World::<Board, Quadrotor, MavlinkInterface, SmokePwm>::init(
+        let mixer = QuadMixer::new(&params);
+        let mut world = World::<
+            Board,
+            QuadEstimator,
+            QuadController,
+            QuadMixer,
+            MavlinkInterface,
+            SmokePwm,
+        >::init(
             board,
             params,
             MavlinkInterface::new(),

@@ -6,13 +6,16 @@
 
 | Crate | Target | Purpose |
 |---|---|---|
-| `voloxide_core` | host | `no_std` algorithm library: board I/O, world scheduler, estimator, controller, mixer, MAVLink |
+| `voloxide_core` | host | `no_std` algorithm library: board I/O, world scheduler, estimator, controller, mixer, communication contracts |
+| `voloxide_mavlink` | host / `thumbv7em-none-eabihf` | MAVLink communication implementation for the core `CommInterface` contract |
 | `stm_32` | `thumbv7em-none-eabihf` | STM32/Embassy HAL and peripheral drivers |
 | `nucleo` | `thumbv7em-none-eabihf` | Binary with `BoardIo` and PWM drivers for the Nucleo-H753ZI dev board |
 | `pixracerpro` | `thumbv7em-none-eabihf` | Binary with `BoardIo` and PWM drivers for the Pixracer Pro flight controller |
 | `sim` | host | Binary with `BoardIo` and PWM drivers for host-side simulation via Zenoh |
 
-MAVLink message types are code-generated at build time by `voloxide_core/build.rs` from `mavlink_definitions/` using the `mavspec` crate. They are accessible as `voloxide_core::mavlink::*`.
+MAVLink message types are code-generated at build time by `voloxide_mavlink/build.rs` from
+`voloxide_mavlink/mavlink_definitions/` using the `mavspec` crate. They are internal to the
+`voloxide_mavlink` communication implementation.
 
 ## Prerequisites
 
@@ -61,7 +64,7 @@ cargo run -p nucleo --target thumbv7em-none-eabihf --bin voloxide
 cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
 ```
 
-Both boards run the same `voloxide` binary entry point. Each binary wires its board, MAVLink interface, quadrotor body components, state manager, and PWM driver into the shared `World` scheduler.
+Both boards run the same `voloxide` binary entry point. Each binary wires its board, `voloxide_mavlink::MavlinkInterface`, quadrotor body components, state manager, and PWM driver into the shared `World` scheduler.
 
 ### Sim
 
@@ -77,9 +80,9 @@ To enable defmt logging, uncomment the `defmt` dependency in the relevant crate'
 
 ## MAVLink
 
-The MAVLink parser (`voloxide_core::comm_manager::mavlink_parser`) is board-agnostic. It operates on raw `&[u8]` bytes: `MavlinkParser::feed_byte` accumulates bytes and returns a frame once the start byte, length, and CRC all match. `process_mavlink_frame` decodes the frame into a typed `Rosflight` dialect message.
+The MAVLink parser (`voloxide_mavlink::parser`) is board-agnostic. It operates on raw `&[u8]` bytes: `MavlinkParser::feed_byte` accumulates bytes and returns a frame once the start byte, length, and CRC all match. `process_mavlink_frame` decodes the frame into a typed `Rosflight` dialect message.
 
-`MavlinkInterface` (in `voloxide_core::comm_manager::comm_link_trait::mavlink`) implements the `CommInterface<B: BoardIo>` trait and wires the parser into the main loop via `comm_manager`.
+`voloxide_mavlink::MavlinkInterface` implements the `voloxide_core::comm::interface::CommInterface<B: BoardIo>` trait and wires the parser into the main loop via `comm`.
 
 ## Branching Strategy
 

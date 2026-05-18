@@ -261,7 +261,7 @@ impl Rc {
                     self.switches[i].channel
                 );
             } else {
-                // comm_manager.log(
+                // comm.log(
                 //     LogSeverity::LOG_INFO,
                 //     &format!("{} switch not mapped", channel_name)
                 // );

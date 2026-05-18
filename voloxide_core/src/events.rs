@@ -9,6 +9,7 @@ use crate::{
     },
     params::{ParamId, ParamValue},
 };
+use heapless::Deque;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum EventQueueError {
@@ -16,29 +17,20 @@ pub enum EventQueueError {
 }
 
 pub struct EventQueue<T: Copy, const N: usize> {
-    items: [Option<T>; N],
-    head: usize,
-    len: usize,
+    items: Deque<T, N>,
 }
 
 impl<T: Copy, const N: usize> EventQueue<T, N> {
     pub const fn new() -> Self {
         Self {
-            items: [None; N],
-            head: 0,
-            len: 0,
+            items: Deque::new(),
         }
     }
 
     pub fn push(&mut self, event: T) -> Result<(), EventQueueError> {
-        if self.len == N {
-            return Err(EventQueueError::Full);
-        }
-
-        let idx = (self.head + self.len) % N;
-        self.items[idx] = Some(event);
-        self.len += 1;
-        Ok(())
+        self.items
+            .push_back(event)
+            .map_err(|_| EventQueueError::Full)
     }
 
     pub fn push_or_log(&mut self, event: T, label: &str) -> bool {
@@ -51,58 +43,29 @@ impl<T: Copy, const N: usize> EventQueue<T, N> {
     }
 
     pub fn pop(&mut self) -> Option<T> {
-        if self.len == 0 {
-            return None;
-        }
-
-        let event = self.items[self.head].take();
-        self.head = (self.head + 1) % N;
-        self.len -= 1;
-        event
+        self.items.pop_front()
     }
 
-    pub fn iter(&self) -> EventQueueIter<'_, T, N> {
-        EventQueueIter {
-            queue: self,
-            offset: 0,
-        }
+    pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
+        self.items.iter().copied()
     }
 
     pub fn clear(&mut self) {
-        while self.pop().is_some() {}
+        self.items.clear();
     }
 
     pub fn len(&self) -> usize {
-        self.len
+        self.items.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.items.is_empty()
     }
 }
 
 impl<T: Copy, const N: usize> Default for EventQueue<T, N> {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-pub struct EventQueueIter<'a, T: Copy, const N: usize> {
-    queue: &'a EventQueue<T, N>,
-    offset: usize,
-}
-
-impl<'a, T: Copy, const N: usize> Iterator for EventQueueIter<'a, T, N> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.queue.len {
-            return None;
-        }
-
-        let idx = (self.queue.head + self.offset) % N;
-        self.offset += 1;
-        self.queue.items[idx]
     }
 }
 
@@ -299,10 +262,12 @@ mod tests {
         let _ = queue.push(7);
         let _ = queue.push(8);
 
-        let mut iter = queue.iter();
-        assert_eq!(iter.next(), Some(7));
-        assert_eq!(iter.next(), Some(8));
-        assert_eq!(iter.next(), None);
+        {
+            let mut iter = queue.iter();
+            assert_eq!(iter.next(), Some(7));
+            assert_eq!(iter.next(), Some(8));
+            assert_eq!(iter.next(), None);
+        }
 
         assert_eq!(queue.pop(), Some(7));
         assert_eq!(queue.pop(), Some(8));

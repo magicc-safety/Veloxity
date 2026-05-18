@@ -6,7 +6,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
 use embassy_usb::Builder;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-use voloxide_core::comm_manager::comm_link_trait::EmbeddedComInterface;
+use voloxide_core::comm::interface::EmbeddedComInterface;
 use voloxide_core::errors::SensorError;
 // use defmt;
 

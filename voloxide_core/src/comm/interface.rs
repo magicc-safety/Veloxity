@@ -1,5 +1,3 @@
-pub mod mavlink;
-
 use crate::board;
 use crate::comm_messages::{self, messages::*};
 use crate::packets;

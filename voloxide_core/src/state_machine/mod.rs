@@ -2,7 +2,7 @@
 mod tests;
 
 use crate::{
-    comm_manager::CommManager,
+    comm::CommManager,
     params::{ParamId, ParamValue, Params},
 };
 use bitflags::bitflags;

@@ -1,5 +1,5 @@
-use crate::comm_manager::CommManager;
-use crate::comm_manager::comm_link_trait::CommInterface;
+use crate::comm::CommManager;
+use crate::comm::interface::CommInterface;
 use crate::comm_messages::{
     enums::{
         OffboardControlIgnore,

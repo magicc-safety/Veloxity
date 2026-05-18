@@ -1,6 +1,6 @@
 use crate::{
     board::{BackupData, BoardIo},
-    comm_manager::comm_link_trait::CommInterface,
+    comm::interface::CommInterface,
     comm_messages::{self, messages::*},
     errors,
 };
