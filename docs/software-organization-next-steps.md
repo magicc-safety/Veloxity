@@ -250,3 +250,7 @@ Then reassess:
 - Are board entrypoints short and obvious?
 - Are protocol-specific details isolated from core?
 - Is a fuller ECS framework still worth its added abstraction?
+
+
+
+As a final note, we should NO LONGER be using micro_algebra... that package is old and we should be doing all our math with a more modern, supported rust crate for linear algebra.
