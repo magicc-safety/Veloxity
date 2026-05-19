@@ -8,10 +8,10 @@ use std::time::Instant;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use voloxide_core::{
     board::BoardIo,
-    controller::quad_controller::QuadController,
+    controller::quad::QuadController,
     errors,
-    estimator::quad_estimator::QuadEstimator,
-    mixer::quad_mixer::QuadMixer,
+    estimator::quad::QuadEstimator,
+    mixer::quad::QuadMixer,
     packets,
     params::{PARAM_DEFINITIONS, ParamValue, Params},
     pwm::{
@@ -464,11 +464,12 @@ pub extern "C" fn voloxide_sim_create() -> *mut VoloxideFfiHandle {
     let sensors = Arc::new(Mutex::new(SharedSensors::default()));
     let outputs = Arc::new(Mutex::new([1000; NUM_PWM_CHANNELS]));
 
-    let Ok(board) = FfiBoard::new(Arc::clone(&sensors)) else {
+    let Ok(mut board) = FfiBoard::new(Arc::clone(&sensors)) else {
         return std::ptr::null_mut();
     };
 
-    let params = Params::new();
+    let mut params = Params::new();
+    let _ = board.read_params(&mut params);
     let estimator = QuadEstimator::default();
     let controller = QuadController::default();
     let mixer = QuadMixer::new(&params);

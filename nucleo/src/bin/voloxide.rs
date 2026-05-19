@@ -9,6 +9,33 @@ use voloxide_core::{
 };
 use voloxide_mavlink::MavlinkInterface;
 
+type NucleoWorld = World<
+    board::Board,
+    quadrotor::Estimator,
+    quadrotor::Controller,
+    quadrotor::Mixer,
+    MavlinkInterface,
+    board::BoardPwmDriver,
+>;
+
+fn init_world(
+    board: board::Board,
+    params: Params,
+    pwm_driver: board::BoardPwmDriver,
+) -> NucleoWorld {
+    let mixer = quadrotor::mixer(&params);
+    NucleoWorld::init(
+        board,
+        params,
+        MavlinkInterface::new(),
+        StateManager::new(),
+        quadrotor::Estimator::default(),
+        quadrotor::Controller::default(),
+        mixer,
+        pwm_driver,
+    )
+}
+
 #[entry]
 fn main() -> ! {
     // board implementation
@@ -19,26 +46,7 @@ fn main() -> ! {
         let _ = board.write_params(&params);
     }
 
-    // body type instantiations
-    let estimator = quadrotor::Estimator::default();
-    let controller = quadrotor::Controller::default();
-    let mixer = quadrotor::mixer(&params);
-
-    // comm_link implementation
-    let mavlink = MavlinkInterface::new();
-
-    let state_manager = StateManager::new();
-
-    let mut world = World::init(
-        board,
-        params,
-        mavlink,
-        state_manager,
-        estimator,
-        controller,
-        mixer,
-        pwm_driver,
-    );
+    let mut world = init_world(board, params, pwm_driver);
 
     loop {
         world.run_once();

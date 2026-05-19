@@ -1,5 +1,5 @@
 use crate::generated::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
-use voloxide_core::comm_messages::{enums as comm_enums, messages as comm_messages};
+use voloxide_core::comm::messages::{enums as comm_enums, messages as core_messages};
 use voloxide_core::packets;
 
 impl From<mav_enums::RosflightAuxCmdType> for comm_enums::RosflightAuxCmdType {
@@ -15,7 +15,7 @@ impl From<mav_enums::RosflightAuxCmdType> for comm_enums::RosflightAuxCmdType {
 }
 
 // RECEIVING MSG CONVERSIONS
-impl From<mav_messages::RosflightCmd> for comm_messages::RosflightCmdMsg {
+impl From<mav_messages::RosflightCmd> for core_messages::RosflightCmdMsg {
     fn from(msg: mav_messages::RosflightCmd) -> Self {
         Self {
             command: comm_enums::RosflightCmd::from(msg.command),
@@ -23,7 +23,7 @@ impl From<mav_messages::RosflightCmd> for comm_messages::RosflightCmdMsg {
     }
 }
 
-impl From<mav_messages::Timesync> for comm_messages::TimesyncMsg {
+impl From<mav_messages::Timesync> for core_messages::TimesyncMsg {
     fn from(msg: mav_messages::Timesync) -> Self {
         Self {
             tc1: msg.tc1,
@@ -32,7 +32,7 @@ impl From<mav_messages::Timesync> for comm_messages::TimesyncMsg {
     }
 }
 
-impl From<mav_messages::ExternalAttitude> for comm_messages::ExternalAttitudeMsg {
+impl From<mav_messages::ExternalAttitude> for core_messages::ExternalAttitudeMsg {
     fn from(msg: mav_messages::ExternalAttitude) -> Self {
         Self {
             qx: msg.qx,
@@ -43,7 +43,7 @@ impl From<mav_messages::ExternalAttitude> for comm_messages::ExternalAttitudeMsg
     }
 }
 
-impl From<mav_messages::OffboardControl> for comm_messages::OffboardControlMsg {
+impl From<mav_messages::OffboardControl> for core_messages::OffboardControlMsg {
     fn from(msg: mav_messages::OffboardControl) -> Self {
         use comm_enums::OffboardControlIgnore as CommIgnore;
         use comm_enums::OffboardControlMode as CommMode;
@@ -107,7 +107,7 @@ impl From<mav_messages::OffboardControl> for comm_messages::OffboardControlMsg {
     }
 }
 
-impl From<mav_messages::RosflightAuxCmd> for comm_messages::RosflightAuxCmdMsg {
+impl From<mav_messages::RosflightAuxCmd> for core_messages::RosflightAuxCmdMsg {
     fn from(msg: mav_messages::RosflightAuxCmd) -> Self {
         Self {
             type_array: msg.type_array.map(comm_enums::RosflightAuxCmdType::from),
@@ -116,7 +116,7 @@ impl From<mav_messages::RosflightAuxCmd> for comm_messages::RosflightAuxCmdMsg {
     }
 }
 
-impl From<mav_messages::Heartbeat> for comm_messages::HeartbeatMsg {
+impl From<mav_messages::Heartbeat> for core_messages::HeartbeatMsg {
     fn from(msg: mav_messages::Heartbeat) -> Self {
         Self {
             type_: msg.type_,
@@ -129,7 +129,7 @@ impl From<mav_messages::Heartbeat> for comm_messages::HeartbeatMsg {
     }
 }
 
-impl From<mav_messages::ParamRequestRead> for comm_messages::ParamRequestReadMsg {
+impl From<mav_messages::ParamRequestRead> for core_messages::ParamRequestReadMsg {
     fn from(msg: mav_messages::ParamRequestRead) -> Self {
         Self {
             target_system: msg.target_system,
@@ -143,7 +143,7 @@ impl From<mav_messages::ParamRequestRead> for comm_messages::ParamRequestReadMsg
     }
 }
 
-impl From<mav_messages::ParamRequestList> for comm_messages::ParamRequestListMsg {
+impl From<mav_messages::ParamRequestList> for core_messages::ParamRequestListMsg {
     fn from(msg: mav_messages::ParamRequestList) -> Self {
         Self {
             target_system: msg.target_system,
@@ -152,7 +152,7 @@ impl From<mav_messages::ParamRequestList> for comm_messages::ParamRequestListMsg
     }
 }
 
-impl From<mav_messages::ParamSet> for comm_messages::ParamSetMsg {
+impl From<mav_messages::ParamSet> for core_messages::ParamSetMsg {
     fn from(msg: mav_messages::ParamSet) -> Self {
         use mav_enums::MavParamType::*;
         use voloxide_core::params::ParamValue;
@@ -175,8 +175,8 @@ impl From<mav_messages::ParamSet> for comm_messages::ParamSetMsg {
 
 // SENDING MSG CONVERSIONS
 
-impl From<comm_messages::TimesyncMsg> for mav_messages::Timesync {
-    fn from(msg: comm_messages::TimesyncMsg) -> Self {
+impl From<core_messages::TimesyncMsg> for mav_messages::Timesync {
+    fn from(msg: core_messages::TimesyncMsg) -> Self {
         mav_messages::Timesync {
             tc1: msg.tc1,
             ts1: msg.ts1,
@@ -184,8 +184,8 @@ impl From<comm_messages::TimesyncMsg> for mav_messages::Timesync {
     }
 }
 
-impl From<comm_messages::RosflightStatusMsg> for mav_messages::RosflightStatus {
-    fn from(msg: comm_messages::RosflightStatusMsg) -> Self {
+impl From<core_messages::RosflightStatusMsg> for mav_messages::RosflightStatus {
+    fn from(msg: core_messages::RosflightStatusMsg) -> Self {
         mav_messages::RosflightStatus {
             armed: msg.armed,
             failsafe: msg.failsafe,
@@ -215,16 +215,16 @@ impl From<comm_enums::OffboardControlMode> for mav_enums::OffboardControlMode {
     }
 }
 
-impl From<comm_messages::RosflightVersionMsg> for mav_messages::RosflightVersion {
-    fn from(msg: comm_messages::RosflightVersionMsg) -> Self {
+impl From<core_messages::RosflightVersionMsg> for mav_messages::RosflightVersion {
+    fn from(msg: core_messages::RosflightVersionMsg) -> Self {
         mav_messages::RosflightVersion {
             version: msg.version,
         }
     }
 }
 
-impl From<comm_messages::SmallImuMsg> for mav_messages::SmallImu {
-    fn from(msg: comm_messages::SmallImuMsg) -> Self {
+impl From<core_messages::SmallImuMsg> for mav_messages::SmallImu {
+    fn from(msg: core_messages::SmallImuMsg) -> Self {
         mav_messages::SmallImu {
             time_boot_us: msg.time_boot_us,
             xacc: msg.xacc,
@@ -249,8 +249,8 @@ impl From<comm_enums::RosflightRangeType> for mav_enums::RosflightRangeType {
     }
 }
 
-impl From<comm_messages::SmallRangeMsg> for mav_messages::SmallRange {
-    fn from(msg: comm_messages::SmallRangeMsg) -> Self {
+impl From<core_messages::SmallRangeMsg> for mav_messages::SmallRange {
+    fn from(msg: core_messages::SmallRangeMsg) -> Self {
         mav_messages::SmallRange {
             type_: msg.type_.into(),
             range: msg.range,
@@ -260,8 +260,8 @@ impl From<comm_messages::SmallRangeMsg> for mav_messages::SmallRange {
     }
 }
 
-impl From<comm_messages::SmallMagMsg> for mav_messages::SmallMag {
-    fn from(msg: comm_messages::SmallMagMsg) -> Self {
+impl From<core_messages::SmallMagMsg> for mav_messages::SmallMag {
+    fn from(msg: core_messages::SmallMagMsg) -> Self {
         mav_messages::SmallMag {
             xmag: msg.xmag,
             ymag: msg.ymag,
@@ -270,8 +270,8 @@ impl From<comm_messages::SmallMagMsg> for mav_messages::SmallMag {
     }
 }
 
-impl From<comm_messages::SmallBaroMsg> for mav_messages::SmallBaro {
-    fn from(msg: comm_messages::SmallBaroMsg) -> Self {
+impl From<core_messages::SmallBaroMsg> for mav_messages::SmallBaro {
+    fn from(msg: core_messages::SmallBaroMsg) -> Self {
         mav_messages::SmallBaro {
             altitude: msg.altitude,
             pressure: msg.pressure,
@@ -280,8 +280,8 @@ impl From<comm_messages::SmallBaroMsg> for mav_messages::SmallBaro {
     }
 }
 
-impl From<comm_messages::HeartbeatMsg> for mav_messages::Heartbeat {
-    fn from(msg: comm_messages::HeartbeatMsg) -> Self {
+impl From<core_messages::HeartbeatMsg> for mav_messages::Heartbeat {
+    fn from(msg: core_messages::HeartbeatMsg) -> Self {
         mav_messages::Heartbeat {
             type_: msg.type_,
             autopilot: msg.autopilot,
@@ -293,8 +293,8 @@ impl From<comm_messages::HeartbeatMsg> for mav_messages::Heartbeat {
     }
 }
 
-impl From<comm_messages::DiffPressureMsg> for mav_messages::DiffPressure {
-    fn from(msg: comm_messages::DiffPressureMsg) -> Self {
+impl From<core_messages::DiffPressureMsg> for mav_messages::DiffPressure {
+    fn from(msg: core_messages::DiffPressureMsg) -> Self {
         mav_messages::DiffPressure {
             velocity: msg.velocity,
             diff_pressure: msg.diff_pressure,
@@ -303,8 +303,8 @@ impl From<comm_messages::DiffPressureMsg> for mav_messages::DiffPressure {
     }
 }
 
-impl From<comm_messages::AttitudeQuaternionMsg> for mav_messages::AttitudeQuaternion {
-    fn from(msg: comm_messages::AttitudeQuaternionMsg) -> Self {
+impl From<core_messages::AttitudeQuaternionMsg> for mav_messages::AttitudeQuaternion {
+    fn from(msg: core_messages::AttitudeQuaternionMsg) -> Self {
         mav_messages::AttitudeQuaternion {
             time_boot_ms: msg.time_boot_ms,
             q1: msg.q1,
@@ -318,8 +318,8 @@ impl From<comm_messages::AttitudeQuaternionMsg> for mav_messages::AttitudeQuater
     }
 }
 
-impl From<comm_messages::RosflightOutputRawMsg> for mav_messages::RosflightOutputRaw {
-    fn from(msg: comm_messages::RosflightOutputRawMsg) -> Self {
+impl From<core_messages::RosflightOutputRawMsg> for mav_messages::RosflightOutputRaw {
+    fn from(msg: core_messages::RosflightOutputRawMsg) -> Self {
         mav_messages::RosflightOutputRaw {
             stamp: msg.stamp,
             values: msg.values,
@@ -342,8 +342,8 @@ impl From<comm_enums::GnssFixType> for mav_enums::GnssFixType {
     }
 }
 
-impl From<comm_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
-    fn from(msg: comm_messages::RosflightGnssMsg) -> Self {
+impl From<core_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
+    fn from(msg: core_messages::RosflightGnssMsg) -> Self {
         mav_messages::RosflightGnss {
             seconds: msg.seconds,
             nanos: msg.nanos,
@@ -363,8 +363,8 @@ impl From<comm_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
     }
 }
 
-impl From<comm_messages::ParamValueMsg> for mav_messages::ParamValue {
-    fn from(msg: comm_messages::ParamValueMsg) -> Self {
+impl From<core_messages::ParamValueMsg> for mav_messages::ParamValue {
+    fn from(msg: core_messages::ParamValueMsg) -> Self {
         use mav_enums::MavParamType;
         use voloxide_core::params::ParamValue as CommParamValue;
         let (value_f32, value_type) = match msg.param_value {
@@ -386,8 +386,8 @@ impl From<comm_messages::ParamValueMsg> for mav_messages::ParamValue {
     }
 }
 
-impl From<comm_messages::RosflightCmdAckMsg> for mav_messages::RosflightCmdAck {
-    fn from(msg: comm_messages::RosflightCmdAckMsg) -> Self {
+impl From<core_messages::RosflightCmdAckMsg> for mav_messages::RosflightCmdAck {
+    fn from(msg: core_messages::RosflightCmdAckMsg) -> Self {
         mav_messages::RosflightCmdAck {
             // Convert the nested enums using their respective From impls
             command: msg.command.into(),
@@ -462,8 +462,8 @@ impl From<mav_enums::RosflightCmdResponse> for comm_enums::RosflightCmdResponse 
     }
 }
 
-impl From<comm_messages::RcChannelsMsg> for mav_messages::RcChannels {
-    fn from(msg: comm_messages::RcChannelsMsg) -> Self {
+impl From<core_messages::RcChannelsMsg> for mav_messages::RcChannels {
+    fn from(msg: core_messages::RcChannelsMsg) -> Self {
         // `msg.channels` is [u16; 16] (from RC_PACKET_CHANNELS)
         // `Self` (RcChannels) has 18 individual channel fields.
 
@@ -497,8 +497,8 @@ impl From<comm_messages::RcChannelsMsg> for mav_messages::RcChannels {
     }
 }
 
-impl From<comm_messages::BatteryStatusMsg> for mav_messages::RosflightBatteryStatus {
-    fn from(msg: comm_messages::BatteryStatusMsg) -> Self {
+impl From<core_messages::BatteryStatusMsg> for mav_messages::RosflightBatteryStatus {
+    fn from(msg: core_messages::BatteryStatusMsg) -> Self {
         mav_messages::RosflightBatteryStatus {
             battery_voltage: msg.battery_voltage,
             battery_current: msg.battery_current,
@@ -521,8 +521,8 @@ impl From<packets::GNSSFixType> for mav_enums::GnssFixType {
     }
 }
 
-impl From<comm_messages::StatustextMsg> for mav_messages::Statustext {
-    fn from(msg: comm_messages::StatustextMsg) -> Self {
+impl From<core_messages::StatustextMsg> for mav_messages::Statustext {
+    fn from(msg: core_messages::StatustextMsg) -> Self {
         mav_messages::Statustext {
             severity: msg.severity.into(),
             text: msg.text,
@@ -530,8 +530,8 @@ impl From<comm_messages::StatustextMsg> for mav_messages::Statustext {
     }
 }
 
-impl From<comm_messages::RosflightHardErrorMsg> for mav_messages::RosflightHardError {
-    fn from(msg: comm_messages::RosflightHardErrorMsg) -> Self {
+impl From<core_messages::RosflightHardErrorMsg> for mav_messages::RosflightHardError {
+    fn from(msg: core_messages::RosflightHardErrorMsg) -> Self {
         mav_messages::RosflightHardError {
             error_code: msg.error_code,
             pc: msg.pc,
@@ -570,7 +570,7 @@ mod tests {
             u: [0.4, 0.5, 0.6, 0.1, 0.2, 0.3, 0.7, 0.8, 0.9, 1.0],
         };
 
-        let converted = comm_messages::OffboardControlMsg::from(msg);
+        let converted = core_messages::OffboardControlMsg::from(msg);
 
         assert_eq!(
             converted.mode,
@@ -634,7 +634,7 @@ mod tests {
                 u: [0.0; 10],
             };
 
-            let converted = comm_messages::OffboardControlMsg::from(msg);
+            let converted = core_messages::OffboardControlMsg::from(msg);
 
             assert_eq!(converted.ignore, expected_comm_ignore);
         }
@@ -648,7 +648,7 @@ mod tests {
             u: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.6, 0.7, 0.8, 0.9],
         };
 
-        let converted = comm_messages::OffboardControlMsg::from(msg);
+        let converted = core_messages::OffboardControlMsg::from(msg);
 
         assert_eq!(converted.passthrough, [0.6, 0.7, 0.8, 0.9]);
         assert_eq!(

@@ -1,7 +1,7 @@
 use crate::{
     board::{BackupData, BoardIo},
     comm::interface::CommInterface,
-    comm_messages::{self, messages::*},
+    comm::messages::{Messages, messages::*},
     errors,
 };
 
@@ -263,10 +263,5 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         self.last_hard_error = Some(msg);
     }
 
-    fn handle_incoming_messages(
-        &mut self,
-        _board: &mut TestBoard,
-        _msgs: &mut comm_messages::Messages,
-    ) {
-    }
+    fn handle_incoming_messages(&mut self, _board: &mut TestBoard, _msgs: &mut Messages) {}
 }

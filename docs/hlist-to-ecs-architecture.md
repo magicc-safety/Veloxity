@@ -1,5 +1,9 @@
 # Voloxide World/Ports Architecture Migration Record
 
+> Historical note: this document records the migration as it happened. Some older entries below
+> intentionally use file paths and module names that have since been renamed. The current live module
+> layout is recorded in `docs/software-organization-migration.md`.
+
 ## Working Agreement
 
 This branch is experimental, but it should still be developed in small, inspectable steps.

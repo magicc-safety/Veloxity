@@ -6,9 +6,10 @@ This document records the next organization pass after the ECS migration and the
 reorganization work. The goal is to keep Voloxide clean, professional, easy to read, and easy for
 new students to modify without weakening the compile-time guarantees that protect flight behavior.
 
-The next implementation phase should complete steps 1-5 below, rerun the full verification gate,
-and then reassess whether Voloxide should move farther toward a more vanilla entity-component-system
-shape.
+The next implementation phase completed steps 1-6 below on 2026-05-18. A follow-up module-layout
+pass also grouped resource, system, service, and reaction code under owning domains. The remaining
+follow-up is to decide how aggressively to clean up the warnings exposed by step 5 and to resolve
+the current toolchain/dependency blockers in the adapter crates.
 
 ## Current Direction
 
@@ -59,11 +60,22 @@ Expected benefit:
 Some module names still reflect historical migrations or implementation mechanics rather than the
 role a reader is looking for. Names should answer: what part of the flight stack is this?
 
-Candidate cleanup areas:
+Completed cleanup areas:
 
-- Move `comm_messages` toward `comm/messages` if that can be done without churn.
-- Move `sensorprocessors` toward `sensors/processors`.
-- Consider grouping control pipeline code under `control/pipeline`.
+- Moved core communication message types to `comm/messages`.
+- Moved sensor processing code to `sensors/processors`.
+- Grouped domain systems under their resources:
+  - `params/service` and `params/reactions`
+  - `log/drain`
+  - `command/service`
+  - `sensors/ingestion` and `sensors/health`
+  - `rc/system`
+  - `pwm/system`
+- Renamed quad implementation files to `controller/quad`, `estimator/quad`, and `mixer/quad`.
+- Migrated `state_machine/mod.rs` to `state_machine.rs`.
+
+Current cleanup areas:
+
 - Keep `vehicle/quadrotor` as the place for quadrotor-specific concrete aliases and helpers.
 - Avoid compatibility names such as old body/HList/marker terminology in live code.
 - Keep MAVLink-specific names inside `voloxide_mavlink`.
@@ -120,12 +132,13 @@ Expected benefit:
 
 ## Step 5: Tighten Lint Scope
 
-The workspace currently allows some naming and unused-code lints broadly. Some generated or wire
+The workspace previously allowed some naming and unused-code lints broadly. Some generated or wire
 protocol code may need exceptions, but the whole workspace should not normalize those exceptions.
 
 Concrete work:
 
-- Move broad lint allowances down to the modules or crates that truly need them.
+- Removed the broad workspace lint allowances.
+- Keep lint allowances local to modules or crates that truly need them.
 - Prefer idiomatic Rust naming in hand-written code.
 - Keep generated MAVLink or protocol-shaped names isolated from core style rules.
 - Re-enable useful compiler pressure where it helps catch stale migration code.
@@ -225,9 +238,20 @@ Follow-up work:
 - Preserve the ROSflight sim integration behavior while reducing unused transport/security weight.
 - Rerun `cargo tree -i num-bigint-dig` after any Zenoh feature changes.
 
+## Step 6: Math And Old Test Artifact Cleanup
+
+`micro_algebra` has been removed from `voloxide_core` and replaced with `nalgebra` for vector and
+quaternion math. The old estimator/controller CSV and plotting workflow has also been removed:
+
+- deleted the artifact-writing estimator and controller integration tests
+- deleted checked-in estimator/controller CSV and PNG artifacts
+- deleted the old estimator/controller Python plotting and CSV-generation scripts
+- kept focused Rust unit tests and mixer integration tests
+- kept Python scripts outside that old artifact workflow, such as sim/FFI acceptance scripts
+
 ## Verification Gate For This Phase
 
-After implementing steps 1-5, rerun at least:
+After implementing steps 1-6, rerun at least:
 
 ```text
 RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt --check
@@ -242,6 +266,19 @@ RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo chec
 RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p stm_32 --target thumbv7em-none-eabihf
 ```
 
+Current 2026-05-18 verification result:
+
+- `rustfmt --edition 2024` was run directly on the touched Rust files because this container's
+  `cargo fmt` subcommand is unavailable.
+- `cargo check -p voloxide_core --lib` passes under the available Rust 1.95.0 toolchain.
+- `cargo test -p voloxide_core --lib` passes: 144 tests.
+- `cargo test -p voloxide_core --tests` passes: 144 lib tests and 15 mixer integration tests.
+- `cargo check -p voloxide_mavlink --lib` passes.
+- `cargo check -p sim` passes.
+- `cargo check -p pixracerpro --target thumbv7em-none-eabihf` is blocked in this container because
+  the available toolchain does not have the `thumbv7em-none-eabihf` target installed (`can't find
+  crate for core`).
+
 Then reassess:
 
 - Is `World` still too hard to read?
@@ -250,7 +287,3 @@ Then reassess:
 - Are board entrypoints short and obvious?
 - Are protocol-specific details isolated from core?
 - Is a fuller ECS framework still worth its added abstraction?
-
-
-
-As a final note, we should NO LONGER be using micro_algebra... that package is old and we should be doing all our math with a more modern, supported rust crate for linear algebra. We should also refactor or improve python scripts that were used to test the estimator, controller, or mixer, as it's not clear if the artifacts they generate are outdated or not. The old python scripts that tested these components (controller and mixer especially) require datasets (csv) to be present in the folder, but thereis no code for generating them, so it's an inflexible way of doing things in the first place and any python scripting related to that nonsense should be removed. Python scripts associated with the FFI can stay.

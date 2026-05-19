@@ -1,8 +1,9 @@
 pub mod interface;
+pub mod messages;
 
 use crate::board;
-use crate::comm_messages::{self, enums::*, messages::*};
-use crate::command_manager::CommandManager;
+use crate::comm::messages::{Messages, enums::*, messages::*};
+use crate::command::CommandManager;
 use crate::estimator::AttitudeEstimate;
 use crate::events::{
     AuxCommandReceived, BoardCommandRequested, CalibrationRequested, CommEventQueues, CommResponse,
@@ -13,8 +14,8 @@ use crate::events::{
 };
 use crate::packets::{RC_PACKET_CHANNELS, RangeType};
 use crate::params::{ParamId, ParamValue, Params};
-use crate::sensorprocessors::CalibrationFlags;
 use crate::sensors::ProcessedSensors;
+use crate::sensors::processors::CalibrationFlags;
 use crate::state_machine::StateManager;
 use core::marker::PhantomData;
 
@@ -76,7 +77,7 @@ where
 
     pub sysid: u8,
     comm_link: T,
-    pub msgs: comm_messages::Messages,
+    pub msgs: Messages,
     pending_calibration_ack: Option<RosflightCmd>,
     _board_marker: PhantomData<B>,
 }
@@ -94,7 +95,7 @@ where
 
             sysid: 0,
             comm_link,
-            msgs: comm_messages::Messages::default(),
+            msgs: Messages::default(),
             pending_calibration_ack: None,
             _board_marker: PhantomData,
         }
@@ -658,7 +659,7 @@ mod tests {
     use super::*;
     use crate::{
         board::BoardIo,
-        comm_messages::{
+        comm::messages::{
             enums::{
                 OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightAuxCmdType,
                 RosflightCmd, RosflightCmdResponse,
@@ -668,17 +669,19 @@ mod tests {
                 ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
             },
         },
-        command_manager::CommandManager,
-        command_system::{self, CalibrationRequestCtx},
+        command::CommandManager,
+        command::service::{self as command_service, CalibrationRequestCtx},
         events::{
             CommEventQueues, CommResponse, CommandEventQueues, CompanionEventQueues,
             ParamEventQueues,
         },
-        param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
+        params::service::{
+            self as param_service, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx,
+        },
         params::{ParamId, ParamValue, Params},
         ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
-        sensorprocessors::CalibrationFlags,
         sensors::ProcessedSensors,
+        sensors::processors::CalibrationFlags,
         state_machine::{Event, StateManager},
         test_support::{RecordingCommLink, TestBoard},
     };
@@ -755,7 +758,7 @@ mod tests {
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
         assert_eq!(param_events.list_requests.len(), 1);
 
-        param_system::service_param_list_requests(ParamListCtx {
+        param_service::service_param_list_requests(ParamListCtx {
             params: ParamsReadPort::new(&params),
             state: &mut param_list_state,
             requests: EventDrainPort::new(&mut param_events.list_requests),
@@ -797,7 +800,7 @@ mod tests {
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
         assert_eq!(param_events.read_requests.len(), 1);
 
-        param_system::service_param_read_requests(ParamReadCtx {
+        param_service::service_param_read_requests(ParamReadCtx {
             params: ParamsReadPort::new(&params),
             requests: EventDrainPort::new(&mut param_events.read_requests),
             responses: EventEmitPort::new(&mut comm_events.responses),
@@ -900,7 +903,7 @@ mod tests {
         assert!(comm_events.responses.is_empty());
         assert_eq!(command_events.version_requests.len(), 1);
 
-        command_system::apply_version_requests(command_system::VersionRequestCtx {
+        command_service::apply_version_requests(command_service::VersionRequestCtx {
             requests: EventDrainPort::new(&mut command_events.version_requests),
             responses: EventEmitPort::new(&mut comm_events.responses),
             state: &initialized_state(),
@@ -945,7 +948,7 @@ mod tests {
         );
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
 
-        param_system::apply_param_requests(ParamApplyCtx {
+        param_service::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut params),
             requests: EventDrainPort::new(&mut param_events.set_requests),
             changes: EventEmitPort::new(&mut param_events.changes),
@@ -981,7 +984,7 @@ mod tests {
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::default();
         let actuator_commands = [0.1, 0.2, 0.3, 0.4];
         let mut processed_sensors = ProcessedSensors::default();
         processed_sensors.imu = Some(crate::packets::ImuPacket {
@@ -1084,7 +1087,7 @@ mod tests {
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::default();
         let mut processed_sensors = ProcessedSensors::default();
         processed_sensors.imu = Some(crate::packets::ImuPacket::default());
 
@@ -1138,7 +1141,7 @@ mod tests {
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::default();
         let mut processed_sensors = ProcessedSensors::default();
         let mut rc_packet = crate::packets::RcPacket::default();
         rc_packet.n_chan = RC_PACKET_CHANNELS as u32;
@@ -1186,7 +1189,7 @@ mod tests {
         let state_manager = StateManager::new();
         let mut command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad_estimator::AttitudeState::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::default();
         let processed_sensors = ProcessedSensors::default();
         let actuator_commands = [0.0, 0.0, 0.0, 0.0];
 
@@ -1247,7 +1250,7 @@ mod tests {
         );
 
         assert!(cal_flags.is_empty());
-        let started = command_system::apply_calibration_requests(CalibrationRequestCtx {
+        let started = command_service::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut command_events.calibration_requests),
             responses: EventEmitPort::new(&mut comm_events.responses),
             state: &initialized_state(),
@@ -1407,7 +1410,7 @@ mod tests {
         );
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
 
-        command_system::apply_param_defaults_requests(command_system::ParamDefaultsCtx {
+        command_service::apply_param_defaults_requests(command_service::ParamDefaultsCtx {
             requests: EventDrainPort::new(&mut command_events.param_defaults_requests),
             responses: EventEmitPort::new(&mut comm_events.responses),
             state: &initialized_state(),

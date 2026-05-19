@@ -9,9 +9,6 @@ voloxide_mavlink = { path = "./voloxide_mavlink" }
 stm_32 = { path = "./stm_32" }
 
 [workspace.lints.rust]
-non_camel_case_types = "allow"
-non_snake_case = "allow"
-unused = "allow"
 
 # cargo build/run
 [profile.dev]

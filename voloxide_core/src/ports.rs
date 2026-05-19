@@ -93,7 +93,7 @@ impl<'a, T: Copy, const N: usize> EventReadPort<'a, T, N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logger::Logger;
+    use crate::log::Logger;
 
     #[test]
     fn emit_or_log_reports_full_queue_without_overwriting_existing_event() {

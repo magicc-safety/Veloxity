@@ -6,7 +6,7 @@ use mavio::prelude::*;
 use mavio::protocol::{DialectVersion, FrameBuilder};
 use voloxide_core::board;
 use voloxide_core::comm::interface::CommInterface;
-use voloxide_core::comm_messages::{Messages, Store, messages as comm_messages};
+use voloxide_core::comm::messages::{Messages, Store, messages as core_messages};
 
 static RX_BUFF_SIZE: usize = 2048;
 const MAV_COMP_ID_ROSFLIGHT_FIRMWARE: u8 = 250;
@@ -95,24 +95,24 @@ impl MavlinkInterface {
     fn process_rosflight_message(&mut self, message: Rosflight, msgs: &mut Messages) {
         match (message) {
             Rosflight::ExternalAttitude(es) => {
-                msgs.store(comm_messages::ExternalAttitudeMsg::from(es))
+                msgs.store(core_messages::ExternalAttitudeMsg::from(es))
             }
-            Rosflight::Timesync(ts) => msgs.store(comm_messages::TimesyncMsg::from(ts)),
-            Rosflight::RosflightCmd(cmd) => msgs.store(comm_messages::RosflightCmdMsg::from(cmd)),
+            Rosflight::Timesync(ts) => msgs.store(core_messages::TimesyncMsg::from(ts)),
+            Rosflight::RosflightCmd(cmd) => msgs.store(core_messages::RosflightCmdMsg::from(cmd)),
             Rosflight::RosflightAuxCmd(aux_cmd) => {
-                msgs.store(comm_messages::RosflightAuxCmdMsg::from(aux_cmd))
+                msgs.store(core_messages::RosflightAuxCmdMsg::from(aux_cmd))
             }
             Rosflight::OffboardControl(oc) => {
-                msgs.store(comm_messages::OffboardControlMsg::from(oc))
+                msgs.store(core_messages::OffboardControlMsg::from(oc))
             }
             Rosflight::ParamRequestRead(pr) => {
-                msgs.store(comm_messages::ParamRequestReadMsg::from(pr))
+                msgs.store(core_messages::ParamRequestReadMsg::from(pr))
             }
-            Rosflight::ParamSet(ps) => msgs.store(comm_messages::ParamSetMsg::from(ps)),
+            Rosflight::ParamSet(ps) => msgs.store(core_messages::ParamSetMsg::from(ps)),
             Rosflight::ParamRequestList(pl) => {
-                msgs.store(comm_messages::ParamRequestListMsg::from(pl))
+                msgs.store(core_messages::ParamRequestListMsg::from(pl))
             }
-            Rosflight::Heartbeat(hb) => msgs.store(comm_messages::HeartbeatMsg::from(hb)),
+            Rosflight::Heartbeat(hb) => msgs.store(core_messages::HeartbeatMsg::from(hb)),
             _ => {}
         }
     }
@@ -140,7 +140,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::RosflightStatusMsg,
+        msg: core_messages::RosflightStatusMsg,
     ) {
         self.send_message(board, system_id, mav_messages::RosflightStatus::from(msg));
     }
@@ -148,7 +148,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::TimesyncMsg,
+        msg: core_messages::TimesyncMsg,
     ) -> bool {
         self.send_message(board, system_id, mav_messages::Timesync::from(msg));
         return true;
@@ -157,7 +157,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::ParamValueMsg,
+        msg: core_messages::ParamValueMsg,
     ) {
         self.send_message(board, system_id, mav_messages::ParamValue::from(msg));
     }
@@ -165,7 +165,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::HeartbeatMsg,
+        msg: core_messages::HeartbeatMsg,
     ) -> bool {
         self.send_message(board, system_id, mav_messages::Heartbeat::from(msg));
         return true;
@@ -174,7 +174,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::RosflightVersionMsg,
+        msg: core_messages::RosflightVersionMsg,
     ) {
         self.send_message(board, system_id, mav_messages::RosflightVersion::from(msg));
     }
@@ -182,21 +182,21 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::DiffPressureMsg,
+        msg: core_messages::DiffPressureMsg,
     ) {
         self.send_message(board, system_id, mav_messages::DiffPressure::from(msg));
     }
-    fn send_baro(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallBaroMsg) {
+    fn send_baro(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallBaroMsg) {
         self.send_message(board, system_id, mav_messages::SmallBaro::from(msg));
     }
-    fn send_imu(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallImuMsg) {
+    fn send_imu(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallImuMsg) {
         self.send_message(board, system_id, mav_messages::SmallImu::from(msg));
     }
     fn send_attitude(
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::AttitudeQuaternionMsg,
+        msg: core_messages::AttitudeQuaternionMsg,
     ) {
         self.send_message(
             board,
@@ -208,7 +208,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::RosflightOutputRawMsg,
+        msg: core_messages::RosflightOutputRawMsg,
     ) {
         self.send_message(
             board,
@@ -216,23 +216,23 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             mav_messages::RosflightOutputRaw::from(msg),
         );
     }
-    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: comm_messages::RcChannelsMsg) {
+    fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: core_messages::RcChannelsMsg) {
         self.send_message(board, system_id, mav_messages::RcChannels::from(msg));
     }
-    fn send_range(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallRangeMsg) {
+    fn send_range(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallRangeMsg) {
         self.send_message(board, system_id, mav_messages::SmallRange::from(msg));
     }
-    fn send_mag(&mut self, board: &mut B, system_id: u8, msg: comm_messages::SmallMagMsg) {
+    fn send_mag(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallMagMsg) {
         self.send_message(board, system_id, mav_messages::SmallMag::from(msg));
     }
-    fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: comm_messages::RosflightGnssMsg) {
+    fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: core_messages::RosflightGnssMsg) {
         self.send_message(board, system_id, mav_messages::RosflightGnss::from(msg));
     }
     fn send_cmd_ack(
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::RosflightCmdAckMsg,
+        msg: core_messages::RosflightCmdAckMsg,
     ) {
         self.send_message(board, system_id, mav_messages::RosflightCmdAck::from(msg));
     }
@@ -240,7 +240,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::RcChannelsMsg,
+        msg: core_messages::RcChannelsMsg,
     ) {
         self.send_message(board, system_id, mav_messages::RcChannels::from(msg));
     }
@@ -248,7 +248,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::BatteryStatusMsg,
+        msg: core_messages::BatteryStatusMsg,
     ) {
         self.send_message(
             board,
@@ -256,14 +256,14 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             mav_messages::RosflightBatteryStatus::from(msg),
         );
     }
-    fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: comm_messages::StatustextMsg) {
+    fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: core_messages::StatustextMsg) {
         self.send_message(board, system_id, mav_messages::Statustext::from(msg));
     }
     fn send_hard_error(
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: comm_messages::RosflightHardErrorMsg,
+        msg: core_messages::RosflightHardErrorMsg,
     ) {
         self.send_message(
             board,

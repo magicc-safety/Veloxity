@@ -1,3 +1,7 @@
+pub mod health;
+pub mod ingestion;
+pub mod processors;
+
 use crate::{errors::SensorError, packets::*};
 use libm::pow;
 

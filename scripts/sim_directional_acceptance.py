@@ -2,7 +2,7 @@
 """Launch ROSflight standalone sim and verify Voloxide directional signs.
 
 Run from an environment with Jazzy, the ROSflight workspace, this overlay, and
-RMW_IMPLEMENTATION=rmw_zenoh_cpp sourced/exported.
+a ROS 2 RMW implementation sourced/exported.
 """
 
 from __future__ import annotations
@@ -219,7 +219,7 @@ def stop_processes(processes: list[subprocess.Popen]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", choices=["rust", "upstream"], default="rust")
-    parser.add_argument("--use-rviz", action="store_true")
+    parser.add_argument("--use-rviz", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--keep-running", action="store_true")
     args = parser.parse_args()
 

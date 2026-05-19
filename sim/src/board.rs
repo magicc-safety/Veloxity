@@ -409,9 +409,9 @@ mod tests {
     use std::rc::Rc;
     use std::time::Instant;
     use voloxide_core::{
-        controller::quad_controller::QuadController,
-        estimator::quad_estimator::QuadEstimator,
-        mixer::quad_mixer::QuadMixer,
+        controller::quad::QuadController,
+        estimator::quad::QuadEstimator,
+        mixer::quad::QuadMixer,
         params::ParamId,
         pwm::{PwmDriver, PwmError},
         state_machine::StateManager,

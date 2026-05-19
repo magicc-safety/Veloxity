@@ -1,5 +1,5 @@
-pub mod quad_controller;
-use crate::command_manager::CombinedControl;
+pub mod quad;
+use crate::command::CombinedControl;
 use crate::params::Params;
 use crate::state_machine::StateManager;
 

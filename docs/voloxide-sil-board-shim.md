@@ -389,25 +389,26 @@ Acceptance criteria:
   after a waypoint is added.
 - The commanded target is NED `[4.0, 0.0, -3.0]`.
 - `/command` carries a nonzero thrust command and Voloxide publishes non-idle PWM.
-- The NED distance to the target decreases during the test window.
+- The NED distance to the target reaches `--waypoint-tolerance` during the test window.
 
-Latest observed result:
+Latest observed result from the current branch:
 
 ```text
 target_ned=(4.0, 0.0, -3.0)
-distance_start=4.456 distance_end=0.550
-max_command_thrust=26.338
+distance_start=4.502 distance_min=4.502 distance_end=60.242 tolerance=3.000
+max_command_thrust=44.900
 status: armed=True failsafe=False offboard=True control_mode=0 rc_override=0 error_code=0
-roscopter_counts: waypoints=1 trajectory=371 high_level=549 command=547
-last_high_level: mode=10 valid=True cmd=(0.000,-0.000,0.000,22.975)
-max_pwm_delta=786
-last_command: mode=0 ignore=0 u0_3=[0.0, 0.0, -22.978, 0.001]
-ROSCOPTER WAYPOINT RESPONSE OK
+roscopter_counts: waypoints=1 trajectory=381 high_level=413 command=513
+last_high_level: mode=10 valid=True cmd=(0.281,-1.311,0.932,362.407)
+max_pwm_delta=1000
+last_command: mode=0 ignore=0 u0_3=[0.0, 0.0, -44.9, 0.0]
+ROSCOPTER WAYPOINT RESPONSE FAILED
 ```
 
-This proves the ROScopter waypoint command chain reaches Voloxide as offboard control, clears RC
-override, drives actuator outputs, and moves the simulated vehicle substantially toward the waypoint
-within the test window.
+This proves only that the ROScopter waypoint command chain reaches Voloxide as offboard control,
+clears RC override, and drives actuator outputs. It does not prove waypoint following, because the
+vehicle did not reach the waypoint and moved farther from the target. The acceptance script must fail
+this case.
 
 The earlier waypoint test showed `/command` activity but no meaningful motion:
 
@@ -455,18 +456,20 @@ python3 scripts/sim_roscopter_waypoint_acceptance.py \
   --waypoint-tolerance 3.0
 ```
 
-Latest observed result:
+Latest observed result from the current branch:
 
 ```text
 targets_ned=[(0.0, 0.0, -10.0), (20.0, 0.0, -10.0), (20.0, -20.0, -20.0), (0.0, -20.0, -20.0)]
-waypoint_start_distances=[9.599, 22.193, 34.507, 28.113]
-waypoint_min_distances=[0.051, 0.099, 0.174, 0.168] tolerance=3.000
-max_command_thrust=28.868
-status: armed=True failsafe=False offboard=True control_mode=0 rc_override=0 error_code=0
-roscopter_counts: waypoints=4 trajectory=1915 high_level=2003 command=2111
-max_pwm_delta=790
-ROSCOPTER WAYPOINT RESPONSE OK
+waypoint_start_distances=[9.848, 22.288, 34.569, 28.201]
+waypoint_min_distances=[4.82, 13.471, 20.486, 25.126] tolerance=3.000
+max_command_thrust=44.900
+status: armed=True failsafe=False offboard=True control_mode=0 rc_override=0 error_code=8
+roscopter_counts: waypoints=4 trajectory=369 high_level=404 command=405
+last_high_level: mode=10 valid=True cmd=(0.254,1.258,0.109,754.568)
+max_pwm_delta=1000
+last_command: mode=0 ignore=0 u0_3=[0.0, 0.0, -44.9, 0.0]
+ROSCOPTER WAYPOINT RESPONSE FAILED
 ```
 
-This demonstrates that the Rust-backed standalone multirotor follows multiple ROScopter waypoints,
-not only a single offboard command.
+This confirms the current branch is not yet following the tutorial waypoints. The command path is
+alive, but the vehicle fails the distance-based acceptance criteria.

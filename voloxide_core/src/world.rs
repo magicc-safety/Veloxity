@@ -1,35 +1,35 @@
 use crate::{
     board::BoardIo,
+    comm::messages::messages::RosflightHardErrorMsg,
     comm::{CommManager, interface::CommInterface},
-    comm_messages::messages::RosflightHardErrorMsg,
-    command_manager::CommandManager,
-    command_system::{
-        self, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx, OffboardControlCtx,
-        ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
+    command::CommandManager,
+    command::service::{
+        self as command_service, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx,
+        OffboardControlCtx, ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
     },
-    companion_system::{
+    companion::{
         self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
         ExternalAttitudeCtx, ExternalAttitudeState,
     },
-    control_system::{
-        ControlPipelineCtx, ControlPipelineResource, run_control_pipeline_if_new_imu,
-    },
+    control::{ControlPipelineCtx, ControlPipelineResource, run_control_pipeline_if_new_imu},
     controller::{Controller, RcTrimCalibrator},
     estimator::{AttitudeEstimate, Estimator},
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
-    log_system::{self, LogDrainCtx},
+    log::drain::{self as log_drain, LogDrainCtx},
     mixer::Mixer,
-    param_reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
-    param_system::{self, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx},
+    params::reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
+    params::service::{
+        self as param_service, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx,
+    },
     params::{ParamId, ParamValue, Params},
     ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
     pwm::PwmDriver,
-    pwm_system::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
+    pwm::system::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
-    rc_system::{RcCommandStateCtx, run_rc_command_state},
-    sensor_health_system::{SensorHealthCtx, update_sensor_health},
-    sensor_systems::{SensorProcessorSet, process_sensor_bus},
-    sensorprocessors::CalibrationFlags,
+    rc::system::{RcCommandStateCtx, run_rc_command_state},
+    sensors::health::{SensorHealthCtx, update_sensor_health},
+    sensors::ingestion::{SensorProcessorSet, process_sensor_bus},
+    sensors::processors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
     state_machine::{ErrorFlag, Event, StateManager},
 };
@@ -158,22 +158,31 @@ where
     }
 
     pub fn run_once(&mut self) -> bool {
-        self.run_comm_param_sensor_stages();
+        self.run_communication_and_parameter_service_stage();
+        self.run_sensor_ingestion_and_health_stage();
         self.run_rc_command_state_stages();
-        self.run_control_stages_if_new_imu();
+        self.run_control_and_mixing_stage_if_new_imu();
         self.run_telemetry_stage();
         true
     }
 
     pub fn run_comm_param_sensor_stages(&mut self) {
-        let now_us = self.board.clock_micros();
+        self.run_communication_and_parameter_service_stage();
+        self.run_sensor_ingestion_and_health_stage();
+    }
 
+    pub fn run_communication_and_parameter_service_stage(&mut self) {
         self.process_comm_stage();
         self.apply_companion_events();
         self.apply_command_events();
         self.service_param_events();
         self.apply_param_reactions();
         self.request_gyro_calibration_if_needed();
+    }
+
+    pub fn run_sensor_ingestion_and_health_stage(&mut self) {
+        let now_us = self.board.clock_micros();
+
         self.run_sensor_ingestion_stage();
         self.update_sensor_health_and_calibration(now_us);
         self.drain_logs_and_send_responses();
@@ -191,7 +200,7 @@ where
     }
 
     fn apply_companion_events(&mut self) {
-        companion_system::apply_companion_heartbeats(CompanionHeartbeatCtx {
+        companion::apply_companion_heartbeats(CompanionHeartbeatCtx {
             requests: EventDrainPort::new(&mut self.companion_events.heartbeats),
             state: &mut self.companion_link,
         });
@@ -202,11 +211,11 @@ where
                     .push_or_log(crate::events::CommResponse::HardError(msg), "hard error");
             }
         }
-        companion_system::apply_aux_commands(AuxCommandCtx {
+        companion::apply_aux_commands(AuxCommandCtx {
             requests: EventDrainPort::new(&mut self.companion_events.aux_commands),
             state: &mut self.aux_commands,
         });
-        companion_system::apply_external_attitudes(ExternalAttitudeCtx {
+        companion::apply_external_attitudes(ExternalAttitudeCtx {
             requests: EventDrainPort::new(&mut self.companion_events.external_attitudes),
             state: &mut self.external_attitude,
         });
@@ -214,7 +223,7 @@ where
 
     fn apply_command_events(&mut self) {
         let started_calibration =
-            command_system::apply_calibration_requests(CalibrationRequestCtx {
+            command_service::apply_calibration_requests(CalibrationRequestCtx {
                 requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
                 responses: EventEmitPort::new(&mut self.comm_events.responses),
                 state: &self.state,
@@ -222,28 +231,33 @@ where
                 params: &mut self.params,
             });
         self.comm.set_pending_calibration_ack(started_calibration);
-        command_system::apply_offboard_control_requests(OffboardControlCtx {
+        command_service::apply_offboard_control_requests(OffboardControlCtx {
             requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
             command: &mut self.command,
+            state: &self.state,
             params: &self.params,
         });
-        command_system::apply_param_defaults_requests(ParamDefaultsCtx {
+        command_service::apply_param_defaults_requests(ParamDefaultsCtx {
             requests: EventDrainPort::new(&mut self.command_events.param_defaults_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             state: &self.state,
             params: &mut self.params,
         });
 
-        command_system::apply_rc_trim_calibration_requests(command_system::RcTrimCalibrationCtx {
-            requests: EventDrainPort::new(&mut self.command_events.rc_trim_calibration_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-            state: &self.state,
-            command: &self.command,
-            controller: &mut self.controller,
-            params: &mut self.params,
-        });
+        command_service::apply_rc_trim_calibration_requests(
+            command_service::RcTrimCalibrationCtx {
+                requests: EventDrainPort::new(
+                    &mut self.command_events.rc_trim_calibration_requests,
+                ),
+                responses: EventEmitPort::new(&mut self.comm_events.responses),
+                state: &self.state,
+                command: &self.command,
+                controller: &mut self.controller,
+                params: &mut self.params,
+            },
+        );
 
-        command_system::apply_board_command_requests(BoardCommandCtx {
+        command_service::apply_board_command_requests(BoardCommandCtx {
             requests: EventDrainPort::new(&mut self.command_events.board_command_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             state: &self.state,
@@ -251,38 +265,38 @@ where
             params: &mut self.params,
         });
 
-        command_system::apply_version_requests(VersionRequestCtx {
+        command_service::apply_version_requests(VersionRequestCtx {
             requests: EventDrainPort::new(&mut self.command_events.version_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             state: &self.state,
         });
 
-        command_system::apply_reset_origin_requests(ResetOriginCtx {
+        command_service::apply_reset_origin_requests(ResetOriginCtx {
             requests: EventDrainPort::new(&mut self.command_events.reset_origin_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
-        command_system::apply_config_info_requests(ConfigInfoCtx {
+        command_service::apply_config_info_requests(ConfigInfoCtx {
             requests: EventDrainPort::new(&mut self.command_events.config_info_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
     }
 
     fn service_param_events(&mut self) {
-        param_system::service_param_read_requests(ParamReadCtx {
+        param_service::service_param_read_requests(ParamReadCtx {
             params: ParamsReadPort::new(&self.params),
             requests: EventDrainPort::new(&mut self.param_events.read_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
-        param_system::service_param_list_requests(ParamListCtx {
+        param_service::service_param_list_requests(ParamListCtx {
             params: ParamsReadPort::new(&self.params),
             state: &mut self.param_list_state,
             requests: EventDrainPort::new(&mut self.param_events.list_requests),
             responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
 
-        param_system::apply_param_requests(ParamApplyCtx {
+        param_service::apply_param_requests(ParamApplyCtx {
             params: ParamsWritePort::new(&mut self.params),
             requests: EventDrainPort::new(&mut self.param_events.set_requests),
             changes: EventEmitPort::new(&mut self.param_events.changes),
@@ -291,13 +305,13 @@ where
     }
 
     fn apply_param_reactions(&mut self) {
-        param_reactions::rc_on_param_changed(RcParamChangedCtx {
+        reactions::rc_on_param_changed(RcParamChangedCtx {
             rc: &mut self.rc,
             params: ParamsReadPort::new(&self.params),
             changes: EventReadPort::new(&self.param_events.changes),
         });
 
-        param_reactions::command_on_param_changed(CommandParamChangedCtx {
+        reactions::command_on_param_changed(CommandParamChangedCtx {
             command: &mut self.command,
             state: &mut self.state,
             params: ParamsReadPort::new(&self.params),
@@ -315,6 +329,7 @@ where
 
     fn run_sensor_ingestion_stage(&mut self) {
         self.board.update_sensor_bus(&mut self.raw_sensors);
+        let calibration_flags_before = self.cal_flags;
         process_sensor_bus(
             &mut self.raw_sensors,
             &mut self.processed_sensors,
@@ -322,10 +337,21 @@ where
             &mut self.cal_flags,
             &mut self.params,
         );
+        if calibration_flags_before.contains(CalibrationFlags::GYRO)
+            && !self.cal_flags.contains(CalibrationFlags::GYRO)
+        {
+            self.estimator.reset_adaptive_bias();
+        }
+        if calibration_flags_before.contains(CalibrationFlags::ACCEL)
+            && !self.cal_flags.contains(CalibrationFlags::ACCEL)
+        {
+            self.estimator.reset();
+            self.control_pipeline = ControlPipelineResource::default();
+        }
     }
 
     fn drain_logs_and_send_responses(&mut self) {
-        log_system::drain_logs_to_comm_responses(LogDrainCtx {
+        log_drain::drain_logs_to_comm_responses(LogDrainCtx {
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             connected: self.companion_link.connected,
         });
@@ -345,7 +371,10 @@ where
             imu_timeout_us: IMU_TIMEOUT_US,
         });
 
-        if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
+        let completed_arm_calibration =
+            self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO);
+
+        if completed_arm_calibration {
             self.state.update(Event::CALIBRATION_COMPLETE, &self.params);
         }
         self.comm
@@ -378,6 +407,10 @@ where
     }
 
     pub fn run_control_stages_if_new_imu(&mut self) -> bool {
+        self.run_control_and_mixing_stage_if_new_imu()
+    }
+
+    pub fn run_control_and_mixing_stage_if_new_imu(&mut self) -> bool {
         run_control_pipeline_if_new_imu(ControlPipelineCtx {
             board: &mut self.board,
             params: &self.params,
@@ -444,7 +477,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        comm_messages::{
+        comm::messages::{
             enums::{
                 OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightAuxCmdType,
                 RosflightCmd, RosflightCmdResponse,
@@ -521,7 +554,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::ParamValueMsg,
+            _msg: crate::comm::messages::messages::ParamValueMsg,
         ) {
         }
 
@@ -529,7 +562,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RosflightStatusMsg,
+            _msg: crate::comm::messages::messages::RosflightStatusMsg,
         ) {
         }
 
@@ -537,7 +570,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::TimesyncMsg,
+            _msg: crate::comm::messages::messages::TimesyncMsg,
         ) -> bool {
             true
         }
@@ -546,7 +579,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RosflightVersionMsg,
+            _msg: crate::comm::messages::messages::RosflightVersionMsg,
         ) {
         }
 
@@ -554,7 +587,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RosflightOutputRawMsg,
+            _msg: crate::comm::messages::messages::RosflightOutputRawMsg,
         ) {
         }
 
@@ -562,7 +595,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::AttitudeQuaternionMsg,
+            _msg: crate::comm::messages::messages::AttitudeQuaternionMsg,
         ) {
         }
 
@@ -570,7 +603,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::SmallBaroMsg,
+            _msg: crate::comm::messages::messages::SmallBaroMsg,
         ) {
         }
 
@@ -578,7 +611,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::DiffPressureMsg,
+            _msg: crate::comm::messages::messages::DiffPressureMsg,
         ) {
         }
 
@@ -586,7 +619,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::SmallImuMsg,
+            _msg: crate::comm::messages::messages::SmallImuMsg,
         ) {
         }
 
@@ -594,7 +627,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::SmallMagMsg,
+            _msg: crate::comm::messages::messages::SmallMagMsg,
         ) {
         }
 
@@ -602,7 +635,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RcChannelsMsg,
+            _msg: crate::comm::messages::messages::RcChannelsMsg,
         ) {
         }
 
@@ -610,7 +643,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::SmallRangeMsg,
+            _msg: crate::comm::messages::messages::SmallRangeMsg,
         ) {
         }
 
@@ -618,7 +651,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RosflightGnssMsg,
+            _msg: crate::comm::messages::messages::RosflightGnssMsg,
         ) {
         }
 
@@ -626,7 +659,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RosflightCmdAckMsg,
+            _msg: crate::comm::messages::messages::RosflightCmdAckMsg,
         ) {
         }
 
@@ -634,7 +667,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RcChannelsMsg,
+            _msg: crate::comm::messages::messages::RcChannelsMsg,
         ) {
         }
 
@@ -642,7 +675,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::BatteryStatusMsg,
+            _msg: crate::comm::messages::messages::BatteryStatusMsg,
         ) {
         }
 
@@ -650,7 +683,7 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::StatustextMsg,
+            _msg: crate::comm::messages::messages::StatustextMsg,
         ) {
         }
 
@@ -658,14 +691,14 @@ mod tests {
             &mut self,
             _board: &mut SensorStageBoard,
             _system_id: u8,
-            _msg: crate::comm_messages::messages::RosflightHardErrorMsg,
+            _msg: crate::comm::messages::messages::RosflightHardErrorMsg,
         ) {
         }
 
         fn handle_incoming_messages(
             &mut self,
             _board: &mut SensorStageBoard,
-            _msgs: &mut crate::comm_messages::Messages,
+            _msgs: &mut crate::comm::messages::Messages,
         ) {
         }
     }
@@ -1332,7 +1365,7 @@ mod tests {
 
     #[test]
     fn world_applies_offboard_control_command_event() {
-        let mut world = test_world();
+        let mut world = armed_test_world_with_params(Params::new());
 
         world.comm.msgs.offboard_control = Some(OffboardControlMsg {
             mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
@@ -1443,7 +1476,7 @@ mod tests {
 
     #[test]
     fn world_drains_logs_through_comm_response_stage() {
-        while crate::logger::Logger::pop().is_some() {}
+        while crate::log::Logger::pop().is_some() {}
 
         let mut world = test_world();
         world.companion_link.connected = true;

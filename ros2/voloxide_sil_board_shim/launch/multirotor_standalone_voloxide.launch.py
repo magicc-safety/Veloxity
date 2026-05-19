@@ -67,8 +67,6 @@ def generate_launch_description():
                         "use_sim_time": use_sim_time,
                         "use_timer": True,
                         "simulation_loop_frequency": 250.0,
-                        "service_exists_timeout_ms": 50,
-                        "service_result_timeout_ms": 50,
                     }
                 ],
             ),

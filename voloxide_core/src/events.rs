@@ -1,5 +1,5 @@
 use crate::{
-    comm_messages::{
+    comm::messages::{
         enums::{ParamIdentifier, RosflightCmd},
         messages::{
             ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamValueMsg,
@@ -236,7 +236,7 @@ impl CompanionEventQueues {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logger::Logger;
+    use crate::log::Logger;
 
     #[test]
     fn event_queue_preserves_fifo_order_across_wraparound() {

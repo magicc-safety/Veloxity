@@ -212,6 +212,57 @@ continues to expose protocol-neutral communication messages and the `CommInterfa
 - Kept `voloxide_core` protocol-neutral for users that provide non-MAVLink communication
   implementations.
 
+### 2026-05-18: Completed Software Organization Steps 1-6
+
+- Step 1: kept adapter responsibilities outside `voloxide_core`; MAVLink remains in
+  `voloxide_mavlink`, sim transport remains in `sim`, and board startup remains in board crates.
+- Step 2: moved `voloxide_core/src/comm_messages.rs` to `voloxide_core/src/comm/messages.rs` and
+  moved `voloxide_core/src/sensorprocessors.rs` to
+  `voloxide_core/src/sensors/processors.rs`.
+- Step 3: added board-local `SimWorld`, `PixracerWorld`, and `NucleoWorld` aliases plus local
+  `init_world` constructors at the runtime entrypoints.
+- Step 4: split `World::run_once` into explicit high-level scheduler phases for communication and
+  parameter service, sensor ingestion and health, RC/state updates, control/mixing, and telemetry.
+  Existing test-facing wrapper methods were preserved.
+- Step 5: removed broad workspace lint allowances so unused/stale hand-written code is visible
+  again; protocol-shaped exceptions remain local.
+- Step 6: replaced `micro_algebra` with `nalgebra` in core math code and tests, removed the old
+  estimator/controller CSV-writing integration tests, removed checked-in CSV/PNG artifacts, and
+  removed the old estimator/controller plotting/data-generation scripts.
+
+### 2026-05-18: Grouped Domain Systems Under Owning Modules
+
+- Replaced the remaining flat top-level `*_system.rs`, `*_manager.rs`, and stale quad file names
+  with domain-owned modules.
+- Parameter ownership is now:
+  - `voloxide_core/src/params.rs`
+  - `voloxide_core/src/params/service.rs`
+  - `voloxide_core/src/params/reactions.rs`
+- Logging ownership is now:
+  - `voloxide_core/src/log.rs`
+  - `voloxide_core/src/log/drain.rs`
+- Command and companion ownership is now:
+  - `voloxide_core/src/command.rs`
+  - `voloxide_core/src/command/service.rs`
+  - `voloxide_core/src/companion.rs`
+- Sensor ownership is now:
+  - `voloxide_core/src/sensors.rs`
+  - `voloxide_core/src/sensors/ingestion.rs`
+  - `voloxide_core/src/sensors/processors.rs`
+  - `voloxide_core/src/sensors/health.rs`
+- RC and PWM ownership is now:
+  - `voloxide_core/src/rc.rs`
+  - `voloxide_core/src/rc/system.rs`
+  - `voloxide_core/src/pwm.rs`
+  - `voloxide_core/src/pwm/system.rs`
+- Control pipeline ownership is now `voloxide_core/src/control.rs`.
+- Quad implementations now use role names:
+  - `voloxide_core/src/controller/quad.rs`
+  - `voloxide_core/src/estimator/quad.rs`
+  - `voloxide_core/src/mixer/quad.rs`
+- Migrated `state_machine/mod.rs` to `state_machine.rs` with tests remaining in
+  `state_machine/tests.rs`, preserving the modern Rust `module.rs` plus `module/child.rs` layout.
+
 ## Verification Log
 
 - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo fmt` passes.
@@ -274,8 +325,29 @@ continues to expose protocol-neutral communication messages and the `CommInterfa
   - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p nucleo --target thumbv7em-none-eabihf`
   - `RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/.cargo-home cargo check -p stm_32 --target thumbv7em-none-eabihf`
 
+- After software organization steps 1-6:
+  - `rustfmt --edition 2024` was run directly on touched Rust files because `cargo fmt` is not
+    installed in the available toolchain.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo check -p voloxide_core --lib` passes.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test -p voloxide_core --lib` passes: 144 tests.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test -p voloxide_core --tests` passes: 144 lib tests and 15 mixer integration tests.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo check -p voloxide_mavlink --lib --message-format short` passes.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo check -p sim --message-format short` passes.
+  - `cargo check -p pixracerpro --target thumbv7em-none-eabihf` is blocked in this container because
+    the available Rust 1.95.0 toolchain does not have the `thumbv7em-none-eabihf` target installed
+    (`can't find crate for core`).
+
+- After grouping domain systems under owning modules:
+  - `/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt --edition 2024` was run on touched Rust files.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo check -p voloxide_core --lib --message-format short` passes.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test -p voloxide_core --tests --message-format short` passes: 144 lib tests and 15 mixer integration tests.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo check -p voloxide_mavlink --lib --message-format short` passes.
+  - `CARGO_HOME=/tmp/cargo-home RUSTC=/run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc /run/host/home/skink/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo check -p sim --message-format short` passes.
+  - `cargo check -p pixracerpro --target thumbv7em-none-eabihf` remains blocked in this container because the target is not installed (`can't find crate for core`).
+
 ## Remaining Work
 
-- Decide whether to continue with core module regrouping in this branch or leave it as a documented
-  next phase.
-- Consider board-specific `init_world` helpers later if binary entrypoints still feel too verbose.
+- Install the embedded `thumbv7em-none-eabihf` Rust target before rerunning Pixracer Pro, Nucleo, and
+  STM32 target checks in this container.
+- Decide whether to clean up the warnings exposed by removing broad workspace `unused` allowances in
+  this branch or leave them as a visible follow-up.

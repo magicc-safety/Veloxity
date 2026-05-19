@@ -3,6 +3,8 @@ use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
 use crate::{log_info, log_warn};
 
+pub mod system;
+
 // --- Constants ---
 pub const STICKS_COUNT: usize = 4;
 pub const SWITCHES_COUNT: usize = 4;

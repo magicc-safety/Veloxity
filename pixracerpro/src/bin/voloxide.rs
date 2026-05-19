@@ -10,6 +10,33 @@ use voloxide_core::{
 };
 use voloxide_mavlink::MavlinkInterface;
 
+type PixracerWorld<'a> = World<
+    board::Board,
+    quadrotor::Estimator,
+    quadrotor::Controller,
+    quadrotor::Mixer,
+    MavlinkInterface,
+    BoardPwmDriver<'a>,
+>;
+
+fn init_world<'a>(
+    board: board::Board,
+    params: Params,
+    pwm_driver: BoardPwmDriver<'a>,
+) -> PixracerWorld<'a> {
+    let mixer = quadrotor::mixer(&params);
+    PixracerWorld::init(
+        board,
+        params,
+        MavlinkInterface::new(),
+        StateManager::new(),
+        quadrotor::Estimator::default(),
+        quadrotor::Controller::default(),
+        mixer,
+        pwm_driver,
+    )
+}
+
 #[entry]
 fn main() -> ! {
     // board implementation & servos object
@@ -20,30 +47,10 @@ fn main() -> ! {
         let _ = board.write_params(&params);
     }
 
-    // body type instantiations
-    let estimator = quadrotor::Estimator::default();
-    let controller = quadrotor::Controller::default();
-    let mixer = quadrotor::mixer(&params);
-
-    // comm_link implementation
-    let mavlink = MavlinkInterface::new();
-
-    // state_manager
-    let state_manager = StateManager::new();
-
     // PWM Driver from servos object
     let pwm_driver = BoardPwmDriver::new(&mut servos);
 
-    let mut world = World::init(
-        board,
-        params,
-        mavlink,
-        state_manager,
-        estimator,
-        controller,
-        mixer,
-        pwm_driver,
-    );
+    let mut world = init_world(board, params, pwm_driver);
 
     loop {
         world.run_once();

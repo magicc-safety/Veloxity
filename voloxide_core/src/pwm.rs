@@ -1,5 +1,7 @@
 use crate::board::BoardIo;
 
+pub mod system;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PwmError {
     ChannelOutOfRange,

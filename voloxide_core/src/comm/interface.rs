@@ -1,7 +1,5 @@
 use crate::board;
-use crate::comm_messages::{self, messages::*};
-use crate::packets;
-use crate::params;
+use crate::comm::messages::{Messages, messages::*};
 
 pub trait CommInterface<B: board::BoardIo> {
     fn send_heartbeat(&mut self, board: &mut B, system_id: u8, msg: HeartbeatMsg) -> bool;
@@ -24,7 +22,7 @@ pub trait CommInterface<B: board::BoardIo> {
     fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: StatustextMsg);
     fn send_hard_error(&mut self, board: &mut B, system_id: u8, msg: RosflightHardErrorMsg);
 
-    fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut comm_messages::Messages);
+    fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut Messages);
 }
 
 #[allow(async_fn_in_trait)]
