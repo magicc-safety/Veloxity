@@ -159,9 +159,11 @@ private:
       return false;
     }
 
-    if (!voloxide_sim_run_once(firmware_.get())) {
-      RCLCPP_WARN(get_logger(), "Voloxide firmware iteration failed");
-      return false;
+    for (int iteration = 0; iteration < 2; ++iteration) {
+      if (!voloxide_sim_run_once(firmware_.get())) {
+        RCLCPP_WARN(get_logger(), "Voloxide firmware iteration %d failed", iteration + 1);
+        return false;
+      }
     }
 
     std::array<uint16_t, kPwmChannelCount> outputs{};

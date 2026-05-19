@@ -355,8 +355,8 @@ impl From<ros_messages::GNSS> for packets::GNSSPacket {
             },
             unix_seconds: msg.header.stamp.sec as i64,
             unix_nanos: msg.header.stamp.nanosec as i32,
-            lat: msg.lat.to_radians(),
-            lon: msg.lon.to_radians(),
+            lat: msg.lat,
+            lon: msg.lon,
             height: msg.alt,
             vel_n: msg.vel_n,
             vel_e: msg.vel_e,
@@ -649,8 +649,8 @@ mod tests {
 
         let gnss = sensors.gnss.unwrap().unwrap();
         assert_eq!(gnss.header.timestamp, 4_200_000);
-        assert!((gnss.lat - 40.0_f64.to_radians()).abs() < 1e-12);
-        assert!((gnss.lon - (-111.0_f64).to_radians()).abs() < 1e-12);
+        assert!((gnss.lat - 40.0).abs() < 1e-12);
+        assert!((gnss.lon - (-111.0)).abs() < 1e-12);
         assert_eq!(gnss.num_sats, 11);
 
         let rc = sensors.rc.unwrap().unwrap();

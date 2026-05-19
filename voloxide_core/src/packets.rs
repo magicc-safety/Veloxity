@@ -203,8 +203,8 @@ pub struct GNSSPacket {
     pub header: RosflightPacketHeader, // timestamp and device specific status
     pub unix_seconds: i64,             // Unix time, in seconds
     pub unix_nanos: i32,
-    pub lat: f64,    // radians
-    pub lon: f64,    // radians
+    pub lat: f64,    // degrees
+    pub lon: f64,    // degrees
     pub height: f32, // m/s above ellipsoid
     pub vel_n: f32,  // m/s north
     pub vel_e: f32,  // m/s east

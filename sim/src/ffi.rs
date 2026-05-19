@@ -242,6 +242,14 @@ struct FfiBoard {
     mavlink_socket: UdpSocket,
     sensors: Arc<Mutex<SharedSensors>>,
     param_store_path: PathBuf,
+    last_imu_timestamp_us: u64,
+    last_mag_timestamp_us: u64,
+    last_baro_timestamp_us: u64,
+    last_gnss_timestamp_us: u64,
+    last_airspeed_timestamp_us: u64,
+    last_range_timestamp_us: u64,
+    last_battery_timestamp_us: u64,
+    last_rc_timestamp_us: u64,
 }
 
 impl FfiBoard {
@@ -263,6 +271,14 @@ impl FfiBoard {
             mavlink_socket,
             sensors,
             param_store_path: param_store_path(),
+            last_imu_timestamp_us: 0,
+            last_mag_timestamp_us: 0,
+            last_baro_timestamp_us: 0,
+            last_gnss_timestamp_us: 0,
+            last_airspeed_timestamp_us: 0,
+            last_range_timestamp_us: 0,
+            last_battery_timestamp_us: 0,
+            last_rc_timestamp_us: 0,
         })
     }
 }
@@ -275,7 +291,8 @@ impl BoardIo for FfiBoard {
         };
         let snapshot = shared.snapshot;
 
-        if snapshot.has_imu {
+        if snapshot.has_imu && snapshot.imu.timestamp_us > self.last_imu_timestamp_us {
+            self.last_imu_timestamp_us = snapshot.imu.timestamp_us;
             sensors.imu = Some(Ok(packets::ImuPacket {
                 header: packets::RosflightPacketHeader {
                     timestamp: snapshot.imu.timestamp_us,
@@ -296,7 +313,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_mag {
+        if snapshot.has_mag && snapshot.mag.timestamp_us > self.last_mag_timestamp_us {
+            self.last_mag_timestamp_us = snapshot.mag.timestamp_us;
             sensors.mag = Some(Ok(packets::MagPacket {
                 header: packets::RosflightPacketHeader {
                     timestamp: snapshot.mag.timestamp_us,
@@ -311,7 +329,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_baro {
+        if snapshot.has_baro && snapshot.baro.timestamp_us > self.last_baro_timestamp_us {
+            self.last_baro_timestamp_us = snapshot.baro.timestamp_us;
             sensors.baro = Some(Ok(packets::BaroPacket {
                 header: packets::RosflightPacketHeader {
                     timestamp: snapshot.baro.timestamp_us,
@@ -323,7 +342,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_gnss {
+        if snapshot.has_gnss && snapshot.gnss.timestamp_us > self.last_gnss_timestamp_us {
+            self.last_gnss_timestamp_us = snapshot.gnss.timestamp_us;
             let dt = Utc
                 .timestamp_opt(snapshot.gnss.unix_seconds, snapshot.gnss.unix_nanos as u32)
                 .latest()
@@ -335,8 +355,8 @@ impl BoardIo for FfiBoard {
                 },
                 unix_seconds: snapshot.gnss.unix_seconds,
                 unix_nanos: snapshot.gnss.unix_nanos,
-                lat: snapshot.gnss.lat_degrees.to_radians(),
-                lon: snapshot.gnss.lon_degrees.to_radians(),
+                lat: snapshot.gnss.lat_degrees,
+                lon: snapshot.gnss.lon_degrees,
                 height: snapshot.gnss.alt,
                 vel_n: snapshot.gnss.vel_n,
                 vel_e: snapshot.gnss.vel_e,
@@ -358,7 +378,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_airspeed {
+        if snapshot.has_airspeed && snapshot.airspeed.timestamp_us > self.last_airspeed_timestamp_us {
+            self.last_airspeed_timestamp_us = snapshot.airspeed.timestamp_us;
             sensors.pitot = Some(Ok(packets::PitotPacket {
                 header: packets::RosflightPacketHeader {
                     timestamp: snapshot.airspeed.timestamp_us,
@@ -370,7 +391,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_range {
+        if snapshot.has_range && snapshot.range.timestamp_us > self.last_range_timestamp_us {
+            self.last_range_timestamp_us = snapshot.range.timestamp_us;
             sensors.range = Some(Ok(packets::RangePacket {
                 header: packets::RosflightPacketHeader {
                     timestamp: snapshot.range.timestamp_us,
@@ -383,7 +405,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_battery {
+        if snapshot.has_battery && snapshot.battery.timestamp_us > self.last_battery_timestamp_us {
+            self.last_battery_timestamp_us = snapshot.battery.timestamp_us;
             sensors.battery = Some(Ok(packets::BatteryPacket {
                 header: packets::RosflightPacketHeader {
                     timestamp: snapshot.battery.timestamp_us,
@@ -394,7 +417,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_rc {
+        if snapshot.has_rc && snapshot.rc.timestamp_us > self.last_rc_timestamp_us {
+            self.last_rc_timestamp_us = snapshot.rc.timestamp_us;
             let mut channels = [0.0f32; packets::RC_PACKET_CHANNELS];
             for (index, value) in snapshot.rc.values.iter().enumerate() {
                 channels[index] = (*value as f32 - 1000.0) / 1000.0;
