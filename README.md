@@ -72,7 +72,14 @@ Both boards run the same `voloxide` binary entry point. Each binary wires its bo
 cargo run -p sim --bin voloxide
 ```
 
-The sim board uses [Zenoh](https://zenoh.io/) for inter-process communication. It subscribes to a `rust/tick` topic to drive the main loop and publishes actuator commands over Zenoh topics. (**WIP**)
+The direct `sim` binary is a legacy host-side path. The current ROSflight 2.0 software-in-the-loop
+workflow uses the ROS 2 shim in `ros2/voloxide_sil_board_shim`, which exposes the same simulator
+firmware endpoint contract as the upstream C `sil_board`.
+
+For the current ROSflight 2.0 software-in-the-loop workflow, see:
+
+- [Connect Voloxide Firmware To ROSflight SIL](tutorial/voloxide-firmware-bridge.md)
+- [Run ROScopter Waypoint Following With Voloxide](tutorial/voloxide-roscopter-waypoints.md)
 
 ## Debugging
 

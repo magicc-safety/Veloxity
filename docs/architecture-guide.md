@@ -115,7 +115,7 @@ Voloxide/
         │   └── voloxide_sil_board_shim/voloxide_ffi.h
         └── launch/
             ├── voloxide_sil_board.launch.py
-            └── multirotor_standalone_voloxide.launch.py
+            └── multirotor_standalone_sil.launch.py
 ```
 
 ## Dependency Direction
@@ -959,4 +959,3 @@ Use this order when stepping through the simulator integration:
 ```
 
 That path follows one simulator tick from ROS sensor input to firmware update to PWM output.
-
