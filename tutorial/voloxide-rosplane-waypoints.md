@@ -40,35 +40,74 @@ export ROS_LOG_DIR=/tmp/rosflight_logs
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 ```
 
-## One-Command Demo
+## Working Visual Demo
 
 Run:
 
 ```bash
 cd /run/host/home/skink/projects/voloxide_proj
+Voloxide/scripts/run_voloxide_rosplane_tutorial_demo.zsh
+```
+
+This is the fixed-wing path that has been validated visually with Voloxide as
+the firmware endpoint. It deliberately uses VimFly for the aircraft takeoff and
+RC-override handoff, matching the ROSflight tutorial model more closely than the
+diagnostic deterministic RC helper.
+
+The wrapper sets the generic ROSplane demo script into the validated tutorial
+mode:
+
+- `FIRMWARE=voloxide`
+- `USE_VIMFLY=true`
+- `USE_TRUTH_STATE_AUTONOMY=true`
+- `USE_STANDALONE_RVIZ=true`
+- `USE_WAYPOINT_VIZ=true`
+- `USE_ROSPLANE_GCS=false`
+- `MANUAL_TAKEOFF_BEFORE_ROSPLANE=true`
+- `RESET_VOLOXIDE_PARAMS=true`
+
+It starts the Zenoh router, launches fixed-wing standalone SIL with VimFly,
+seeds a ground state for firmware calibration, loads the standard ROSflight
+fixed-wing firmware parameters, refreshes the dynamics parameter cache, starts
+one RViz window, and then pauses.
+
+At the first pause:
+
+1. Click the VimFly window.
+2. Press `t` once to arm.
+3. Fly the aircraft manually under RC override.
+4. Do not press `r` yet.
+5. Press Enter in the script terminal only after the aircraft is airborne and
+   stable.
+
+The script then starts ROSplane from the truth-state adapter, starts the
+waypoint marker publisher, loads `fixedwing_mission.yaml`, and pauses again.
+
+At the second pause:
+
+1. Keep the aircraft flying manually.
+2. Press `r` once in VimFly to release RC override.
+3. Press Enter in the script terminal after `/status` shows `rc_override=0`.
+
+The standalone RViz window should show `/rviz/waypoint`, `/rviz/mesh`, and
+`/rviz/mesh_path`. The separate ROSplane GCS RViz window is disabled by default
+so there is only one visual window.
+
+By default the script deletes `/tmp/voloxide_rosplane_sim.params` before launch
+and then loads the documented ROSflight fixed-wing parameter file, so saved
+Voloxide parameters from earlier tests do not define the demo flight
+configuration.
+
+Stop the demo with `Ctrl-C` in the script terminal.
+
+The lower-level script remains available for diagnostics:
+
+```bash
 Voloxide/scripts/run_voloxide_rosplane_demo.zsh
 ```
 
-The script starts the Zenoh router, launches fixed-wing standalone SIL with
-`firmware:=voloxide` and `use_vimfly:=false`, seeds a visual ground state for
-RViz and firmware calibration, loads the standard fixed-wing firmware
-parameters, then seeds a finite near-ground state before ROSplane subscribes.
-By default it deletes `/tmp/voloxide_rosplane_sim.params` before launch
-(`RESET_VOLOXIDE_PARAMS=true`) and then loads the documented ROSflight
-fixed-wing parameter file, so saved Voloxide parameters from earlier tests do
-not define the demo flight configuration.
-That avoids the local ROSplane zero-airspeed truth-state NaN path while keeping
-the documented mission, arm, and RC-release order. The deterministic RC handoff
-arms under RC override, waits for a live ROSplane command, seeds the finite
-release state, and only then releases RC override. The separate ROSplane GCS
-RViz window is disabled by default so there is only one visual window. The
-script still starts the ROSplane waypoint marker publisher, so the standalone
-RViz window should show `/rviz/waypoint`, `/rviz/mesh`, and `/rviz/mesh_path`.
-Set `USE_VIMFLY=true` to use manual VimFly input instead. Set
-`USE_ROSPLANE_GCS=true` to also launch the full GCS. Set `USE_WAYPOINT_VIZ=false`
-to skip the marker publisher.
-
-Stop the demo with `Ctrl-C` in the script terminal.
+Use that directly only when you intentionally want to change one of the wrapper
+defaults above.
 
 ## Manual Sequence
 
@@ -104,11 +143,19 @@ Initialize fixed-wing firmware parameters and IMU calibration:
 ros2 launch rosflight_sim fixedwing_init_firmware.launch.py
 ```
 
-Start ROSplane and the waypoint visualization:
+After firmware initialization, use VimFly to take off manually before starting
+ROSplane:
+
+1. Click the VimFly window.
+2. Press `t` once to arm.
+3. Fly the aircraft manually under RC override until it is airborne and stable.
+4. Do not press `r` yet.
+
+Start ROSplane from the truth-state adapter and start waypoint visualization:
 
 ```bash
-ros2 launch rosplane_sim sim.launch.py
-ros2 launch rosplane_gcs rosplane_gcs.launch.py
+ros2 launch voloxide_sil_board_shim rosplane_truth_state_autonomy.launch.py
+python3 Voloxide/scripts/rosplane_waypoint_markers.py
 ```
 
 Load the default fixed-wing mission:
@@ -119,12 +166,11 @@ ros2 service call /load_mission_from_file rosflight_msgs/srv/ParamFile \
   "{filename: $(pwd)/fixedwing_mission.yaml}"
 ```
 
-Arm and release RC override from the VimFly window:
+Release RC override from the VimFly window:
 
 1. Click the VimFly window.
-2. Press `t` once to arm.
-3. Wait about one second.
-4. Press `r` once to release RC override.
+2. Keep the aircraft flying manually.
+3. Press `r` once to release RC override.
 
 When this is successful, `/status` should show `armed: true`,
 `rc_override: 0`, and `offboard: true`.
