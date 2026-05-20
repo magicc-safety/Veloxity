@@ -183,13 +183,13 @@ impl UbloxSensor {
         if make_packet(class, id, payload, &mut buffer) {
             // Make the expected ack packet
             let mut ack: [u8; 10] = [0u8; 10];
-            let result = make_packet(0x05, 0x01, &[class, id], &mut ack); // ack packet is class=0x05 id=0x01
+            let _result = make_packet(0x05, 0x01, &[class, id], &mut ack); // ack packet is class=0x05 id=0x01
             // info!("Made ack packet: {:x} ", ack);
 
             // send packet
             let result = self.uart.write(&buffer[0..payload.len() + 8]).await;
             // info!("Sent ubx packet class: {:#02X} id: {:#02X} result: {:?}", class, id, result);
-            if let Ok((size)) = result {
+            if let Ok(_size) = result {
                 // check it it was successful
                 let result = self.look_for_ack(&ack).await;
                 return result;
@@ -198,7 +198,7 @@ impl UbloxSensor {
         false
     }
 
-    async fn cfg_prt(&mut self, baud: u32) -> bool {
+    async fn cfg_prt(&mut self, _baud: u32) -> bool {
         // return error
         match self.protocol {
             Protocol::M8 => {
@@ -310,7 +310,7 @@ impl UbloxSensor {
         )
         .await
         {
-            Ok(Ok(size)) => {
+            Ok(Ok(_size)) => {
                 // info!("Looking for ACK, received {} bytes: {:x}", size, buffer[0..size]);
                 for subarray in buffer.windows(ack.len()) {
                     if ack == subarray {
@@ -319,11 +319,11 @@ impl UbloxSensor {
                     }
                 }
             }
-            Ok(Err(read_err)) => {
+            Ok(Err(_read_err)) => {
                 // underlying UART/read error from self.uart.read(...)
                 // info!("UART read error while looking for ACK: {:?}", read_err);
             }
-            Err(timeout_err) => {
+            Err(_timeout_err) => {
                 // with_timeout timed out
                 // info!("Timed out waiting for UART read while looking for ACK: {:?}", timeout_err);
             }
@@ -341,12 +341,12 @@ impl UbloxSensor {
             Bitrate::Baud230400 as u32,
         ]; //, 460800u32, 921600u32];
 
-        for retries in 0..30 {
+        for _retries in 0..30 {
             for baud in bauds {
                 // try baud rate
                 // info!("Try {} baud", baud);
                 // set stm32 baud rate
-                let result: Result<(), usart::ConfigError> = self.uart.set_baudrate(baud);
+                let _result: Result<(), usart::ConfigError> = self.uart.set_baudrate(baud);
                 // info!("Set baud result: {:?}", result);
 
                 // set ublox the desired baud rate
@@ -355,7 +355,7 @@ impl UbloxSensor {
 
                 if result {
                     // info!("Synced baudrate to {}", baud);
-                    let result: Result<(), usart::ConfigError> =
+                    let _result: Result<(), usart::ConfigError> =
                         self.uart.set_baudrate(self.baudrate as u32);
                     return true;
                 }
@@ -367,7 +367,7 @@ impl UbloxSensor {
     }
 
     pub async fn run(&mut self) {
-        let synced = self.sync_baudrate().await;
+        let _synced = self.sync_baudrate().await;
 
         // Disable these messages
         self.cfg_msg(0x0A, 0x09, 0).await; // MON-HW
@@ -506,7 +506,7 @@ impl UbloxSensor {
                     // if(n==p->length+7) // Checksum B (the end)
                     {
                         n = 0;
-                        if (p.b == c) {
+                        if p.b == c {
                             // we found a valid packet
                             if (p.cl == 0x01) || (p.id == 0x07)
                             // pvt packet
@@ -593,10 +593,10 @@ impl UbloxSensor {
                                     status,
                                 };
 
-                                let fix_type =
+                                let _fix_type =
                                     packets::GNSSFixType::from_u8(unsafe { pvt.packet }.fix_type);
 
-                                let pi = 3.141592654;
+                                let _pi = 3.141592654;
                                 let pvt_packet = packets::GNSSPacket {
                                     header: header,
                                     unix_seconds: unix_seconds_from_utc(

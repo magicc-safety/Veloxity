@@ -34,7 +34,7 @@ impl Ist8308Sensor {
         data: &mut [u8],
     ) -> Result<(), ()> {
         match self.dev.write(address, register).await {
-            Err(e) => return Err(()),
+            Err(_e) => return Err(()),
             Ok(_) => {}
         }
 
@@ -42,7 +42,7 @@ impl Ist8308Sensor {
 
         // Read register
         match self.dev.read(address, data).await {
-            Err(e) => return Err(()),
+            Err(_e) => return Err(()),
             Ok(_) => {}
         }
 

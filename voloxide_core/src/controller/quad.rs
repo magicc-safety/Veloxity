@@ -3,7 +3,6 @@ use crate::command::{CombinedControl, ControlType};
 use crate::controller::ControllerCtx;
 use crate::estimator::quad::AttitudeState;
 use crate::params::{ParamId, ParamValue, Params};
-use crate::state_machine::StateManager;
 use libm::{atan2, cos, pow, sin, sqrt};
 use nalgebra::Quaternion;
 use nalgebra::SVector as Vector;
@@ -324,7 +323,7 @@ impl Controller for QuadController {
         // Roll Rate
         self.roll_rate_pid.p = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_P) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.roll_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_I) {
             ParamValue::Float(val) => val as f64,
@@ -332,11 +331,11 @@ impl Controller for QuadController {
         };
         self.roll_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_ROLL_RATE_D) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.roll_rate_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
 
         // Pitch Rate
@@ -350,17 +349,17 @@ impl Controller for QuadController {
         };
         self.pitch_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_PITCH_RATE_D) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.pitch_rate_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
 
         // Yaw Rate
         self.yaw_rate_pid.p = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_P) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.yaw_rate_pid.i = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_I) {
             ParamValue::Float(val) => val as f64,
@@ -368,17 +367,17 @@ impl Controller for QuadController {
         };
         self.yaw_rate_pid.d = match params.get_by_id(ParamId::PARAM_PID_YAW_RATE_D) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.yaw_rate_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
 
         // Roll Angle
         self.roll_angle_pid.p = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_P) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.roll_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_I) {
             ParamValue::Float(val) => val as f64,
@@ -386,17 +385,17 @@ impl Controller for QuadController {
         };
         self.roll_angle_pid.d = match params.get_by_id(ParamId::PARAM_PID_ROLL_ANGLE_D) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.roll_angle_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
 
         // Pitch Angle
         self.pitch_angle_pid.p = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_P) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.pitch_angle_pid.i = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_I) {
             ParamValue::Float(val) => val as f64,
@@ -404,33 +403,28 @@ impl Controller for QuadController {
         };
         self.pitch_angle_pid.d = match params.get_by_id(ParamId::PARAM_PID_PITCH_ANGLE_D) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
         self.pitch_angle_pid.tau = match params.get_by_id(ParamId::PARAM_PID_TAU) {
             ParamValue::Float(val) => val as f64,
-            other => 0.0,
+            _ => 0.0,
         };
     }
 
     fn control(&mut self, state: &Self::State, ctx: ControllerCtx<'_>) -> Self::ControlOutput {
         self.update_gains(ctx.params);
 
-        if !ctx.state_manager.is_armed() {
-            self.reset_pids();
-
-            ControllerOutput::default()
-        } else {
-            let update_integrators = controller_should_update_integrators(ctx.command, ctx.dt);
-            self.run_pid_control(
-                state,
-                ctx.command,
-                ctx.params,
-                ctx.dt,
-                true,
-                update_integrators,
-                ctx.air_density,
-            )
-        }
+        let update_integrators = ctx.state_manager.is_armed()
+            && controller_should_update_integrators(ctx.command, ctx.dt);
+        self.run_pid_control(
+            state,
+            ctx.command,
+            ctx.params,
+            ctx.dt,
+            true,
+            update_integrators,
+            ctx.air_density,
+        )
     }
 }
 
@@ -554,7 +548,7 @@ mod tests {
     use super::*;
     use crate::{
         command::{CombinedControl, ControlChannel, ControlType},
-        state_machine::Event,
+        state_machine::{Event, StateManager},
     };
 
     fn armed_state(params: &Params) -> StateManager {
@@ -806,6 +800,88 @@ mod tests {
         );
 
         assert!((gated_in.u[3] - 0.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pid_derivative_integrator_and_saturation_match_rosflight_trace() {
+        let mut pid = Pid::new(2.0, 3.0, 0.5, 0.25, 0.05);
+
+        let first = pid.run(1.0, 3.0, 0.01, true);
+        assert!((pid.differentiator - 18.1818181818).abs() < 1e-9);
+        assert!((pid.integrator - 0.02).abs() < 1e-9);
+        assert_eq!(first, -0.25);
+
+        let second = pid.run(1.2, 3.0, 0.01, true);
+        assert!((pid.differentiator - 18.5123966942).abs() < 1e-9);
+        assert!((pid.integrator - 1.8020661157).abs() < 1e-9);
+        assert_eq!(second, -0.25);
+
+        let held_integrator = pid.integrator;
+        let disabled = pid.run(1.2, 3.0, 0.01, false);
+        assert_eq!(pid.integrator, held_integrator);
+        assert_eq!(disabled, -0.25);
+    }
+
+    #[test]
+    fn angle_mode_controller_trace_uses_body_rate_as_derivative_feedback() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_ANGLE_P, ParamValue::Float(4.0));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_ANGLE_I, ParamValue::Float(0.0));
+        params.set_by_id(ParamId::PARAM_PID_ROLL_ANGLE_D, ParamValue::Float(0.5));
+        params.set_by_id(ParamId::PARAM_PID_PITCH_ANGLE_P, ParamValue::Float(3.0));
+        params.set_by_id(ParamId::PARAM_PID_PITCH_ANGLE_I, ParamValue::Float(0.0));
+        params.set_by_id(ParamId::PARAM_PID_PITCH_ANGLE_D, ParamValue::Float(0.25));
+        params.set_by_id(ParamId::PARAM_PID_YAW_RATE_P, ParamValue::Float(2.0));
+        params.set_by_id(ParamId::PARAM_PID_YAW_RATE_I, ParamValue::Float(0.0));
+        params.set_by_id(ParamId::PARAM_PID_YAW_RATE_D, ParamValue::Float(0.0));
+
+        let mut state_manager = armed_state(&params);
+        let mut controller = QuadController::default();
+        let state = AttitudeState {
+            q_hat: quaternion_from_euler(0.1, -0.2, 0.0),
+            body_rate: Vector::from([0.3, -0.4, 0.5]),
+            is_healthy: true,
+            ..Default::default()
+        };
+        let command = CombinedControl {
+            qx: ControlChannel {
+                active: true,
+                control_type: ControlType::Angle,
+                value: 0.2,
+            },
+            qy: ControlChannel {
+                active: true,
+                control_type: ControlType::Angle,
+                value: -0.1,
+            },
+            qz: ControlChannel {
+                active: true,
+                control_type: ControlType::Rate,
+                value: 0.8,
+            },
+            fz: ControlChannel {
+                active: true,
+                control_type: ControlType::Throttle,
+                value: 0.4,
+            },
+            ..Default::default()
+        };
+
+        let output = control_with_density(
+            &mut controller,
+            &state,
+            &mut state_manager,
+            &command,
+            &params,
+            0.005,
+            1.225,
+        );
+
+        assert!((output.u[3] - 0.25).abs() < 1e-9);
+        assert!((output.u[4] - 0.4).abs() < 1e-9);
+        assert!((output.u[5] - 0.6).abs() < 1e-9);
+        assert!((output.u[2] + 0.28).abs() < 1e-6);
     }
 
     #[test]

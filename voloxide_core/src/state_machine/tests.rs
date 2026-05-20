@@ -58,7 +58,7 @@ macro_rules! assert_state {
 
 #[test]
 fn test_set_and_clear_all_errors() {
-    let (mut sm, mut params) = setup_sm();
+    let (_, params) = setup_sm();
     // manually put it in an "init" state for this test
     let mut sm = StateMachine::Init(crate::state_machine::State {
         state: crate::state_machine::Init,
@@ -440,8 +440,8 @@ fn test_disarm_while_in_failsafe() {
     sm.update(Event::REQUEST_DISARM, &params);
 
     assert!(!sm.is_armed());
-    assert!(!sm.is_in_failsafe());
-    assert_state!(sm, StateMachine::ErrorPresent);
+    assert!(sm.is_in_failsafe());
+    assert_state!(sm, StateMachine::ErrorFailsafe);
     assert_eq!(sm.get_errors(), ErrorFlag::RC_LOST);
 }
 
@@ -553,6 +553,19 @@ fn state_manager_allows_arm_with_low_throttle_and_throttle_override() {
     manager.update_arming_safety(true, true);
 
     manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(manager.is_armed());
+    assert_state!(manager.machine, StateMachine::Armed);
+}
+
+#[test]
+fn hardfault_rearm_is_an_explicit_state_transition() {
+    let params = Params::new();
+    let mut manager = StateManager::new();
+    manager.update(Event::INITIALIZED, &params);
+    manager.update_arming_safety(false, false);
+
+    manager.update(Event::HARDFAULT_REARM_REQUESTED, &params);
 
     assert!(manager.is_armed());
     assert_state!(manager.machine, StateMachine::Armed);

@@ -42,7 +42,7 @@ impl SdCard {
 
         for i in 0..blocks {
             let mut block = DataBlock([0u8; 512]);
-            let result = self.sdmmc.read_block(i as u32, &mut block).await?;
+            let _result = self.sdmmc.read_block(i as u32, &mut block).await?;
             p.values[i * 512..(i + 1) * 512].copy_from_slice(&block.0);
         }
         Ok(())
@@ -64,7 +64,7 @@ impl SdCard {
             block
                 .0
                 .copy_from_slice(&p.values[(i * 512)..((i + 1) * 512)]);
-            let result = self.sdmmc.write_block(i as u32, &block).await?;
+            let _result = self.sdmmc.write_block(i as u32, &block).await?;
         }
         Ok(())
     }
@@ -78,7 +78,7 @@ impl SdCard {
         //trace!("uSD: Configured clock: {}", self.sdmmc.clock().0);
 
         // Initialize the SD card
-        if let Err(e) = self.sdmmc.init_card(mhz(4)).await {
+        if let Err(_e) = self.sdmmc.init_card(mhz(4)).await {
             //trace!("uSD: Failed to initialize SD card: {:?}", e);
         } else {
             //trace!("uSD: Initialized SD card");
@@ -92,11 +92,11 @@ impl SdCard {
 
                 //defmt::trace!("uSD: SD card initialized.");
             }
-            Err(e) => {
+            Err(_e) => {
                 //defmt::error!("uSD: Failed to get card details: {:?}", e);
             }
         }
-        let block_size = card_size / card_blocks;
+        let _block_size = card_size / card_blocks;
         // any block_size other than 512 is an error!
 
         //defmt::trace!(
@@ -110,14 +110,14 @@ impl SdCard {
 
         // Read stored values from sd and push to SD_READ_SIGNAL
 
-        let mut header = packets::RosflightPacketHeader {
+        let header = packets::RosflightPacketHeader {
             timestamp: Instant::now().as_micros(),
             status: 0u16,
         };
-        let mut values = [0u8; packets::PARAM_PACKET_SIZE];
+        let values = [0u8; packets::PARAM_PACKET_SIZE];
         let mut param_packet = packets::ParamPacket { header, values };
 
-        let result = self.read(&mut param_packet, card_blocks).await;
+        let _result = self.read(&mut param_packet, card_blocks).await;
 
         SD_READ_SIGNAL.signal(Ok(param_packet));
 
@@ -130,13 +130,13 @@ impl SdCard {
                         Ok(()) => {
                             packet.header.status = 1;
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             packet.header.status = 0;
                         }
                     }
                     SD_READ_SIGNAL.signal(Ok(packet));
                 }
-                Err(e) => {
+                Err(_e) => {
                     //trace!("uSD: Error here");
                 }
             }

@@ -13,10 +13,9 @@ use crate::{
     },
     control::{ControlPipelineCtx, ControlPipelineResource, run_control_pipeline_if_new_imu},
     controller::{Controller, RcTrimCalibrator},
-    estimator::{AttitudeEstimate, Estimator},
+    estimator::Estimator,
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     log::drain::{self as log_drain, LogDrainCtx},
-    mixer::Mixer,
     params::reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     params::service::{
         self as param_service, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx,
@@ -31,7 +30,7 @@ use crate::{
     sensors::ingestion::{SensorProcessorSet, process_sensor_bus},
     sensors::processors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
-    state_machine::{ErrorFlag, Event, StateManager},
+    state_machine::{Event, StateManager},
 };
 
 const IMU_TIMEOUT_US: u64 = 100_000;
@@ -86,8 +85,6 @@ where
     CI: CommInterface<B>,
     PD: PwmDriver,
 {
-    const ESTIMATOR_DT: f64 = 1.0 / 400.0;
-
     pub fn init(
         mut board: B,
         mut params: Params,
@@ -98,6 +95,15 @@ where
         mixer: M,
         pwm: PD,
     ) -> Self {
+        crate::mixer::matrix::sync_reflected_mixer_params(
+            &mut params,
+            ParamId::PARAM_PRIMARY_MIXER,
+        );
+        crate::mixer::matrix::sync_reflected_mixer_params(
+            &mut params,
+            ParamId::PARAM_SECONDARY_MIXER,
+        );
+
         state.update(Event::INITIALIZED, &params);
 
         let mut rc = Rc::new();
@@ -120,14 +126,12 @@ where
                 do_rearm: data.do_rearm,
             }
         });
-        if pending_hard_error
+        let do_rearm_after_hardfault = pending_hard_error
+            .as_ref()
             .map(|msg| msg.do_rearm != 0)
-            .unwrap_or(false)
-        {
-            state.update(Event::REQUEST_ARM, &params);
-        }
+            .unwrap_or(false);
 
-        Self {
+        let mut world = Self {
             board,
             params,
             param_list_state: ParamListState::default(),
@@ -154,7 +158,13 @@ where
             pwm_output,
             pwm,
             last_imu_seen: now_us,
+        };
+        if do_rearm_after_hardfault {
+            world
+                .state
+                .update(Event::HARDFAULT_REARM_REQUESTED, &world.params);
         }
+        world
     }
 
     pub fn run_once(&mut self) -> bool {
@@ -222,19 +232,16 @@ where
     }
 
     fn apply_command_events(&mut self) {
-        let started_calibration =
-            command_service::apply_calibration_requests(CalibrationRequestCtx {
-                requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
-                responses: EventEmitPort::new(&mut self.comm_events.responses),
-                state: &self.state,
-                flags: &mut self.cal_flags,
-                params: &mut self.params,
-            });
-        self.comm.set_pending_calibration_ack(started_calibration);
+        command_service::apply_calibration_requests(CalibrationRequestCtx {
+            requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            state: &self.state,
+            flags: &mut self.cal_flags,
+            params: &mut self.params,
+        });
         command_service::apply_offboard_control_requests(OffboardControlCtx {
             requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
             command: &mut self.command,
-            state: &self.state,
             params: &self.params,
         });
         command_service::apply_param_defaults_requests(ParamDefaultsCtx {
@@ -323,6 +330,13 @@ where
 
     fn request_gyro_calibration_if_needed(&mut self) {
         if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
+            self.cal_flags.remove(CalibrationFlags::GYRO_FAILED);
+            self.params
+                .set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.0));
+            self.params
+                .set_by_id(ParamId::PARAM_GYRO_Y_BIAS, ParamValue::Float(0.0));
+            self.params
+                .set_by_id(ParamId::PARAM_GYRO_Z_BIAS, ParamValue::Float(0.0));
             self.cal_flags.insert(CalibrationFlags::GYRO);
         }
     }
@@ -339,11 +353,13 @@ where
         );
         if calibration_flags_before.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO)
+            && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)
         {
             self.estimator.reset_adaptive_bias();
         }
         if calibration_flags_before.contains(CalibrationFlags::ACCEL)
             && !self.cal_flags.contains(CalibrationFlags::ACCEL)
+            && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
         {
             self.estimator.reset();
             self.control_pipeline = ControlPipelineResource::default();
@@ -371,14 +387,17 @@ where
             imu_timeout_us: IMU_TIMEOUT_US,
         });
 
+        let failed_arm_calibration =
+            self.state.is_calibrating() && self.cal_flags.contains(CalibrationFlags::GYRO_FAILED);
         let completed_arm_calibration =
             self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO);
 
-        if completed_arm_calibration {
+        if failed_arm_calibration {
+            self.state.update(Event::CALIBRATION_FAILED, &self.params);
+            self.cal_flags.remove(CalibrationFlags::GYRO_FAILED);
+        } else if completed_arm_calibration {
             self.state.update(Event::CALIBRATION_COMPLETE, &self.params);
         }
-        self.comm
-            .queue_completed_calibration_ack(&mut self.comm_events, self.cal_flags);
     }
 
     pub fn run_rc_command_state_stages(&mut self) {
@@ -425,7 +444,6 @@ where
             control_pipeline: &mut self.control_pipeline,
             pwm_output: &self.pwm_output,
             pwm: &mut self.pwm,
-            dt: Self::ESTIMATOR_DT,
         })
     }
 
@@ -487,9 +505,11 @@ mod tests {
                 ParamRequestReadMsg, ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
             },
         },
+        estimator::AttitudeEstimate,
         packets::{ImuPacket, RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
         params::{ParamId, ParamValue},
         pwm::{PwmDriver, PwmError},
+        state_machine::ErrorFlag,
         test_support::{RecordingCommLink, TestBoard},
         vehicle::quadrotor,
     };
@@ -819,6 +839,30 @@ mod tests {
         test_world_with_params(Params::new())
     }
 
+    #[test]
+    fn world_init_reconciles_reflected_mixer_params_from_persisted_mixer_choice() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(10));
+        params.set_by_id(ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0, ParamValue::Int(2));
+        params.set_by_id(
+            ParamId::PARAM_PRIMARY_MIXER_3_0,
+            ParamValue::Float(-25303.715),
+        );
+
+        let world = test_world_with_params(params);
+
+        assert_eq!(
+            world
+                .params
+                .get_by_id(ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0),
+            ParamValue::Int(1)
+        );
+        assert_eq!(
+            world.params.get_by_id(ParamId::PARAM_PRIMARY_MIXER_3_0),
+            ParamValue::Float(1.0)
+        );
+    }
+
     fn armed_test_world_with_params(params: Params) -> TestWorld {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
@@ -842,12 +886,15 @@ mod tests {
     fn world_scheduler_runs_deferred_param_pipeline() {
         let mut world = test_world();
 
-        world.comm.msgs.param_set = Some(ParamSetMsg {
-            target_system: 1,
-            target_component: 1,
-            param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
-            param_value: ParamValue::Int(42),
-        });
+        crate::comm::messages::Store::store(
+            &mut world.comm.msgs,
+            ParamSetMsg {
+                target_system: 1,
+                target_component: 1,
+                param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+                param_value: ParamValue::Int(42),
+            },
+        );
 
         assert!(world.run_once());
 
@@ -1014,9 +1061,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Int(1));
         let mut world = test_world_with_params(params);
 
-        world
-            .state
-            .update_arming_safety(true, true);
+        world.state.update_arming_safety(true, true);
         world
             .state
             .update(crate::state_machine::Event::REQUEST_ARM, &world.params);
@@ -1049,6 +1094,15 @@ mod tests {
             seq: 1,
         });
 
+        assert!(!world.run_control_stages_if_new_imu());
+        world
+            .processed_sensors
+            .imu
+            .as_mut()
+            .unwrap()
+            .header
+            .timestamp = 2;
+
         assert!(world.run_control_stages_if_new_imu());
         world.run_telemetry_stage();
         assert_eq!(world.pwm.send_count, 1);
@@ -1070,8 +1124,8 @@ mod tests {
         assert_eq!(output_raw.values[4], 0.25);
         assert!((output_raw.values[5] - 0.2).abs() < 1e-6);
 
-        assert!(!world.run_control_stages_if_new_imu());
-        assert_eq!(world.pwm.send_count, 1);
+        assert!(world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.send_count, 2);
         assert_eq!(world.comm.comm_link().output_raw_count, 1);
 
         world
@@ -1080,10 +1134,10 @@ mod tests {
             .as_mut()
             .unwrap()
             .header
-            .timestamp = 2;
+            .timestamp = 3;
 
         assert!(world.run_control_stages_if_new_imu());
-        assert_eq!(world.pwm.send_count, 2);
+        assert_eq!(world.pwm.send_count, 3);
         assert_eq!(world.comm.comm_link().output_raw_count, 1);
     }
 
@@ -1099,11 +1153,11 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(world.run_control_stages_if_new_imu());
+        assert!(!world.run_control_stages_if_new_imu());
 
         world.processed_sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
-                timestamp: 10,
+                timestamp: 9,
                 status: 0,
             },
             accel: [0.0, 0.0, -9.80665],
@@ -1138,6 +1192,33 @@ mod tests {
     }
 
     #[test]
+    fn world_telemetry_rates_match_rosflight_c_default_stream_cadence() {
+        let mut world = test_world();
+
+        for sample in 0..40 {
+            world.board.current_time_us = 1_000_000 + sample * 2_500;
+            world.processed_sensors.imu = Some(ImuPacket {
+                header: RosflightPacketHeader {
+                    timestamp: world.board.current_time_us,
+                    status: 0,
+                },
+                accel: [0.0, 0.0, -9.80665],
+                gyro: [0.0, 0.0, 0.0],
+                temperature: 25.0,
+                seq: sample as u32,
+            });
+
+            world.run_telemetry_stage();
+        }
+
+        assert_eq!(world.comm.comm_link().heartbeat_count, 1);
+        assert_eq!(world.comm.comm_link().status_count, 1);
+        assert_eq!(world.comm.comm_link().imu_count, 40);
+        assert_eq!(world.comm.comm_link().attitude_count, 40);
+        assert_eq!(world.comm.comm_link().output_raw_count, 5);
+    }
+
+    #[test]
     fn world_status_uses_board_error_count_and_control_loop_time() {
         let mut world = test_world();
         world.board.current_time_us = 1_100_000;
@@ -1149,6 +1230,56 @@ mod tests {
         let status = world.comm.comm_link().last_status.unwrap();
         assert_eq!(status.num_errors, 7);
         assert_eq!(status.loop_time_us, 123);
+    }
+
+    #[test]
+    fn world_led_outputs_follow_rc_override_armed_error_and_failsafe_states() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
+        let mut world = test_world_with_params(params);
+
+        world.update_board_leds(0);
+        assert!(!world.board.led0_high);
+        assert!(world.board.led1_high);
+        world.update_board_leds(500);
+        assert!(!world.board.led1_high);
+
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[0] = 0.8;
+        world.processed_sensors.rc = Some(RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            n_chan: 1,
+            chan: channels,
+            lol: false,
+        });
+        world.run_rc_command_state_stages();
+        world.update_board_leds(0);
+        assert!(world.board.led0_high);
+
+        world.state.update_arming_safety(true, true);
+        world.state.update(Event::REQUEST_ARM, &world.params);
+        world.update_board_leds(0);
+        assert!(world.board.led1_high);
+
+        world.state.update(
+            Event::ERROR_OCCURRED(ErrorFlag::UNCALIBRATED_IMU),
+            &world.params,
+        );
+        world.update_board_leds(500);
+        assert!(!world.board.led1_high);
+
+        let mut failsafe_world = armed_test_world_with_params(Params::new());
+        failsafe_world.state.update(
+            Event::ERROR_OCCURRED(ErrorFlag::RC_LOST),
+            &failsafe_world.params,
+        );
+        failsafe_world.update_board_leds(100);
+        assert!(!failsafe_world.board.led1_high);
+        failsafe_world.update_board_leds(200);
+        assert!(failsafe_world.board.led1_high);
     }
 
     #[test]
@@ -1175,6 +1306,8 @@ mod tests {
             TestPwm::new(),
         );
         assert_eq!(world.board.backup_clear_count, 1);
+        assert_eq!(world.pending_hard_error.unwrap().do_rearm, 1);
+        assert!(world.state.is_armed());
 
         world.comm.msgs.heartbeat = Some(HeartbeatMsg {
             type_: 1,
@@ -1206,6 +1339,15 @@ mod tests {
             temperature: 25.0,
             seq: 1,
         });
+
+        assert!(!world.run_control_stages_if_new_imu());
+        world
+            .processed_sensors
+            .imu
+            .as_mut()
+            .unwrap()
+            .header
+            .timestamp = 2;
 
         assert!(world.run_control_stages_if_new_imu());
 
@@ -1306,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn world_sends_calibration_ack_after_calibration_flag_clears() {
+    fn world_sends_calibration_ack_when_calibration_starts() {
         let mut world = test_world();
 
         world.comm.msgs.cmd = Some(RosflightCmdMsg {
@@ -1316,16 +1458,6 @@ mod tests {
         world.run_comm_param_sensor_stages();
 
         assert!(world.cal_flags.contains(CalibrationFlags::GYRO));
-        assert_eq!(world.comm.comm_link().cmd_ack_count, 0);
-
-        world.cal_flags.remove(CalibrationFlags::GYRO);
-        world.update_sensor_health_and_calibration(world.board.clock_micros());
-
-        assert_eq!(world.comm.comm_link().cmd_ack_count, 0);
-        world
-            .comm
-            .send_comm_responses(&mut world.board, &mut world.comm_events);
-
         assert_eq!(world.comm.comm_link().cmd_ack_count, 1);
         let ack = world.comm.comm_link().last_cmd_ack.unwrap();
         assert!(matches!(ack.command, RosflightCmd::GyroCalibration));
@@ -1346,9 +1478,7 @@ mod tests {
         assert_eq!(world.pwm.enable_all_count, 0);
         assert_eq!(world.pwm.disable_all_count, 0);
 
-        world
-            .state
-            .update_arming_safety(true, true);
+        world.state.update_arming_safety(true, true);
         world
             .state
             .update(crate::state_machine::Event::REQUEST_ARM, &world.params);
@@ -1500,6 +1630,7 @@ mod tests {
     fn world_routes_rc_trim_calibration_and_sets_equilibrium_torques() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(0));
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(4));
         params.set_by_id(ParamId::PARAM_RC_MAX_ROLLRATE, ParamValue::Float(1.0));
         params.set_by_id(ParamId::PARAM_RC_MAX_PITCHRATE, ParamValue::Float(1.0));
         params.set_by_id(ParamId::PARAM_RC_MAX_YAWRATE, ParamValue::Float(1.0));

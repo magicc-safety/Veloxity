@@ -2,7 +2,7 @@ pub mod interface;
 pub mod messages;
 
 use crate::board;
-use crate::comm::messages::{Messages, enums::*, messages::*};
+use crate::comm::messages::{Messages, Store, enums::*, messages::*};
 use crate::command::CommandManager;
 use crate::estimator::AttitudeEstimate;
 use crate::events::{
@@ -15,7 +15,6 @@ use crate::events::{
 use crate::packets::{RC_PACKET_CHANNELS, RangeType};
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
-use crate::sensors::processors::CalibrationFlags;
 use crate::state_machine::StateManager;
 use core::marker::PhantomData;
 
@@ -49,16 +48,6 @@ pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
     buffer
 }
 
-fn calibration_command_is_complete(command: RosflightCmd, flags: CalibrationFlags) -> bool {
-    match command {
-        RosflightCmd::AccelCalibration => !flags.contains(CalibrationFlags::ACCEL),
-        RosflightCmd::GyroCalibration => !flags.contains(CalibrationFlags::GYRO),
-        RosflightCmd::BaroCalibration => !flags.contains(CalibrationFlags::BARO),
-        RosflightCmd::AirspeedCalibration => !flags.contains(CalibrationFlags::PITOT),
-        _ => false,
-    }
-}
-
 fn param_int(params: &Params, id: ParamId) -> i32 {
     match params.get_by_id(id) {
         ParamValue::Int(value) => value,
@@ -78,7 +67,6 @@ where
     pub sysid: u8,
     comm_link: T,
     pub msgs: Messages,
-    pending_calibration_ack: Option<RosflightCmd>,
     _board_marker: PhantomData<B>,
 }
 
@@ -93,16 +81,11 @@ where
             last_status_send_us: now_us,
             output_raw_imu_count: 0,
 
-            sysid: 0,
+            sysid: 1,
             comm_link,
             msgs: Messages::default(),
-            pending_calibration_ack: None,
             _board_marker: PhantomData,
         }
-    }
-
-    pub fn set_pending_calibration_ack(&mut self, command: Option<RosflightCmd>) {
-        self.pending_calibration_ack = command;
     }
 
     #[cfg(test)]
@@ -113,6 +96,10 @@ where
     pub fn process_incoming_messages(&mut self, board: &mut B) {
         self.comm_link
             .handle_incoming_messages(board, &mut self.msgs);
+    }
+
+    fn targets_this_system(&self, target_system: u8) -> bool {
+        target_system == self.sysid
     }
 
     pub fn send_named_telemetry_streams<S, A>(
@@ -324,32 +311,6 @@ where
         );
     }
 
-    pub fn queue_completed_calibration_ack(
-        &mut self,
-        comm_events: &mut CommEventQueues,
-        flags: CalibrationFlags,
-    ) -> bool {
-        let Some(command) = self.pending_calibration_ack else {
-            return false;
-        };
-
-        if calibration_command_is_complete(command, flags) {
-            if !comm_events.responses.push_or_log(
-                CommResponse::CmdAck(RosflightCmdAckMsg {
-                    command,
-                    success: RosflightCmdResponse::RosflightCmdSuccess,
-                }),
-                "completed calibration ack",
-            ) {
-                return false;
-            }
-            self.pending_calibration_ack = None;
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn act_on_messages(
         &mut self,
         param_events: &mut ParamEventQueues,
@@ -366,26 +327,31 @@ where
 
         // first check the param_request_list
         if let Some(msg) = self.msgs.param_request_read.take() {
-            param_events.read_requests.push_or_log(
-                ParamReadRequested {
-                    identifier: msg.param_identifier,
-                },
-                "param read request",
-            );
+            if self.targets_this_system(msg.target_system) {
+                param_events.read_requests.push_or_log(
+                    ParamReadRequested {
+                        identifier: msg.param_identifier,
+                    },
+                    "param read request",
+                );
+            }
         }
 
-        if self.msgs.param_request_list.take().is_some() {
-            param_events
-                .list_requests
-                .push_or_log(ParamListRequested, "param list request");
+        if let Some(msg) = self.msgs.param_request_list.take() {
+            if self.targets_this_system(msg.target_system) {
+                param_events
+                    .list_requests
+                    .push_or_log(ParamListRequested, "param list request");
+            }
         }
 
         // next check for timesync messages
         let msg_opt: Option<TimesyncMsg> = self.msgs.timesync.take();
         if let Some(mut msg) = msg_opt {
-            // fill ts1 (which is currently set to 0) and pass back to the companion computer immediately
-            msg.ts1 = (board.clock_micros() * 1000) as i64;
-            self.send_timesync(board, msg);
+            if msg.tc1 == 0 {
+                msg.tc1 = (board.clock_micros() * 1000) as i64;
+                self.send_timesync(board, msg);
+            }
         }
 
         if let Some(msg) = self.msgs.offboard_control.take() {
@@ -407,14 +373,21 @@ where
                 .push_or_log(ExternalAttitudeReceived { msg }, "external attitude");
         }
 
-        if let Some(msg) = self.msgs.param_set.take() {
-            param_events.set_requests.push_or_log(
-                ParamSetRequested {
-                    value: msg.param_value,
-                    param_id_bytes: msg.param_id,
-                },
-                "param set request",
-            );
+        while !param_events.set_requests.is_full() {
+            let Some(msg) = Store::<ParamSetMsg>::take(&mut self.msgs) else {
+                break;
+            };
+
+            if self.targets_this_system(msg.target_system) {
+                let pushed = param_events.set_requests.push_or_log(
+                    ParamSetRequested {
+                        value: msg.param_value,
+                        param_id_bytes: msg.param_id,
+                    },
+                    "param set request",
+                );
+                debug_assert!(pushed);
+            }
         }
 
         // now act on ROSflight Commands
@@ -422,7 +395,7 @@ where
         let cmd_msg_opt = self.msgs.cmd.take();
         if let Some(msg) = cmd_msg_opt {
             // Assume failure unless explicitly set to success
-            let mut success = RosflightCmdResponse::RosflightCmdFailed;
+            let success = RosflightCmdResponse::RosflightCmdFailed;
             let mut send_ack_now = true;
 
             match msg.command {
@@ -665,8 +638,8 @@ mod tests {
                 RosflightCmd, RosflightCmdResponse,
             },
             messages::{
-                ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamRequestReadMsg,
-                ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
+                ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamRequestListMsg,
+                ParamRequestReadMsg, ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg, TimesyncMsg,
             },
         },
         command::CommandManager,
@@ -701,12 +674,12 @@ mod tests {
     fn param_set_emits_request_without_mutating_or_acknowledging() {
         let mut board = TestBoard::default();
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
-        let mut params = Params::new();
+        let params = Params::new();
         let mut param_events = ParamEventQueues::default();
         let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
-        manager.msgs.param_set = Some(ParamSetMsg {
+        manager.msgs.store(ParamSetMsg {
             target_system: 1,
             target_component: 1,
             param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
@@ -730,6 +703,99 @@ mod tests {
         let request = param_events.set_requests.pop().unwrap();
         assert_eq!(request.value, ParamValue::Int(42));
         assert_eq!(request.param_id_bytes, *b"SYS_ID\0\0\0\0\0\0\0\0\0\0");
+    }
+
+    #[test]
+    fn param_set_ingress_waits_when_ecs_queue_is_full() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        for value in 10..15 {
+            manager.msgs.store(ParamSetMsg {
+                target_system: 1,
+                target_component: 1,
+                param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+                param_value: ParamValue::Int(value),
+            });
+        }
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events(),
+            &mut board,
+        );
+
+        assert!(param_events.set_requests.is_full());
+        assert_eq!(param_events.set_requests.len(), 4);
+        assert_eq!(manager.msgs.param_set.len(), 1);
+
+        let _ = param_events.set_requests.pop();
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events(),
+            &mut board,
+        );
+
+        assert!(param_events.set_requests.is_full());
+        assert_eq!(manager.msgs.param_set.len(), 0);
+        let values: heapless::Vec<_, 4> = param_events
+            .set_requests
+            .iter()
+            .map(|req| req.value)
+            .collect();
+        assert_eq!(
+            values.as_slice(),
+            &[
+                ParamValue::Int(11),
+                ParamValue::Int(12),
+                ParamValue::Int(13),
+                ParamValue::Int(14),
+            ]
+        );
+    }
+
+    #[test]
+    fn param_messages_for_other_system_are_ignored() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.store(ParamSetMsg {
+            target_system: 42,
+            target_component: 1,
+            param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+            param_value: ParamValue::Int(42),
+        });
+        manager.msgs.param_request_list = Some(ParamRequestListMsg {
+            target_system: 42,
+            target_component: 1,
+        });
+        manager.msgs.param_request_read = Some(ParamRequestReadMsg {
+            target_system: 42,
+            target_component: 1,
+            param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
+        });
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events(),
+            &mut board,
+        );
+
+        assert!(param_events.set_requests.is_empty());
+        assert!(param_events.list_requests.is_empty());
+        assert!(param_events.read_requests.is_empty());
     }
 
     #[test]
@@ -927,7 +993,7 @@ mod tests {
         let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
-        manager.msgs.param_set = Some(ParamSetMsg {
+        manager.msgs.store(ParamSetMsg {
             target_system: 1,
             target_component: 1,
             param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
@@ -1228,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn calibration_command_ack_is_deferred_until_flag_clears() {
+    fn calibration_command_ack_is_sent_when_calibration_starts() {
         let mut board = TestBoard::default();
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
         let mut param_events = ParamEventQueues::default();
@@ -1250,21 +1316,15 @@ mod tests {
         );
 
         assert!(cal_flags.is_empty());
-        let started = command_service::apply_calibration_requests(CalibrationRequestCtx {
+        command_service::apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut command_events.calibration_requests),
             responses: EventEmitPort::new(&mut comm_events.responses),
             state: &initialized_state(),
             flags: &mut cal_flags,
             params: &mut params,
         });
-        manager.set_pending_calibration_ack(started);
 
         assert!(cal_flags.contains(CalibrationFlags::GYRO));
-        assert_eq!(manager.comm_link().cmd_ack_count, 0);
-
-        cal_flags.remove(CalibrationFlags::GYRO);
-
-        assert!(manager.queue_completed_calibration_ack(&mut comm_events, cal_flags));
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
         manager.send_comm_responses(&mut board, &mut comm_events);
         assert_eq!(manager.comm_link().cmd_ack_count, 1);
@@ -1380,6 +1440,42 @@ mod tests {
             companion_events.external_attitudes.pop().unwrap().msg.qz,
             0.3
         );
+    }
+
+    #[test]
+    fn timesync_responds_only_to_requests_and_uses_local_time() {
+        let mut board = TestBoard {
+            current_time_us: 123,
+            ..Default::default()
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        manager.msgs.timesync = Some(TimesyncMsg { tc1: 99, ts1: 55 });
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events(),
+            &mut board,
+        );
+        assert_eq!(manager.comm_link().timesync_count, 0);
+
+        manager.msgs.timesync = Some(TimesyncMsg { tc1: 0, ts1: 55 });
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events(),
+            &mut board,
+        );
+
+        assert_eq!(manager.comm_link().timesync_count, 1);
+        let response = manager.comm_link().last_timesync.unwrap();
+        assert_eq!(response.tc1, 123_000);
+        assert_eq!(response.ts1, 55);
     }
 
     #[test]

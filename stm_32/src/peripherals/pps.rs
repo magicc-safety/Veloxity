@@ -2,7 +2,6 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
-use embassy_time::Timer;
 
 use voloxide_core::packets;
 //use defmt::trace;

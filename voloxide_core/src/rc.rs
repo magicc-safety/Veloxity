@@ -1,7 +1,7 @@
+use crate::log_info;
 use crate::packets::RcPacket;
 use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
-use crate::log_info;
 
 pub mod system;
 
@@ -121,7 +121,7 @@ impl Rc {
         self.sticks[Stick::X as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_X_CHANNEL) {
                 ParamValue::Int(val) => val,
-                other => {
+                _ => {
                     0 // Default C++ value
                 }
             },
@@ -132,7 +132,7 @@ impl Rc {
         self.sticks[Stick::Y as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Y_CHANNEL) {
                 ParamValue::Int(val) => val,
-                other => {
+                _ => {
                     1 // Default C++ value
                 }
             },
@@ -143,7 +143,7 @@ impl Rc {
         self.sticks[Stick::Z as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_Z_CHANNEL) {
                 ParamValue::Int(val) => val,
-                other => {
+                _ => {
                     3 // Default C++ value
                 }
             },
@@ -154,7 +154,7 @@ impl Rc {
         self.sticks[Stick::F as usize] = StickConfig {
             channel: match params.get_by_id(ParamId::PARAM_RC_F_CHANNEL) {
                 ParamValue::Int(val) => val,
-                other => {
+                _ => {
                     2 // Default C++ value
                 }
             },
@@ -166,7 +166,7 @@ impl Rc {
         // --- REFACTORED: PARAM_RC_NUM_CHANNELS ---
         let rc_num_channels = match params.get_by_id(ParamId::PARAM_RC_NUM_CHANNELS) {
             ParamValue::Int(val) => val,
-            other => {
+            _ => {
                 6 // Default C++ value
             }
         };
@@ -174,28 +174,25 @@ impl Rc {
         // must loop over the 4 logical functions we have defined
         for i in 0..SWITCHES_COUNT {
             // Using Option<ParamId> to handle the "INVALID" case safely
-            let (channel_name, channel_param_id) = match i {
-                i if i == Switch::Arm as usize => ("ARM", Some(ParamId::PARAM_RC_ARM_CHANNEL)),
-                i if i == Switch::AttOverride as usize => (
-                    "ATTITUDE OVERRIDE",
-                    Some(ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL),
-                ),
-                i if i == Switch::ThrottleOverride as usize => (
-                    "THROTTLE OVERRIDE",
-                    Some(ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL),
-                ),
-                i if i == Switch::AttType as usize => (
-                    "ATTITUDE TYPE",
-                    Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL),
-                ),
-                _ => ("INVALID", None),
+            let channel_param_id = match i {
+                i if i == Switch::Arm as usize => Some(ParamId::PARAM_RC_ARM_CHANNEL),
+                i if i == Switch::AttOverride as usize => {
+                    Some(ParamId::PARAM_RC_ATTITUDE_OVERRIDE_CHANNEL)
+                }
+                i if i == Switch::ThrottleOverride as usize => {
+                    Some(ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL)
+                }
+                i if i == Switch::AttType as usize => {
+                    Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL)
+                }
+                _ => None,
             };
 
             // --- REFACTORED: channel_num retrieval ---
             let channel_num = if let Some(id) = channel_param_id {
                 match params.get_by_id(id) {
                     ParamValue::Int(val) => val,
-                    other => {
+                    _ => {
                         255 // Default for "INVALID"
                     }
                 }
@@ -223,7 +220,7 @@ impl Rc {
             self.switches[i].direction = if let Some(id) = direction_param_id {
                 match params.get_by_id(id) {
                     ParamValue::Int(val) => val,
-                    other => {
+                    _ => {
                         1 // C++ default
                     }
                 }
@@ -367,9 +364,11 @@ impl Rc {
             ParamValue::Int(val) => val as usize,
             _ => 6,
         };
-        let channels_to_check = num_channels.min(self.rc.num_channels);
+        if self.rc.num_channels < num_channels {
+            return false;
+        }
 
-        for i in 0..channels_to_check {
+        for i in 0..num_channels {
             let val = self.rc.chan[i];
             if val < -0.25 || val > 1.25 {
                 return false;
@@ -412,7 +411,7 @@ impl Rc {
 
         let arm_threshold = match params.get_by_id(ParamId::PARAM_ARM_THRESHOLD) {
             ParamValue::Float(val) => val,
-            other => {
+            _ => {
                 0.15 // Default value from C++ param definitions
             }
         };
@@ -471,7 +470,7 @@ impl Rc {
                     self.switch_mapped(Switch::ThrottleOverride)
                         && self.switch_on(Switch::ThrottleOverride),
                 );
-                if !is_armed && (f_stick < arm_threshold) {
+                if !is_armed {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }

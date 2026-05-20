@@ -45,14 +45,12 @@ impl DlhrL20GSensor {
                 with_timeout(Duration::from_millis(100), self.drdy.wait_for_rising_edge()).await
             {
                 let mut data = [0u8; 7];
-                self.dev
-                    .read(ADDRESS, &mut data)
-                    .await
-                    .map_err(|e| match e {
-                        _ => {
-                            errors::SensorError::GenericSensorError("Pitot failed: reading problem")
-                        }
-                    });
+                if self.dev.read(ADDRESS, &mut data).await.is_err() {
+                    PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+                        "Pitot failed: reading problem",
+                    )));
+                    continue;
+                }
                 let status = data[0] as u16;
                 let u32_pressure =
                     u32::from(data[1]) << 16 | u32::from(data[2]) << 8 | u32::from(data[3]);

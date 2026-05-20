@@ -1,16 +1,16 @@
 use sim::{board::Board, pwm::SimPwmDriver};
 use voloxide_core::{
-    board::BoardIo,
-    controller::quad::QuadController, estimator::quad::QuadEstimator, mixer::quad::QuadMixer,
-    params::Params, pwm::PwmDriver, state_machine::StateManager, world::World,
+    board::BoardIo, controller::quad::QuadController, estimator::quad::QuadEstimator,
+    mixer::matrix::MatrixMixer, params::Params, pwm::PwmDriver, state_machine::StateManager,
+    world::World,
 };
 use voloxide_mavlink::MavlinkInterface;
 
 type SimWorld =
-    World<Board, QuadEstimator, QuadController, QuadMixer, MavlinkInterface, SimPwmDriver>;
+    World<Board, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, SimPwmDriver>;
 
 fn init_world(board: Board, params: Params, pwm: SimPwmDriver) -> SimWorld {
-    let mixer = QuadMixer::new(&params);
+    let mixer = MatrixMixer::new(&params);
     SimWorld::init(
         board,
         params,

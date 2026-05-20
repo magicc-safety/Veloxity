@@ -7,7 +7,7 @@ use crate::{
         PARAM_SET_REQUEST_QUEUE_CAPACITY, ParamChanged, ParamListRequested, ParamReadRequested,
         ParamSetRequested,
     },
-    params::{PARAM_DEFINITIONS, PARAMS_COUNT, ParamId},
+    params::{PARAM_DEFINITIONS, PARAMS_COUNT, ParamId, ParamValue},
     ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
 };
 
@@ -48,8 +48,23 @@ pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
             continue;
         };
 
+        let def = &PARAM_DEFINITIONS[id as usize];
+        if !same_param_type(def.default, req.value) {
+            continue;
+        }
+
         let old = ctx.params.get(id);
+        if old == req.value {
+            if is_mixer_choice_param(id) {
+                crate::mixer::matrix::sync_reflected_mixer_params(ctx.params.raw_mut(), id);
+                emit_reflected_mixer_param_responses(&mut ctx.responses, &ctx.params, id);
+                emit_param_value_response(&mut ctx.responses, ctx.params.get(id), id);
+            }
+            continue;
+        }
+
         ctx.params.set(id, req.value);
+        crate::mixer::matrix::sync_reflected_mixer_params(ctx.params.raw_mut(), id);
         let new = ctx.params.get(id);
 
         let changed = ParamChanged {
@@ -60,6 +75,7 @@ pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
         };
         ctx.changes.emit_or_log(changed, "param changed event");
 
+        emit_reflected_mixer_param_responses(&mut ctx.responses, &ctx.params, id);
         let response = ParamValueMsg {
             param_id: req.param_id_bytes,
             param_value: new,
@@ -69,6 +85,94 @@ pub fn apply_param_requests(mut ctx: ParamApplyCtx<'_>) {
         ctx.responses
             .emit_or_log(CommResponse::ParamValue(response), "param set response");
     }
+}
+
+fn is_mixer_choice_param(id: ParamId) -> bool {
+    matches!(
+        id,
+        ParamId::PARAM_PRIMARY_MIXER | ParamId::PARAM_SECONDARY_MIXER
+    )
+}
+
+fn emit_param_value_response(
+    responses: &mut EventEmitPort<'_, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    value: ParamValue,
+    id: ParamId,
+) {
+    let def = &PARAM_DEFINITIONS[id as usize];
+    let response = ParamValueMsg {
+        param_id: str_to_fixed_bytes(def.name),
+        param_value: value,
+        param_count: PARAMS_COUNT as u16,
+        param_index: id as u16,
+    };
+    responses.emit_or_log(CommResponse::ParamValue(response), "param value response");
+}
+
+fn emit_reflected_mixer_param_responses(
+    responses: &mut EventEmitPort<'_, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    params: &ParamsWritePort<'_>,
+    changed: ParamId,
+) {
+    match changed {
+        ParamId::PARAM_PRIMARY_MIXER => {
+            emit_param_range(
+                responses,
+                params,
+                ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0,
+                NUM_MIXER_OUTPUT_PARAMS,
+            );
+            emit_param_range(
+                responses,
+                params,
+                ParamId::PARAM_PRIMARY_MIXER_PWM_RATE_0,
+                NUM_MIXER_OUTPUT_PARAMS,
+            );
+            emit_param_range(
+                responses,
+                params,
+                ParamId::PARAM_PRIMARY_MIXER_0_0,
+                NUM_MIXER_MATRIX_PARAMS,
+            );
+        }
+        ParamId::PARAM_SECONDARY_MIXER => {
+            emit_param_range(
+                responses,
+                params,
+                ParamId::PARAM_SECONDARY_MIXER_0_0,
+                NUM_MIXER_MATRIX_PARAMS,
+            );
+        }
+        _ => {}
+    }
+}
+
+const NUM_MIXER_OUTPUT_PARAMS: usize = 10;
+const NUM_MIXER_MATRIX_PARAMS: usize = 100;
+
+fn emit_param_range(
+    responses: &mut EventEmitPort<'_, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
+    params: &ParamsWritePort<'_>,
+    first_id: ParamId,
+    len: usize,
+) {
+    let first_index = first_id as usize;
+    for offset in 0..len {
+        let Some(id) = ParamId::from_index(first_index + offset) else {
+            return;
+        };
+        emit_param_value_response(responses, params.get(id), id);
+    }
+}
+
+fn same_param_type(lhs: ParamValue, rhs: ParamValue) -> bool {
+    matches!(
+        (lhs, rhs),
+        (ParamValue::Float(_), ParamValue::Float(_))
+            | (ParamValue::Int(_), ParamValue::Int(_))
+            | (ParamValue::Uint(_), ParamValue::Uint(_))
+            | (ParamValue::Bool(_), ParamValue::Bool(_))
+    )
 }
 
 pub fn service_param_read_requests(mut ctx: ParamReadCtx<'_>) {
@@ -179,6 +283,109 @@ mod tests {
                 assert_eq!(response.param_value, ParamValue::Int(42));
             }
             _ => panic!("expected param value response"),
+        }
+    }
+
+    #[test]
+    fn apply_param_requests_ignores_wrong_type_and_unchanged_value() {
+        let mut params = Params::new();
+        let mut requests = EventQueue::<ParamSetRequested, PARAM_SET_REQUEST_QUEUE_CAPACITY>::new();
+        let mut changes = EventQueue::<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(ParamSetRequested {
+            value: ParamValue::Float(42.0),
+            param_id_bytes: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+        });
+        let _ = requests.push(ParamSetRequested {
+            value: ParamValue::Int(1),
+            param_id_bytes: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+        });
+
+        apply_param_requests(ParamApplyCtx {
+            params: ParamsWritePort::new(&mut params),
+            requests: EventDrainPort::new(&mut requests),
+            changes: EventEmitPort::new(&mut changes),
+            responses: EventEmitPort::new(&mut responses),
+        });
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(1)
+        );
+        assert!(changes.is_empty());
+        assert!(responses.is_empty());
+    }
+
+    #[test]
+    fn apply_param_requests_refreshes_mixer_reflection_for_unchanged_mixer_choice() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(10));
+        params.set_by_id(ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0, ParamValue::Int(2));
+        let mut requests = EventQueue::<ParamSetRequested, PARAM_SET_REQUEST_QUEUE_CAPACITY>::new();
+        let mut changes = EventQueue::<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(ParamSetRequested {
+            value: ParamValue::Int(10),
+            param_id_bytes: *b"PRIMARY_MIXER\0\0\0",
+        });
+
+        apply_param_requests(ParamApplyCtx {
+            params: ParamsWritePort::new(&mut params),
+            requests: EventDrainPort::new(&mut requests),
+            changes: EventEmitPort::new(&mut changes),
+            responses: EventEmitPort::new(&mut responses),
+        });
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0),
+            ParamValue::Int(1)
+        );
+        assert!(changes.is_empty());
+        assert!(!responses.is_empty());
+    }
+
+    #[test]
+    fn apply_param_requests_emits_mixer_reflection_before_choice_ack() {
+        let mut params = Params::new();
+        let mut requests = EventQueue::<ParamSetRequested, PARAM_SET_REQUEST_QUEUE_CAPACITY>::new();
+        let mut changes = EventQueue::<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(ParamSetRequested {
+            value: ParamValue::Int(10),
+            param_id_bytes: *b"PRIMARY_MIXER\0\0\0",
+        });
+
+        apply_param_requests(ParamApplyCtx {
+            params: ParamsWritePort::new(&mut params),
+            requests: EventDrainPort::new(&mut requests),
+            changes: EventEmitPort::new(&mut changes),
+            responses: EventEmitPort::new(&mut responses),
+        });
+
+        match responses.pop().unwrap() {
+            CommResponse::ParamValue(response) => {
+                assert_eq!(
+                    response.param_index,
+                    ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0 as u16
+                );
+                assert_eq!(response.param_value, ParamValue::Int(1));
+            }
+            _ => panic!("expected reflected mixer param response"),
+        }
+
+        for _ in 1..(NUM_MIXER_OUTPUT_PARAMS * 2 + NUM_MIXER_MATRIX_PARAMS) {
+            let _ = responses.pop().unwrap();
+        }
+
+        match responses.pop().unwrap() {
+            CommResponse::ParamValue(response) => {
+                assert_eq!(response.param_index, ParamId::PARAM_PRIMARY_MIXER as u16);
+                assert_eq!(response.param_value, ParamValue::Int(10));
+            }
+            _ => panic!("expected primary mixer acknowledgement"),
         }
     }
 

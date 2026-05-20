@@ -5,7 +5,6 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use cdr::CdrLe;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use tokio::io::ErrorKind;
 use tokio::net::UdpSocket;
@@ -411,7 +410,7 @@ mod tests {
     use voloxide_core::{
         controller::quad::QuadController,
         estimator::quad::QuadEstimator,
-        mixer::quad::QuadMixer,
+        mixer::matrix::MatrixMixer,
         params::ParamId,
         pwm::{PwmDriver, PwmError},
         state_machine::StateManager,
@@ -704,12 +703,12 @@ mod tests {
         params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(8));
         let flushed_pwm = Rc::new(Cell::new(0));
         let sent_pwm = Rc::new(Cell::new(0));
-        let mixer = QuadMixer::new(&params);
+        let mixer = MatrixMixer::new(&params);
         let mut world = World::<
             Board,
             QuadEstimator,
             QuadController,
-            QuadMixer,
+            MatrixMixer,
             MavlinkInterface,
             SmokePwm,
         >::init(

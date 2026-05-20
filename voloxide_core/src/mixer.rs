@@ -1,6 +1,6 @@
 use crate::{params::Params, state_machine::StateManager};
 
-pub mod quad;
+pub mod matrix;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MixerOutputType {
     Aux,

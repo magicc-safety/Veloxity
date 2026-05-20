@@ -1294,22 +1294,20 @@ Design correction:
 - Calibration command receipt must not report success.
 - Calibration command receipt starts calibration work.
 - The sensor/calibration system owns completion.
-- Communication ACK success is sent only after the relevant calibration flag has been cleared by processing.
-- This matches the broader plan: requests emit work, systems perform work, and responses are emitted after work completes.
+- Historical note: this slice deferred communication ACK success until the relevant calibration flag had been cleared by processing. Later ROSflight 2.0 parity review corrected the ACK timing so calibration commands now ACK success immediately when accepted/started.
 
 `voloxide_core/src/comm_manager.rs`
 
-- Adds a pending calibration ACK slot in `CommManager`.
-- Calibration commands now set the corresponding `CalibrationFlags` and store the pending command.
-- Calibration commands no longer send immediate success ACKs.
-- Adds `send_completed_calibration_ack`.
-- `send_completed_calibration_ack` sends `RosflightCmdSuccess` only when the pending command's flag is no longer active.
+- Historical: added a pending calibration ACK slot in `CommManager`.
+- Current behavior: calibration commands set the corresponding `CalibrationFlags` and queue immediate success ACKs when accepted.
+- Historical: added `send_completed_calibration_ack`.
+- Current behavior: calibration completion/failure affects state/logs, not command ACK timing.
 - Non-calibration commands still use the immediate command ACK path.
 
 `voloxide_core/src/world.rs`
 
-- After sensor processing and sensor health/calibration updates, World calls `send_completed_calibration_ack`.
-- This places the success response after the stage that can observe calibration completion.
+- Historical: after sensor processing and sensor health/calibration updates, World called `send_completed_calibration_ack`.
+- Current behavior: World observes calibration completion for state transitions and logs, while the command ACK has already been queued by the command service.
 
 `voloxide_core/src/test_support.rs`
 
@@ -1458,7 +1456,7 @@ Current stage ownership:
 - `World::update_sensor_health_and_calibration`
   - Owns IMU timeout/error propagation.
   - Owns state-machine `CALIBRATION_COMPLETE` after calibration flags clear.
-  - Calls `CommManager::send_completed_calibration_ack` after completion is observable.
+  - Calibration completion/failure does not emit a second command ACK; ROSflight ACKs calibration request acceptance when calibration starts.
 - `pwm_system::sync_pwm_output_state`
   - Owns PWM enable/disable transitions from state-machine armed facts.
 - `pwm_system::write_pwm_commands`
@@ -1519,13 +1517,13 @@ Design correction:
 - `act_on_messages` now receives `CommandEventQueues`.
 - Calibration commands push `CalibrationRequested`.
 - Calibration commands no longer mutate `CalibrationFlags` directly.
-- Pending calibration ACK behavior remains deferred until completion.
+- Calibration ACK behavior was later corrected to ROSflight 2.0 parity: the command ACK is sent when calibration starts, not when it completes.
 
 `voloxide_core/src/world.rs`
 
 - Adds `command_events: CommandEventQueues`.
 - Schedules `command_system::apply_calibration_requests` after comm message handling and before sensor processing.
-- Existing calibration completion ACK behavior continues after sensor processing observes cleared flags.
+- Sensor processing owns calibration completion/failure state and logs; it does not emit a second command ACK.
 
 `voloxide_core/src/rosflight.rs`
 
@@ -2219,7 +2217,7 @@ Design now implemented:
   - if armed, it queues a failed ACK and does not send a version message.
 - `command_system::apply_calibration_requests` now reads `StateManager`.
   - if armed, it queues a failed ACK and does not set calibration flags,
-  - if disarmed, it sets calibration flags and reports the started command so the scheduler can track the deferred completion ACK.
+  - if disarmed, it sets calibration flags and queues a success ACK immediately when calibration starts.
 - `command_system::apply_param_defaults_requests` now reads `StateManager`.
   - if armed, it queues a failed ACK and does not reset params,
   - if disarmed, it resets params and queues success.
@@ -2619,16 +2617,20 @@ Next planned migration target:
 
 ## Completed ACK Response Queue Progress
 
-Reason for this change:
+Historical note:
+
+- This section describes an intermediate implementation that deferred calibration ACKs until completion.
+- Later ROSflight 2.0 parity review found that upstream ACKs calibration commands immediately when accepted/started. Voloxide now follows that behavior.
+- The parameter-default ACK queueing part of this section remains relevant; the calibration-completion ACK part is superseded.
+
+Reason for the intermediate change:
 
 - Most command responses now flow through `CommEventQueues::responses`.
-- Two completed-work ACK helpers still wrote directly to the comm link:
-  - calibration completion ACKs,
-  - parameter-default reset completion ACKs.
+- Completed-work ACK helpers still wrote directly to the comm link.
 - Direct writes meant there were still multiple wire-output points for command ACKs.
 - The response queue should be the single boundary between internal completion facts and external MAVLink transmission.
 
-Design now implemented:
+Design that was implemented at that intermediate point:
 
 - Renamed `send_completed_calibration_ack` to `queue_completed_calibration_ack`.
 - Renamed `send_completed_param_defaults_ack` to `queue_completed_param_defaults_ack`.
@@ -2639,8 +2641,8 @@ Design now implemented:
 
 ROSflight compatibility:
 
-- The wire payload is unchanged: completed work still produces `ROSFLIGHT_CMD_ACK`.
-- Calibration success is still emitted only after the calibration flag clears.
+- The wire payload is unchanged: commands produce `ROSFLIGHT_CMD_ACK`.
+- Calibration ACK timing was later corrected: calibration success is emitted immediately when the command starts, and later calibration completion/failure is reported through state/logs.
 - Parameter-default success is still emitted only after params are reset.
 - The only internal difference is that ACK transmission is centralized through `CommManager::send_comm_responses`.
 
@@ -2658,14 +2660,14 @@ Files changed in this slice:
   - Updates tests to assert ACKs are not transmitted until `send_comm_responses`.
 - `voloxide_core/src/world.rs`
   - Queues parameter-default ACKs.
-  - Queues calibration-completion ACKs.
-  - Moves the scheduler response flush after sensor processing so calibration completion ACKs can transmit in the same scheduler call.
+  - Historical: queued calibration-completion ACKs before the later parity correction.
+  - Historical: moved the scheduler response flush after sensor processing so calibration completion ACKs could transmit in the same scheduler call.
 - `voloxide_core/src/rosflight.rs`
   - Mirrors completed ACK queueing and later response flushing in the legacy loop.
 
 Tests updated:
 
-- `comm_manager::tests::calibration_command_ack_is_deferred_until_flag_clears`
+- Historical: `comm_manager::tests::calibration_command_ack_is_deferred_until_flag_clears`
   - Now proves completion queues the ACK first and wire transmission happens only through `send_comm_responses`.
 - `comm_manager::tests::set_param_defaults_emits_request_and_defers_ack`
   - Now proves default-reset completion queues the ACK first and wire transmission happens only through `send_comm_responses`.
@@ -5173,11 +5175,10 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` Fixed deterministic scheduler exists through `World::run_once` and named stage functions.
 - `[x]` IMU-gated estimator/controller/mixer/PWM pipeline matches ROSflight's control-loop dependency on new IMU data.
 - `[x]` No-IMU health path sets `IMU_NOT_RESPONDING` separately from calibration validity, matching ROSflight's sensor-owned health split.
-- `[x]` Time-going-backwards error flag exists in the state machine and tests.
-- `[!]` Time-going-backwards detection is not visibly wired into the active IMU control path in the same way as `ROSflight::check_time_going_forwards()`.
-- `[!]` Telemetry streaming is currently called from the IMU-gated control stage; ROSflight streams non-IMU sensor telemetry whenever each sensor's `got_flags` bit is set, even on loops without a new IMU.
-- `[!]` RC raw telemetry is currently tied to the named telemetry call path; ROSflight sends RC raw immediately when `rc.receive()` returns a new packet.
-- `[!]` ROSflight status `loop_time_us` is emitted as the measured control-loop time; Voloxide currently emits `0`.
+- `[x]` Time-going-backwards detection is wired into the active IMU control path; non-advancing IMU timestamps set `TIME_GOING_BACKWARDS` and skip control work until time advances.
+- `[x]` Telemetry streaming is a scheduler stage, so non-IMU sensor telemetry can emit without a new IMU control update.
+- `[x]` RC raw telemetry follows the RC packet resource and is independent of estimator/controller execution.
+- `[x]` ROSflight status `loop_time_us` reports the measured control-loop time.
 
 ### MAVLink Dialect, Parser, And Wire Messages
 
@@ -5188,7 +5189,7 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` Standard messages used by ROSflight 2.0.1 are represented: `HEARTBEAT`, `PARAM_REQUEST_READ`, `PARAM_REQUEST_LIST`, `PARAM_VALUE`, `PARAM_SET`, `ATTITUDE_QUATERNION`, `RC_CHANNELS`, `TIMESYNC`, and `STATUSTEXT`.
 - `[x]` Local XML intentionally marks `ROSFLIGHT_ERROR_CODE` as a bitmask so the Rust generator produces the intended representation; the numeric wire values remain ROSflight-compatible.
 - `[n/a]` `NAMED_VALUE_FLOAT` and `NAMED_VALUE_INT` remain dialect messages but are not active ROSflight 2.0.1 firmware behavior.
-- `[!]` `ROSFLIGHT_HARD_ERROR` is present in the message surface, but hard-fault backup recovery/reporting is not implemented in the active runtime.
+- `[x]` `ROSFLIGHT_HARD_ERROR` is represented and emitted after companion heartbeat connection when backup data is present at boot.
 
 ### Parameters
 
@@ -5213,7 +5214,7 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` `RESET_ORIGIN` and `SEND_ALL_CONFIG_INFOS` are recognized and ACKed as unsupported/failed, matching the practical ROSflight 2.0.1 command surface.
 - `[x]` Timesync requests return board time in nanoseconds as ROSflight does.
 - `[x]` Companion heartbeat is parsed and recorded as connection state.
-- `[!]` Companion connection state is not yet used to gate/replay statustext logging exactly like ROSflight.
+- `[x]` Companion connection state gates statustext draining and replays buffered logs after heartbeat connection.
 
 ### State Machine, Errors, Failsafe, And Arming
 
@@ -5224,8 +5225,8 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` Arming gates include low throttle, failsafe/error state, and calibration-on-arm behavior.
 - `[x]` RC lost/found events trigger failsafe transitions compatible with ROSflight behavior.
 - `[x]` Calibration complete/fail events return the state machine to the expected mode.
-- `[!]` LED state outputs are not represented through board `led0`/`led1` hooks; ROSflight uses LED0 for RC override and LED1 for armed/error/failsafe blink state.
-- `[!]` Hard-fault backup memory recovery, rearm-after-hardfault behavior, and `HARD_ERROR` telemetry are not implemented.
+- `[x]` LED state outputs are represented through board `led0`/`led1` hooks; LED0 follows RC override and LED1 follows armed/error/failsafe state.
+- `[x]` Hard-fault backup memory recovery, rearm-after-hardfault behavior, and `HARD_ERROR` telemetry are implemented through board hooks and an explicit state-machine rearm transition.
 - `[!]` Status-change immediate telemetry update is not explicitly modeled; ROSflight can push status on state/error changes through `update_status()`.
 
 ### RC Input And Command Muxing
@@ -5279,7 +5280,7 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` GNSS and range are passthrough in core, matching ROSflight's lack of additional core correction.
 - `[~]` Board physical sensor drivers, exact sampling rates, and actual ADC/GNSS hardware behavior are backend responsibilities.
 - `[!]` Battery voltage/current multiplier hooks exist as parameters and board concepts in ROSflight, but physical board scaling parity still requires backend validation/plumbing.
-- `[!]` Board sensor-init error count/message APIs are not represented in the Rust core board trait.
+- `[x]` Board sensor-init error count/message APIs are represented in the Rust core board trait.
 
 ### Mixer, Aux, PWM, And Output Protocols
 
@@ -5307,13 +5308,13 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` Output raw divisor is every eighth IMU sample, matching ROSflight.
 - `[x]` RC raw scaling uses the first eight normalized channels mapped to `channel * 1000 + 1000`.
 - `[x]` GNSS telemetry includes board timestamp, Unix seconds/nanos, fix, satellites, position, velocity, and accuracy fields.
-- `[!]` Status `num_errors` currently reports state error-bit count; ROSflight reports `board.sensors_errors_count()`.
-- `[!]` Status `loop_time_us` currently reports `0`; ROSflight reports measured loop time.
-- `[!]` Non-IMU telemetry stream gating is currently stricter than ROSflight because telemetry is emitted from the new-IMU control path.
-- `[!]` RC raw telemetry should be sent from the RC stage when a new RC packet is consumed, independent of IMU.
-- `[!]` Param-list streaming in Rust is event-response based; verify it sends one parameter per scheduler cycle like ROSflight's `send_next_param()`.
-- `[!]` Statustext buffering/replay is not heartbeat-connection-gated like ROSflight.
-- `[!]` `ROSFLIGHT_HARD_ERROR` telemetry is not emitted because backup recovery is not implemented.
+- `[x]` Status `num_errors` reports `board.sensors_errors_count()`.
+- `[x]` Status `loop_time_us` reports measured loop time.
+- `[x]` Non-IMU telemetry stream gating runs outside the new-IMU control path.
+- `[x]` RC raw telemetry is sent from the current RC packet resource, independent of IMU.
+- `[x]` Param-list streaming sends one parameter per scheduler service pass.
+- `[x]` Statustext buffering/replay is heartbeat-connection-gated.
+- `[x]` `ROSFLIGHT_HARD_ERROR` telemetry is emitted from boot backup data after companion heartbeat connection.
 
 ### Board Runtime Interface
 
@@ -5323,9 +5324,9 @@ This inventory supersedes the earlier "Compatibility List item complete" stateme
 - `[x]` PixRacerPro and Nucleo compile against the new board/runtime surface.
 - `[x]` Sim board tracks the core board/runtime surface for software testing.
 - `[~]` ROSflight's concrete board APIs for `imu_read`, `mag_read`, `baro_read`, `diff_pressure_read`, `range_read`, `gnss_read`, `battery_read`, `rc_read`, `pwm_init`, `pwm_write`, and `pwm_disable` are intentionally collapsed behind Voloxide's named sensor bus and PWM driver boundaries. This is architecture-compatible, but each board backend must validate exact behavior.
-- `[!]` Board LED hooks are missing.
-- `[!]` Board backup-memory hooks are missing.
-- `[!]` Board sensor-init error count/message hooks are missing.
+- `[x]` Board LED hooks are present.
+- `[x]` Board backup-memory hooks are present.
+- `[x]` Board sensor-init error count/message hooks are present.
 - `[!]` Board battery voltage/current multiplier hooks are not fully wired to physical ADC scaling behavior.
 
 ### Simulator Readiness Result
@@ -5372,7 +5373,7 @@ These points are the final compatibility list discovered by the comprehensive RO
 6. Hard-fault backup memory and `ROSFLIGHT_HARD_ERROR`.
    - ROSflight 2.0.1 exposes backup-memory recovery and `ROSFLIGHT_HARD_ERROR` telemetry for hard-fault diagnostics.
    - Voloxide must at least expose board backup-memory hooks and a comm hard-error telemetry path before this can be considered present.
-   - Status: complete for the software/runtime interface; `BoardIo` exposes backup-memory hooks, `CommInterface` exposes `send_hard_error`, `World` reads/clears pending backup data at init, attempts rearm through the normal state machine request when backup data asks for it, and sends `ROSFLIGHT_HARD_ERROR` after companion heartbeat connection.
+   - Status: complete for the software/runtime interface; `BoardIo` exposes backup-memory hooks, `CommInterface` exposes `send_hard_error`, `World` reads/clears pending backup data at init, routes rearm intent through the explicit `HARDFAULT_REARM_REQUESTED` state-machine transition when backup data asks for it, and sends `ROSFLIGHT_HARD_ERROR` after companion heartbeat connection.
 
 7. LED and board sensor-init diagnostics.
    - ROSflight 2.0.1 has board LED hooks and board sensor-init error count/message diagnostics.
@@ -5382,7 +5383,7 @@ These points are the final compatibility list discovered by the comprehensive RO
 ### Final Compatibility Points Progress
 
 - Final Compatibility Point 1: complete.
-  - Implemented in `voloxide_core/src/control_system.rs`.
+  - Implemented in `voloxide_core/src/control.rs`.
   - Covered by `world_control_stage_flags_non_advancing_imu_time`.
 
 - Final Compatibility Point 2: complete.
@@ -5398,7 +5399,7 @@ These points are the final compatibility list discovered by the comprehensive RO
   - Covered by `world_status_uses_board_error_count_and_control_loop_time`.
 
 - Final Compatibility Point 5: complete.
-  - `log_system::drain_logs_to_comm_responses` now takes companion connection state and sends at most one buffered statustext per drain.
+  - `log::drain::drain_logs_to_comm_responses` now takes companion connection state and sends at most one buffered statustext per drain.
   - Covered by `drain_logs_waits_for_companion_connection`.
 
 - Final Compatibility Point 6: complete for the software/runtime surface.

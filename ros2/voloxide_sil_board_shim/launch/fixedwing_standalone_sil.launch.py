@@ -11,8 +11,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     rosflight_sim_dir = get_package_share_directory("rosflight_sim")
-    dynamics_param_file = os.path.join(
-        rosflight_sim_dir, "params", "multirotor_dynamics.yaml")
+    dynamics_param_file = LaunchConfiguration("dynamics_param_file")
     standalone_param_file = os.path.join(
         rosflight_sim_dir, "params", "standalone_sim_params.yaml")
 
@@ -44,13 +43,19 @@ def generate_launch_description():
             default_value="true",
             description="Open the standalone RViz visualizer.",
         ),
+        DeclareLaunchArgument(
+            "dynamics_param_file",
+            default_value=os.path.join(
+                rosflight_sim_dir, "params", "anaconda_dynamics.yaml"),
+            description="Fixed-wing dynamics parameter file.",
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(rosflight_sim_dir, "launch", "standalone_sim.launch.py")
             ),
             condition=IfCondition(use_rviz),
             launch_arguments={
-                "sim_aircraft_file": os.path.join("common_resource", "multirotor.dae"),
+                "sim_aircraft_file": os.path.join("common_resource", "skyhunter.dae"),
             }.items(),
         ),
         Node(
@@ -61,6 +66,7 @@ def generate_launch_description():
             parameters=[{
                 "use_sim_time": use_sim_time,
                 "use_timer": True,
+                "service_exists_timeout_ms": 100,
                 "service_result_timeout_ms": 100,
             }],
         ),
@@ -110,8 +116,8 @@ def generate_launch_description():
         ),
         Node(
             package="rosflight_sim",
-            executable="multirotor_forces_and_moments",
-            name="multirotor_forces_and_moments",
+            executable="fixedwing_forces_and_moments",
+            name="fixedwing_forces_and_moments",
             output="screen",
             parameters=[{"use_sim_time": use_sim_time}, dynamics_param_file],
         ),

@@ -12,7 +12,7 @@ pub struct RcCommandStateCtx<'a> {
     pub params: &'a Params,
 }
 
-pub fn run_rc_command_state(mut ctx: RcCommandStateCtx<'_>) {
+pub fn run_rc_command_state(ctx: RcCommandStateCtx<'_>) {
     if let Some(rc_packet) = ctx.sensors.rc {
         ctx.rc.receive(&rc_packet);
     }

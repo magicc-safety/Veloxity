@@ -7,6 +7,7 @@ use crate::controller::quad::ControllerOutput;
 use crate::mixer::{Mixer, MixerCtx, MixerOutputType, MixerRun, MixerStatus};
 use crate::params::{ParamId, ParamValue, Params};
 use libm::{fabs, sqrt};
+use nalgebra::SMatrix;
 
 const NUM_MIXER_OUTPUTS: usize = 10;
 const NUM_MIXERS: i32 = 12;
@@ -227,7 +228,7 @@ pub struct MixerParams {
     pub num_motors: usize,
 }
 
-pub struct QuadMixer {
+pub struct MatrixMixer {
     params: MixerParams,
     output_types: [MixerOutputType; NUM_MIXER_OUTPUTS],
     default_pwm_rates: [f64; NUM_MIXER_OUTPUTS],
@@ -242,7 +243,7 @@ struct CannedMixerConfig {
     matrix: [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
 }
 
-impl QuadMixer {
+impl MatrixMixer {
     pub fn new(params: &Params) -> Self {
         let mixer_params = MixerParams {
             num_motors: 4,
@@ -274,7 +275,7 @@ impl QuadMixer {
     }
 }
 
-impl Mixer for QuadMixer {
+impl Mixer for MatrixMixer {
     type MixerInput = ControllerOutput;
     type ActuatorCommands = [f64; NUM_MIXER_OUTPUTS];
 
@@ -285,7 +286,7 @@ impl Mixer for QuadMixer {
     ) -> MixerRun<Self::ActuatorCommands> {
         let status = self.refresh_mixer_config(ctx.params);
 
-        if !ctx.state.is_armed() {
+        if matches!(status, MixerStatus::InvalidMixer) {
             return MixerRun {
                 commands: [0.0; NUM_MIXER_OUTPUTS],
                 status,
@@ -374,15 +375,11 @@ impl Mixer for QuadMixer {
     }
 }
 
-impl QuadMixer {
+impl MatrixMixer {
     fn refresh_mixer_config(&mut self, params: &Params) -> MixerStatus {
         let primary_choice = param_int(params, ParamId::PARAM_PRIMARY_MIXER);
         if primary_choice >= NUM_MIXERS {
             crate::log_error!("Invalid mixer choice for primary mixer");
-            self.output_types = QUAD_X_OUTPUT_TYPES;
-            self.default_pwm_rates = [50.0; NUM_MIXER_OUTPUTS];
-            self.primary_mixer = QUAD_X_MIXER;
-            self.secondary_mixer = QUAD_X_MIXER;
             return MixerStatus::InvalidMixer;
         }
 
@@ -572,70 +569,120 @@ fn mixer_output_type_from_rosflight(value: i32) -> MixerOutputType {
     }
 }
 
-fn inverted_multirotor_mixer(
-    mixer: [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
-    output_types: [MixerOutputType; NUM_MIXER_OUTPUTS],
-) -> [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS] {
-    const ACTIVE_ROWS: [usize; 4] = [2, 3, 4, 5];
-
-    let mut motor_outputs = [0usize; NUM_MIXER_OUTPUTS];
-    let mut num_motors = 0;
-    for (output, output_type) in output_types.iter().enumerate() {
-        if *output_type == MixerOutputType::Motor {
-            motor_outputs[num_motors] = output;
-            num_motors += 1;
-        }
+fn mixer_output_type_to_rosflight(value: MixerOutputType) -> i32 {
+    match value {
+        MixerOutputType::Aux => 0,
+        MixerOutputType::Servo => 1,
+        MixerOutputType::Motor => 2,
+        MixerOutputType::Gpio => 3,
     }
+}
 
-    let mut gram = [[0.0; 4]; 4];
-    for (row_index, row) in ACTIVE_ROWS.iter().enumerate() {
-        for (col_index, col) in ACTIVE_ROWS.iter().enumerate() {
-            for motor_output in motor_outputs.iter().take(num_motors) {
-                gram[row_index][col_index] +=
-                    mixer[*row][*motor_output] * mixer[*col][*motor_output];
+pub fn sync_reflected_mixer_params(params: &mut Params, changed: ParamId) {
+    match changed {
+        ParamId::PARAM_PRIMARY_MIXER => {
+            let choice = param_int(params, ParamId::PARAM_PRIMARY_MIXER);
+            let Some(config) = canned_mixer(choice) else {
+                return;
+            };
+            save_primary_mixer_params(params, config);
+            let secondary_choice = param_int(params, ParamId::PARAM_SECONDARY_MIXER);
+            if !(0..NUM_MIXERS).contains(&secondary_choice) {
+                save_secondary_mixer_params(params, config.matrix);
             }
         }
+        ParamId::PARAM_SECONDARY_MIXER => {
+            let choice = param_int(params, ParamId::PARAM_SECONDARY_MIXER);
+            let Some(config) = canned_secondary_mixer(choice) else {
+                return;
+            };
+            save_secondary_mixer_params(params, config.matrix);
+        }
+        _ => {}
+    }
+}
+
+fn save_primary_mixer_params(params: &mut Params, config: CannedMixerConfig) {
+    for output in 0..NUM_MIXER_OUTPUTS {
+        if let Some(output_id) =
+            ParamId::from_index(ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0 as usize + output)
+        {
+            params.set_by_id(
+                output_id,
+                ParamValue::Int(mixer_output_type_to_rosflight(config.output_types[output])),
+            );
+        }
+
+        if let Some(rate_id) =
+            ParamId::from_index(ParamId::PARAM_PRIMARY_MIXER_PWM_RATE_0 as usize + output)
+        {
+            params.set_by_id(
+                rate_id,
+                ParamValue::Float(config.default_pwm_rates[output] as f32),
+            );
+        }
     }
 
-    let Some(gram_inverse) = invert_4x4(gram) else {
+    save_mixer_matrix_params(params, ParamId::PARAM_PRIMARY_MIXER_0_0, config.matrix);
+}
+
+fn save_secondary_mixer_params(
+    params: &mut Params,
+    matrix: [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
+) {
+    save_mixer_matrix_params(params, ParamId::PARAM_SECONDARY_MIXER_0_0, matrix);
+}
+
+fn save_mixer_matrix_params(
+    params: &mut Params,
+    first_matrix_id: ParamId,
+    matrix: [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
+) {
+    let first_index = first_matrix_id as usize;
+    for col in 0..NUM_MIXER_OUTPUTS {
+        for (row, mixer_row) in matrix.iter().enumerate() {
+            let Some(param_id) = ParamId::from_index(first_index + col * NUM_MIXER_OUTPUTS + row)
+            else {
+                return;
+            };
+            params.set_by_id(param_id, ParamValue::Float(mixer_row[col] as f32));
+        }
+    }
+}
+
+fn inverted_multirotor_mixer(
+    mixer: [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
+) -> [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS] {
+    let mut mixer_matrix = SMatrix::<f64, NUM_MIXER_OUTPUTS, NUM_MIXER_OUTPUTS>::zeros();
+    for row in 0..NUM_MIXER_OUTPUTS {
+        for col in 0..NUM_MIXER_OUTPUTS {
+            mixer_matrix[(row, col)] = mixer[row][col];
+        }
+    }
+
+    let svd = mixer_matrix.svd(true, true);
+    let Some(u) = svd.u else {
+        return mixer;
+    };
+    let Some(v_t) = svd.v_t else {
         return mixer;
     };
 
-    let mut inverted = [[0.0; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS];
-    for motor_output in motor_outputs.iter().take(num_motors) {
-        for (command_row_index, command_row) in ACTIVE_ROWS.iter().enumerate() {
-            let mut coefficient = 0.0;
-            for (source_row_index, source_row) in ACTIVE_ROWS.iter().enumerate() {
-                coefficient += mixer[*source_row][*motor_output]
-                    * gram_inverse[source_row_index][command_row_index];
-            }
-            inverted[*command_row][*motor_output] = coefficient;
+    let mut sigma_inverse = SMatrix::<f64, NUM_MIXER_OUTPUTS, NUM_MIXER_OUTPUTS>::zeros();
+    for i in 0..NUM_MIXER_OUTPUTS {
+        let singular_value = svd.singular_values[i];
+        if singular_value != 0.0 {
+            sigma_inverse[(i, i)] = 1.0 / singular_value;
         }
     }
 
-    inverted
-}
-
-fn orthogonal_row_pseudoinverse_mixer(
-    mixer: [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
-) -> [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS] {
+    let mixer_matrix_pinv = v_t.transpose() * sigma_inverse * u.transpose();
     let mut inverted = [[0.0; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS];
-
-    for row in 0..NUM_MIXER_OUTPUTS {
-        let mut norm_squared = 0.0;
-        for col in 0..NUM_MIXER_OUTPUTS {
-            norm_squared += mixer[row][col] * mixer[row][col];
-        }
-
-        if norm_squared < 1.0e-12 {
-            continue;
-        }
-
-        for col in 0..NUM_MIXER_OUTPUTS {
-            inverted[row][col] = mixer[row][col] / norm_squared;
+    for i in 0..NUM_MIXER_OUTPUTS {
+        for j in 0..NUM_MIXER_OUTPUTS {
+            inverted[j][i] = mixer_matrix_pinv[(i, j)];
         }
     }
-
     inverted
 }
 
@@ -663,54 +710,6 @@ fn rank_one_pseudoinverse_mixer(
     inverted
 }
 
-fn invert_4x4(mut matrix: [[f64; 4]; 4]) -> Option<[[f64; 4]; 4]> {
-    let mut inverse = [[0.0; 4]; 4];
-    for (row, inverse_row) in inverse.iter_mut().enumerate() {
-        inverse_row[row] = 1.0;
-    }
-
-    for pivot_col in 0..4 {
-        let mut pivot_row = pivot_col;
-        let mut pivot_abs = fabs(matrix[pivot_col][pivot_col]);
-        for (candidate_row, row) in matrix.iter().enumerate().skip(pivot_col + 1) {
-            let candidate_abs = fabs(row[pivot_col]);
-            if candidate_abs > pivot_abs {
-                pivot_abs = candidate_abs;
-                pivot_row = candidate_row;
-            }
-        }
-
-        if pivot_abs < 1.0e-9 {
-            return None;
-        }
-
-        if pivot_row != pivot_col {
-            matrix.swap(pivot_col, pivot_row);
-            inverse.swap(pivot_col, pivot_row);
-        }
-
-        let pivot = matrix[pivot_col][pivot_col];
-        for col in 0..4 {
-            matrix[pivot_col][col] /= pivot;
-            inverse[pivot_col][col] /= pivot;
-        }
-
-        for row in 0..4 {
-            if row == pivot_col {
-                continue;
-            }
-
-            let factor = matrix[row][pivot_col];
-            for col in 0..4 {
-                matrix[row][col] -= factor * matrix[pivot_col][col];
-                inverse[row][col] -= factor * inverse[pivot_col][col];
-            }
-        }
-    }
-
-    Some(inverse)
-}
-
 fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
     let config = match choice {
         ESC_CALIBRATION_MIXER => CannedMixerConfig {
@@ -721,12 +720,12 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
         QUAD_PLUS_MIXER => CannedMixerConfig {
             output_types: QUAD_X_OUTPUT_TYPES,
             default_pwm_rates: QUAD_X_PWM_RATES,
-            matrix: inverted_multirotor_mixer(QUAD_PLUS_MATRIX, QUAD_X_OUTPUT_TYPES),
+            matrix: inverted_multirotor_mixer(QUAD_PLUS_MATRIX),
         },
         QUAD_X_MIXER_CHOICE => CannedMixerConfig {
             output_types: QUAD_X_OUTPUT_TYPES,
             default_pwm_rates: QUAD_X_PWM_RATES,
-            matrix: inverted_multirotor_mixer(QUAD_X_MIXER, QUAD_X_OUTPUT_TYPES),
+            matrix: inverted_multirotor_mixer(QUAD_X_MIXER),
         },
         HEX_PLUS_MIXER => CannedMixerConfig {
             output_types: [
@@ -742,21 +741,7 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
                 MixerOutputType::Aux,
             ],
             default_pwm_rates: HEX_PWM_RATES,
-            matrix: inverted_multirotor_mixer(
-                HEX_PLUS_MATRIX,
-                [
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                ],
-            ),
+            matrix: inverted_multirotor_mixer(HEX_PLUS_MATRIX),
         },
         HEX_X_MIXER => CannedMixerConfig {
             output_types: [
@@ -772,21 +757,7 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
                 MixerOutputType::Aux,
             ],
             default_pwm_rates: HEX_PWM_RATES,
-            matrix: inverted_multirotor_mixer(
-                HEX_X_MATRIX,
-                [
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                ],
-            ),
+            matrix: inverted_multirotor_mixer(HEX_X_MATRIX),
         },
         Y6_MIXER => CannedMixerConfig {
             output_types: [
@@ -802,21 +773,7 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
                 MixerOutputType::Aux,
             ],
             default_pwm_rates: HEX_PWM_RATES,
-            matrix: inverted_multirotor_mixer(
-                Y6_MATRIX,
-                [
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                ],
-            ),
+            matrix: inverted_multirotor_mixer(Y6_MATRIX),
         },
         OCTO_PLUS_MIXER => CannedMixerConfig {
             output_types: [
@@ -832,21 +789,7 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
                 MixerOutputType::Aux,
             ],
             default_pwm_rates: OCTO_PWM_RATES,
-            matrix: inverted_multirotor_mixer(
-                OCTO_PLUS_MATRIX,
-                [
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                ],
-            ),
+            matrix: inverted_multirotor_mixer(OCTO_PLUS_MATRIX),
         },
         OCTO_X_MIXER => CannedMixerConfig {
             output_types: [
@@ -862,21 +805,7 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
                 MixerOutputType::Aux,
             ],
             default_pwm_rates: OCTO_PWM_RATES,
-            matrix: inverted_multirotor_mixer(
-                OCTO_X_MATRIX,
-                [
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                ],
-            ),
+            matrix: inverted_multirotor_mixer(OCTO_X_MATRIX),
         },
         X8_MIXER => CannedMixerConfig {
             output_types: [
@@ -892,21 +821,7 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
                 MixerOutputType::Aux,
             ],
             default_pwm_rates: OCTO_PWM_RATES,
-            matrix: inverted_multirotor_mixer(
-                X8_MATRIX,
-                [
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Motor,
-                    MixerOutputType::Aux,
-                    MixerOutputType::Aux,
-                ],
-            ),
+            matrix: inverted_multirotor_mixer(X8_MATRIX),
         },
         FIXEDWING_MIXER => CannedMixerConfig {
             output_types: FIXEDWING_OUTPUT_TYPES,
@@ -926,15 +841,28 @@ fn canned_mixer(choice: i32) -> Option<CannedMixerConfig> {
 
 fn canned_secondary_mixer(choice: i32) -> Option<CannedMixerConfig> {
     let mut config = canned_mixer(choice)?;
-
-    match choice {
-        FIXEDWING_MIXER | INVERTED_VTAIL_MIXER => {
-            config.matrix = orthogonal_row_pseudoinverse_mixer(config.matrix);
-        }
-        _ => {}
-    }
-
+    config.matrix = match choice {
+        CUSTOM_MIXER => config.matrix,
+        _ => inverted_multirotor_mixer(raw_canned_mixer_matrix(choice)?),
+    };
     Some(config)
+}
+
+fn raw_canned_mixer_matrix(choice: i32) -> Option<[[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS]> {
+    match choice {
+        ESC_CALIBRATION_MIXER => Some(ESC_CALIBRATION_MATRIX),
+        QUAD_PLUS_MIXER => Some(QUAD_PLUS_MATRIX),
+        QUAD_X_MIXER_CHOICE => Some(QUAD_X_MIXER),
+        HEX_PLUS_MIXER => Some(HEX_PLUS_MATRIX),
+        HEX_X_MIXER => Some(HEX_X_MATRIX),
+        OCTO_PLUS_MIXER => Some(OCTO_PLUS_MATRIX),
+        OCTO_X_MIXER => Some(OCTO_X_MATRIX),
+        Y6_MIXER => Some(Y6_MATRIX),
+        X8_MIXER => Some(X8_MATRIX),
+        FIXEDWING_MIXER => Some(FIXEDWING_MATRIX),
+        INVERTED_VTAIL_MIXER => Some(INVERTED_VTAIL_MATRIX),
+        _ => None,
+    }
 }
 
 fn apply_fixedwing_reversals(commands: &mut ControllerOutput, params: &Params) {
@@ -946,5 +874,153 @@ fn apply_fixedwing_reversals(commands: &mut ControllerOutput, params: &Params) {
     }
     if param_int(params, ParamId::PARAM_RUDDER_REVERSE) != 0 {
         commands.u[5] *= -1.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::{OVERRIDE_ATT_SWITCH, OVERRIDE_NO_OVERRIDE, OVERRIDE_THR_SWITCH};
+    use crate::state_machine::StateManager;
+
+    fn mixer_ctx<'a>(
+        state: &'a StateManager,
+        params: &'a Params,
+        rc_override: u16,
+    ) -> MixerCtx<'a> {
+        MixerCtx {
+            state,
+            params,
+            rc_override,
+            air_density: 1.225,
+            battery_voltage: None,
+        }
+    }
+
+    #[test]
+    fn canned_fixedwing_mixer_maps_controls_and_pwm_rates_like_rosflight_c() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
+        params.set_by_id(
+            ParamId::PARAM_PRIMARY_MIXER,
+            ParamValue::Int(FIXEDWING_MIXER),
+        );
+        let state = StateManager::new();
+        let mut mixer = MatrixMixer::new(&params);
+        let mut controls = ControllerOutput::default();
+        controls.u[0] = 0.7;
+        controls.u[3] = 0.1;
+        controls.u[4] = -0.2;
+        controls.u[5] = 0.3;
+
+        let run = mixer.mix(&controls, mixer_ctx(&state, &params, OVERRIDE_NO_OVERRIDE));
+
+        assert_eq!(run.status, MixerStatus::Healthy);
+        assert_eq!(
+            mixer.output_types(),
+            [
+                MixerOutputType::Servo,
+                MixerOutputType::Servo,
+                MixerOutputType::Servo,
+                MixerOutputType::Aux,
+                MixerOutputType::Motor,
+                MixerOutputType::Aux,
+                MixerOutputType::Aux,
+                MixerOutputType::Aux,
+                MixerOutputType::Aux,
+                MixerOutputType::Aux,
+            ]
+        );
+        assert_eq!(mixer.default_pwm_rates(), [50.0; NUM_MIXER_OUTPUTS]);
+        assert!((run.commands[0] - 0.1).abs() < 1e-9);
+        assert!((run.commands[1] + 0.2).abs() < 1e-9);
+        assert!((run.commands[2] - 0.3).abs() < 1e-9);
+        assert_eq!(run.commands[3], 0.0);
+        assert!((run.commands[4] - 0.7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn canned_fixedwing_reversal_params_apply_before_mixing() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
+        params.set_by_id(
+            ParamId::PARAM_PRIMARY_MIXER,
+            ParamValue::Int(FIXEDWING_MIXER),
+        );
+        params.set_by_id(ParamId::PARAM_AILERON_REVERSE, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_ELEVATOR_REVERSE, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_RUDDER_REVERSE, ParamValue::Int(1));
+        let state = StateManager::new();
+        let mut mixer = MatrixMixer::new(&params);
+        let mut controls = ControllerOutput::default();
+        controls.u[3] = 0.1;
+        controls.u[4] = -0.2;
+        controls.u[5] = 0.3;
+
+        let run = mixer.mix(&controls, mixer_ctx(&state, &params, OVERRIDE_NO_OVERRIDE));
+
+        assert!((run.commands[0] + 0.1).abs() < 1e-9);
+        assert!((run.commands[1] - 0.2).abs() < 1e-9);
+        assert!((run.commands[2] + 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn secondary_mixer_row_selection_matches_rosflight_c_override_masks() {
+        let mut params = Params::new();
+        params.set_by_id(
+            ParamId::PARAM_PRIMARY_MIXER,
+            ParamValue::Int(FIXEDWING_MIXER),
+        );
+        params.set_by_id(
+            ParamId::PARAM_SECONDARY_MIXER,
+            ParamValue::Int(INVERTED_VTAIL_MIXER),
+        );
+        let mut mixer = MatrixMixer::new(&params);
+        assert_eq!(mixer.refresh_mixer_config(&params), MixerStatus::Healthy);
+
+        let secondary_only = mixer.select_primary_or_secondary(OVERRIDE_NO_OVERRIDE);
+        assert_eq!(secondary_only[0], mixer.secondary_mixer[0]);
+        assert_eq!(secondary_only[3], mixer.secondary_mixer[3]);
+
+        let attitude_override = mixer.select_primary_or_secondary(OVERRIDE_ATT_SWITCH);
+        assert_eq!(attitude_override[0], mixer.secondary_mixer[0]);
+        assert_eq!(attitude_override[1], mixer.secondary_mixer[1]);
+        assert_eq!(attitude_override[2], mixer.secondary_mixer[2]);
+        assert_eq!(attitude_override[3], mixer.primary_mixer[3]);
+        assert_eq!(attitude_override[4], mixer.primary_mixer[4]);
+        assert_eq!(attitude_override[5], mixer.primary_mixer[5]);
+
+        let throttle_override = mixer.select_primary_or_secondary(OVERRIDE_THR_SWITCH);
+        assert_eq!(throttle_override[0], mixer.primary_mixer[0]);
+        assert_eq!(throttle_override[1], mixer.primary_mixer[1]);
+        assert_eq!(throttle_override[2], mixer.primary_mixer[2]);
+        assert_eq!(throttle_override[3], mixer.secondary_mixer[3]);
+        assert_eq!(throttle_override[4], mixer.secondary_mixer[4]);
+        assert_eq!(throttle_override[5], mixer.secondary_mixer[5]);
+    }
+
+    #[test]
+    fn reflected_secondary_mixer_defaults_to_primary_when_choice_is_unset() {
+        let mut params = Params::new();
+        params.set_by_id(
+            ParamId::PARAM_PRIMARY_MIXER,
+            ParamValue::Int(INVERTED_VTAIL_MIXER),
+        );
+        params.set_by_id(ParamId::PARAM_SECONDARY_MIXER, ParamValue::Int(-1));
+
+        sync_reflected_mixer_params(&mut params, ParamId::PARAM_PRIMARY_MIXER);
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_PRIMARY_MIXER_3_0),
+            params.get_by_id(ParamId::PARAM_SECONDARY_MIXER_3_0)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_PRIMARY_MIXER_4_1),
+            params.get_by_id(ParamId::PARAM_SECONDARY_MIXER_4_1)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_PRIMARY_MIXER_5_1),
+            params.get_by_id(ParamId::PARAM_SECONDARY_MIXER_5_1)
+        );
     }
 }

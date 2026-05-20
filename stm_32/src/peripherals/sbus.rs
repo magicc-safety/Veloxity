@@ -48,7 +48,7 @@ impl SbusRC {
         loop {
             // Read a packet
             let result = self.uart.read_until_idle(&mut buffer).await;
-            if let Ok(size) = result {
+            if let Ok(_size) = result {
                 timeout = Instant::now() + Duration::from_secs(1);
                 if (buffer[0] == 0x0F)
                     && ((buffer[24] == 0x00)
@@ -88,7 +88,7 @@ impl SbusRC {
                         rc_chan[i] = chan[i];
                     }
 
-                    let mut rc_packet = packets::RcPacket {
+                    let rc_packet = packets::RcPacket {
                         header,
                         n_chan: 24,
                         chan: rc_chan,
@@ -105,7 +105,7 @@ impl SbusRC {
                     timestamp: Instant::now().as_micros(),
                     status: dig,
                 };
-                let mut rc_packet = packets::RcPacket {
+                let rc_packet = packets::RcPacket {
                     header,
                     n_chan: 24,
                     chan: rc_chan,          // last known good values

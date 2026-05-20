@@ -6,7 +6,6 @@ use voloxide_core::sensors::SensorBus;
 use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
-use stm_32::embassy_stm32::lptim::timer::Timer;
 use stm_32::peripherals;
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 use stm_32::*;
@@ -16,6 +15,7 @@ include!("../../stm_32/stm32h7x3_common.rs");
 static mut PARAM_STORE: Option<Params> = None;
 
 pub struct Board {
+    #[allow(dead_code)]
     probe: [Output<'static>; 3], // PixRacerPro exposes three probe pins.
     pub start_time: embassy_time::Instant,
     test_pin_1: Output<'static>,
@@ -67,11 +67,6 @@ impl BoardIo for Board {
                 // This is NORMAL. Do not log an error.
                 // Return Ok(0) to indicate "no bytes right now" without erroring.
                 return Some(Ok(0));
-            }
-            Err(error) => {
-                return Some(Err(errors::TelemError::GenericTelemError(
-                    "Error Reading Telem Packet",
-                )));
             }
         }
     }
@@ -142,14 +137,17 @@ impl BoardIo for Board {
 }
 
 impl Board {
+    #[allow(dead_code)]
     fn probe_hi(&mut self, id: usize) {
         self.probe[id].set_high(); // so we can see something on the logic analyzer.
     }
 
+    #[allow(dead_code)]
     fn probe_lo(&mut self, id: usize) {
         self.probe[id].set_low(); // so we can see something on the logic analyzer.
     }
 
+    #[allow(dead_code)]
     fn probe_tog(&mut self, id: usize) {
         self.probe[id].toggle(); // so we can see something on the logic analyzer.
     }
@@ -175,7 +173,7 @@ impl Board {
             spi1_config,
         );
         let spi1_bus = Mutex::new(spi1);
-        let spi1_bus = SPI1_BUS.init(spi1_bus);
+        let _spi1_bus = SPI1_BUS.init(spi1_bus);
 
         // SPI2 (internal DPS310)
         let mut spi2_config: embassy_stm32::spi::Config = spi::Config::default();
@@ -224,16 +222,16 @@ impl Board {
         let i2c1_bus = I2C1_BUS.init(i2c1_bus);
 
         // IST8308 Magnetometer (External)
-        let mut ist8303_sensor = peripherals::ist8308::Ist8308Sensor {
+        let ist8303_sensor = peripherals::ist8308::Ist8308Sensor {
             dev: I2cDevice::new(i2c1_bus),
         };
 
         // MS4525 Pitot (External)
-        let mut ms4525_sensor = peripherals::ms4525::Ms4525Sensor {
+        let ms4525_sensor = peripherals::ms4525::Ms4525Sensor {
             dev: I2cDevice::new(i2c1_bus),
         };
 
-        let mut llv3hp_sensor = peripherals::llv3hp::Llv3hpSensor {
+        let llv3hp_sensor = peripherals::llv3hp::Llv3hpSensor {
             dev: I2cDevice::new(i2c1_bus),
         };
 
@@ -264,7 +262,7 @@ impl Board {
         let mut uart3config = usart::Config::default();
         uart3config.rx_pull = Pull::Up;
         uart3config.baudrate = 921600;
-        let mut uart3 = Uart::new(
+        let uart3 = Uart::new(
             p.USART3,
             p.PD9,
             p.PD8,
@@ -274,7 +272,7 @@ impl Board {
             uart3config,
         )
         .unwrap();
-        let (mut uart3_tx, mut uart3_rx) = uart3.split();
+        let (uart3_tx, uart3_rx) = uart3.split();
 
         let telem3_rx = peripherals::telem::TelemRx {
             uart_rx: uart3_rx,
@@ -304,7 +302,7 @@ impl Board {
         let mut uart4config = usart::Config::default();
         uart4config.baudrate = 9600u32;
         uart4config.rx_pull = Pull::Up;
-        let mut uart4 = Uart::new(
+        let uart4 = Uart::new(
             p.UART4,
             p.PA1,
             p.PA0,
@@ -335,7 +333,7 @@ impl Board {
         uart6config.invert_tx = true;
         uart6config.data_bits = usart::DataBits::DataBits8;
 
-        let mut usart6 = Uart::new(
+        let usart6 = Uart::new(
             p.USART6,
             p.PC7,
             p.PC6,
@@ -345,11 +343,11 @@ impl Board {
             uart6config,
         )
         .unwrap();
-        let (mut uart6_tx, mut uart6_rx) = usart6.split();
+        let (_uart6_tx, uart6_rx) = usart6.split();
         let sbus_rx = peripherals::sbus::SbusRC { uart: uart6_rx };
 
         // uSD SDMMC1
-        let mut sdmmc1 = sdmmc::Sdmmc::new_4bit(
+        let sdmmc1 = sdmmc::Sdmmc::new_4bit(
             p.SDMMC1,
             Sdmmc1Irqs,
             p.PC12,
@@ -420,7 +418,7 @@ impl Board {
 
         // P2 VCP Task (Telemetry alternate)
         spawner2.spawn(peripherals::vcp::task(vcp)).unwrap();
-        spawner2.spawn(peripherals::telem::task_rx(telem3_rx));
+        let _ = spawner2.spawn(peripherals::telem::task_rx(telem3_rx));
 
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);
@@ -468,7 +466,7 @@ impl Board {
         // TIM2
         let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
 
-        let mut timer1 = SimplePwm::new(
+        let timer1 = SimplePwm::new(
             p.TIM1,
             Some(tim1_ch1_pin),
             Some(tim1_ch2_pin),
@@ -477,7 +475,7 @@ impl Board {
             Hertz::hz(400),
             Default::default(),
         );
-        let mut timer4 = SimplePwm::new(
+        let timer4 = SimplePwm::new(
             p.TIM4,
             None, // Some(ch4_pin),
             Some(tim4_ch2_pin),
@@ -486,7 +484,7 @@ impl Board {
             Hertz::hz(400),
             Default::default(),
         );
-        let mut timer2 = SimplePwm::new(
+        let timer2 = SimplePwm::new(
             p.TIM2,
             Some(tim2_ch1_pin),
             None,
@@ -496,13 +494,13 @@ impl Board {
             Default::default(),
         );
 
-        let mut timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
-        let mut timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
-        let mut timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
+        let timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
+        let timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
+        let timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
 
-        let mut timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4];
+        let timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4];
 
-        let mut servos = peripherals::pwm::PixRacerProServoMonstrosity::with_timer_kinds_and_dma(
+        let servos = peripherals::pwm::PixRacerProServoMonstrosity::with_timer_kinds_and_dma(
             timers,
             [
                 (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4

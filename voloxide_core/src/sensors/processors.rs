@@ -1,12 +1,9 @@
-use core::default;
-
 use crate::errors;
-use crate::log_info;
 use crate::packets::*;
 use crate::params::{ParamId, ParamValue, Params};
+use crate::{log_error, log_info};
 use bitflags::bitflags;
-use libm::{cos, sin, sqrt};
-use num_traits::Float;
+use libm::{cos, pow, sin, sqrt};
 
 const DEG_TO_RAD: f64 = 0.017453293;
 
@@ -17,6 +14,10 @@ bitflags! {
         const ACCEL = 1 << 1;
         const BARO = 1 << 2;
         const PITOT = 1 << 3;
+        const GYRO_FAILED = 1 << 4;
+        const ACCEL_FAILED = 1 << 5;
+        const BARO_FAILED = 1 << 6;
+        const PITOT_FAILED = 1 << 7;
 
         // Create a convenient combination for a full IMU calibration
         const IMU = Self::GYRO.bits() | Self::ACCEL.bits();
@@ -66,6 +67,7 @@ impl_passthrough_sensor_packet_processor!(PassthroughBatteryProcessor, BatteryPa
 pub struct BatteryProcessor {
     previous_voltage: f32,
     previous_current: f32,
+    latest_packet: Option<BatteryPacket>,
     initialized: bool,
 }
 
@@ -74,6 +76,7 @@ impl Default for BatteryProcessor {
         Self {
             previous_voltage: 0.0,
             previous_current: 0.0,
+            latest_packet: None,
             initialized: false,
         }
     }
@@ -86,7 +89,9 @@ impl BatteryProcessor {
         _flags: &mut CalibrationFlags,
         params: &mut Params,
     ) -> Option<BatteryPacket> {
-        let mut packet = take_ok_packet(packet)?;
+        let Some(mut packet) = take_ok_packet(packet) else {
+            return self.latest_packet;
+        };
 
         if !self.initialized {
             self.previous_voltage = param_float(params, ParamId::PARAM_VOLT_MAX);
@@ -104,6 +109,7 @@ impl BatteryProcessor {
 
         self.previous_voltage = packet.voltage;
         self.previous_current = packet.current;
+        self.latest_packet = Some(packet);
 
         Some(packet)
     }
@@ -124,8 +130,6 @@ impl SensorPacketProcessor<BatteryPacket> for BatteryProcessor {
 // IMU Packet
 // ------------------------------
 
-const GYRO_MAX_CALIBRATION_DELTA: f64 = 0.1; // (rad/s) Threshold for movement... we won't calibrate if it's above this...
-
 #[derive(Default, Copy, Clone)]
 pub struct PassthroughImuProcessor;
 impl_passthrough_sensor_packet_processor!(PassthroughImuProcessor, ImuPacket);
@@ -139,8 +143,6 @@ pub struct ImuCalibrationState {
     accel_calibration_count: u16,
     max_accel: [f64; 3],
     min_accel: [f64; 3],
-    max_gyro: [f64; 3],
-    min_gyro: [f64; 3],
 }
 
 #[derive(Copy, Clone)]
@@ -200,12 +202,15 @@ impl ImuProcessor {
                                 ParamId::PARAM_GYRO_Z_BIAS,
                                 ParamValue::Float(bias_z as f32),
                             );
+                            log_info!("Gyro Calibration complete!");
+                        } else {
+                            flags.insert(CalibrationFlags::GYRO_FAILED);
+                            log_error!("Gyro calibration failed");
                         }
 
                         self.calibration_state.gyro_sum = [0.0; 3];
                         self.calibration_state.gyro_calibration_count = 0;
                         flags.remove(CalibrationFlags::GYRO);
-                        log_info!("Gyro Calibration complete!");
                     }
                 }
 
@@ -230,16 +235,17 @@ impl ImuProcessor {
                     self.calibration_state.min_accel[2] =
                         self.calibration_state.min_accel[2].min(packet.accel[2] as f64);
                     if self.calibration_state.accel_calibration_count > 1000 {
-                        let max_delta = ((self.calibration_state.max_accel[0]
-                            - self.calibration_state.min_accel[0])
-                            .powi(2)
-                            + (self.calibration_state.max_accel[1]
-                                - self.calibration_state.min_accel[1])
-                                .powi(2)
-                            + (self.calibration_state.max_accel[2]
-                                - self.calibration_state.min_accel[2])
-                                .powi(2))
-                        .sqrt();
+                        let accel_delta_x = self.calibration_state.max_accel[0]
+                            - self.calibration_state.min_accel[0];
+                        let accel_delta_y = self.calibration_state.max_accel[1]
+                            - self.calibration_state.min_accel[1];
+                        let accel_delta_z = self.calibration_state.max_accel[2]
+                            - self.calibration_state.min_accel[2];
+                        let max_delta = sqrt(
+                            accel_delta_x * accel_delta_x
+                                + accel_delta_y * accel_delta_y
+                                + accel_delta_z * accel_delta_z,
+                        );
 
                         if max_delta < 1.0 {
                             let count = self.calibration_state.accel_calibration_count as f64;
@@ -288,8 +294,14 @@ impl ImuProcessor {
                                     ParamId::PARAM_ACC_Z_BIAS,
                                     ParamValue::Float(bias_z as f32),
                                 );
+                                log_info!("Accelerometer Calibration Complete!");
+                            } else {
+                                flags.insert(CalibrationFlags::ACCEL_FAILED);
+                                log_error!("Accelerometer calibration failed");
                             }
                         } else {
+                            flags.insert(CalibrationFlags::ACCEL_FAILED);
+                            log_error!("Accelerometer calibration failed: too much movement");
                         }
 
                         self.calibration_state.accel_sum = [0.0; 3];
@@ -298,7 +310,6 @@ impl ImuProcessor {
                         self.calibration_state.max_accel = [-1000.0, -1000.0, -1000.0];
                         self.calibration_state.min_accel = [1000.0, 1000.0, 1000.0];
                         flags.remove(CalibrationFlags::ACCEL);
-                        log_info!("Accelerometer Calibration Complete!");
                     }
                 }
                 // return None; // Removed this so we don't get IMU errors while calibrating
@@ -411,13 +422,16 @@ impl BaroProcessor {
                     ParamValue::Float(ground_alt as f32),
                 );
                 self.calibration_state.calibrated = true;
+                flags.remove(CalibrationFlags::BARO);
+                self.calibration_state.request_active = false;
+            } else {
+                flags.insert(CalibrationFlags::BARO_FAILED);
+                log_error!("Baro calibration failed");
             }
 
             self.calibration_state.mean = 0.0;
             self.calibration_state.m2 = 0.0;
             self.calibration_state.count = 0;
-            self.calibration_state.request_active = false;
-            flags.remove(CalibrationFlags::BARO);
         } else if self.calibration_state.count > SENSOR_CAL_DELAY_CYCLES {
             let n = (self.calibration_state.count - SENSOR_CAL_DELAY_CYCLES) as f64;
             let delta = packet.pressure as f64 - self.calibration_state.mean;
@@ -431,7 +445,7 @@ impl BaroProcessor {
 }
 
 fn pressure_to_altitude(pressure: f64) -> f64 {
-    44330.0 * (1.0 - (pressure / 101325.0).powf(0.190295))
+    44330.0 * (1.0 - pow(pressure / 101325.0, 0.190295))
 }
 
 impl SensorPacketProcessor<BaroPacket> for BaroProcessor {
@@ -494,7 +508,7 @@ impl PitotProcessor {
 
             const RHO: f64 = 1.225;
             let dp = packet.differential_pressure as f64;
-            packet.indicated_airspeed = (2.0 * dp.abs() / RHO).sqrt() as f32 * dp.signum() as f32;
+            packet.indicated_airspeed = sqrt(2.0 * dp.abs() / RHO) as f32 * dp.signum() as f32;
 
             Some(packet)
         } else {
@@ -523,13 +537,16 @@ impl PitotProcessor {
                     ParamValue::Float(self.calibration_state.mean as f32),
                 );
                 self.calibration_state.calibrated = true;
+                flags.remove(CalibrationFlags::PITOT);
+                self.calibration_state.request_active = false;
+            } else {
+                flags.insert(CalibrationFlags::PITOT_FAILED);
+                log_error!("Airspeed calibration failed");
             }
 
             self.calibration_state.mean = 0.0;
             self.calibration_state.m2 = 0.0;
             self.calibration_state.count = 0;
-            self.calibration_state.request_active = false;
-            flags.remove(CalibrationFlags::PITOT);
         } else if self.calibration_state.count > SENSOR_CAL_DELAY_CYCLES {
             let n = (self.calibration_state.count - SENSOR_CAL_DELAY_CYCLES) as f64;
             let delta = packet.differential_pressure as f64 - self.calibration_state.mean;
@@ -750,6 +767,39 @@ mod tests {
     }
 
     #[test]
+    fn imu_processor_matches_rosflight_c_bias_and_temperature_compensation() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_GYRO_Y_BIAS, ParamValue::Float(-0.2));
+        params.set_by_id(ParamId::PARAM_GYRO_Z_BIAS, ParamValue::Float(0.3));
+        params.set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(0.4));
+        params.set_by_id(ParamId::PARAM_ACC_Y_BIAS, ParamValue::Float(-0.5));
+        params.set_by_id(ParamId::PARAM_ACC_Z_BIAS, ParamValue::Float(0.6));
+        params.set_by_id(ParamId::PARAM_ACC_X_TEMP_COMP, ParamValue::Float(0.01));
+        params.set_by_id(ParamId::PARAM_ACC_Y_TEMP_COMP, ParamValue::Float(-0.02));
+        params.set_by_id(ParamId::PARAM_ACC_Z_TEMP_COMP, ParamValue::Float(0.03));
+        let mut processor = ImuProcessor::new();
+
+        let processed = process_one(
+            &mut processor,
+            ImuPacket {
+                accel: [1.4, -2.5, -8.00665],
+                gyro: [0.6, -0.7, 1.1],
+                temperature: 20.0,
+                ..Default::default()
+            },
+            &mut params,
+        );
+
+        assert!((processed.gyro[0] - 0.5).abs() < 1e-6);
+        assert!((processed.gyro[1] + 0.5).abs() < 1e-6);
+        assert!((processed.gyro[2] - 0.8).abs() < 1e-6);
+        assert!((processed.accel[0] - 0.8).abs() < 1e-6);
+        assert!((processed.accel[1] + 1.6).abs() < 1e-6);
+        assert!((processed.accel[2] + 9.20665).abs() < 1e-5);
+    }
+
+    #[test]
     fn mag_processor_applies_orientation_hard_iron_and_rosflight_matrix() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_MAG_YAW, ParamValue::Float(90.0));
@@ -896,6 +946,34 @@ mod tests {
         assert_eq!(first.current, 6.0);
         assert_eq!(second.voltage, 14.5);
         assert_eq!(second.current, 4.5);
+    }
+
+    #[test]
+    fn battery_processor_reuses_latest_sample_between_battery_updates() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_VOLT_MAX, ParamValue::Float(23.5));
+        params.set_by_id(ParamId::PARAM_BATTERY_VOLTAGE_ALPHA, ParamValue::Float(0.0));
+        params.set_by_id(
+            ParamId::PARAM_BATTERY_CURRENT_ALPHA,
+            ParamValue::Float(0.0),
+        );
+        let mut processor = BatteryProcessor::default();
+        let mut flags = CalibrationFlags::empty();
+        let mut raw = Some(Ok(BatteryPacket {
+            voltage: 22.0,
+            current: 3.0,
+            ..Default::default()
+        }));
+
+        let first = processor.process(&mut raw, &mut flags, &mut params).unwrap();
+        let mut no_new_packet = None;
+        let second = processor
+            .process(&mut no_new_packet, &mut flags, &mut params)
+            .unwrap();
+
+        assert_eq!(first.voltage, 22.0);
+        assert_eq!(second.voltage, first.voltage);
+        assert_eq!(second.current, first.current);
     }
 
     #[test]

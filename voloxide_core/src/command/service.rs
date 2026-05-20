@@ -36,10 +36,7 @@ pub struct CalibrationRequestCtx<'a, const N: usize> {
     pub params: &'a mut Params,
 }
 
-pub fn apply_calibration_requests<const N: usize>(
-    mut ctx: CalibrationRequestCtx<'_, N>,
-) -> Option<RosflightCmd> {
-    let mut started = None;
+pub fn apply_calibration_requests<const N: usize>(mut ctx: CalibrationRequestCtx<'_, N>) {
     while let Some(request) = ctx.requests.next() {
         if ctx.state.is_armed() {
             emit_cmd_ack(
@@ -52,29 +49,37 @@ pub fn apply_calibration_requests<const N: usize>(
 
         match request.command {
             RosflightCmd::AccelCalibration => {
+                ctx.flags
+                    .remove(CalibrationFlags::GYRO_FAILED | CalibrationFlags::ACCEL_FAILED);
                 ctx.flags.insert(CalibrationFlags::IMU);
                 zero_gyro_biases(ctx.params);
                 zero_accel_biases(ctx.params);
             }
             RosflightCmd::GyroCalibration => {
+                ctx.flags.remove(CalibrationFlags::GYRO_FAILED);
                 ctx.flags.insert(CalibrationFlags::GYRO);
                 zero_gyro_biases(ctx.params);
             }
             RosflightCmd::BaroCalibration => {
+                ctx.flags.remove(CalibrationFlags::BARO_FAILED);
                 ctx.flags.insert(CalibrationFlags::BARO);
                 ctx.params
                     .set_by_id(ParamId::PARAM_BARO_BIAS, ParamValue::Float(0.0));
             }
             RosflightCmd::AirspeedCalibration => {
+                ctx.flags.remove(CalibrationFlags::PITOT_FAILED);
                 ctx.flags.insert(CalibrationFlags::PITOT);
                 ctx.params
                     .set_by_id(ParamId::PARAM_DIFF_PRESS_BIAS, ParamValue::Float(0.0));
             }
             _ => {}
         }
-        started = Some(request.command);
+        emit_cmd_ack(
+            &mut ctx.responses,
+            request.command,
+            RosflightCmdResponse::RosflightCmdSuccess,
+        );
     }
-    started
 }
 
 fn zero_gyro_biases(params: &mut Params) {
@@ -92,16 +97,11 @@ fn zero_accel_biases(params: &mut Params) {
 pub struct OffboardControlCtx<'a, const N: usize> {
     pub requests: EventDrainPort<'a, OffboardControlRequested, N>,
     pub command: &'a mut CommandManager,
-    pub state: &'a StateManager,
     pub params: &'a Params,
 }
 
 pub fn apply_offboard_control_requests<const N: usize>(mut ctx: OffboardControlCtx<'_, N>) {
     while let Some(request) = ctx.requests.next() {
-        if !ctx.state.is_armed() {
-            continue;
-        }
-
         ctx.command
             .set_new_offboard_command(request.now_us, &request.msg, ctx.params);
     }
@@ -142,14 +142,35 @@ where
     B: BoardIo,
 {
     while let Some(request) = ctx.requests.next() {
+        if !ctx.state.is_armed()
+            && matches!(
+                request.command,
+                RosflightCmd::Reboot | RosflightCmd::RebootToBootloader
+            )
+        {
+            emit_cmd_ack(
+                &mut ctx.responses,
+                request.command,
+                RosflightCmdResponse::RosflightCmdSuccess,
+            );
+            match request.command {
+                RosflightCmd::Reboot => {
+                    let _ = ctx.board.reboot();
+                }
+                RosflightCmd::RebootToBootloader => {
+                    let _ = ctx.board.reboot_to_bootloader();
+                }
+                _ => {}
+            }
+            continue;
+        }
+
         let completed = if ctx.state.is_armed() {
             false
         } else {
             match request.command {
                 RosflightCmd::ReadParams => ctx.board.read_params(ctx.params),
                 RosflightCmd::WriteParams => ctx.board.write_params(ctx.params),
-                RosflightCmd::Reboot => ctx.board.reboot(),
-                RosflightCmd::RebootToBootloader => ctx.board.reboot_to_bootloader(),
                 _ => false,
             }
         };
@@ -300,11 +321,13 @@ pub fn apply_config_info_requests<const N: usize>(mut ctx: ConfigInfoCtx<'_, N>)
 mod tests {
     use super::*;
     use crate::{
+        board::BoardIo,
         comm::messages::{
             enums::{OffboardControlIgnore, OffboardControlMode},
             messages::OffboardControlMsg,
         },
         controller::quad::QuadController,
+        errors,
         events::{
             BOARD_COMMAND_REQUEST_QUEUE_CAPACITY, CALIBRATION_REQUEST_QUEUE_CAPACITY,
             COMM_RESPONSE_QUEUE_CAPACITY, CONFIG_INFO_REQUEST_QUEUE_CAPACITY, EventQueue,
@@ -317,6 +340,49 @@ mod tests {
         state_machine::{Event, StateManager},
         test_support::TestBoard,
     };
+
+    #[derive(Default)]
+    struct PersistBoard {
+        read_count: usize,
+        write_count: usize,
+        stored_system_id: i32,
+    }
+
+    impl BoardIo for PersistBoard {
+        fn serial_rx_read(&mut self, _buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+            None
+        }
+
+        fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
+            Some(Ok(bytes.len()))
+        }
+
+        fn clock_millis(&self) -> u32 {
+            0
+        }
+
+        fn clock_micros(&self) -> u64 {
+            0
+        }
+
+        fn read_params(&mut self, params: &mut Params) -> bool {
+            self.read_count += 1;
+            params.set_by_id(
+                ParamId::PARAM_SYSTEM_ID,
+                ParamValue::Int(self.stored_system_id),
+            );
+            true
+        }
+
+        fn write_params(&mut self, params: &Params) -> bool {
+            self.write_count += 1;
+            self.stored_system_id = match params.get_by_id(ParamId::PARAM_SYSTEM_ID) {
+                ParamValue::Int(value) => value,
+                _ => 0,
+            };
+            true
+        }
+    }
 
     fn initialized_state() -> StateManager {
         let params = Params::new();
@@ -353,7 +419,7 @@ mod tests {
         let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
         let state = initialized_state();
 
-        let started = apply_calibration_requests(CalibrationRequestCtx {
+        apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut requests),
             responses: EventEmitPort::new(&mut responses),
             state: &state,
@@ -361,7 +427,6 @@ mod tests {
             params: &mut params,
         });
 
-        assert!(matches!(started, Some(RosflightCmd::BaroCalibration)));
         assert!(flags.contains(CalibrationFlags::GYRO));
         assert!(flags.contains(CalibrationFlags::BARO));
         assert_eq!(
@@ -372,7 +437,19 @@ mod tests {
             params.get_by_id(ParamId::PARAM_BARO_BIAS),
             ParamValue::Float(0.0)
         );
-        assert!(responses.is_empty());
+        assert_eq!(responses.len(), 2);
+        for expected in [RosflightCmd::GyroCalibration, RosflightCmd::BaroCalibration] {
+            match responses.pop().unwrap() {
+                CommResponse::CmdAck(ack) => {
+                    assert!(matches!(ack.command, command if command == expected));
+                    assert!(matches!(
+                        ack.success,
+                        RosflightCmdResponse::RosflightCmdSuccess
+                    ));
+                }
+                _ => panic!("expected command ack response"),
+            }
+        }
         assert!(requests.is_empty());
     }
 
@@ -390,7 +467,7 @@ mod tests {
         let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
         let state = initialized_state();
 
-        let started = apply_calibration_requests(CalibrationRequestCtx {
+        apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut requests),
             responses: EventEmitPort::new(&mut responses),
             state: &state,
@@ -398,7 +475,6 @@ mod tests {
             params: &mut params,
         });
 
-        assert!(matches!(started, Some(RosflightCmd::AccelCalibration)));
         assert!(flags.contains(CalibrationFlags::IMU));
         assert_eq!(
             params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
@@ -408,6 +484,16 @@ mod tests {
             params.get_by_id(ParamId::PARAM_ACC_Z_BIAS),
             ParamValue::Float(0.0)
         );
+        match responses.pop().unwrap() {
+            CommResponse::CmdAck(ack) => {
+                assert!(matches!(ack.command, RosflightCmd::AccelCalibration));
+                assert!(matches!(
+                    ack.success,
+                    RosflightCmdResponse::RosflightCmdSuccess
+                ));
+            }
+            _ => panic!("expected command ack response"),
+        }
     }
 
     #[test]
@@ -435,7 +521,6 @@ mod tests {
         apply_offboard_control_requests(OffboardControlCtx {
             requests: EventDrainPort::new(&mut requests),
             command: &mut command,
-            state: &armed_state(),
             params: &params,
         });
 
@@ -444,12 +529,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_offboard_control_requests_drops_requests_while_disarmed() {
+    fn apply_offboard_control_requests_stores_requests_while_disarmed() {
         let params = Params::new();
         let mut command = CommandManager::new();
         let mut requests =
             EventQueue::<OffboardControlRequested, OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY>::new();
-        let state = initialized_state();
 
         let _ = requests.push(OffboardControlRequested {
             now_us: 42_000,
@@ -469,11 +553,10 @@ mod tests {
         apply_offboard_control_requests(OffboardControlCtx {
             requests: EventDrainPort::new(&mut requests),
             command: &mut command,
-            state: &state,
             params: &params,
         });
 
-        assert!(!command.is_offboard_active());
+        assert!(command.is_offboard_active());
         assert!(requests.is_empty());
     }
 
@@ -548,9 +631,58 @@ mod tests {
     }
 
     #[test]
+    fn apply_board_command_requests_round_trips_persistent_params_when_disarmed() {
+        let mut board = PersistBoard {
+            stored_system_id: 77,
+            ..Default::default()
+        };
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
+        let mut requests =
+            EventQueue::<BoardCommandRequested, BOARD_COMMAND_REQUEST_QUEUE_CAPACITY>::new();
+        let mut responses = EventQueue::<CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>::new();
+
+        let _ = requests.push(BoardCommandRequested {
+            command: RosflightCmd::WriteParams,
+        });
+        let _ = requests.push(BoardCommandRequested {
+            command: RosflightCmd::ReadParams,
+        });
+
+        apply_board_command_requests(BoardCommandCtx {
+            requests: EventDrainPort::new(&mut requests),
+            responses: EventEmitPort::new(&mut responses),
+            state: &initialized_state(),
+            board: &mut board,
+            params: &mut params,
+        });
+
+        assert_eq!(board.write_count, 1);
+        assert_eq!(board.read_count, 1);
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_SYSTEM_ID),
+            ParamValue::Int(42)
+        );
+        for expected in [RosflightCmd::WriteParams, RosflightCmd::ReadParams] {
+            match responses.pop().unwrap() {
+                CommResponse::CmdAck(ack) => {
+                    assert!(matches!(ack.command, command if command == expected));
+                    assert!(matches!(
+                        ack.success,
+                        RosflightCmdResponse::RosflightCmdSuccess
+                    ));
+                }
+                _ => panic!("expected command ack response"),
+            }
+        }
+        assert!(requests.is_empty());
+    }
+
+    #[test]
     fn apply_rc_trim_calibration_requests_sets_equilibrium_torques_and_acks() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(0));
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(4));
         params.set_by_id(ParamId::PARAM_RC_MAX_ROLLRATE, ParamValue::Float(1.0));
         params.set_by_id(ParamId::PARAM_RC_MAX_PITCHRATE, ParamValue::Float(1.0));
         params.set_by_id(ParamId::PARAM_RC_MAX_YAWRATE, ParamValue::Float(1.0));
@@ -639,7 +771,7 @@ mod tests {
             command: RosflightCmd::GyroCalibration,
         });
 
-        let started = apply_calibration_requests(CalibrationRequestCtx {
+        apply_calibration_requests(CalibrationRequestCtx {
             requests: EventDrainPort::new(&mut calibration_requests),
             responses: EventEmitPort::new(&mut responses),
             state: &armed,
@@ -647,7 +779,6 @@ mod tests {
             params: &mut params,
         });
 
-        assert!(started.is_none());
         assert!(!flags.contains(CalibrationFlags::GYRO));
         assert_eq!(
             params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
