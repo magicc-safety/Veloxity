@@ -166,7 +166,7 @@ timing or allocation behavior.
 - Scoped the event-queue iterator test so it no longer keeps an immutable iterator alive while
   mutating the queue afterward.
 - Added a local `SimWorld` type alias in the sim binary to hide the full
-  `World<Board, QuadEstimator, QuadController, QuadMixer, MavlinkInterface, SimPwmDriver>` type.
+  `World<Board, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, SimPwmDriver>` type.
 - Simplified embedded board entrypoint associated-type construction from fully qualified
   `voloxide_core::vehicle::quadrotor::Quadrotor` paths to the imported `Quadrotor` type. This was
   later simplified further when the `BodyType` marker trait was removed.
@@ -259,7 +259,7 @@ continues to expose protocol-neutral communication messages and the `CommInterfa
 - Quad implementations now use role names:
   - `voloxide_core/src/controller/quad.rs`
   - `voloxide_core/src/estimator/quad.rs`
-  - `voloxide_core/src/mixer/quad.rs`
+  - `voloxide_core/src/mixer/matrix.rs`
 - Migrated `state_machine/mod.rs` to `state_machine.rs` with tests remaining in
   `state_machine/tests.rs`, preserving the modern Rust `module.rs` plus `module/child.rs` layout.
 

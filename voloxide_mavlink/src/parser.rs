@@ -1,6 +1,6 @@
 use crate::generated::dialects::rosflight::Rosflight;
+use mavio::Receiver;
 use mavio::prelude::*;
-use mavio::{Frame, Receiver, Sender};
 
 static MAX_FRAME_SIZE_BYTES: usize = 280; // it's ok that this isn't as large as RX_BUF_SIZE
 // because we reset the index if we receive a whole

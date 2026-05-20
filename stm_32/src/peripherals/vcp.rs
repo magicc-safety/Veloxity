@@ -30,7 +30,7 @@ pub struct Vcp<ECI: EmbeddedComInterface> {
 }
 
 impl<ECI: EmbeddedComInterface> Vcp<ECI> {
-    pub async fn run(mut self) {
+    pub async fn run(self) {
         // Adapted from Embassy STM32H7 examples
 
         let driver = self.driver;
@@ -116,6 +116,6 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
 }
 
 #[embassy_executor::task]
-pub async fn task(mut vcp: Vcp<BasicProcessor>) {
+pub async fn task(vcp: Vcp<BasicProcessor>) {
     vcp.run().await;
 }

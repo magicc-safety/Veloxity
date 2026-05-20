@@ -10,7 +10,6 @@ use embassy_time::Timer;
 use voloxide_core::errors;
 use voloxide_core::packets;
 
-use core::module_path;
 // use defmt::info;
 
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
@@ -647,7 +646,7 @@ impl Bmi08xSensor {
         let mut tx = [0u8; 8];
         let mut sync_cfg = [0u8; 8];
         tx[0] = BMI08_REG_ACCEL_FEATURE_CFG | SPI_READ;
-        self.dev_a.transfer(&mut sync_cfg, &tx).await;
+        let _ = self.dev_a.transfer(&mut sync_cfg, &tx).await;
 
         // Unclear why this is 16-bit data, just following what Bosh does
         sync_cfg[1] = BMI08_REG_ACCEL_FEATURE_CFG | SPI_WRITE; // 0x5E
@@ -655,7 +654,7 @@ impl Bmi08xSensor {
         let reg_data = sync_cfg_mode & BMI08_ACCEL_DATA_SYNC_MODE_MASK;
         sync_cfg[6] = reg_data; // low byte
         sync_cfg[7] = 0; // high byte
-        self.dev_a.write(&sync_cfg[1..]).await;
+        let _ = self.dev_a.write(&sync_cfg[1..]).await;
 
         Timer::after_micros(100000).await; // delay of 100ms for data sync to take effect.
 
@@ -717,7 +716,7 @@ impl Bmi08xSensor {
             let mut rx = [0u8; BMI_ACCEL_BYTES];
             let mut tx = [0u8; BMI_ACCEL_BYTES];
             tx[0] = BMI_ACCEL_CMD | SPI_READ;
-            self.dev_a.transfer(&mut rx, &tx).await;
+            let _ = self.dev_a.transfer(&mut rx, &tx).await;
 
             let seq = ((rx[8] as u64 | (rx[9] as u64) << 8 | (rx[10] as u64) << 16) * 625u64
                 / 16u64) as u32; // 625/64 = 39.0625us/count
@@ -740,7 +739,7 @@ impl Bmi08xSensor {
             let mut rx = [0u8; BMI_ACCEL_SYNC_BYTES];
             let mut tx = [0u8; BMI_ACCEL_SYNC_BYTES];
             tx[0] = BMI_ACCEL_SYNC_CMD | SPI_READ;
-            self.dev_a.transfer(&mut rx, &tx).await;
+            let _ = self.dev_a.transfer(&mut rx, &tx).await;
 
             accel[2] = scale_factor_a * (((rx[3] as i16) << 8 | (rx[2] as i16)) as f64);
 
@@ -750,7 +749,7 @@ impl Bmi08xSensor {
             let mut rx = [0u8; BMI_GYRO_BYTES];
             let mut tx = [0u8; BMI_GYRO_BYTES];
             tx[0] = BMI_GYRO_CMD | SPI_READ;
-            self.dev_g.transfer(&mut rx, &tx).await;
+            let _ = self.dev_g.transfer(&mut rx, &tx).await;
 
             let mut gyro = [0f64; 3];
             gyro[0] = scale_factor_g * (((rx[2] as i16) << 8 | (rx[1] as i16)) as f64);

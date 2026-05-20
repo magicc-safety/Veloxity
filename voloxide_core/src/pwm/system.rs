@@ -455,4 +455,37 @@ mod tests {
         assert_eq!(outputs[2], 0.3);
         assert_eq!(outputs[3], 0.4);
     }
+
+    #[test]
+    fn compose_pwm_outputs_clamps_servo_gpio_and_motor_ranges() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update_arming_safety(true, true);
+        state.update(Event::REQUEST_ARM, &params);
+        let output_types = [
+            MixerOutputType::Servo,
+            MixerOutputType::Servo,
+            MixerOutputType::Gpio,
+            MixerOutputType::Gpio,
+            MixerOutputType::Motor,
+            MixerOutputType::Motor,
+        ];
+
+        let outputs = compose_pwm_outputs(
+            &[-2.0, 2.0, -0.1, 0.1, -0.5, 1.5],
+            &output_types,
+            None,
+            &state,
+            &params,
+        );
+
+        assert_eq!(outputs[0], 0.0);
+        assert_eq!(outputs[1], 1.0);
+        assert_eq!(outputs[2], 0.0);
+        assert_eq!(outputs[3], 1.0);
+        assert!((outputs[4] - 0.1).abs() < 1e-6);
+        assert_eq!(outputs[5], 1.0);
+    }
 }

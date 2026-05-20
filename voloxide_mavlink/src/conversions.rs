@@ -134,7 +134,6 @@ impl From<mav_messages::ParamRequestRead> for core_messages::ParamRequestReadMsg
         Self {
             target_system: msg.target_system,
             target_component: msg.target_component,
-            /// Parameter index. Send -1 to use the param ID field as identifier (else the param id will be ignored)
             param_identifier: match msg.param_index {
                 -1 => comm_enums::ParamIdentifier::ID(msg.param_id),
                 _ => comm_enums::ParamIdentifier::INDEX(msg.param_index),

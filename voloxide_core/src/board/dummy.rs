@@ -22,7 +22,7 @@ impl BoardIo for DummyBoard {
         sensors.attitude = Some(Ok(packets::AttitudePacket::default()));
     }
 
-    fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+    fn serial_rx_read(&mut self, _buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         None // pretend we never receive any data
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -38,10 +38,10 @@ impl BoardIo for DummyBoard {
         self.current_time_us
     }
 
-    fn set_test_pin_1(&mut self, high: bool) {
+    fn set_test_pin_1(&mut self, _high: bool) {
         // Dummy implementation does nothing
     }
-    fn set_test_pin_2(&mut self, high: bool) {
+    fn set_test_pin_2(&mut self, _high: bool) {
         // Dummy implementation does nothing
     }
 }

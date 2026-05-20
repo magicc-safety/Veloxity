@@ -87,6 +87,8 @@ pub struct RecordingCommLink {
     pub last_rc_channels: Option<RcChannelsMsg>,
     pub output_raw_count: usize,
     pub last_output_raw: Option<RosflightOutputRawMsg>,
+    pub timesync_count: usize,
+    pub last_timesync: Option<TimesyncMsg>,
     pub version_count: usize,
     pub last_version: Option<RosflightVersionMsg>,
     pub cmd_ack_count: usize,
@@ -122,6 +124,8 @@ impl RecordingCommLink {
             last_rc_channels: None,
             output_raw_count: 0,
             last_output_raw: None,
+            timesync_count: 0,
+            last_timesync: None,
             version_count: 0,
             last_version: None,
             cmd_ack_count: 0,
@@ -167,7 +171,9 @@ impl CommInterface<TestBoard> for RecordingCommLink {
         self.last_status = Some(msg);
     }
 
-    fn send_timesync(&mut self, _board: &mut TestBoard, _system_id: u8, _msg: TimesyncMsg) -> bool {
+    fn send_timesync(&mut self, _board: &mut TestBoard, _system_id: u8, msg: TimesyncMsg) -> bool {
+        self.timesync_count += 1;
+        self.last_timesync = Some(msg);
         true
     }
 

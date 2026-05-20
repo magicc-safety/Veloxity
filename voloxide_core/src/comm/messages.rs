@@ -1,15 +1,18 @@
-use crate::state_machine::ErrorFlag;
 use bitflags::bitflags;
-use core::marker::PhantomData;
-use enums::*;
+use heapless::Deque;
 use messages::*;
+
+// PARAM_SET has a two-stage path: decoded MAVLink ingress waits here, then the
+// comm system admits work into the ECS event queue while that queue has room.
+pub const PARAM_SET_INGRESS_QUEUE_CAPACITY: usize = 32;
+pub const PARAM_SET_EVENT_QUEUE_CAPACITY: usize = 4;
 
 #[derive(Default)]
 pub struct Messages {
     pub heartbeat: Option<HeartbeatMsg>,
     pub param_request_read: Option<ParamRequestReadMsg>,
     pub param_request_list: Option<ParamRequestListMsg>,
-    pub param_set: Option<ParamSetMsg>,
+    pub param_set: Deque<ParamSetMsg, PARAM_SET_INGRESS_QUEUE_CAPACITY>,
     pub timesync: Option<TimesyncMsg>,
     pub offboard_control: Option<OffboardControlMsg>,
     pub cmd: Option<RosflightCmdMsg>,
@@ -28,7 +31,7 @@ macro_rules! impl_store {
     ($ty:ty, $field:ident, $name:literal) => {
         impl Store<$ty> for Messages {
             fn store(&mut self, msg: $ty) {
-                self.$field.insert(msg);
+                let _ = self.$field.insert(msg);
             }
             fn take(&mut self) -> Option<$ty> {
                 self.$field.take()
@@ -49,7 +52,15 @@ impl_store!(
     param_request_list,
     "param_request_list"
 );
-impl_store!(ParamSetMsg, param_set, "param_set");
+impl Store<ParamSetMsg> for Messages {
+    fn store(&mut self, msg: ParamSetMsg) {
+        let _ = self.param_set.push_back(msg);
+    }
+
+    fn take(&mut self) -> Option<ParamSetMsg> {
+        self.param_set.pop_front()
+    }
+}
 impl_store!(TimesyncMsg, timesync, "timesync");
 impl_store!(OffboardControlMsg, offboard_control, "offboard_control");
 impl_store!(RosflightCmdMsg, cmd, "cmd");

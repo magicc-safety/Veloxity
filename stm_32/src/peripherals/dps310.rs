@@ -14,7 +14,6 @@ use crate::synch_at;
 use voloxide_core::errors;
 use voloxide_core::packets;
 
-use core::module_path;
 //use defmt::info;
 //use defmt::trace;
 
@@ -114,7 +113,7 @@ impl Dps310Sensor {
             ));
         }
 
-        let mut cal = self.read_calibration_coefficients().await?;
+        let cal = self.read_calibration_coefficients().await?;
         Ok(cal)
     }
 
@@ -206,7 +205,7 @@ impl Dps310Sensor {
 
         // wait for data ready...
         // Use DRDY signal for better robustness? otherwise, timeout at 14ms.
-        let drdy_result = with_timeout(
+        let _drdy_result = with_timeout(
             Duration::from_micros(14_000),
             self.drdy.wait_for_rising_edge(),
         )
@@ -215,10 +214,10 @@ impl Dps310Sensor {
         Timer::after_micros(20).await; // We need at least 14us delay here if running at 2 MHz, maybe because of the messy harness?
 
         // read status (highest 8 bits)
-        let mut status = (self.read_register(MEAS_CFG_REG).await? as u16) << 8;
+        let status = (self.read_register(MEAS_CFG_REG).await? as u16) << 8;
 
         // read Pressure data
-        let mut raw_p = self.get_sensor_data(DPS310_READ_P_CMD).await?;
+        let raw_p = self.get_sensor_data(DPS310_READ_P_CMD).await?;
         Ok((raw_p, status))
     }
 
@@ -228,7 +227,7 @@ impl Dps310Sensor {
 
         // wait for data ready...
         // Use DRDY signal if available, otherwise let it timeout
-        let drdy_result = with_timeout(
+        let _drdy_result = with_timeout(
             Duration::from_micros(3_000),
             self.drdy.wait_for_rising_edge(),
         )
@@ -236,10 +235,10 @@ impl Dps310Sensor {
         .is_ok();
 
         // read status (modify lowest 8 bits)
-        let mut status_low = self.read_register(MEAS_CFG_REG).await? as u16;
+        let status_low = self.read_register(MEAS_CFG_REG).await? as u16;
 
         // read Temperature data
-        let mut raw_t = self.get_sensor_data(DPS310_READ_T_CMD).await?;
+        let raw_t = self.get_sensor_data(DPS310_READ_T_CMD).await?;
         Ok((raw_t, status_low))
     }
 
@@ -300,14 +299,14 @@ impl Dps310Sensor {
 
             // process pressure data
             // let ((raw_p, status_high), (raw_t, status_low)) = join!(pressure_fut, temperature_fut).await;
-            let (raw_p, mut status_high) = match self.get_pressure_data().await {
+            let (raw_p, status_high) = match self.get_pressure_data().await {
                 Ok(data) => data,
                 Err(e) => {
                     BARO_SIGNAL.signal(Err(e));
                     continue;
                 }
             };
-            let (raw_t, mut status_low) = match self.get_temperature_data().await {
+            let (raw_t, status_low) = match self.get_temperature_data().await {
                 Ok(data) => data,
                 Err(e) => {
                     BARO_SIGNAL.signal(Err(e));
@@ -318,12 +317,9 @@ impl Dps310Sensor {
             // combine status bits
             let status_combined = (status_high & 0xFF00) | (status_low & 0x00FF);
 
-            // read status (modify lowest 8 bits)
-            let status = status_high |= status_low;
-
             let (raw_t_f64, temperature) =
                 self.process_temperature_data(raw_t, &mut raw_t_previous, &mut cal);
-            let (raw_p_f64, pressure) = self.process_pressure_data(raw_p, raw_t_f64, &mut cal);
+            let (_raw_p_f64, pressure) = self.process_pressure_data(raw_p, raw_t_f64, &mut cal);
 
             if status_combined == 0xD0E0 {
                 let header = packets::RosflightPacketHeader {

@@ -81,7 +81,6 @@ where
     pub control_pipeline: &'a mut ControlPipelineResource<E::State, M::ActuatorCommands>,
     pub pwm_output: &'a PwmOutputState,
     pub pwm: &'a mut PD,
-    pub dt: f64,
 }
 
 pub fn run_control_pipeline_if_new_imu<B, E, C, M, PD>(
@@ -102,7 +101,12 @@ where
 
     let current_time = imu_packet.header.timestamp;
     let last_imu_time = ctx.control_pipeline.last_imu_time();
-    if last_imu_time != 0 && current_time <= last_imu_time {
+    if last_imu_time == 0 {
+        ctx.control_pipeline.set_last_imu_time(current_time);
+        return false;
+    }
+
+    if current_time < last_imu_time {
         ctx.state.update(
             Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS),
             ctx.params,
@@ -114,13 +118,14 @@ where
         Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS),
         ctx.params,
     );
+    let dt = current_time.saturating_sub(last_imu_time) as f64 * 1e-6;
 
     let loop_start_us = ctx.board.clock_micros();
     let external_attitude = ctx.external_attitude.latest.take();
     let state = ctx.estimator.estimate_with_external_attitude(
         ctx.sensors,
         ctx.params,
-        ctx.dt,
+        dt,
         external_attitude,
     );
 
@@ -143,7 +148,7 @@ where
             command: ctx.command.combined_control(),
             params: ctx.params,
             air_density: ctx.sensors.air_density(),
-            dt: ctx.dt,
+            dt,
         },
     );
     let mixer_run = ctx.mixer.mix(

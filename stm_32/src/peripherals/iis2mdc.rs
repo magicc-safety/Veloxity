@@ -14,7 +14,6 @@ use crate::synch_at;
 use voloxide_core::errors;
 use voloxide_core::packets;
 
-use core::module_path;
 //use defmt::info;
 //use defmt::trace;
 
@@ -155,7 +154,7 @@ impl Iis2mdcSensor {
                 _ => errors::SensorError::GenericSensorError("SPI failed: initialize_sensor"),
             })?;
 
-        let offset = [
+        let _offset = [
             (((offset[1] as u16) | (offset[2] as u16) << 8) as i16) * 3 / 2,
             (((offset[3] as u16) | (offset[4] as u16) << 8) as i16) * 3 / 2,
             (((offset[5] as u16) | (offset[6] as u16) << 8) as i16) * 3 / 2,
@@ -173,7 +172,7 @@ impl Iis2mdcSensor {
         self.write_register(CFG_REG_A, 0x81).await?;
 
         // Use DRDY signal for better robustness? otherwise, timeout at 9.6ms.
-        let drdy_result = with_timeout(
+        let _drdy_result = with_timeout(
             Duration::from_micros(9_600),
             self.drdy.wait_for_rising_edge(),
         )
@@ -235,7 +234,7 @@ impl Iis2mdcSensor {
     }
 
     pub async fn run(&mut self) {
-        let status = match self.initialize_sensor().await {
+        let _status = match self.initialize_sensor().await {
             Ok(status) => status,
             Err(e) => {
                 //trace!("Failed to initialize sensor: {:?}", e);
@@ -252,7 +251,7 @@ impl Iis2mdcSensor {
             Timer::at(timestamp).await;
 
             // Read Flux Data
-            let (status, mut flux_data, mut raw_temperature) =
+            let (status, flux_data, raw_temperature) =
                 match self.get_flux_and_temperature_data().await {
                     Ok(data) => data,
                     Err(e) => {

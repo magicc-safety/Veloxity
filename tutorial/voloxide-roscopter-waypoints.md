@@ -58,6 +58,14 @@ The script starts the Zenoh router, launches the Voloxide firmware bridge with R
 initialization and IMU calibration, starts ROScopter's estimator first, arms and waits for stationary
 barometer calibration, starts the ROScopter autonomy nodes and waypoint marker publisher, sets
 `/path_manager hold_last=true`, loads the default multirotor mission, and releases RC override.
+It uses `/tmp/voloxide_roscopter_sim.params` as the Voloxide SIL parameter store so fixed-wing
+simulation runs cannot leave stale mixer or airframe settings in the quadrotor demo.
+By default it deletes that store before launch (`RESET_VOLOXIDE_PARAMS=true`) and then loads
+`rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml`, so the flight demo uses the
+documented ROSflight parameter file rather than saved parameters from previous tests.
+For this external-estimator sim path it also sets firmware parameter `FILT_USE_ACC=0` before arming,
+so the firmware does not block actuator output on its internal accelerometer correction health gate
+while ROScopter is already feeding external attitude.
 
 Stop the demo with `Ctrl-C` in the script terminal.
 
@@ -94,6 +102,7 @@ Run firmware initialization and calibration:
 ```bash
 ros2 launch rosflight_sim multirotor_init_firmware.launch.py
 ros2 service call /calibrate_imu std_srvs/srv/Trigger
+ros2 service call /param_set rosflight_msgs/srv/ParamSet "{name: FILT_USE_ACC, value: 0.0}"
 ```
 
 Start only the ROScopter estimator first. Override `rho` to `NOT_IN_USE`; the installed estimator
@@ -104,9 +113,15 @@ GNSS-altitude density calculation.
 ros2 run roscopter estimator \
   --ros-args \
   --params-file workspace/install/roscopter/share/roscopter/params/estimator.yaml \
+  -r imu:=/imu/data \
   -p hotstart_estimator:=false \
   -p rho:=-1000000.0
 ```
+
+The `imu` remap is required when launching the estimator directly. ROSflight
+publishes the bridged IMU on `/imu/data`; without the remap the estimator waits
+on `/imu`, `/estimated_state` stays frozen at the origin, and the controller
+publishes a zero `/command` even though the trajectory follower is active.
 
 Arm and wait on the ground for ROScopter's barometer calibration:
 
@@ -177,6 +192,8 @@ Expected healthy GUI run:
 
 The ROSflight tutorial says RC override starts enabled and must be disabled for autonomous flight.
 It also says `standalone_sim` can drift when armed because the ground-plane model is simple.
+When `use_vimfly:=true`, the `rc.py` helper does not create the `/toggle_arm`
+and `/toggle_override` service shortcuts; use VimFly's `t` and `r` keys instead.
 
 ROScopter's estimator starts barometer calibration after the first armed status. Starting the
 estimator alone, arming, and waiting before starting controller/path nodes prevents the controller

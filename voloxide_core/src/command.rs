@@ -1,10 +1,5 @@
-use crate::comm::CommManager;
-use crate::comm::interface::CommInterface;
 use crate::comm::messages::{
-    enums::{
-        OffboardControlIgnore,
-        OffboardControlMode::{self, *},
-    },
+    enums::{OffboardControlIgnore, OffboardControlMode},
     messages::OffboardControlMsg,
 };
 use crate::params::{ParamId, ParamValue, Params};
@@ -23,7 +18,6 @@ pub enum ControlType {
 
 // simpler than the enum representation in c++ command_manager.h
 const ATTITUDE_RATE_MODE: i32 = 0;
-const ATTITUDE_ANGLE_MODE: i32 = 1;
 
 pub const OVERRIDE_NO_OVERRIDE: u16 = 0x0;
 pub const OVERRIDE_ATT_SWITCH: u16 = 0x1;
@@ -164,12 +158,12 @@ impl CommandManager {
     pub fn update_failsafe_config(&mut self, params: &Params, state_manager: &mut StateManager) {
         let mut failsafe_throttle = match params.get_by_id(ParamId::PARAM_FAILSAFE_THROTTLE) {
             ParamValue::Float(val) => val,
-            other => 0.0f32,
+            _ => 0.0f32,
         };
 
         let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
             ParamValue::Int(val) => val != 0,
-            other => false,
+            _ => false,
         };
 
         if !is_fixed_wing && (failsafe_throttle < 0.0 || failsafe_throttle > 1.0) {
@@ -195,7 +189,7 @@ impl CommandManager {
             }
             // Error case: it's the wrong type.
             // We log the error and apply a safe default (Fz).
-            other_type => {
+            _ => {
                 self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64;
             }
         }
@@ -219,7 +213,7 @@ impl CommandManager {
         if state_manager.is_in_failsafe() {
             let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
                 ParamValue::Int(val) => val != 0,
-                other => false,
+                _ => false,
             };
             self.combined_command = if is_fixed_wing {
                 self.fixedwing_failsafe_command
@@ -238,7 +232,7 @@ impl CommandManager {
             // --- 3. Offboard Timeout "Fail-over" (C++ lines 246-252) ---
             let timeout_ms = match params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) {
                 ParamValue::Int(val) => val as u32,
-                other => {
+                _ => {
                     100 // Use the C++ default as a safe fallback
                 }
             };
@@ -271,7 +265,7 @@ impl CommandManager {
         &mut self,
         now_us: u64,
         msg: &OffboardControlMsg,
-        params: &Params,
+        _params: &Params,
     ) {
         // We got a new command, so update the timestamp
         self.last_offboard_command_us = now_us;
@@ -370,7 +364,7 @@ impl CommandManager {
                 }
             }
             // Error case: param is wrong type!
-            other_type => {
+            _ => {
                 // Default to Z_AXIS for safety
                 self.rc_command.fx.value = 0.0;
                 self.rc_command.fy.value = 0.0;
@@ -389,7 +383,7 @@ impl CommandManager {
         // C++: lines 130-153
         let is_fixed_wing = match params.get_by_id(ParamId::PARAM_FIXED_WING) {
             ParamValue::Int(val) => val != 0,
-            other => {
+            _ => {
                 // This is a param definition error. Default to the safer
                 // (non-fixed-wing) case.
                 false
@@ -404,30 +398,29 @@ impl CommandManager {
             self.rc_command.fz.control_type = ControlType::Passthrough;
         } else {
             // check if we've mapped the AttType channel...
-            let mut roll_pitch_type = ControlType::Rate;
-            if rc.switch_mapped(Switch::AttType) {
+            let roll_pitch_type = if rc.switch_mapped(Switch::AttType) {
                 // if we have, probe it to know if we should use rate or angle for qx and qy
-                roll_pitch_type = if rc.switch_on(Switch::AttType) {
+                if rc.switch_on(Switch::AttType) {
                     ControlType::Angle
                 } else {
                     ControlType::Rate
-                };
+                }
             } else {
                 // if not, fall back to the parameter Attitude mode
                 let att_mode = match params.get_by_id(ParamId::PARAM_RC_ATTITUDE_MODE) {
                     ParamValue::Int(val) => val,
-                    other => {
+                    _ => {
                         200 // Default value from C++ params
                     }
                 };
-                roll_pitch_type = match att_mode {
+                match att_mode {
                     ATTITUDE_RATE_MODE => ControlType::Rate,
                     _ => {
                         // if we're not in rate mode, we're in pitch mode...
                         ControlType::Angle
                     }
                 }
-            }
+            };
 
             self.rc_command.qx.control_type = roll_pitch_type;
             self.rc_command.qy.control_type = roll_pitch_type;
@@ -436,11 +429,11 @@ impl CommandManager {
                 ControlType::Rate => {
                     let max_rollrate = match params.get_by_id(ParamId::PARAM_RC_MAX_ROLLRATE) {
                         ParamValue::Float(val) => val as f64,
-                        other => 1.0,
+                        _ => 1.0,
                     };
                     let max_pitchrate = match params.get_by_id(ParamId::PARAM_RC_MAX_PITCHRATE) {
                         ParamValue::Float(val) => val as f64,
-                        other => 1.0,
+                        _ => 1.0,
                     };
                     self.rc_command.qx.value *= max_rollrate;
                     self.rc_command.qy.value *= max_pitchrate;
@@ -448,11 +441,11 @@ impl CommandManager {
                 ControlType::Angle => {
                     let max_roll = match params.get_by_id(ParamId::PARAM_RC_MAX_ROLL) {
                         ParamValue::Float(val) => val as f64,
-                        other => 1.0,
+                        _ => 1.0,
                     };
                     let max_pitch = match params.get_by_id(ParamId::PARAM_RC_MAX_PITCH) {
                         ParamValue::Float(val) => val as f64,
-                        other => 1.0,
+                        _ => 1.0,
                     };
                     self.rc_command.qx.value *= max_roll;
                     self.rc_command.qy.value *= max_pitch;
@@ -463,7 +456,7 @@ impl CommandManager {
             self.rc_command.qz.control_type = ControlType::Rate;
             let max_yawrate = match params.get_by_id(ParamId::PARAM_RC_MAX_YAWRATE) {
                 ParamValue::Float(val) => val as f64,
-                other => 1.0,
+                _ => 1.0,
             };
             self.rc_command.qz.value *= max_yawrate;
 
@@ -492,18 +485,22 @@ impl CommandManager {
         lag_time_ms: u32,
         now_ms: u32,
     ) -> bool {
-        if (rc.stick(stick) as f64).abs() > deviation_param {
-            self.last_stick_override_time[stick as usize] = now_ms;
-            true
-        } else {
-            now_ms < self.last_stick_override_time[stick as usize].saturating_add(lag_time_ms)
+        if now_ms < self.last_stick_override_time[stick as usize].saturating_add(lag_time_ms) {
+            return true;
         }
+
+        if (rc.stick(stick) as f64).abs() <= deviation_param {
+            return false;
+        }
+
+        self.last_stick_override_time[stick as usize] = now_ms;
+        true
     }
 
     fn do_attitude_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32) -> u16 {
         let deviation_param = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
             ParamValue::Float(val) => val as f64, // Convert f32 to f64
-            other => {
+            _ => {
                 0.1 // Default value from C++ params
             }
         };
@@ -511,7 +508,7 @@ impl CommandManager {
         // --- REFACTORED: PARAM_OVERRIDE_LAG_TIME ---
         let lag_time_ms = match params.get_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME) {
             ParamValue::Int(val) => val as u32,
-            other => {
+            _ => {
                 200 // Default value from C++ params
             }
         };
@@ -576,7 +573,7 @@ impl CommandManager {
     fn do_throttle_muxing(&mut self, params: &Params, rc: &Rc) -> u16 {
         let throttle_axis_idx = match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
             ParamValue::Int(val) => val as u32,
-            other => {
+            _ => {
                 200 // Default value from C++ params
             }
         };
@@ -596,7 +593,7 @@ impl CommandManager {
         if offboard_throttle_channel.active {
             let take_min = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE) {
                 ParamValue::Int(val) => val != 0,
-                other => true,
+                _ => true,
             };
 
             if take_min && rc_throttle_value < offboard_throttle_channel.value {
@@ -766,7 +763,10 @@ mod tests {
     #[test]
     fn throttle_switch_override_still_reports_inactive_offboard_throttle() {
         let mut params = Params::new();
-        params.set_by_id(ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL, ParamValue::Int(5));
+        params.set_by_id(
+            ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL,
+            ParamValue::Int(5),
+        );
         let mut state = StateManager::new();
         let mut command = CommandManager::new();
         let mut rc = initialized_rc(&params);
@@ -895,5 +895,43 @@ mod tests {
             command.fixedwing_failsafe_command.fz.control_type,
             ControlType::Passthrough
         );
+    }
+
+    #[test]
+    fn fixedwing_rc_command_uses_passthrough_channel_types() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        command.interpret_rc(&rc, &params);
+
+        let rc_control = command.rc_control();
+        assert_eq!(rc_control.qx.control_type, ControlType::Passthrough);
+        assert_eq!(rc_control.qy.control_type, ControlType::Passthrough);
+        assert_eq!(rc_control.qz.control_type, ControlType::Passthrough);
+        assert_eq!(rc_control.fx.control_type, ControlType::Passthrough);
+        assert_eq!(rc_control.fy.control_type, ControlType::Passthrough);
+        assert_eq!(rc_control.fz.control_type, ControlType::Passthrough);
+    }
+
+    #[test]
+    fn fixedwing_failsafe_accepts_passthrough_throttle_outside_multirotor_range() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(1.5));
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+
+        command.update_failsafe_config(&params, &mut state);
+
+        assert!(!state.get_errors().contains(ErrorFlag::INVALID_FAILSAFE));
+        assert_eq!(
+            command.fixedwing_failsafe_command.fz.control_type,
+            ControlType::Passthrough
+        );
+        assert_eq!(command.fixedwing_failsafe_command.fz.value, 0.0);
     }
 }

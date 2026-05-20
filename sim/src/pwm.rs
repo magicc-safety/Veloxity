@@ -1,21 +1,13 @@
-use std::time::Instant;
-
 use crate::ros_messages;
 use voloxide_core::board::BoardIo;
-use voloxide_core::errors;
 use voloxide_core::pwm::{
     PwmDriver, PwmError, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
 };
 
 use cdr::{CdrLe, Infinite};
-use tokio::io::ErrorKind;
-use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
 use zenoh::bytes::{Encoding, ZBytes};
-use zenoh::handlers::FifoChannelHandler;
-use zenoh::pubsub::{Publisher, Subscriber};
-use zenoh::sample::Sample;
 use zenoh::session::Session;
 
 const NUM_SIM_CHANNELS: usize = 14; // Match OutputRaw array size
@@ -70,14 +62,6 @@ impl SimPwmDriver {
             // enabled_mask: 0, // Initialize if using mask
         }
     }
-
-    /// Helper to convert u16 duty (0-u16::MAX) to simulator PWM (1000-2000 us).
-    fn duty_u16_to_normalized(duty: u16) -> f32 {
-        // Map u16 range linearly to 1000-2000 us range
-        let normalized_duty = duty as f32 / u16::MAX as f32;
-        // Clamp normalized duty before scaling
-        normalized_duty.clamp(0.0, 1.0)
-    }
 }
 
 impl PwmDriver for SimPwmDriver {
@@ -95,7 +79,7 @@ impl PwmDriver for SimPwmDriver {
 
     fn disable_all(&mut self) {
         for i in 0..self.len() {
-            self.disable(i);
+            let _ = self.disable(i);
         }
     }
 

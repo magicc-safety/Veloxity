@@ -1,9 +1,7 @@
 use crate::generated::dialects::rosflight::{Rosflight, messages as mav_messages};
 use crate::parser;
-use core::result::Result;
 use mavio::Frame;
 use mavio::prelude::*;
-use mavio::protocol::{DialectVersion, FrameBuilder};
 use voloxide_core::board;
 use voloxide_core::comm::interface::CommInterface;
 use voloxide_core::comm::messages::{Messages, Store, messages as core_messages};
@@ -93,7 +91,7 @@ impl MavlinkInterface {
     }
 
     fn process_rosflight_message(&mut self, message: Rosflight, msgs: &mut Messages) {
-        match (message) {
+        match message {
             Rosflight::ExternalAttitude(es) => {
                 msgs.store(core_messages::ExternalAttitudeMsg::from(es))
             }

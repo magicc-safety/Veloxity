@@ -448,7 +448,7 @@ ros2/voloxide_sil_board_shim
 sim/src/ffi.rs
 ├── owns FfiBoard
 ├── owns FfiPwmDriver
-├── instantiates World<FfiBoard, QuadEstimator, QuadController, QuadMixer, MavlinkInterface, FfiPwmDriver>
+├── instantiates World<FfiBoard, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, FfiPwmDriver>
 ├── maps FFI snapshots into SensorBus packets
 ├── maps PwmDriver commands into shared PWM outputs
 └── owns UDP MAVLink socket for rosflight_io
@@ -611,7 +611,7 @@ shows the same composition pattern without the ROS 2 C++ shim:
 
 ```text
 SimWorld =
-World<Board, QuadEstimator, QuadController, QuadMixer, MavlinkInterface, SimPwmDriver>
+World<Board, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, SimPwmDriver>
 
 main
 ├── Board::new
@@ -683,15 +683,14 @@ rosflight_io
                     ├── checks StateManager
                     ├── sets CalibrationFlags
                     ├── zeros relevant bias params
-                    └── returns started command
-                        └── CommManager stores pending calibration ack
-                            └── sensor processors run calibration while sensor packets arrive
-                                └── World::update_sensor_health_and_calibration
-                                    └── queue_completed_calibration_ack when flags clear
+                    └── queues immediate ROSFLIGHT_CMD_ACK when calibration starts
+                        └── sensor processors run calibration while sensor packets arrive
+                            └── completion or failure updates calibration state/logs
 ```
 
-The command service starts calibration. The sensor processors finish calibration. The scheduler
-coordinates when the completion ACK is emitted.
+The command service starts calibration and ACKs acceptance immediately, matching ROSflight 2.0.
+The sensor processors finish calibration later and report completion/failure through state and logs,
+not through a second command ACK.
 
 ## End-To-End Flow: RC And Arming
 

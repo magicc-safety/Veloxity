@@ -106,8 +106,8 @@ impl Adis16500Sensor {
         // let mut sync_clk = self.timer.ch1();
         // sync_clk.enable();
         // sync_clk.set_duty_cycle_fraction(1,2); // .set_duty_cycle(ch1.max_duty_cycle()/2);
-        self.timer.enable(pwm::TimerChannel::Ch1);
-        self.timer.set_duty_cycle(pwm::TimerChannel::Ch1, 500); // 500 us
+        let _ = self.timer.enable(pwm::TimerChannel::Ch1);
+        let _ = self.timer.set_duty_cycle(pwm::TimerChannel::Ch1, 500); // 500 us
 
         Timer::after_micros(1000).await;
 
@@ -324,7 +324,7 @@ impl Adis16500Sensor {
     }
 
     pub async fn run(&mut self) {
-        let status = match self.initialize_sensor().await {
+        let _status = match self.initialize_sensor().await {
             Ok(status) => status,
             Err(e) => {
                 //trace!("Failed to initialize sensor: {:?}", e);

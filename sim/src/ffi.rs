@@ -11,7 +11,7 @@ use voloxide_core::{
     controller::quad::QuadController,
     errors,
     estimator::quad::QuadEstimator,
-    mixer::quad::QuadMixer,
+    mixer::matrix::MatrixMixer,
     packets,
     params::{PARAM_DEFINITIONS, ParamValue, Params},
     pwm::{
@@ -378,7 +378,8 @@ impl BoardIo for FfiBoard {
             }));
         }
 
-        if snapshot.has_airspeed && snapshot.airspeed.timestamp_us > self.last_airspeed_timestamp_us {
+        if snapshot.has_airspeed && snapshot.airspeed.timestamp_us > self.last_airspeed_timestamp_us
+        {
             self.last_airspeed_timestamp_us = snapshot.airspeed.timestamp_us;
             sensors.pitot = Some(Ok(packets::PitotPacket {
                 header: packets::RosflightPacketHeader {
@@ -475,7 +476,7 @@ impl BoardIo for FfiBoard {
 }
 
 type FfiWorld =
-    World<FfiBoard, QuadEstimator, QuadController, QuadMixer, MavlinkInterface, FfiPwmDriver>;
+    World<FfiBoard, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, FfiPwmDriver>;
 
 pub struct VoloxideFfiHandle {
     sensors: Arc<Mutex<SharedSensors>>,
@@ -496,7 +497,7 @@ pub extern "C" fn voloxide_sim_create() -> *mut VoloxideFfiHandle {
     let _ = board.read_params(&mut params);
     let estimator = QuadEstimator::default();
     let controller = QuadController::default();
-    let mixer = QuadMixer::new(&params);
+    let mixer = MatrixMixer::new(&params);
     let mavlink = MavlinkInterface::new();
     let state = StateManager::new();
     let pwm = FfiPwmDriver::new(Arc::clone(&outputs));

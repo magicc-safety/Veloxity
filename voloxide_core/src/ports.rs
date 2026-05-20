@@ -37,6 +37,10 @@ impl<'a> ParamsWritePort<'a> {
     pub fn set(&mut self, id: ParamId, value: ParamValue) {
         self.params.set_by_id(id, value);
     }
+
+    pub fn raw_mut(&mut self) -> &mut Params {
+        self.params
+    }
 }
 
 pub struct EventEmitPort<'a, T: Copy, const N: usize> {

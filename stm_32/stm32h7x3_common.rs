@@ -2,7 +2,6 @@ use core::default::Default;
 use core::option::Option::Some;
 use embassy_stm32::{Config, rcc};
 
-use cortex_m_rt::entry;
 //use defmt::*;
 
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
@@ -10,11 +9,10 @@ use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::Peripherals as EMBASSY_Peripherals;
 use embassy_stm32::bind_interrupts;
-use embassy_stm32::dma::NoDma;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::OutputType;
 use embassy_stm32::gpio::Pull;
-use embassy_stm32::gpio::{Input, Level, Output, Speed};
+use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::i2c;
 use embassy_stm32::interrupt;
 use embassy_stm32::interrupt::InterruptExt;
@@ -27,48 +25,50 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::time::mhz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart;
-use embassy_stm32::usart::BufferedUart;
-use embassy_stm32::usart::BufferedUartTx;
 use embassy_stm32::usart::Uart;
 use embassy_stm32::usb;
-use embassy_stm32::usb::{Driver, Instance};
+use embassy_stm32::usb::Driver;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
-use embassy_sync::pipe::Pipe;
-use embassy_time::Duration;
-use embassy_time::Instant;
-use embedded_io_async::BufRead;
 use static_cell::StaticCell;
 //use {defmt_rtt as _, panic_probe as _};
 
-use embedded_hal_async::spi::SpiDevice as _;
 
 // pub struct UartResources {
 //     pub uart: usart::BufferedUart<'static>,
 // }
 
 // All STM32 SPI's
+#[allow(dead_code)]
 static SPI1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static SPI2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static SPI3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static SPI4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static SPI5_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static SPI6_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
 
 // All STM32 I2C's
+#[allow(dead_code)]
 static I2C1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static I2C2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static I2C3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
+#[allow(dead_code)]
 static I2C4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
 
@@ -184,13 +184,13 @@ pub fn clock_config(mhz: u32) -> Config {
 
         if mhz == 4 {
             hsi_prediv = PllPreDiv::DIV2;
-        } else if (mhz == 8) {
+        } else if mhz == 8  {
             hsi_prediv = PllPreDiv::DIV4;
-        } else if (mhz == 24) {
+        } else if mhz == 24  {
             hsi_prediv = PllPreDiv::DIV12;
-        } else if (mhz == 50) {
+        } else if mhz == 50  {
             hsi_prediv = PllPreDiv::DIV25;
-        } else if (mhz == 64) {
+        } else if mhz == 64  {
             hsi_prediv = PllPreDiv::DIV32;
         } else {
             //self::panic!("HSI OSC MHz value");

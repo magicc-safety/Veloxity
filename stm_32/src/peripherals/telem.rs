@@ -2,7 +2,6 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 use embassy_stm32::usart::UartTx;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
 use embassy_sync::pipe::Pipe;
 use embassy_time::Timer;
 
@@ -10,7 +9,6 @@ use embassy_time::Timer;
 
 use voloxide_core::comm::interface::EmbeddedComInterface;
 use voloxide_core::errors;
-use voloxide_core::packets;
 
 pub static TX_BUFF_SIZE: usize = 4 * 2048;
 pub static RX_BUFF_SIZE: usize = 4 * 2048;
@@ -49,7 +47,7 @@ impl TelemTx {
             let mut buf = [0u8; TX_BUFF_SIZE]; // read up to the whole buffer
             let n = TELEM_TX.read(&mut buf).await;
             if n > 0 && n <= TX_BUFF_SIZE {
-                let result = self
+                let _result = self
                     .uart_tx
                     .write(&mut buf[0..n])
                     .await

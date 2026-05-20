@@ -16,6 +16,7 @@ static mut PARAM_STORE: Option<Params> = None;
 // we need a way of passing RcPacket from it's ROS definition to a "packet" form that we can process
 
 pub struct Board {
+    #[allow(dead_code)]
     probe: [Output<'static>; 4],
     pub start_time: embassy_time::Instant,
     pending_reset_to_bootloader: Option<bool>,
@@ -135,11 +136,6 @@ impl BoardIo for Board {
             Err(embassy_sync::pipe::TryReadError::Empty) => {
                 return Some(Ok(0));
             }
-            Err(_error) => {
-                return Some(Err(errors::TelemError::GenericTelemError(
-                    "Error Reading Telem Packet",
-                )));
-            }
         }
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -209,14 +205,17 @@ impl BoardIo for Board {
 }
 
 impl Board {
+    #[allow(dead_code)]
     fn probe_hi(&mut self, id: usize) {
         self.probe[id].set_high(); // so we can see something on the logic analyzer.
     }
 
+    #[allow(dead_code)]
     fn probe_lo(&mut self, id: usize) {
         self.probe[id].set_low(); // so we can see something on the logic analyzer.
     }
 
+    #[allow(dead_code)]
     fn probe_tog(&mut self, id: usize) {
         self.probe[id].toggle(); // so we can see something on the logic analyzer.
     }
@@ -280,7 +279,7 @@ impl Board {
             spi2_config,
         );
         let spi2_bus = Mutex::new(spi2);
-        let spi2_bus = SPI2_BUS.init(spi2_bus);
+        let _spi2_bus = SPI2_BUS.init(spi2_bus);
 
         // I2C1 Bus  ///////////////////////////////////////////
         let mut i2c_config = i2c::Config::default();
@@ -302,7 +301,7 @@ impl Board {
         // DLHRL20G Pitot
         let drdy0 = ExtiInput::new(p.PA15, p.EXTI15, Pull::Down);
         let dlhr_dev = I2cDevice::new(i2c1_bus);
-        let dlhr_sensor = peripherals::dlhrl20g::DlhrL20GSensor {
+        let _dlhr_sensor = peripherals::dlhrl20g::DlhrL20GSensor {
             dev: dlhr_dev,
             drdy: drdy0,
         };
@@ -310,7 +309,7 @@ impl Board {
         // Telemetry UART
         let mut uart2config = usart::Config::default();
         uart2config.baudrate = 921600;
-        let mut usart2 = Uart::new(
+        let usart2 = Uart::new(
             p.USART2,
             p.PD6,
             p.PD5,
@@ -320,7 +319,7 @@ impl Board {
             uart2config,
         )
         .unwrap();
-        let (mut usart2_tx, mut usart2_rx) = usart2.split();
+        let (usart2_tx, usart2_rx) = usart2.split();
 
         let telem2_rx = peripherals::telem::TelemRx {
             uart_rx: usart2_rx,
@@ -349,14 +348,14 @@ impl Board {
         // P1 Priority Task for Rx Tememetry
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
+        let _ = spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
         // TODO: What priority should VCP be?
         spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
         //GPS USART7
         let mut uart7config = usart::Config::default();
         uart7config.baudrate = 9600u32;
-        let mut uart7 = Uart::new(
+        let uart7 = Uart::new(
             p.UART7,
             p.PE7,
             p.PE8,
@@ -385,7 +384,7 @@ impl Board {
         uart1config.invert_tx = true;
         uart1config.data_bits = usart::DataBits::DataBits8;
 
-        let mut usart1 = Uart::new(
+        let usart1 = Uart::new(
             p.USART1,
             p.PB7,
             p.PB6,
@@ -395,11 +394,11 @@ impl Board {
             uart1config,
         )
         .unwrap();
-        let (mut uart1_tx, mut uart1_rx) = usart1.split();
+        let (_uart1_tx, uart1_rx) = usart1.split();
         let sbus_rx = peripherals::sbus::SbusRC { uart: uart1_rx };
 
         // uSD SDMMC1
-        let mut sdmmc1 = sdmmc::Sdmmc::new_4bit(
+        let sdmmc1 = sdmmc::Sdmmc::new_4bit(
             p.SDMMC1,
             Sdmmc1Irqs,
             p.PC12,
@@ -511,7 +510,7 @@ impl Board {
         let ch10_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
         let ch11_pin = PwmPin::new_ch4(p.PB1, OutputType::PushPull);
 
-        let mut timer1 = SimplePwm::new(
+        let timer1 = SimplePwm::new(
             p.TIM1,
             Some(ch0_pin),
             Some(ch1_pin),
@@ -520,7 +519,7 @@ impl Board {
             Hertz::hz(50),
             Default::default(),
         );
-        let mut timer4 = SimplePwm::new(
+        let timer4 = SimplePwm::new(
             p.TIM4,
             Some(ch4_pin),
             Some(ch5_pin),
@@ -529,7 +528,7 @@ impl Board {
             Hertz::hz(50),
             Default::default(),
         );
-        let mut timer2 = SimplePwm::new(
+        let timer2 = SimplePwm::new(
             p.TIM2,
             Some(ch8_pin),
             None,
@@ -538,7 +537,7 @@ impl Board {
             Hertz::hz(50),
             Default::default(),
         );
-        let mut timer3 = SimplePwm::new(
+        let timer3 = SimplePwm::new(
             p.TIM3,
             Some(ch10_pin),
             None,
@@ -548,12 +547,12 @@ impl Board {
             Default::default(),
         );
 
-        let mut timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
-        let mut timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
-        let mut timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
-        let mut timer3 = peripherals::pwm::TimerEnum::TIM3(timer3);
+        let timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
+        let timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
+        let timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
+        let timer3 = peripherals::pwm::TimerEnum::TIM3(timer3);
 
-        let mut timers: [peripherals::pwm::TimerEnum; 4] = [timer1, timer2, timer3, timer4];
+        let timers: [peripherals::pwm::TimerEnum; 4] = [timer1, timer2, timer3, timer4];
 
         let mut servos = peripherals::pwm::ServoMonstrosity::new(
             timers,
@@ -575,7 +574,7 @@ impl Board {
 
         // disable all channels at start
         for i in 0..servos.len() {
-            servos.disable(i);
+            let _ = servos.disable(i);
         }
 
         // Setup Probe GPIO's

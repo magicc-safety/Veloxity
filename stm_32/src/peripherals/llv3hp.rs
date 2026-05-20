@@ -6,7 +6,6 @@ use voloxide_core::{errors, packets};
 // I2C Specific
 use embassy_stm32::i2c::I2c;
 //use embassy_stm32::i2c::Master;
-use embassy_embedded_hal::shared_bus::I2cDeviceError;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embedded_hal_async::i2c::I2c as _;
 
@@ -63,7 +62,7 @@ impl Llv3hpSensor {
         data: &mut [u8],
     ) -> Result<(), ()> {
         match self.dev.write(address, register).await {
-            Err(e) => return Err(()),
+            Err(_e) => return Err(()),
             Ok(_) => {}
         }
 
@@ -71,7 +70,7 @@ impl Llv3hpSensor {
 
         // Read register
         match self.dev.read(address, data).await {
-            Err(e) => return Err(()),
+            Err(_e) => return Err(()),
             Ok(_) => {}
         }
 
@@ -200,7 +199,6 @@ impl Llv3hpSensor {
         }
 
         let loop_period = Duration::from_hz(100);
-        let mut last_timestamp_us = 0u64;
         loop {
             // Initiate another data read
             if self
@@ -255,7 +253,6 @@ impl Llv3hpSensor {
                 RANGE_SIGNAL.signal(Ok(range_packet)); // make data available for other tasks
                 //defmt::info!("{:?} ", range_packet);
                 //defmt::info!("{:?}", timestamp_us-last_timestamp_us);
-                last_timestamp_us = timestamp_us;
             }
         }
     }

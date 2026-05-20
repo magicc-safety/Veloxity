@@ -216,7 +216,7 @@ impl QuadEstimator {
         // Update parameters from parameter server (matches C behavior)
         self.update_params(params);
 
-        if dt <= 0.0 {
+        if dt < 0.0 {
             return AttitudeState {
                 q_hat: self.q_hat,
                 q_dot: self.q_dot,
@@ -578,6 +578,40 @@ mod tests {
         let state = estimator.estimate(&sensors, &params, 0.002);
 
         assert!(!state.is_healthy());
+    }
+
+    #[test]
+    fn fixedwing_flag_keeps_attitude_estimator_healthy_on_accel_correction_timeout() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_FILTER_USE_ACC, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_INIT_TIME, ParamValue::Int(0));
+        let mut estimator = QuadEstimator::default();
+        let mut sensors = ProcessedSensors::default();
+        sensors.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1_000,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -G],
+            gyro: [0.0, 0.0, 0.0],
+            ..Default::default()
+        });
+
+        let _ = estimator.estimate(&sensors, &params, 0.002);
+        sensors.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 601_001,
+                status: 0,
+            },
+            accel: [20.0, 0.0, 0.0],
+            gyro: [0.0, 0.0, 0.0],
+            ..Default::default()
+        });
+
+        let state = estimator.estimate(&sensors, &params, 0.002);
+
+        assert!(state.is_healthy());
     }
 
     #[test]

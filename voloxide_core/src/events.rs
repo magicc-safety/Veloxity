@@ -1,5 +1,6 @@
 use crate::{
     comm::messages::{
+        PARAM_SET_EVENT_QUEUE_CAPACITY,
         enums::{ParamIdentifier, RosflightCmd},
         messages::{
             ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamValueMsg,
@@ -60,6 +61,10 @@ impl<T: Copy, const N: usize> EventQueue<T, N> {
 
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.items.len() == N
     }
 }
 
@@ -156,11 +161,11 @@ pub enum CommResponse {
     HardError(RosflightHardErrorMsg),
 }
 
-pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = 4;
+pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = PARAM_SET_EVENT_QUEUE_CAPACITY;
 pub const PARAM_READ_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const PARAM_LIST_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const PARAM_CHANGED_QUEUE_CAPACITY: usize = 8;
-pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = 8;
+pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = 128;
 pub const CALIBRATION_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const OFFBOARD_CONTROL_REQUEST_QUEUE_CAPACITY: usize = 4;
 pub const PARAM_DEFAULTS_REQUEST_QUEUE_CAPACITY: usize = 2;

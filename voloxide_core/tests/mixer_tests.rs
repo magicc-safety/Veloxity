@@ -1,6 +1,6 @@
 use nalgebra::SVector as Vector;
 use voloxide_core::controller::quad::ControllerOutput;
-use voloxide_core::mixer::quad::QuadMixer;
+use voloxide_core::mixer::matrix::{MatrixMixer, sync_reflected_mixer_params};
 use voloxide_core::mixer::{Mixer, MixerCtx, MixerStatus};
 use voloxide_core::params::{ParamId, ParamValue, Params};
 use voloxide_core::state_machine::{Event, StateManager};
@@ -26,9 +26,9 @@ fn test_params() -> Params {
 }
 
 /// Helper to create a Mixer with deterministic parameters for testing
-fn create_test_mixer() -> QuadMixer {
+fn create_test_mixer() -> MatrixMixer {
     let params = test_params();
-    QuadMixer::new(&params)
+    MatrixMixer::new(&params)
 }
 
 fn armed_state() -> StateManager {
@@ -113,7 +113,7 @@ fn test_quad_emits_rosflight_ten_output_shape() {
 fn test_quad_x_canned_mixer_uses_rosflight_runtime_inversion() {
     let mut params = test_params();
     params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(2));
-    let mut mixer = QuadMixer::new(&params);
+    let mut mixer = MatrixMixer::new(&params);
     let input = controller_output(0.4, Vector::from([0.0, 0.0, 0.0]));
     let state = armed_state();
 
@@ -130,7 +130,7 @@ fn test_esc_calibration_mixer_uses_rosflight_rank_deficient_pseudoinverse() {
     let mut params = test_params();
     params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(0));
     params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.0));
-    let mut mixer = QuadMixer::new(&params);
+    let mut mixer = MatrixMixer::new(&params);
     let input = ControllerOutput::from_forces_torques_and_passthrough(
         Vector::from([0.0, 0.0, 0.4]),
         Vector::from([0.0, 0.0, 0.0]),
@@ -155,7 +155,7 @@ fn test_custom_mixer_loads_rosflight_parameter_matrix_and_output_types() {
     params.set_by_name("PRI_MIXER_PWM_0", ParamValue::Float(490.0));
     params.set_by_name("PRI_MIXER_2_0", ParamValue::Float(-0.5));
 
-    let mut mixer = QuadMixer::new(&params);
+    let mut mixer = MatrixMixer::new(&params);
     let input = controller_output(0.4, Vector::from([0.0, 0.0, 0.0]));
     let state = armed_state();
 
@@ -179,7 +179,7 @@ fn test_invalid_primary_mixer_reports_status_without_mutating_state() {
     let mut params = test_params();
     params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(255));
     let state = armed_state();
-    let mut mixer = QuadMixer::new(&params);
+    let mut mixer = MatrixMixer::new(&params);
     let input = controller_output(0.4, Vector::from([0.0, 0.0, 0.0]));
 
     let run = mixer.mix(&input, mixer_ctx(&state, &params));
@@ -196,7 +196,7 @@ fn test_invalid_primary_mixer_reports_status_without_mutating_state() {
 fn test_canned_hex_x_selection_uses_rosflight_output_ownership() {
     let mut params = test_params();
     params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(4));
-    let mut mixer = QuadMixer::new(&params);
+    let mut mixer = MatrixMixer::new(&params);
     let input = controller_output(0.6, Vector::from([0.0, 0.0, 0.0]));
     let state = armed_state();
 
@@ -225,7 +225,7 @@ fn test_fixedwing_mixer_applies_reversal_params_before_mixing() {
     params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(9));
     params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
     params.set_by_id(ParamId::PARAM_AILERON_REVERSE, ParamValue::Int(1));
-    let mut mixer = QuadMixer::new(&params);
+    let mut mixer = MatrixMixer::new(&params);
     let input = ControllerOutput::from_forces_torques_and_passthrough(
         Vector::from([0.2, 0.0, 0.0]),
         Vector::from([0.4, 0.5, 0.6]),
@@ -250,12 +250,49 @@ fn test_fixedwing_mixer_applies_reversal_params_before_mixing() {
 }
 
 #[test]
+fn fixedwing_canned_mixer_updates_rosflight_reflection_params() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(10));
+
+    sync_reflected_mixer_params(&mut params, ParamId::PARAM_PRIMARY_MIXER);
+
+    assert_eq!(
+        params.get_by_name("PRI_MIXER_OUT_0"),
+        Some(ParamValue::Int(1))
+    );
+    assert_eq!(
+        params.get_by_name("PRI_MIXER_OUT_3"),
+        Some(ParamValue::Int(0))
+    );
+    assert_eq!(
+        params.get_by_name("PRI_MIXER_OUT_4"),
+        Some(ParamValue::Int(2))
+    );
+    assert_eq!(
+        params.get_by_name("PRI_MIXER_3_0"),
+        Some(ParamValue::Float(1.0))
+    );
+    assert_eq!(
+        params.get_by_name("PRI_MIXER_4_1"),
+        Some(ParamValue::Float(-0.5))
+    );
+    assert_eq!(
+        params.get_by_name("PRI_MIXER_5_2"),
+        Some(ParamValue::Float(0.5))
+    );
+    assert_eq!(
+        params.get_by_name("PRI_MIXER_0_4"),
+        Some(ParamValue::Float(1.0))
+    );
+}
+
+#[test]
 fn test_secondary_inverted_vtail_matches_rosflight_pseudoinverse_branch() {
     let mut params = test_params();
     params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(9));
     params.set_by_id(ParamId::PARAM_SECONDARY_MIXER, ParamValue::Int(10));
     params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
-    let mut mixer = QuadMixer::new(&params);
+    let mut mixer = MatrixMixer::new(&params);
     let input = ControllerOutput::from_forces_torques_and_passthrough(
         Vector::from([0.25, 0.0, 0.0]),
         Vector::from([0.3, 0.4, 0.2]),
@@ -314,7 +351,7 @@ fn test_pure_pitch_down() {
         front_motors_avg, rear_motors_avg
     );
 
-    // Current QuadMixer convention: positive pitch input increases the front pair.
+    // Current MatrixMixer convention: positive pitch input increases the front pair.
     assert!(
         front_motors_avg > rear_motors_avg,
         "Front motors should spin faster for positive pitch input"

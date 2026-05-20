@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+#[cfg(test)]
 mod tests;
 
 use crate::params::{ParamId, ParamValue, Params};
@@ -13,6 +14,7 @@ pub enum Event {
     REQUEST_DISARM,
     CALIBRATION_COMPLETE,
     CALIBRATION_FAILED,
+    HARDFAULT_REARM_REQUESTED,
     ERROR_OCCURRED(ErrorFlag),
     ERROR_CLEARED(ErrorFlag),
 }
@@ -33,20 +35,21 @@ bitflags! {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct State<S> {
+pub(crate) struct State<S> {
     state: S,
     error_flags: ErrorFlag,
 }
 
 // Holds FSM as its type changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateMachine {
+pub(crate) enum StateMachine {
     Init(State<Init>),
     Preflight(State<Preflight>),
     Calibrating(State<Calibrating>),
     Armed(State<Armed>),
     Failsafe(State<Failsafe>),
     ErrorPresent(State<ErrorPresent>),
+    ErrorFailsafe(State<ErrorFailsafe>),
 }
 
 impl StateMachine {
@@ -67,6 +70,7 @@ impl StateMachine {
             StateMachine::Armed(sm) => &mut sm.error_flags,
             StateMachine::Failsafe(sm) => &mut sm.error_flags,
             StateMachine::ErrorPresent(sm) => &mut sm.error_flags,
+            StateMachine::ErrorFailsafe(sm) => &mut sm.error_flags,
         }
     }
 
@@ -92,6 +96,7 @@ impl StateMachine {
             StateMachine::Armed(sm) => sm.state.on_event(sm, event, params),
             StateMachine::Failsafe(sm) => sm.state.on_event(sm, event, params),
             StateMachine::ErrorPresent(sm) => sm.state.on_event(sm, event, params),
+            StateMachine::ErrorFailsafe(sm) => sm.state.on_event(sm, event, params),
         }
     }
 
@@ -103,6 +108,7 @@ impl StateMachine {
             StateMachine::Armed(sm) => sm.error_flags,
             StateMachine::Failsafe(sm) => sm.error_flags,
             StateMachine::ErrorPresent(sm) => sm.error_flags,
+            StateMachine::ErrorFailsafe(sm) => sm.error_flags,
         }
     }
 
@@ -111,11 +117,17 @@ impl StateMachine {
     }
 
     pub fn is_in_failsafe(&self) -> bool {
-        matches!(self, StateMachine::Failsafe(_))
+        matches!(
+            self,
+            StateMachine::Failsafe(_) | StateMachine::ErrorFailsafe(_)
+        )
     }
 
     pub fn is_in_error_state(&self) -> bool {
-        matches!(self, StateMachine::ErrorPresent(_))
+        matches!(
+            self,
+            StateMachine::ErrorPresent(_) | StateMachine::ErrorFailsafe(_)
+        )
     }
 }
 
@@ -127,17 +139,19 @@ impl Default for StateMachine {
 
 // State structs
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Init;
+pub(crate) struct Init;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Preflight;
+pub(crate) struct Preflight;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Calibrating;
+pub(crate) struct Calibrating;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Armed;
+pub(crate) struct Armed;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Failsafe;
+pub(crate) struct Failsafe;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ErrorPresent;
+pub(crate) struct ErrorPresent;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ErrorFailsafe;
 
 // State transition logic
 impl Init {
@@ -147,6 +161,7 @@ impl Init {
                 state: Preflight,
                 error_flags: sm.error_flags,
             }),
+            Event::HARDFAULT_REARM_REQUESTED => StateMachine::Init(sm),
             _ => StateMachine::Init(sm),
         }
     }
@@ -173,6 +188,10 @@ impl Preflight {
                     })
                 }
             }
+            Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(State {
+                state: Armed,
+                error_flags: sm.error_flags,
+            }),
             Event::ERROR_OCCURRED(_) => StateMachine::ErrorPresent(State {
                 state: ErrorPresent,
                 error_flags: sm.error_flags,
@@ -201,6 +220,10 @@ impl Calibrating {
                 state: ErrorPresent,
                 error_flags: sm.error_flags,
             }),
+            Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(State {
+                state: Armed,
+                error_flags: sm.error_flags,
+            }),
             _ => StateMachine::Calibrating(sm),
         }
     }
@@ -226,6 +249,7 @@ impl Armed {
                 state: Failsafe,
                 error_flags: sm.error_flags,
             }),
+            Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(sm),
             _ => StateMachine::Armed(sm),
         }
     }
@@ -238,8 +262,12 @@ impl Failsafe {
                 state: Armed,
                 error_flags: sm.error_flags,
             }),
-            Event::REQUEST_DISARM => StateMachine::ErrorPresent(State {
-                state: ErrorPresent,
+            Event::REQUEST_DISARM => StateMachine::ErrorFailsafe(State {
+                state: ErrorFailsafe,
+                error_flags: sm.error_flags,
+            }),
+            Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(State {
+                state: Armed,
                 error_flags: sm.error_flags,
             }),
             _ => StateMachine::Failsafe(sm),
@@ -247,9 +275,56 @@ impl Failsafe {
     }
 }
 
+impl ErrorFailsafe {
+    fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
+        match event {
+            Event::REQUEST_ARM => {
+                log_arming_errors(sm.error_flags);
+                StateMachine::ErrorFailsafe(sm)
+            }
+            Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(State {
+                state: Armed,
+                error_flags: sm.error_flags,
+            }),
+            Event::ERROR_CLEARED(ErrorFlag::RC_LOST) => {
+                if sm.error_flags.is_empty() {
+                    StateMachine::Preflight(State {
+                        state: Preflight,
+                        error_flags: sm.error_flags,
+                    })
+                } else {
+                    StateMachine::ErrorPresent(State {
+                        state: ErrorPresent,
+                        error_flags: sm.error_flags,
+                    })
+                }
+            }
+            Event::ERROR_CLEARED(_) => {
+                if sm.error_flags.is_empty() {
+                    StateMachine::Preflight(State {
+                        state: Preflight,
+                        error_flags: sm.error_flags,
+                    })
+                } else {
+                    StateMachine::ErrorFailsafe(sm)
+                }
+            }
+            _ => StateMachine::ErrorFailsafe(sm),
+        }
+    }
+}
+
 impl ErrorPresent {
     fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
         match event {
+            Event::REQUEST_ARM => {
+                log_arming_errors(sm.error_flags);
+                StateMachine::ErrorPresent(sm)
+            }
+            Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(State {
+                state: Armed,
+                error_flags: sm.error_flags,
+            }),
             Event::ERROR_CLEARED(_) => {
                 if sm.error_flags.is_empty() {
                     StateMachine::Preflight(State {
@@ -262,6 +337,30 @@ impl ErrorPresent {
             }
             _ => StateMachine::ErrorPresent(sm),
         }
+    }
+}
+
+fn log_arming_errors(error_flags: ErrorFlag) {
+    if error_flags.contains(ErrorFlag::INVALID_MIXER) {
+        crate::log_error!("Unable to arm: Invalid mixer");
+    }
+    if error_flags.contains(ErrorFlag::IMU_NOT_RESPONDING) {
+        crate::log_error!("Unable to arm: IMU not responding");
+    }
+    if error_flags.contains(ErrorFlag::RC_LOST) {
+        crate::log_error!("Unable to arm: RC signal lost");
+    }
+    if error_flags.contains(ErrorFlag::UNHEALTHY_ESTIMATOR) {
+        crate::log_error!("Unable to arm: Unhealthy estimator");
+    }
+    if error_flags.contains(ErrorFlag::TIME_GOING_BACKWARDS) {
+        crate::log_error!("Unable to arm: Time going backwards");
+    }
+    if error_flags.contains(ErrorFlag::UNCALIBRATED_IMU) {
+        crate::log_error!("Unable to arm: IMU not calibrated");
+    }
+    if error_flags.contains(ErrorFlag::INVALID_FAILSAFE) {
+        crate::log_error!("Unable to arm: Invalid failsafe setting");
     }
 }
 
@@ -360,11 +459,6 @@ impl StateManager {
     }
 
     fn update_leds(&self) {
-        // TODO: Add board ref for LED updates
-        // blink fast if in failsafe
-        // blink slowly if in error
-        // off if disarmed, on if armed
+        // LED hardware output is synchronized by the world board stage.
     }
-
-    // left out backup data functionality
 }
