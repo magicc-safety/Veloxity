@@ -329,6 +329,7 @@ mod tests {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = initialized_state();
+        state.update_arming_safety(true, true);
         state.update(Event::REQUEST_ARM, &params);
         assert!(state.is_armed());
         state

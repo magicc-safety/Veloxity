@@ -1,12 +1,9 @@
 #![allow(non_camel_case_types)]
 mod tests;
 
-use crate::{
-    comm::CommManager,
-    params::{ParamId, ParamValue, Params},
-};
+use crate::params::{ParamId, ParamValue, Params};
 use bitflags::bitflags;
-use core::{error, mem::take};
+use core::mem::take;
 
 // Events that trigger state transitions
 #[derive(Debug, Clone, Copy)]
@@ -271,12 +268,20 @@ impl ErrorPresent {
 // Struct for state management
 pub struct StateManager {
     machine: StateMachine,
+    arming_safety: ArmingSafety,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ArmingSafety {
+    rc_throttle_low: bool,
+    rc_throttle_override_switch_on: bool,
 }
 
 impl StateManager {
     pub fn new() -> Self {
         StateManager {
             machine: StateMachine::new(),
+            arming_safety: ArmingSafety::default(),
         }
     }
 
@@ -284,8 +289,45 @@ impl StateManager {
         matches!(self.machine, StateMachine::Calibrating(_))
     }
 
+    pub fn update_arming_safety(
+        &mut self,
+        rc_throttle_low: bool,
+        rc_throttle_override_switch_on: bool,
+    ) {
+        self.arming_safety = ArmingSafety {
+            rc_throttle_low,
+            rc_throttle_override_switch_on,
+        };
+    }
+
+    fn arming_safety_allows_arm(&self, params: &Params) -> bool {
+        if !self.arming_safety.rc_throttle_low {
+            crate::log_error!("Cannot arm with RC throttle high");
+            return false;
+        }
+
+        let take_min_throttle = matches!(
+            params.get_by_id(ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE),
+            ParamValue::Int(value) if value != 0
+        );
+
+        if !take_min_throttle && !self.arming_safety.rc_throttle_override_switch_on {
+            crate::log_error!("RC throttle override must be active to arm");
+            return false;
+        }
+
+        true
+    }
+
     // The main update loop. Takes an event and applies it to the internal state machine.
     pub fn update(&mut self, event: Event, params: &Params) {
+        if matches!(event, Event::REQUEST_ARM)
+            && matches!(self.machine, StateMachine::Preflight(_))
+            && !self.arming_safety_allows_arm(params)
+        {
+            return;
+        }
+
         self.machine.update(event, params);
     }
 

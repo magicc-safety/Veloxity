@@ -560,6 +560,7 @@ mod tests {
     fn armed_state(params: &Params) -> StateManager {
         let mut state_manager = StateManager::new();
         state_manager.update(Event::INITIALIZED, params);
+        state_manager.update_arming_safety(true, true);
         state_manager.update(Event::REQUEST_ARM, params);
         state_manager
     }

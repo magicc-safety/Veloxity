@@ -822,6 +822,7 @@ mod tests {
     fn armed_test_world_with_params(params: Params) -> TestWorld {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
+        state.update_arming_safety(true, true);
         state.update(Event::REQUEST_ARM, &params);
         let mixer = quadrotor::mixer(&params);
 
@@ -1013,6 +1014,9 @@ mod tests {
         params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Int(1));
         let mut world = test_world_with_params(params);
 
+        world
+            .state
+            .update_arming_safety(true, true);
         world
             .state
             .update(crate::state_machine::Event::REQUEST_ARM, &world.params);
@@ -1342,6 +1346,9 @@ mod tests {
         assert_eq!(world.pwm.enable_all_count, 0);
         assert_eq!(world.pwm.disable_all_count, 0);
 
+        world
+            .state
+            .update_arming_safety(true, true);
         world
             .state
             .update(crate::state_machine::Event::REQUEST_ARM, &world.params);

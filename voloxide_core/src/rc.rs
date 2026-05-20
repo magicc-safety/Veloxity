@@ -1,7 +1,7 @@
 use crate::packets::RcPacket;
 use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
-use crate::{log_info, log_warn};
+use crate::log_info;
 
 pub mod system;
 
@@ -437,6 +437,11 @@ impl Rc {
                 }
 
                 if self.time_sticks_have_been_in_arming_position_ms > 1000 {
+                    state_manager.update_arming_safety(
+                        f_stick < arm_threshold,
+                        self.switch_mapped(Switch::ThrottleOverride)
+                            && self.switch_on(Switch::ThrottleOverride),
+                    );
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);
                 }
@@ -461,6 +466,11 @@ impl Rc {
             // Switch arming
             let f_stick = self.stick(Stick::F);
             if self.switch_on(Switch::Arm) {
+                state_manager.update_arming_safety(
+                    f_stick < arm_threshold,
+                    self.switch_mapped(Switch::ThrottleOverride)
+                        && self.switch_on(Switch::ThrottleOverride),
+                );
                 if !is_armed && (f_stick < arm_threshold) {
                     // Use update() with params
                     state_manager.update(Event::REQUEST_ARM, params);

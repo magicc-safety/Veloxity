@@ -286,6 +286,7 @@ mod tests {
         assert_eq!(pwm.enable_all_count, 0);
         assert_eq!(pwm.disable_all_count, 0);
 
+        state.update_arming_safety(true, true);
         state.update(Event::REQUEST_ARM, &params);
 
         assert!(
@@ -355,6 +356,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
+        state.update_arming_safety(true, true);
         state.update(Event::REQUEST_ARM, &params);
         let mut aux = RosflightAuxCmdMsg {
             type_array: [RosflightAuxCmdType::Disabled; PWM_OUTPUT_CHANNELS],
@@ -423,6 +425,7 @@ mod tests {
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
+        state.update_arming_safety(true, true);
         state.update(Event::REQUEST_ARM, &params);
         let mut aux = RosflightAuxCmdMsg {
             type_array: [RosflightAuxCmdType::Disabled; PWM_OUTPUT_CHANNELS],

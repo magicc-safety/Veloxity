@@ -15,6 +15,7 @@ fn setup_state_manager() -> (StateManager, Params) {
     let params = Params::new();
     let mut sm = StateManager::new();
     sm.update(Event::INITIALIZED, &params);
+    sm.update_arming_safety(true, true);
     (sm, params)
 }
 
@@ -487,6 +488,74 @@ fn test_manager_controller_arm_and_disarm() {
     assert!(!manager.is_armed());
     assert!(!manager.is_in_failsafe());
     assert_state!(manager.machine, StateMachine::Preflight);
+}
+
+#[test]
+fn state_manager_rejects_arm_when_rc_throttle_high() {
+    let mut params = Params::new();
+    params.set_by_id(
+        ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+        ParamValue::Int(1),
+    );
+    let mut manager = StateManager::new();
+    manager.update(Event::INITIALIZED, &params);
+    manager.update_arming_safety(false, true);
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(!manager.is_armed());
+    assert_state!(manager.machine, StateMachine::Preflight);
+}
+
+#[test]
+fn state_manager_rejects_arm_without_take_min_or_throttle_override() {
+    let mut params = Params::new();
+    params.set_by_id(
+        ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+        ParamValue::Int(0),
+    );
+    let mut manager = StateManager::new();
+    manager.update(Event::INITIALIZED, &params);
+    manager.update_arming_safety(true, false);
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(!manager.is_armed());
+    assert_state!(manager.machine, StateMachine::Preflight);
+}
+
+#[test]
+fn state_manager_allows_arm_with_low_throttle_and_take_min() {
+    let mut params = Params::new();
+    params.set_by_id(
+        ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+        ParamValue::Int(1),
+    );
+    let mut manager = StateManager::new();
+    manager.update(Event::INITIALIZED, &params);
+    manager.update_arming_safety(true, false);
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(manager.is_armed());
+    assert_state!(manager.machine, StateMachine::Armed);
+}
+
+#[test]
+fn state_manager_allows_arm_with_low_throttle_and_throttle_override() {
+    let mut params = Params::new();
+    params.set_by_id(
+        ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+        ParamValue::Int(0),
+    );
+    let mut manager = StateManager::new();
+    manager.update(Event::INITIALIZED, &params);
+    manager.update_arming_safety(true, true);
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(manager.is_armed());
+    assert_state!(manager.machine, StateMachine::Armed);
 }
 
 // --------------------- Sim Loop Tests ---------------------
