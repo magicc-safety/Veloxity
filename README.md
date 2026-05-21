@@ -30,7 +30,7 @@ MAVLink message types are code-generated at build time by `comms/voloxide_mavlin
 Run Rust commands from the Voloxide repo root:
 
 ```bash
-cd /run/host/home/skink/projects/voloxide_proj/Voloxide
+cd ~/Voloxide
 ```
 
 Root `cargo build` uses the workspace `default-members`, which are intentionally host-compatible.
@@ -71,11 +71,12 @@ cargo build -p sim --lib
   ```bash
   cargo install probe-rs-tools
   ```
-- For ROSflight SIL demos, source the ROSflight workspace from the parent `voloxide_proj` directory:
+- For ROSflight SIL demos, source ROS 2 and the ROSflight workspace in your shell before building or
+  running Voloxide. The Voloxide scripts use the environment you already sourced; they do not source
+  ROSflight helper scripts from outside this repository.
   ```bash
-  cd /run/host/home/skink/projects/voloxide_proj
-  source scripts/source_rosflight_env.zsh
-  source install/setup.zsh
+  # Example only; use your local ROSflight setup.
+  source ~/rosflight/workspace/install/setup.zsh
   ```
 - For the recommended ROS 2 middleware:
   ```bash
@@ -87,33 +88,13 @@ cargo build -p sim --lib
 Build the Rust simulator firmware static library and ROS 2 shim:
 
 ```bash
-cd /run/host/home/skink/projects/voloxide_proj/Voloxide
-cargo xtask build-sim-lib
-
-cd /run/host/home/skink/projects/voloxide_proj
-colcon build --base-paths Voloxide/sim/ros2/voloxide_sil_board_shim \
-  --packages-select voloxide_sil_board_shim
-source install/setup.zsh
+cd ~/Voloxide
+source scripts/build_and_source_ros2_shim.zsh
 ```
 
-Run the supported ROScopter waypoint demo:
-
-```bash
-cd /run/host/home/skink/projects/voloxide_proj
-Voloxide/scripts/run_voloxide_waypoint_demo.zsh
-```
-
-Run the supported ROSplane fixed-wing demo:
-
-```bash
-cd /run/host/home/skink/projects/voloxide_proj
-Voloxide/scripts/run_voloxide_rosplane_demo.zsh
-```
-
-Both demo scripts set `VOLOXIDE_SIM_PARAM_DIR` to a demo-specific directory under
-`Voloxide/target/voloxide-runtime/`. The simulator firmware requires that directory to be explicit
-and writes its saved parameter file there. Since `target/` is ignored by Git, runtime parameter
-stores and other disposable SIL state stay out of the repository.
+Set `VOLOXIDE_SIM_PARAM_DIR` to an explicit runtime directory before running SIL demos manually.
+The simulator firmware writes its saved parameter file there. Since `target/` is ignored by Git,
+runtime parameter stores and other disposable SIL state stay out of the repository.
 
 The current ROSflight 2.0 software-in-the-loop workflow uses the ROS 2 shim in
 `sim/ros2/voloxide_sil_board_shim`. The shim calls the Rust simulator firmware through a C FFI

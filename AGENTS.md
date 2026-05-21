@@ -6,14 +6,15 @@ These instructions apply to the Voloxide repository.
 
 ## ROSflight Workspace Boundary
 
-The local ROSflight ROS 2 workspace under
-`/run/host/home/skink/projects/voloxide_proj/workspace` is a runtime and reference dependency only.
+The local ROSflight ROS 2 workspace is a runtime and reference dependency only. Its location is
+provided by the caller's already-sourced shell environment.
 
-Source the ROSflight environment with the top-level helper:
+Do not source ROSflight helper scripts from outside this repository in Voloxide scripts. Assume ROS 2
+and the ROSflight workspace are already sourced by the caller before building or running Voloxide
+ROS 2 integration scripts.
 
 ```bash
-source scripts/source_rosflight_env.zsh
-source install/setup.zsh
+source scripts/build_and_source_ros2_shim.zsh
 ```
 
 Do not modify `rosflight_io` source, generated files, install files, or package configuration.
