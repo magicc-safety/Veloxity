@@ -44,78 +44,81 @@ Use these terms consistently when reading or editing this codebase.
 
 ```text
 Voloxide/
-├── voloxide_core/
+├── crates/
+│   └── voloxide_core/
+│       └── src/
+│           ├── lib.rs
+│           ├── world.rs
+│           ├── board.rs
+│           ├── comm.rs
+│           ├── comm/
+│           │   ├── interface.rs
+│           │   └── messages.rs
+│           ├── params.rs
+│           ├── params/
+│           │   ├── service.rs
+│           │   └── reactions.rs
+│           ├── command.rs
+│           ├── command/
+│           │   └── service.rs
+│           ├── companion.rs
+│           ├── sensors.rs
+│           ├── sensors/
+│           │   ├── ingestion.rs
+│           │   ├── processors.rs
+│           │   └── health.rs
+│           ├── rc.rs
+│           ├── rc/
+│           │   └── system.rs
+│           ├── control.rs
+│           ├── pwm.rs
+│           ├── pwm/
+│           │   └── system.rs
+│           ├── estimator.rs
+│           ├── estimator/
+│           │   └── quad.rs
+│           ├── controller.rs
+│           ├── controller/
+│           │   └── quad.rs
+│           ├── mixer.rs
+│           ├── mixer/
+│           │   └── matrix.rs
+│           ├── state_machine.rs
+│           ├── log.rs
+│           ├── events.rs
+│           ├── ports.rs
+│           ├── packets.rs
+│           ├── errors.rs
+│           └── vehicle.rs
+├── comms/
+│   └── voloxide_mavlink/
+│       └── src/
+│           ├── link.rs
+│           ├── conversions.rs
+│           └── parser.rs
+├── platforms/
+│   └── stm_32/
 │   └── src/
-│       ├── lib.rs
-│       ├── world.rs
-│       ├── board.rs
-│       ├── comm.rs
-│       ├── comm/
-│       │   ├── interface.rs
-│       │   └── messages.rs
-│       ├── params.rs
-│       ├── params/
-│       │   ├── service.rs
-│       │   └── reactions.rs
-│       ├── command.rs
-│       ├── command/
-│       │   └── service.rs
-│       ├── companion.rs
-│       ├── sensors.rs
-│       ├── sensors/
-│       │   ├── ingestion.rs
-│       │   ├── processors.rs
-│       │   └── health.rs
-│       ├── rc.rs
-│       ├── rc/
-│       │   └── system.rs
-│       ├── control.rs
-│       ├── pwm.rs
-│       ├── pwm/
-│       │   └── system.rs
-│       ├── estimator.rs
-│       ├── estimator/
-│       │   └── quad.rs
-│       ├── controller.rs
-│       ├── controller/
-│       │   └── quad.rs
-│       ├── mixer.rs
-│       ├── mixer/
-│       │   └── quad.rs
-│       ├── state_machine.rs
-│       ├── state_machine/
-│       │   └── tests.rs
-│       ├── log.rs
-│       ├── log/
-│       │   └── drain.rs
-│       ├── events.rs
-│       ├── ports.rs
-│       ├── packets.rs
-│       ├── errors.rs
-│       ├── vehicle.rs
-│       └── vehicle/
-│           └── quadrotor.rs
-├── voloxide_mavlink/
-│   └── src/
-│       ├── link.rs
-│       ├── conversions.rs
-│       └── parser.rs
+│       └── peripherals/
+├── boards/
+│   ├── nucleo/
+│   └── pixracerpro/
 ├── sim/
-│   └── src/
-│       ├── ffi.rs
-│       ├── board.rs
-│       ├── pwm.rs
-│       └── bin/
-│           └── voloxide.rs
-└── ros2/
-    └── voloxide_sil_board_shim/
-        ├── src/
-        │   └── voloxide_sil_board.cpp
-        ├── include/
-        │   └── voloxide_sil_board_shim/voloxide_ffi.h
-        └── launch/
-            ├── voloxide_sil_board.launch.py
-            └── multirotor_standalone_sil.launch.py
+│   ├── firmware/
+│   │   └── src/
+│   │       ├── ffi.rs
+│   │       ├── board.rs
+│   │       ├── pwm.rs
+│   │       └── bin/
+│   │           └── voloxide.rs
+│   └── ros2/
+│       └── voloxide_sil_board_shim/
+│           ├── src/
+│           ├── include/
+│           └── launch/
+├── docs/
+├── scripts/
+└── xtask/
 ```
 
 ## Dependency Direction
@@ -141,9 +144,9 @@ sim
 ├── depends on voloxide_core
 ├── depends on voloxide_mavlink
 ├── provides FFI board/PWM adapters for ROS 2 shim
-└── still contains an older direct Zenoh sim binary path
+└── exposes the simulator firmware through the ROS 2 shim FFI path
 
-ros2/voloxide_sil_board_shim
+sim/ros2/voloxide_sil_board_shim
 ├── is a ROS 2 rclcpp package in this repo
 ├── subscribes/publishes ROSflight simulator topics
 ├── exposes sil_board/run
@@ -239,7 +242,7 @@ Those fields are not handed wholesale to systems. `World` creates contexts from 
 
 ## Events And Ports
 
-Events are declared in `voloxide_core/src/events.rs`.
+Events are declared in `crates/voloxide_core/src/events.rs`.
 
 ```text
 ParamEventQueues
@@ -435,7 +438,7 @@ rosflight_sim standalone multirotor
 ├── calls sil_board/run through rosflight_sil_manager
 └── consumes sim/pwm_output
 
-ros2/voloxide_sil_board_shim
+sim/ros2/voloxide_sil_board_shim
 ├── subscribes simulator sensor topics
 ├── subscribes sim/RC
 ├── exposes sil_board/run
@@ -445,7 +448,7 @@ ros2/voloxide_sil_board_shim
 ├── calls voloxide_sim_get_pwm
 └── publishes sim/pwm_output
 
-sim/src/ffi.rs
+sim/firmware/src/ffi.rs
 ├── owns FfiBoard
 ├── owns FfiPwmDriver
 ├── instantiates World<FfiBoard, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, FfiPwmDriver>
@@ -473,12 +476,12 @@ unmodified rosflight_io
 └── exposes ROS services and topics used by tests
 ```
 
-## Reading `sim/src/ffi.rs`
+## Reading `sim/firmware/src/ffi.rs`
 
-`sim/src/ffi.rs` is the Rust side used by the ROS 2 C++ shim.
+`sim/firmware/src/ffi.rs` is the Rust side used by the ROS 2 C++ shim.
 
 ```text
-sim/src/ffi.rs
+sim/firmware/src/ffi.rs
 ├── FFI data structs
 │   ├── VoloxideFfiImu
 │   ├── VoloxideFfiMag
@@ -554,7 +557,7 @@ World/control/pwm system
 The C++ shim later calls `voloxide_sim_get_pwm` and publishes those values as ROS 2
 `sim/pwm_output`.
 
-## Reading `ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp`
+## Reading `sim/ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp`
 
 The C++ shim is the ROS 2 node boundary. It does not implement flight logic.
 
@@ -604,27 +607,25 @@ fcu_clock_micros
 
 That prevents wall-clock jumps from becoming firmware time-backwards errors.
 
-## Reading The Older Direct `sim` Binary
+The FFI simulator requires `VOLOXIDE_SIM_PARAM_DIR` to point at a writable runtime directory before
+`voloxide_sim_create` is called. The supported demo scripts set this under
+`target/voloxide-runtime/`, which is ignored by Git.
 
-`sim/src/bin/voloxide.rs` is an older direct Zenoh path. It is still useful to understand because it
-shows the same composition pattern without the ROS 2 C++ shim:
+## Simulator Integration Boundary
+
+The simulator firmware package intentionally exposes only the FFI/staticlib path. Older direct
+simulator experiments that subscribed to CDR messages on Zenoh from Rust were removed so the repo
+has one supported ROSflight SIL path:
 
 ```text
-SimWorld =
-World<Board, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, SimPwmDriver>
-
-main
-├── Board::new
-├── subscribe rust/tick
-├── Params::new
-├── SimPwmDriver::new
-├── init_world
-└── on each rust/tick: world.run_once
+ROSflight simulator topics
+└── sim/ros2/voloxide_sil_board_shim
+    └── sim/firmware/src/ffi.rs
+        └── voloxide_core::World
 ```
 
-In the current ROSflight integration target, the C++ shim plus `sim/src/ffi.rs` is the preferred
-path because it uses normal ROS 2 APIs and the same `sil_board/run` service contract expected by
-unmodified `rosflight_sil_manager`.
+`rmw_zenoh_cpp` may still be used as the ROS 2 middleware for the surrounding ROS graph, but the
+Rust firmware crate does not depend on the Rust `zenoh` crate or start its own Zenoh session.
 
 ## End-To-End Flow: Parameter Set
 
@@ -908,17 +909,17 @@ world.rs
 Use this order when stepping through the simulator integration:
 
 ```text
-1. ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp
+1. sim/ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp
    ├── node construction
    ├── ROS subscriptions
    ├── sil_board/run service
    ├── build_sensor_snapshot
    └── publish_pwm
 
-2. ros2/voloxide_sil_board_shim/include/voloxide_sil_board_shim/voloxide_ffi.h
+2. sim/ros2/voloxide_sil_board_shim/include/voloxide_sil_board_shim/voloxide_ffi.h
    └── C ABI declarations
 
-3. sim/src/ffi.rs
+3. sim/firmware/src/ffi.rs
    ├── FFI structs
    ├── FfiBoard::update_sensor_bus
    ├── FfiBoard serial_rx_read / serial_tx_write
@@ -928,30 +929,30 @@ Use this order when stepping through the simulator integration:
    ├── voloxide_sim_run_once
    └── voloxide_sim_get_pwm
 
-4. voloxide_core/src/world.rs
+4. crates/voloxide_core/src/world.rs
    ├── World resources
    ├── run_once
    └── stage methods
 
-5. voloxide_core/src/comm.rs
+5. crates/voloxide_core/src/comm.rs
    ├── process_incoming_messages
    ├── act_on_messages
    └── send_comm_responses
 
-6. voloxide_core/src/sensors/
+6. crates/voloxide_core/src/sensors/
    ├── ingestion.rs
    ├── processors.rs
    └── health.rs
 
-7. voloxide_core/src/rc/
+7. crates/voloxide_core/src/rc/
    └── system.rs
 
-8. voloxide_core/src/control.rs
+8. crates/voloxide_core/src/control.rs
 
-9. voloxide_core/src/pwm/
+9. crates/voloxide_core/src/pwm/
    └── system.rs
 
-10. voloxide_mavlink/src/
+10. comms/voloxide_mavlink/src/
     ├── parser.rs
     ├── conversions.rs
     └── link.rs

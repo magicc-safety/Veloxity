@@ -1,6 +1,21 @@
 /target/
+Cargo.lock
+
+# Local editor and OS metadata
+.DS_Store
+**/.DS_Store
 .gitconfig
 .vscode/
-Cargo.lock
 .claude/
 CLAUDE.md
+
+# Generated caches and local runtime artifacts
+__pycache__/
+*.py[cod]
+*.log
+*.db3
+*.bag
+*.mcap
+*.csv
+*.params
+rosflight_memory/

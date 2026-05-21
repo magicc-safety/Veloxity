@@ -1,0 +1,42 @@
+[package]
+name = "stm_32"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+voloxide_core = { workspace = true }
+
+embassy-executor = { version = "0.7.0", features = [
+  "task-arena-size-32768",
+  "arch-cortex-m",
+  "executor-thread",
+  "executor-interrupt",
+] }
+embassy-embedded-hal = { version = "0.3.0" }
+embedded-hal-async = { version = "1.0" }
+embedded-io-async = { version = "0.6.1" }
+embedded-hal-nb = { version = "1.0.0" }
+embassy-stm32 = { version = "0.2.0", features = [
+  "stm32h753zi",
+  "time-driver-tim5",
+  "exti",
+  "unstable-pac",
+  "chrono",
+  "rt",
+  "memory-x",
+] }
+embassy-time = { version = "0.4.0", features = [
+  "tick-hz-1_000_000",
+] }
+embassy-sync = { version = "0.6.1" }
+embassy-usb = { version = "0.4.0" }
+embassy-futures = { version = "0.1.0" }
+cortex-m-rt = { version = "0.7.0" }
+cortex-m = { version = "0.7.6", features = [
+  "inline-asm",
+  "critical-section-single-core",
+] }
+static_cell = { version = "2" }
+
+[lints]
+workspace = true

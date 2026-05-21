@@ -1,0 +1,19 @@
+[package]
+name = "pixracerpro"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+stm_32 = { workspace = true }
+voloxide_core = { workspace = true }
+voloxide_mavlink = { workspace = true }
+
+panic-halt = "1.0.0"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "voloxide"
+test = false
+bench = false
