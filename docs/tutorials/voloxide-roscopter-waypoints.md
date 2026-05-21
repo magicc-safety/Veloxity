@@ -54,9 +54,10 @@ The script starts the Zenoh router, launches the Voloxide firmware bridge with R
 initialization and IMU calibration, starts ROScopter's estimator first, arms and waits for stationary
 barometer calibration, starts the ROScopter autonomy nodes and waypoint marker publisher, sets
 `/path_manager hold_last=true`, loads the default multirotor mission, and releases RC override.
-It uses `/tmp/voloxide_roscopter_sim.params` as the Voloxide SIL parameter store so fixed-wing
-simulation runs cannot leave stale mixer or airframe settings in the quadrotor demo.
-By default it deletes that store before launch (`RESET_VOLOXIDE_PARAMS=true`) and then loads
+It sets `VOLOXIDE_SIM_PARAM_DIR` to `Voloxide/target/voloxide-runtime/roscopter` by default.
+`target/` is ignored by Git, so saved SIL parameters cannot be accidentally committed. Override
+`VOLOXIDE_SIM_PARAM_DIR` to point at a different disposable runtime directory. By default the
+script deletes that store before launch (`RESET_VOLOXIDE_PARAMS=true`) and then loads
 `rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml`, so the flight demo uses the
 documented ROSflight parameter file rather than saved parameters from previous tests.
 For this external-estimator sim path it also sets firmware parameter `FILT_USE_ACC=0` before arming,
@@ -77,6 +78,8 @@ source scripts/source_rosflight_env.zsh
 source install/setup.zsh
 export ROS_LOG_DIR=/tmp/rosflight_logs
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export VOLOXIDE_SIM_PARAM_DIR="$PWD/Voloxide/target/voloxide-runtime/roscopter-manual"
+mkdir -p "$VOLOXIDE_SIM_PARAM_DIR"
 ```
 
 Start the Zenoh router:

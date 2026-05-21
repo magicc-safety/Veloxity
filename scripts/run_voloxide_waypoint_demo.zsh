@@ -12,7 +12,8 @@ source "${PROJECT_ROOT}/install/setup.zsh"
 
 export ROS_LOG_DIR="${ROS_LOG_DIR:-/tmp/rosflight_logs}"
 export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_zenoh_cpp}"
-export VOLOXIDE_SIM_PARAM_STORE="${VOLOXIDE_SIM_PARAM_STORE:-/tmp/voloxide_roscopter_sim.params}"
+export VOLOXIDE_SIM_PARAM_DIR="${VOLOXIDE_SIM_PARAM_DIR:-${VOLOXIDE_ROOT}/target/voloxide-runtime/roscopter}"
+VOLOXIDE_SIM_PARAM_STORE="${VOLOXIDE_SIM_PARAM_DIR}/voloxide_sim.params"
 
 RESET_VOLOXIDE_PARAMS="${RESET_VOLOXIDE_PARAMS:-true}"
 MISSION_FILE="${MISSION_FILE:-${PROJECT_ROOT}/workspace/src/roscopter/roscopter/params/multirotor_mission.yaml}"
@@ -38,6 +39,7 @@ cleanup_stale_processes() {
 }
 
 reset_voloxide_param_store_if_enabled() {
+  mkdir -p "${VOLOXIDE_SIM_PARAM_DIR}"
   if [[ "${RESET_VOLOXIDE_PARAMS}" == "true" ]]; then
     print -P "%F{yellow}resetting Voloxide param store before loading ROSflight defaults%f"
     rm -f "${VOLOXIDE_SIM_PARAM_STORE}" "${VOLOXIDE_SIM_PARAM_STORE:r}.tmp"
@@ -63,7 +65,7 @@ print "mission: ${MISSION_FILE}"
 print "firmware: voloxide"
 print "RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION}"
 print "ROS_LOG_DIR=${ROS_LOG_DIR}"
-print "VOLOXIDE_SIM_PARAM_STORE=${VOLOXIDE_SIM_PARAM_STORE}"
+print "VOLOXIDE_SIM_PARAM_DIR=${VOLOXIDE_SIM_PARAM_DIR}"
 print "RESET_VOLOXIDE_PARAMS=${RESET_VOLOXIDE_PARAMS}"
 print "USE_RVIZ=${USE_RVIZ}"
 

@@ -26,8 +26,8 @@ use voloxide_mavlink::MavlinkInterface;
 const NUM_PWM_CHANNELS: usize = 14;
 const DEFAULT_MAVLINK_BIND: &str = "127.0.0.1:14525";
 const DEFAULT_MAVLINK_REMOTE: &str = "127.0.0.1:14520";
-const DEFAULT_PARAM_STORE: &str = "voloxide_sim.params";
-const PARAM_STORE_ENV: &str = "VOLOXIDE_SIM_PARAM_STORE";
+const PARAM_DIR_ENV: &str = "VOLOXIDE_SIM_PARAM_DIR";
+const PARAM_STORE_FILE: &str = "voloxide_sim.params";
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -270,7 +270,7 @@ impl FfiBoard {
             start_time: Instant::now(),
             mavlink_socket,
             sensors,
-            param_store_path: param_store_path(),
+            param_store_path: param_store_path()?,
             last_imu_timestamp_us: 0,
             last_mag_timestamp_us: 0,
             last_baro_timestamp_us: 0,
@@ -568,10 +568,16 @@ pub unsafe extern "C" fn voloxide_sim_get_pwm(
     copy_len
 }
 
-fn param_store_path() -> PathBuf {
-    std::env::var_os(PARAM_STORE_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_PARAM_STORE))
+fn param_store_path() -> io::Result<PathBuf> {
+    let Some(dir) = std::env::var_os(PARAM_DIR_ENV) else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "VOLOXIDE_SIM_PARAM_DIR must point to a writable runtime parameter directory",
+        ));
+    };
+    let dir = PathBuf::from(dir);
+    fs::create_dir_all(&dir)?;
+    Ok(dir.join(PARAM_STORE_FILE))
 }
 
 fn write_params_to_path(path: &Path, params: &Params) -> io::Result<()> {

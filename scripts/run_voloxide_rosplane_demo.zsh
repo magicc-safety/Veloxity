@@ -12,7 +12,8 @@ source "${PROJECT_ROOT}/install/setup.zsh"
 
 export ROS_LOG_DIR="${ROS_LOG_DIR:-/tmp/rosflight_logs}"
 export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_zenoh_cpp}"
-export VOLOXIDE_SIM_PARAM_STORE="${VOLOXIDE_SIM_PARAM_STORE:-/tmp/voloxide_rosplane_sim.params}"
+export VOLOXIDE_SIM_PARAM_DIR="${VOLOXIDE_SIM_PARAM_DIR:-${VOLOXIDE_ROOT}/target/voloxide-runtime/rosplane}"
+VOLOXIDE_SIM_PARAM_STORE="${VOLOXIDE_SIM_PARAM_DIR}/voloxide_sim.params"
 export ZENOH_ROUTER_CHECK_ATTEMPTS="${ZENOH_ROUTER_CHECK_ATTEMPTS:-20}"
 
 MISSION_FILE="${MISSION_FILE:-${PROJECT_ROOT}/workspace/src/rosplane/rosplane/missions/fixedwing_mission.yaml}"
@@ -113,6 +114,7 @@ cleanup_stale_processes() {
 }
 
 reset_voloxide_param_store_if_enabled() {
+  mkdir -p "${VOLOXIDE_SIM_PARAM_DIR}"
   if [[ "${FIRMWARE}" == "voloxide" && "${RESET_VOLOXIDE_PARAMS}" == "true" ]]; then
     print -P "%F{yellow}resetting Voloxide param store before loading ROSflight defaults%f"
     rm -f "${VOLOXIDE_SIM_PARAM_STORE}" "${VOLOXIDE_SIM_PARAM_STORE:r}.tmp"
@@ -145,7 +147,7 @@ print "dynamics: ${DYNAMICS_PARAM_FILE}"
 print "firmware: ${FIRMWARE}"
 print "RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION}"
 print "ROS_LOG_DIR=${ROS_LOG_DIR}"
-print "VOLOXIDE_SIM_PARAM_STORE=${VOLOXIDE_SIM_PARAM_STORE}"
+print "VOLOXIDE_SIM_PARAM_DIR=${VOLOXIDE_SIM_PARAM_DIR}"
 print "RESET_VOLOXIDE_PARAMS=${RESET_VOLOXIDE_PARAMS}"
 print "ROSplane startup state: airspeed=${ROSPLANE_START_AIRSPEED}, down=${ROSPLANE_START_DOWN_POSITION}"
 print "RC release state: airspeed=${RC_HANDOFF_RELEASE_AIRSPEED}, down=${RC_HANDOFF_RELEASE_DOWN_POSITION}, seed=${RC_HANDOFF_SEED_RELEASE_STATE}"

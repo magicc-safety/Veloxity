@@ -607,6 +607,10 @@ fcu_clock_micros
 
 That prevents wall-clock jumps from becoming firmware time-backwards errors.
 
+The FFI simulator requires `VOLOXIDE_SIM_PARAM_DIR` to point at a writable runtime directory before
+`voloxide_sim_create` is called. The supported demo scripts set this under
+`target/voloxide-runtime/`, which is ignored by Git.
+
 ## Simulator Integration Boundary
 
 The simulator firmware package intentionally exposes only the FFI/staticlib path. Older direct

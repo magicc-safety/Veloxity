@@ -38,6 +38,7 @@ Zenoh RMW is recommended for local graph stability:
 ```bash
 export ROS_LOG_DIR=/tmp/rosflight_logs
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export VOLOXIDE_SIM_PARAM_DIR="$PWD/Voloxide/target/voloxide-runtime/rosplane"
 ```
 
 ## Working Visual Demo
@@ -92,9 +93,11 @@ The standalone RViz window should show `/rviz/waypoint`, `/rviz/mesh`, and
 `/rviz/mesh_path`. The separate ROSplane GCS RViz window is disabled by default
 so there is only one visual window.
 
-By default the script deletes `/tmp/voloxide_rosplane_sim.params` before launch
-and then loads the documented ROSflight fixed-wing parameter file, so saved
-Voloxide parameters from earlier tests do not define the demo flight
+It sets `VOLOXIDE_SIM_PARAM_DIR` to `Voloxide/target/voloxide-runtime/rosplane` by default.
+`target/` is ignored by Git, so saved SIL parameters cannot be accidentally committed. Override
+`VOLOXIDE_SIM_PARAM_DIR` to point at a different disposable runtime directory. By default the
+script deletes that store before launch and then loads the documented ROSflight fixed-wing
+parameter file, so saved Voloxide parameters from earlier tests do not define the demo flight
 configuration.
 
 Stop the demo with `Ctrl-C` in the script terminal.
@@ -109,6 +112,8 @@ source scripts/source_rosflight_env.zsh
 source install/setup.zsh
 export ROS_LOG_DIR=/tmp/rosflight_logs
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export VOLOXIDE_SIM_PARAM_DIR="$PWD/Voloxide/target/voloxide-runtime/rosplane-manual"
+mkdir -p "$VOLOXIDE_SIM_PARAM_DIR"
 ```
 
 Start the Zenoh router:
@@ -210,9 +215,8 @@ the sim truth-state adapter, load the mission, and release RC override. A
 fixed-wing aircraft is not a quadrotor hover case; the scripted deterministic
 RC helper is useful for diagnostics, but it does not replace a clean manual
 takeoff in the visual ROSplane tutorial path.
-The script uses `/tmp/voloxide_rosplane_sim.params` as the Voloxide SIL
-parameter store so fixed-wing mixer and airframe settings cannot leak into the
-quadrotor demo.
+The script uses `VOLOXIDE_SIM_PARAM_DIR` as the Voloxide SIL parameter directory so fixed-wing mixer
+and airframe settings cannot leak into the quadrotor demo.
 
 The one-command wrapper separates firmware calibration, visual startup, and
 handoff:

@@ -110,6 +110,11 @@ cd /run/host/home/skink/projects/voloxide_proj
 Voloxide/scripts/run_voloxide_rosplane_demo.zsh
 ```
 
+Both demo scripts set `VOLOXIDE_SIM_PARAM_DIR` to a demo-specific directory under
+`Voloxide/target/voloxide-runtime/`. The simulator firmware requires that directory to be explicit
+and writes its saved parameter file there. Since `target/` is ignored by Git, runtime parameter
+stores and other disposable SIL state stay out of the repository.
+
 The current ROSflight 2.0 software-in-the-loop workflow uses the ROS 2 shim in
 `sim/ros2/voloxide_sil_board_shim`. The shim calls the Rust simulator firmware through a C FFI
 static library and exposes the same simulator firmware endpoint contract as the upstream C
