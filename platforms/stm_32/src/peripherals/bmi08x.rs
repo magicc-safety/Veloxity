@@ -462,15 +462,23 @@ const SPI_READ: u8 = 0x80;
 const SPI_WRITE: u8 = 0x00;
 
 pub struct Bmi08xSensor {
-    pub dev_a:
-        SpiDevice<'static, CriticalSectionRawMutex, spi::Spi<'static, Async>, Output<'static>>,
-    pub dev_g:
-        SpiDevice<'static, CriticalSectionRawMutex, spi::Spi<'static, Async>, Output<'static>>,
+    pub dev_a: SpiDevice<
+        'static,
+        CriticalSectionRawMutex,
+        spi::Spi<'static, Async, spi::mode::Master>,
+        Output<'static>,
+    >,
+    pub dev_g: SpiDevice<
+        'static,
+        CriticalSectionRawMutex,
+        spi::Spi<'static, Async, spi::mode::Master>,
+        Output<'static>,
+    >,
 
     pub sample_rate: SampleRate,
 
-    pub drdy_a: ExtiInput<'static>,
-    pub drdy_g: ExtiInput<'static>,
+    pub drdy_a: ExtiInput<'static, Async>,
+    pub drdy_g: ExtiInput<'static, Async>,
     pub jumper: Output<'static>,
 
     pub range_a: AccelRange,

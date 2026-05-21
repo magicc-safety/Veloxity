@@ -41,8 +41,13 @@ pub static MAG_SIGNAL: Signal<
 > = Signal::<CriticalSectionRawMutex, Result<packets::MagPacket, errors::SensorError>>::new();
 
 pub struct Iis2mdcSensor {
-    pub dev: SpiDevice<'static, CriticalSectionRawMutex, spi::Spi<'static, Async>, Output<'static>>,
-    pub drdy: ExtiInput<'static>,
+    pub dev: SpiDevice<
+        'static,
+        CriticalSectionRawMutex,
+        spi::Spi<'static, Async, spi::mode::Master>,
+        Output<'static>,
+    >,
+    pub drdy: ExtiInput<'static, Async>,
 }
 
 impl Iis2mdcSensor {

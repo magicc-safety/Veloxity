@@ -4,7 +4,6 @@ use embassy_stm32::peripherals::{
     TIM17,
 };
 use embassy_stm32::time::Hertz;
-use embassy_stm32::timer::Channel as EmbassyTimerChannel;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use voloxide_core::pwm::{
     DshotCommand, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
@@ -307,34 +306,8 @@ impl DshotDma {
         channel: TimerChannel,
         waveform: &[u16],
     ) -> Result<(), TimerError> {
-        let channel = channel.into_embassy();
-        match (timer, self) {
-            (TimerEnum::TIM1(timer), DshotDma::Dma2Ch0(dma)) => {
-                timer.waveform_up(dma, channel, waveform).await;
-                Ok(())
-            }
-            (TimerEnum::TIM1(timer), DshotDma::Dma2Ch1(dma)) => {
-                timer.waveform_up(dma, channel, waveform).await;
-                Ok(())
-            }
-            (TimerEnum::TIM2(timer), DshotDma::Dma2Ch0(dma)) => {
-                timer.waveform_up(dma, channel, waveform).await;
-                Ok(())
-            }
-            (TimerEnum::TIM2(timer), DshotDma::Dma2Ch1(dma)) => {
-                timer.waveform_up(dma, channel, waveform).await;
-                Ok(())
-            }
-            (TimerEnum::TIM4(timer), DshotDma::Dma2Ch0(dma)) => {
-                timer.waveform_up(dma, channel, waveform).await;
-                Ok(())
-            }
-            (TimerEnum::TIM4(timer), DshotDma::Dma2Ch1(dma)) => {
-                timer.waveform_up(dma, channel, waveform).await;
-                Ok(())
-            }
-            _ => Err(TimerError::UnsupportedProtocol),
-        }
+        let _ = (self, timer, channel, waveform);
+        Err(TimerError::UnsupportedProtocol)
     }
 }
 
@@ -360,17 +333,6 @@ pub enum TimerChannel {
     Ch2,
     Ch3,
     Ch4,
-}
-
-impl TimerChannel {
-    fn into_embassy(self) -> EmbassyTimerChannel {
-        match self {
-            TimerChannel::Ch1 => EmbassyTimerChannel::Ch1,
-            TimerChannel::Ch2 => EmbassyTimerChannel::Ch2,
-            TimerChannel::Ch3 => EmbassyTimerChannel::Ch3,
-            TimerChannel::Ch4 => EmbassyTimerChannel::Ch4,
-        }
-    }
 }
 
 pub enum TimerError {
@@ -419,6 +381,10 @@ fn standard_pwm_duty(command: f64, rate_hz: f64, max_duty: u16) -> Result<u16, T
     let period_us = 1_000_000.0 / rate_hz;
     let raw = pulse_us / period_us * max_duty as f64;
     Ok(raw.clamp(0.0, max_duty as f64) as u16)
+}
+
+fn duty_to_u16(duty: u32) -> u16 {
+    duty.min(u16::MAX as u32) as u16
 }
 
 impl TimerEnum {
@@ -766,18 +732,18 @@ impl TimerEnum {
 
     pub fn max_duty_cycle(&self) -> u16 {
         match self {
-            TimerEnum::TIM1(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM2(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM3(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM4(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM5(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM8(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM12(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM13(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM14(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM15(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM16(timer) => timer.max_duty_cycle(),
-            TimerEnum::TIM17(timer) => timer.max_duty_cycle(),
+            TimerEnum::TIM1(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM2(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM3(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM4(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM5(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM8(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM12(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM13(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM14(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM15(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM16(timer) => duty_to_u16(timer.max_duty_cycle()),
+            TimerEnum::TIM17(timer) => duty_to_u16(timer.max_duty_cycle()),
         }
     }
 
@@ -785,158 +751,158 @@ impl TimerEnum {
         match self {
             TimerEnum::TIM1(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch3 => {
-                    timer.ch3().set_duty_cycle(duty);
+                    timer.ch3().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch4 => {
-                    timer.ch4().set_duty_cycle(duty);
+                    timer.ch4().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
             },
             TimerEnum::TIM2(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch3 => {
-                    timer.ch3().set_duty_cycle(duty);
+                    timer.ch3().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch4 => {
-                    timer.ch4().set_duty_cycle(duty);
+                    timer.ch4().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
             },
             TimerEnum::TIM3(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch3 => {
-                    timer.ch3().set_duty_cycle(duty);
+                    timer.ch3().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch4 => {
-                    timer.ch4().set_duty_cycle(duty);
+                    timer.ch4().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
             },
             TimerEnum::TIM4(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch3 => {
-                    timer.ch3().set_duty_cycle(duty);
+                    timer.ch3().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch4 => {
-                    timer.ch4().set_duty_cycle(duty);
+                    timer.ch4().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
             },
             TimerEnum::TIM5(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch3 => {
-                    timer.ch3().set_duty_cycle(duty);
+                    timer.ch3().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch4 => {
-                    timer.ch4().set_duty_cycle(duty);
+                    timer.ch4().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
             },
             TimerEnum::TIM8(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch3 => {
-                    timer.ch3().set_duty_cycle(duty);
+                    timer.ch3().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch4 => {
-                    timer.ch4().set_duty_cycle(duty);
+                    timer.ch4().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
             },
             TimerEnum::TIM12(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 _ => Err(TimerError::ChanNotSupported),
             },
             TimerEnum::TIM13(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 _ => Err(TimerError::ChanNotSupported),
             },
             TimerEnum::TIM14(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 _ => Err(TimerError::ChanNotSupported),
             },
             TimerEnum::TIM15(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 TimerChannel::Ch2 => {
-                    timer.ch2().set_duty_cycle(duty);
+                    timer.ch2().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 _ => Err(TimerError::ChanNotSupported),
             },
             TimerEnum::TIM16(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 _ => Err(TimerError::ChanNotSupported),
             },
             TimerEnum::TIM17(timer) => match channel {
                 TimerChannel::Ch1 => {
-                    timer.ch1().set_duty_cycle(duty);
+                    timer.ch1().set_duty_cycle(u32::from(duty));
                     Ok(())
                 }
                 _ => Err(TimerError::ChanNotSupported),

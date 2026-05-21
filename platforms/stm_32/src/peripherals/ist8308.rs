@@ -21,7 +21,11 @@ pub static MAG_SIGNAL: Signal<
 > = Signal::<CriticalSectionRawMutex, Result<packets::MagPacket, errors::SensorError>>::new();
 
 pub struct Ist8308Sensor {
-    pub dev: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>,
+    pub dev: I2cDevice<
+        'static,
+        CriticalSectionRawMutex,
+        I2c<'static, Async, embassy_stm32::i2c::mode::Master>,
+    >,
 }
 
 impl Ist8308Sensor {

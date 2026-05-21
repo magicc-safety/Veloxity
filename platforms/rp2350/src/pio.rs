@@ -16,10 +16,12 @@ pub enum StateMachine {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PioPurpose {
     MotorOutput,
+    MotorTelemetry,
     ServoOutput,
     SbusInput,
     I2cSensor,
     SpiSensor,
+    StatusLed,
     Cyw43Wifi,
 }
 

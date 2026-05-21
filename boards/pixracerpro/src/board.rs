@@ -152,6 +152,7 @@ impl Board {
             p.PA6,
             p.DMA1_CH0,
             p.DMA1_CH1,
+            BoardIrqs,
             spi1_config,
         );
         let spi1_bus = Mutex::new(spi1);
@@ -170,6 +171,7 @@ impl Board {
             p.PB14, // Miso
             p.DMA1_CH2,
             p.DMA1_CH3,
+            BoardIrqs,
             spi2_config,
         );
         let spi2_bus = Mutex::new(spi2);
@@ -178,7 +180,7 @@ impl Board {
         // DPS310 Baro (Internal)
         let nss2 = Output::new(p.PD7, Level::High, Speed::Low);
         // these pins are generalized for the IC
-        let drdy2 = ExtiInput::new(p.PD15, p.EXTI15, Pull::Down);
+        let drdy2 = ExtiInput::new(p.PD15, p.EXTI15, Pull::Down, BoardIrqs);
         let dps_dev = SpiDevice::new(spi2_bus, nss2);
         let dps_sensor = peripherals::dps310::Dps310Sensor {
             dev: dps_dev,
@@ -190,15 +192,9 @@ impl Board {
         let mut i2c_config = i2c::Config::default();
         i2c_config.scl_pullup = true;
         i2c_config.sda_pullup = true;
+        i2c_config.frequency = Hertz(100_000);
         let i2c1 = i2c::I2c::new(
-            p.I2C1,
-            p.PB8,
-            p.PB9,
-            IrqsI2c1,
-            p.DMA2_CH2,
-            p.DMA2_CH3,
-            Hertz(100_000),
-            i2c_config,
+            p.I2C1, p.PB8, p.PB9, p.DMA2_CH2, p.DMA2_CH3, BoardIrqs, i2c_config,
         );
         let i2c1_bus = Mutex::new(i2c1);
         let i2c1_bus = I2C1_BUS.init(i2c1_bus);
@@ -225,9 +221,9 @@ impl Board {
             p.USART3,
             p.PD9,
             p.PD8,
-            Usart3Irqs,
             p.DMA2_CH4,
             p.DMA2_CH5,
+            BoardIrqs,
             uart3config,
         )
         .unwrap();
@@ -265,9 +261,9 @@ impl Board {
             p.UART4,
             p.PA1,
             p.PA0,
-            Uart4Irqs,
             p.DMA2_CH6,
             p.DMA2_CH7,
+            BoardIrqs,
             uart4config,
         )
         .unwrap();
@@ -279,7 +275,7 @@ impl Board {
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down);
+        let drdy_pps = ExtiInput::new(p.PG12, p.EXTI12, Pull::Down, BoardIrqs);
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART6
@@ -296,9 +292,9 @@ impl Board {
             p.USART6,
             p.PC7,
             p.PC6,
-            Uart6Irqs,
             p.DMA1_CH4,
             p.DMA1_CH5,
+            BoardIrqs,
             uart6config,
         )
         .unwrap();
@@ -308,7 +304,7 @@ impl Board {
         // uSD SDMMC1
         let sdmmc1 = sdmmc::Sdmmc::new_4bit(
             p.SDMMC1,
-            Sdmmc1Irqs,
+            BoardIrqs,
             p.PC12,
             p.PD2,
             p.PC8,
@@ -331,6 +327,7 @@ impl Board {
             p.PF8,      // miso
             p.DMA1_CH6, // tx_dma
             p.DMA1_CH7, // rx_dma
+            BoardIrqs,
             spi5_config,
         );
         let spi5_ = Mutex::new(spi5);
@@ -338,9 +335,9 @@ impl Board {
 
         // BMI085 (Internal)
         let nss_bmi08x_a = Output::new(p.PF6, Level::High, Speed::Low); // Accel
-        let drdy_bmi08x_a = ExtiInput::new(p.PF1, p.EXTI1, Pull::Down); // Accel
+        let drdy_bmi08x_a = ExtiInput::new(p.PF1, p.EXTI1, Pull::Down, BoardIrqs); // Accel
         let nss_bmi08x_g = Output::new(p.PF10, Level::High, Speed::Low); // Gyro
-        let drdy_bmi08x_g = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down); // Gyro
+        let drdy_bmi08x_g = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down, BoardIrqs); // Gyro
         let bmi08x_dev_a = SpiDevice::new(spi5_bus, nss_bmi08x_a);
         let bmi08x_dev_g = SpiDevice::new(spi5_bus, nss_bmi08x_g);
         let jumper: Output<'static> = Output::new(p.PF2, Level::High, Speed::Low); // Bridge pin
@@ -413,17 +410,23 @@ impl Board {
         // SERVOS + TIMERS
         // There are only 7 available Servo Channels on the PixRacer Pro
         // TIM1
-        let tim1_ch1_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
-        let tim1_ch2_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
-        let tim1_ch3_pin = PwmPin::new_ch3(p.PE13, OutputType::PushPull);
-        let tim1_ch4_pin = PwmPin::new_ch4(p.PE14, OutputType::PushPull);
+        let tim1_ch1_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PE9, OutputType::PushPull);
+        let tim1_ch2_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PE11, OutputType::PushPull);
+        let tim1_ch3_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PE13, OutputType::PushPull);
+        let tim1_ch4_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PE14, OutputType::PushPull);
 
         // TIM4
-        let tim4_ch2_pin = PwmPin::new_ch2(p.PD13, OutputType::PushPull);
-        let tim4_ch3_pin = PwmPin::new_ch3(p.PD14, OutputType::PushPull);
+        let tim4_ch2_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PD13, OutputType::PushPull);
+        let tim4_ch3_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PD14, OutputType::PushPull);
 
         // TIM2
-        let tim2_ch1_pin = PwmPin::new_ch1(p.PA15, OutputType::PushPull);
+        let tim2_ch1_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PA15, OutputType::PushPull);
 
         let timer1 = SimplePwm::new(
             p.TIM1,
@@ -471,15 +474,11 @@ impl Board {
                 (2, peripherals::pwm::TimerChannel::Ch3), // -
             ],
             [
-                peripherals::pwm::PwmTimerBlockKind::DshotCapable,
+                peripherals::pwm::PwmTimerBlockKind::StandardOnly,
                 peripherals::pwm::PwmTimerBlockKind::StandardOnly,
                 peripherals::pwm::PwmTimerBlockKind::StandardOnly,
             ],
-            [
-                Some(peripherals::pwm::DshotDma::Dma2Ch0(p.DMA2_CH0)),
-                None,
-                None,
-            ],
+            [None, None, None],
         );
 
         // Test PWM pins

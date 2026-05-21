@@ -36,20 +36,20 @@ timing jitter while core 0 only consumes complete byte streams from the mailbox.
 
 PIO is the right place for deterministic signal timing on this board:
 
-- motor/servo output,
+- DShot motor output,
 - SBUS or other receiver input,
 - timing-sensitive sensor buses if normal I2C/SPI timing is not sufficient,
 - CYW43 PIO SPI for Wi-Fi.
 
-The current `DEFAULT_PIO_ALLOCATIONS` is deliberately provisional. It exists to make the ownership
-model explicit before pin and state-machine assignments are finalized.
+The current `DEFAULT_PIO_ALLOCATIONS` reserves PIO0 SM0 for CYW43, PIO1 SM0 for a four-lane DShot
+bus, PIO1 SM1 for later ESC telemetry, and PIO2 SM0 for an addressable status LED. The proposed
+pinout is documented in `docs/pico2w-esc-imu-pinout.md`.
 
 ## Open Decisions
 
-- Which GPIOs are assigned to motors, servos, receiver input, and each sensor bus.
-- Which PIO block/state machine is reserved for CYW43 versus flight-control I/O.
-- Whether sensor I/O is all PIO-backed immediately or whether low-rate sensors start on hardware
-  I2C/SPI and move to PIO only where timing demands it.
+- The exact IMU part number and matching Rust driver.
+- Whether AM32 telemetry will use a separate telemetry wire or bidirectional DShot line turnaround.
+- Whether future low-rate sensors use the reserved I2C pins or their own bus.
 - Mailbox sizing and backpressure behavior between the Wi-Fi core and flight-control core.
 - How Wi-Fi credentials and UDP peer settings are supplied without baking private network data into
   firmware.

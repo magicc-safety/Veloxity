@@ -24,8 +24,13 @@ pub static BARO_SIGNAL: Signal<
 > = Signal::<CriticalSectionRawMutex, Result<packets::BaroPacket, errors::SensorError>>::new();
 
 pub struct Dps310Sensor {
-    pub dev: SpiDevice<'static, CriticalSectionRawMutex, spi::Spi<'static, Async>, Output<'static>>,
-    pub drdy: ExtiInput<'static>,
+    pub dev: SpiDevice<
+        'static,
+        CriticalSectionRawMutex,
+        spi::Spi<'static, Async, spi::mode::Master>,
+        Output<'static>,
+    >,
+    pub drdy: ExtiInput<'static, Async>,
     pub three_wire: bool,
 }
 

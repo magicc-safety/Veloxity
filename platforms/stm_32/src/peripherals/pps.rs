@@ -1,4 +1,5 @@
 use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::mode::Async;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
@@ -9,7 +10,7 @@ pub static PPS_SIGNAL: Signal<CriticalSectionRawMutex, packets::PpsPacket> =
     Signal::<CriticalSectionRawMutex, packets::PpsPacket>::new();
 
 pub struct PpsSensor {
-    pub pps: ExtiInput<'static>,
+    pub pps: ExtiInput<'static, Async>,
 }
 
 impl PpsSensor {

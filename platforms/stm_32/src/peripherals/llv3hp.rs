@@ -21,7 +21,11 @@ pub static RANGE_SIGNAL: Signal<
 > = Signal::<CriticalSectionRawMutex, Result<packets::RangePacket, errors::SensorError>>::new();
 
 pub struct Llv3hpSensor {
-    pub dev: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>,
+    pub dev: I2cDevice<
+        'static,
+        CriticalSectionRawMutex,
+        I2c<'static, Async, embassy_stm32::i2c::mode::Master>,
+    >,
 }
 
 // Control Register List - Address Definitions

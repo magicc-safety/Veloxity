@@ -21,7 +21,11 @@ pub static PITOT_SIGNAL: Signal<
 > = Signal::<CriticalSectionRawMutex, Result<packets::PitotPacket, errors::SensorError>>::new();
 
 pub struct Ms4525Sensor {
-    pub dev: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>,
+    pub dev: I2cDevice<
+        'static,
+        CriticalSectionRawMutex,
+        I2c<'static, Async, embassy_stm32::i2c::mode::Master>,
+    >,
 }
 
 impl Ms4525Sensor {

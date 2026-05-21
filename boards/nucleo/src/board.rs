@@ -219,6 +219,7 @@ impl Board {
             p.PB4,
             p.DMA1_CH0,
             p.DMA1_CH1,
+            BoardIrqs,
             spi1_config,
         );
         let spi1_bus = Mutex::new(spi1);
@@ -226,7 +227,7 @@ impl Board {
 
         // IIS2MDC Mag
         let nss1 = Output::new(p.PA4, Level::High, Speed::Low);
-        let drdy1 = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down);
+        let drdy1 = ExtiInput::new(p.PF3, p.EXTI3, Pull::Down, BoardIrqs);
         let iis_dev = SpiDevice::new(spi1_bus, nss1); // Todo implement new funciton
         let iis_sensor = peripherals::iis2mdc::Iis2mdcSensor {
             dev: iis_dev,
@@ -235,7 +236,7 @@ impl Board {
 
         // DPS210 Baro
         let nss2 = Output::new(p.PC7, Level::High, Speed::Low);
-        let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down);
+        let drdy2 = ExtiInput::new(p.PG2, p.EXTI2, Pull::Down, BoardIrqs);
         let dps_dev = SpiDevice::new(spi1_bus, nss2);
         let dps_sensor = peripherals::dps310::Dps310Sensor {
             dev: dps_dev,
@@ -256,6 +257,7 @@ impl Board {
             p.PC2,
             p.DMA1_CH2,
             p.DMA1_CH3,
+            BoardIrqs,
             spi2_config,
         );
         let spi2_bus = Mutex::new(spi2);
@@ -265,21 +267,15 @@ impl Board {
         let mut i2c_config = i2c::Config::default();
         i2c_config.scl_pullup = true;
         i2c_config.sda_pullup = true;
+        i2c_config.frequency = Hertz(100_000);
         let i2c1 = i2c::I2c::new(
-            p.I2C1,
-            p.PB8,
-            p.PB9,
-            IrqsI2c1,
-            p.DMA2_CH2,
-            p.DMA2_CH3,
-            Hertz(100_000),
-            i2c_config,
+            p.I2C1, p.PB8, p.PB9, p.DMA2_CH2, p.DMA2_CH3, BoardIrqs, i2c_config,
         );
         let i2c1_bus = Mutex::new(i2c1);
         let i2c1_bus = I2C1_BUS.init(i2c1_bus);
 
         // DLHRL20G Pitot
-        let drdy0 = ExtiInput::new(p.PA15, p.EXTI15, Pull::Down);
+        let drdy0 = ExtiInput::new(p.PA15, p.EXTI15, Pull::Down, BoardIrqs);
         let dlhr_dev = I2cDevice::new(i2c1_bus);
         let _dlhr_sensor = peripherals::dlhrl20g::DlhrL20GSensor {
             dev: dlhr_dev,
@@ -293,9 +289,9 @@ impl Board {
             p.USART2,
             p.PD6,
             p.PD5,
-            Usart2Irqs,
             p.DMA2_CH4,
             p.DMA2_CH5,
+            BoardIrqs,
             uart2config,
         )
         .unwrap();
@@ -338,9 +334,9 @@ impl Board {
             p.UART7,
             p.PE7,
             p.PE8,
-            Uart7Irqs,
             p.DMA2_CH6,
             p.DMA2_CH7,
+            BoardIrqs,
             uart7config,
         )
         .unwrap();
@@ -350,7 +346,7 @@ impl Board {
             baudrate: peripherals::ublox::Bitrate::Baud230400,
             nav_period_ms: 100u16,
         };
-        let drdy_pps = ExtiInput::new(p.PE0, p.EXTI0, Pull::Down); // Gyro
+        let drdy_pps = ExtiInput::new(p.PE0, p.EXTI0, Pull::Down, BoardIrqs); // Gyro
         let pps_sensor = peripherals::pps::PpsSensor { pps: drdy_pps };
 
         // S.Bus USART1
@@ -367,9 +363,9 @@ impl Board {
             p.USART1,
             p.PB7,
             p.PB6,
-            Usart1Irqs,
             p.DMA1_CH4,
             p.DMA1_CH5,
+            BoardIrqs,
             uart1config,
         )
         .unwrap();
@@ -379,7 +375,7 @@ impl Board {
         // uSD SDMMC1
         let sdmmc1 = sdmmc::Sdmmc::new_4bit(
             p.SDMMC1,
-            Sdmmc1Irqs,
+            BoardIrqs,
             p.PC12,
             p.PD2,
             p.PC8,
@@ -402,6 +398,7 @@ impl Board {
             p.PE5,
             p.DMA2_CH0,
             p.DMA2_CH1,
+            BoardIrqs,
             spi4_config,
         );
         let spi4_ = Mutex::new(spi4);
@@ -409,9 +406,9 @@ impl Board {
 
         // BMI08x
         let nss_bmi08x_a = Output::new(p.PE3, Level::High, Speed::Low); // Accel
-        let drdy_bmi08x_a = ExtiInput::new(p.PE4, p.EXTI4, Pull::Down); // Accel
+        let drdy_bmi08x_a = ExtiInput::new(p.PE4, p.EXTI4, Pull::Down, BoardIrqs); // Accel
         let nss_bmi08x_g = Output::new(p.PF8, Level::High, Speed::Low); // Gyro
-        let drdy_bmi08x_g = ExtiInput::new(p.PF7, p.EXTI7, Pull::Down); // Gyro
+        let drdy_bmi08x_g = ExtiInput::new(p.PF7, p.EXTI7, Pull::Down, BoardIrqs); // Gyro
         let bmi08x_dev_a = SpiDevice::new(spi4_bus, nss_bmi08x_a);
         let bmi08x_dev_g = SpiDevice::new(spi4_bus, nss_bmi08x_g);
         let jumper: Output<'static> = Output::new(p.PF15, Level::High, Speed::Low); // Bridge pin
@@ -473,21 +470,21 @@ impl Board {
 
         // SERVOS + TIMERS
         // TIM1
-        let ch0_pin = PwmPin::new_ch1(p.PE9, OutputType::PushPull);
-        let ch1_pin = PwmPin::new_ch2(p.PE11, OutputType::PushPull);
-        let ch2_pin = PwmPin::new_ch3(p.PE13, OutputType::PushPull);
-        let ch3_pin = PwmPin::new_ch4(p.PE14, OutputType::PushPull);
+        let ch0_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PE9, OutputType::PushPull);
+        let ch1_pin = PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PE11, OutputType::PushPull);
+        let ch2_pin = PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PE13, OutputType::PushPull);
+        let ch3_pin = PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PE14, OutputType::PushPull);
         // TIM4
-        let ch4_pin = PwmPin::new_ch1(p.PD12, OutputType::PushPull);
-        let ch5_pin = PwmPin::new_ch2(p.PD13, OutputType::PushPull);
-        let ch6_pin = PwmPin::new_ch3(p.PD14, OutputType::PushPull);
-        let ch7_pin = PwmPin::new_ch4(p.PD15, OutputType::PushPull);
+        let ch4_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PD12, OutputType::PushPull);
+        let ch5_pin = PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PD13, OutputType::PushPull);
+        let ch6_pin = PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PD14, OutputType::PushPull);
+        let ch7_pin = PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PD15, OutputType::PushPull);
         // TIM2
-        let ch8_pin = PwmPin::new_ch1(p.PA0, OutputType::PushPull);
-        let ch9_pin = PwmPin::new_ch4(p.PB11, OutputType::PushPull);
+        let ch8_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PA0, OutputType::PushPull);
+        let ch9_pin = PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PB11, OutputType::PushPull);
         // TIM3
-        let ch10_pin = PwmPin::new_ch1(p.PC6, OutputType::PushPull);
-        let ch11_pin = PwmPin::new_ch4(p.PB1, OutputType::PushPull);
+        let ch10_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PC6, OutputType::PushPull);
+        let ch11_pin = PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PB1, OutputType::PushPull);
 
         let timer1 = SimplePwm::new(
             p.TIM1,

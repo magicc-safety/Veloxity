@@ -12,11 +12,11 @@ embassy-executor = { version = "0.7.0", features = [
   "executor-thread",
   "executor-interrupt",
 ] }
-embassy-embedded-hal = { version = "0.3.0" }
+embassy-embedded-hal = { version = "0.6.0" }
 embedded-hal-async = { version = "1.0" }
-embedded-io-async = { version = "0.6.1" }
+embedded-io-async = { version = "0.7.0" }
 embedded-hal-nb = { version = "1.0.0" }
-embassy-stm32 = { version = "0.2.0", features = [
+embassy-stm32 = { version = "0.6.0", features = [
   "stm32h753zi",
   "time-driver-tim5",
   "exti",
@@ -25,11 +25,11 @@ embassy-stm32 = { version = "0.2.0", features = [
   "rt",
   "memory-x",
 ] }
-embassy-time = { version = "0.4.0", features = [
+embassy-time = { version = "0.5.0", features = [
   "tick-hz-1_000_000",
 ] }
-embassy-sync = { version = "0.6.1" }
-embassy-usb = { version = "0.4.0" }
+embassy-sync = { version = "0.8.0" }
+embassy-usb = { version = "0.6.0" }
 embassy-futures = { version = "0.1.0" }
 cortex-m-rt = { version = "0.7.0" }
 cortex-m = { version = "0.7.6", features = [

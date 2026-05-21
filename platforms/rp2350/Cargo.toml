@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 embassy-rp = { version = "0.10.0", features = [
   "rp235xa",
+  "time-driver",
   "critical-section-impl",
   "rom-v2-intrinsics",
 ] }

@@ -31,9 +31,14 @@ pub enum DecRate {
 }
 
 pub struct Adis16500Sensor {
-    pub dev: SpiDevice<'static, CriticalSectionRawMutex, spi::Spi<'static, Async>, Output<'static>>,
+    pub dev: SpiDevice<
+        'static,
+        CriticalSectionRawMutex,
+        spi::Spi<'static, Async, spi::mode::Master>,
+        Output<'static>,
+    >,
     pub dec_rate: DecRate,
-    pub drdy: ExtiInput<'static>,
+    pub drdy: ExtiInput<'static, Async>,
     pub reset: Output<'static>,
     pub timer: TimerEnum,
 }

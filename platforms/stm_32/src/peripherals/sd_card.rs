@@ -1,8 +1,7 @@
 use embassy_stm32::gpio::Input;
-use embassy_stm32::peripherals::SDMMC1;
-use embassy_stm32::sdmmc::DataBlock;
 use embassy_stm32::sdmmc::Error;
 use embassy_stm32::sdmmc::Sdmmc;
+use embassy_stm32::sdmmc::sd::{Addressable, CmdBlock, DataBlock, StorageDevice};
 use embassy_stm32::time::mhz;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
@@ -22,80 +21,35 @@ pub static SD_READ_SIGNAL: Signal<
 > = Signal::<CriticalSectionRawMutex, Result<packets::ParamPacket, errors::SensorError>>::new();
 
 pub struct SdCard {
-    pub sdmmc: Sdmmc<'static, SDMMC1>,
+    pub sdmmc: Sdmmc<'static>,
     pub detect: Input<'static>,
 }
 
 impl SdCard {
     async fn read(&mut self, p: &mut packets::ParamPacket, max_blocks: usize) -> Result<(), Error> {
-        let block_size = 512; // this is a fixed value
-        // number of blocks to write
-        let p_size = p.values.len();
-        let p_blocks = (p_size + block_size - 1) / block_size;
-
-        let mut blocks = p_blocks;
-        if blocks > max_blocks {
-            blocks = max_blocks;
-        };
-
-        for i in 0..blocks {
-            let mut block = DataBlock([0u8; 512]);
-            let _result = self.sdmmc.read_block(i as u32, &mut block).await?;
-            p.values[i * 512..(i + 1) * 512].copy_from_slice(&block.0);
-        }
-        Ok(())
+        let mut cmd_block = CmdBlock::new();
+        let mut storage =
+            StorageDevice::new_sd_card(&mut self.sdmmc, &mut cmd_block, mhz(4)).await?;
+        read(&mut storage, p, max_blocks).await
     }
 
     async fn write(&mut self, p: &packets::ParamPacket, max_blocks: usize) -> Result<(), Error> {
-        let block_size = 512; // this is a fixed value
-        // number of blocks to write
-        let p_size = p.values.len();
-        let p_blocks = (p_size + block_size - 1) / block_size;
-
-        let mut blocks = p_blocks;
-        if blocks > max_blocks {
-            blocks = max_blocks;
-        };
-
-        for i in 0..blocks {
-            let mut block = DataBlock([0u8; 512]);
-            block
-                .0
-                .copy_from_slice(&p.values[(i * 512)..((i + 1) * 512)]);
-            let _result = self.sdmmc.write_block(i as u32, &block).await?;
-        }
-        Ok(())
+        let mut cmd_block = CmdBlock::new();
+        let mut storage =
+            StorageDevice::new_sd_card(&mut self.sdmmc, &mut cmd_block, mhz(4)).await?;
+        write(&mut storage, p, max_blocks).await
     }
 
     async fn run(&mut self) {
-        // Initialize
         let mut card_blocks = 0usize;
-        let mut card_size = 0usize;
+        let mut cmd_block = CmdBlock::new();
 
-        // Should print 400kHz for initialization
-
-        // Initialize the SD card
-        if let Err(_e) = self.sdmmc.init_card(mhz(4)).await {
-        } else {
+        if let Ok(storage) =
+            StorageDevice::new_sd_card(&mut self.sdmmc, &mut cmd_block, mhz(4)).await
+        {
+            let card = storage.card();
+            card_blocks = (card.size() / 512) as usize;
         }
-
-        // Get card information
-        match self.sdmmc.card() {
-            Ok(card) => {
-                card_blocks = card.csd.block_count() as usize;
-                card_size = card.csd.card_size() as usize;
-            }
-            Err(_e) => {}
-        }
-        let _block_size = card_size / card_blocks;
-        // any block_size other than 512 is an error!
-        //    "uSD: ( {} blocks ) * ( {} bytes/block) = card size {} bytes",
-        //    card_blocks,
-        //    block_size,
-        //    card_size
-        //);
-
-        // Read stored values from sd and push to SD_READ_SIGNAL
 
         let header = packets::RosflightPacketHeader {
             timestamp: Instant::now().as_micros(),
@@ -126,6 +80,52 @@ impl SdCard {
             }
         }
     }
+}
+
+async fn read(
+    storage: &mut StorageDevice<'_, '_, impl Addressable>,
+    p: &mut packets::ParamPacket,
+    max_blocks: usize,
+) -> Result<(), Error> {
+    let block_size = 512; // this is a fixed value
+    // number of blocks to write
+    let p_size = p.values.len();
+    let p_blocks = (p_size + block_size - 1) / block_size;
+
+    let mut blocks = p_blocks;
+    if blocks > max_blocks {
+        blocks = max_blocks;
+    };
+
+    for i in 0..blocks {
+        let mut block = DataBlock::new();
+        storage.read_block(i as u32, &mut block).await?;
+        p.values[i * 512..(i + 1) * 512].copy_from_slice(&block[..]);
+    }
+    Ok(())
+}
+
+async fn write(
+    storage: &mut StorageDevice<'_, '_, impl Addressable>,
+    p: &packets::ParamPacket,
+    max_blocks: usize,
+) -> Result<(), Error> {
+    let block_size = 512; // this is a fixed value
+    // number of blocks to write
+    let p_size = p.values.len();
+    let p_blocks = (p_size + block_size - 1) / block_size;
+
+    let mut blocks = p_blocks;
+    if blocks > max_blocks {
+        blocks = max_blocks;
+    };
+
+    for i in 0..blocks {
+        let mut block = DataBlock::new();
+        block.copy_from_slice(&p.values[(i * 512)..((i + 1) * 512)]);
+        storage.write_block(i as u32, &block).await?;
+    }
+    Ok(())
 }
 
 #[embassy_executor::task]

@@ -17,8 +17,12 @@ pub static PITOT_SIGNAL: Signal<
 > = Signal::<CriticalSectionRawMutex, Result<packets::PitotPacket, errors::SensorError>>::new();
 
 pub struct DlhrL20GSensor {
-    pub dev: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>,
-    pub drdy: ExtiInput<'static>,
+    pub dev: I2cDevice<
+        'static,
+        CriticalSectionRawMutex,
+        I2c<'static, Async, embassy_stm32::i2c::mode::Master>,
+    >,
+    pub drdy: ExtiInput<'static, Async>,
 }
 
 impl DlhrL20GSensor {

@@ -7,6 +7,8 @@ use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::InterruptExecutor;
 use embassy_stm32::Peripherals as EMBASSY_Peripherals;
 use embassy_stm32::bind_interrupts;
+use embassy_stm32::dma;
+use embassy_stm32::exti;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::OutputType;
 use embassy_stm32::gpio::Pull;
@@ -19,6 +21,7 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::peripherals as EMBASSY_peripherals;
 use embassy_stm32::sdmmc;
 use embassy_stm32::spi;
+use embassy_stm32::spi::mode::Master as SpiMaster;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::time::mhz;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
@@ -29,80 +32,69 @@ use embassy_stm32::usb::Driver;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
-pub static SPI1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async, SpiMaster>>> =
     StaticCell::new();
-pub static SPI2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async, SpiMaster>>> =
     StaticCell::new();
-pub static SPI3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async, SpiMaster>>> =
     StaticCell::new();
-pub static SPI4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async, SpiMaster>>> =
     StaticCell::new();
-pub static SPI5_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI5_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async, SpiMaster>>> =
     StaticCell::new();
-pub static SPI6_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
-    StaticCell::new();
-
-pub static I2C1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
-    StaticCell::new();
-pub static I2C2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
-    StaticCell::new();
-pub static I2C3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
-    StaticCell::new();
-pub static I2C4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
+pub static SPI6_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async, SpiMaster>>> =
     StaticCell::new();
 
-// All I2C Interrupts
-bind_interrupts!(struct IrqsI2c1 {
+pub static I2C1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async, i2c::mode::Master>>> =
+    StaticCell::new();
+pub static I2C2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async, i2c::mode::Master>>> =
+    StaticCell::new();
+pub static I2C3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async, i2c::mode::Master>>> =
+    StaticCell::new();
+pub static I2C4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async, i2c::mode::Master>>> =
+    StaticCell::new();
+
+bind_interrupts!(struct BoardIrqs {
     I2C1_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C1>;
     I2C1_ER => i2c::ErrorInterruptHandler<EMBASSY_peripherals::I2C1>;
-});
-bind_interrupts!(struct IrqsI2c2 {
     I2C2_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C2>;
     I2C2_ER => i2c::ErrorInterruptHandler<EMBASSY_peripherals::I2C2>;
-});
-bind_interrupts!(struct IrqsI2c3 {
     I2C3_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C3>;
     I2C3_ER => i2c::ErrorInterruptHandler<EMBASSY_peripherals::I2C3>;
-});
-bind_interrupts!(struct IrqsI2c4 {
     I2C4_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C4>;
     I2C4_ER => i2c::ErrorInterruptHandler<EMBASSY_peripherals::I2C4>;
-});
-
-// All USART Interrupts
-bind_interrupts!(struct Usart1Irqs {
     USART1 => usart::InterruptHandler<EMBASSY_peripherals::USART1>;
-});
-
-bind_interrupts!(struct Usart2Irqs {
     USART2 => usart::InterruptHandler<EMBASSY_peripherals::USART2>;
-});
-
-bind_interrupts!(struct Usart3Irqs {
     USART3 => usart::InterruptHandler<EMBASSY_peripherals::USART3>;
-});
-
-bind_interrupts!(struct Uart6Irqs {
     USART6 => usart::InterruptHandler<EMBASSY_peripherals::USART6>;
-});
-
-// All UART Interrupts
-bind_interrupts!(struct Uart4Irqs {
     UART4 => usart::InterruptHandler<EMBASSY_peripherals::UART4>;
-});
-bind_interrupts!(struct Uart5Irqs {
     UART5 => usart::InterruptHandler<EMBASSY_peripherals::UART5>;
-});
-bind_interrupts!(struct Uart7Irqs {
     UART7 => usart::InterruptHandler<EMBASSY_peripherals::UART7>;
-});
-bind_interrupts!(struct Uart8Irqs {
     UART8 => usart::InterruptHandler<EMBASSY_peripherals::UART8>;
-});
-
-// SDMMC 1 Interrupts
-bind_interrupts!(struct Sdmmc1Irqs {
     SDMMC1 => sdmmc::InterruptHandler<EMBASSY_peripherals::SDMMC1>;
+    DMA1_STREAM0 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH0>;
+    DMA1_STREAM1 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH1>;
+    DMA1_STREAM2 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH2>;
+    DMA1_STREAM3 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH3>;
+    DMA1_STREAM4 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH4>;
+    DMA1_STREAM5 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH5>;
+    DMA1_STREAM6 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH6>;
+    DMA1_STREAM7 => dma::InterruptHandler<EMBASSY_peripherals::DMA1_CH7>;
+    DMA2_STREAM0 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH0>;
+    DMA2_STREAM1 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH1>;
+    DMA2_STREAM2 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH2>;
+    DMA2_STREAM3 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH3>;
+    DMA2_STREAM4 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH4>;
+    DMA2_STREAM5 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH5>;
+    DMA2_STREAM6 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH6>;
+    DMA2_STREAM7 => dma::InterruptHandler<EMBASSY_peripherals::DMA2_CH7>;
+    EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
+    EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
+    EXTI2 => exti::InterruptHandler<interrupt::typelevel::EXTI2>;
+    EXTI3 => exti::InterruptHandler<interrupt::typelevel::EXTI3>;
+    EXTI4 => exti::InterruptHandler<interrupt::typelevel::EXTI4>;
+    EXTI9_5 => exti::InterruptHandler<interrupt::typelevel::EXTI9_5>;
+    EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
 });
 
 // USB Interrupt
