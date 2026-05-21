@@ -127,11 +127,11 @@ timing or allocation behavior.
 
 ### 2026-05-18: Introduced `voloxide_core::comm`
 
-- Moved the core communication manager from `voloxide_core/src/comm_manager.rs` to
-  `voloxide_core/src/comm.rs`.
+- Moved the core communication manager from `crates/voloxide_core/src/comm_manager.rs` to
+  `crates/voloxide_core/src/comm.rs`.
 - Moved the communication interface trait from
-  `voloxide_core/src/comm_manager/comm_link_trait.rs` to
-  `voloxide_core/src/comm/interface.rs`.
+  `crates/voloxide_core/src/comm_manager/comm_link_trait.rs` to
+  `crates/voloxide_core/src/comm/interface.rs`.
 - Added temporary compatibility re-exports so existing `voloxide_core::comm_manager` and
   `comm_link_trait` paths could still resolve during the migration.
 - Updated internal core code and `voloxide_mavlink` to use the new
@@ -148,9 +148,9 @@ timing or allocation behavior.
 
 ### 2026-05-18: Renamed `bodytype` Domain To `vehicle`
 
-- Moved `voloxide_core/src/bodytype.rs` to `voloxide_core/src/vehicle.rs`.
-- Moved `voloxide_core/src/bodytype/quadrotor.rs` to
-  `voloxide_core/src/vehicle/quadrotor.rs`.
+- Moved `crates/voloxide_core/src/bodytype.rs` to `crates/voloxide_core/src/vehicle.rs`.
+- Moved `crates/voloxide_core/src/bodytype/quadrotor.rs` to
+  `crates/voloxide_core/src/vehicle/quadrotor.rs`.
 - Updated core, sim, Nucleo, and Pixracer Pro code to use `voloxide_core::vehicle`.
 - Removed now-empty legacy `bodytype` and `comm_manager` source directories.
 - The `BodyType` trait remained briefly after this slice to keep the behavioral surface small; it
@@ -196,8 +196,8 @@ continues to expose protocol-neutral communication messages and the `CommInterfa
 ### 2026-05-18: Split MAVLink Conversion Module
 
 - Split MAVLink/core message conversion impls and conversion tests out of
-  `voloxide_mavlink/src/link.rs`.
-- Added `voloxide_mavlink/src/conversions.rs`.
+  `comms/voloxide_mavlink/src/link.rs`.
+- Added `comms/voloxide_mavlink/src/conversions.rs`.
 - Kept `link.rs` focused on `MavlinkInterface`, frame construction, serial I/O, and the
   `CommInterface` implementation.
 
@@ -216,9 +216,9 @@ continues to expose protocol-neutral communication messages and the `CommInterfa
 
 - Step 1: kept adapter responsibilities outside `voloxide_core`; MAVLink remains in
   `voloxide_mavlink`, sim transport remains in `sim`, and board startup remains in board crates.
-- Step 2: moved `voloxide_core/src/comm_messages.rs` to `voloxide_core/src/comm/messages.rs` and
-  moved `voloxide_core/src/sensorprocessors.rs` to
-  `voloxide_core/src/sensors/processors.rs`.
+- Step 2: moved `crates/voloxide_core/src/comm_messages.rs` to `crates/voloxide_core/src/comm/messages.rs` and
+  moved `crates/voloxide_core/src/sensorprocessors.rs` to
+  `crates/voloxide_core/src/sensors/processors.rs`.
 - Step 3: added board-local `SimWorld`, `PixracerWorld`, and `NucleoWorld` aliases plus local
   `init_world` constructors at the runtime entrypoints.
 - Step 4: split `World::run_once` into explicit high-level scheduler phases for communication and
@@ -235,31 +235,31 @@ continues to expose protocol-neutral communication messages and the `CommInterfa
 - Replaced the remaining flat top-level `*_system.rs`, `*_manager.rs`, and stale quad file names
   with domain-owned modules.
 - Parameter ownership is now:
-  - `voloxide_core/src/params.rs`
-  - `voloxide_core/src/params/service.rs`
-  - `voloxide_core/src/params/reactions.rs`
+  - `crates/voloxide_core/src/params.rs`
+  - `crates/voloxide_core/src/params/service.rs`
+  - `crates/voloxide_core/src/params/reactions.rs`
 - Logging ownership is now:
-  - `voloxide_core/src/log.rs`
-  - `voloxide_core/src/log/drain.rs`
+  - `crates/voloxide_core/src/log.rs`
+  - `crates/voloxide_core/src/log/drain.rs`
 - Command and companion ownership is now:
-  - `voloxide_core/src/command.rs`
-  - `voloxide_core/src/command/service.rs`
-  - `voloxide_core/src/companion.rs`
+  - `crates/voloxide_core/src/command.rs`
+  - `crates/voloxide_core/src/command/service.rs`
+  - `crates/voloxide_core/src/companion.rs`
 - Sensor ownership is now:
-  - `voloxide_core/src/sensors.rs`
-  - `voloxide_core/src/sensors/ingestion.rs`
-  - `voloxide_core/src/sensors/processors.rs`
-  - `voloxide_core/src/sensors/health.rs`
+  - `crates/voloxide_core/src/sensors.rs`
+  - `crates/voloxide_core/src/sensors/ingestion.rs`
+  - `crates/voloxide_core/src/sensors/processors.rs`
+  - `crates/voloxide_core/src/sensors/health.rs`
 - RC and PWM ownership is now:
-  - `voloxide_core/src/rc.rs`
-  - `voloxide_core/src/rc/system.rs`
-  - `voloxide_core/src/pwm.rs`
-  - `voloxide_core/src/pwm/system.rs`
-- Control pipeline ownership is now `voloxide_core/src/control.rs`.
+  - `crates/voloxide_core/src/rc.rs`
+  - `crates/voloxide_core/src/rc/system.rs`
+  - `crates/voloxide_core/src/pwm.rs`
+  - `crates/voloxide_core/src/pwm/system.rs`
+- Control pipeline ownership is now `crates/voloxide_core/src/control.rs`.
 - Quad implementations now use role names:
-  - `voloxide_core/src/controller/quad.rs`
-  - `voloxide_core/src/estimator/quad.rs`
-  - `voloxide_core/src/mixer/matrix.rs`
+  - `crates/voloxide_core/src/controller/quad.rs`
+  - `crates/voloxide_core/src/estimator/quad.rs`
+  - `crates/voloxide_core/src/mixer/matrix.rs`
 - Migrated `state_machine/mod.rs` to `state_machine.rs` with tests remaining in
   `state_machine/tests.rs`, preserving the modern Rust `module.rs` plus `module/child.rs` layout.
 

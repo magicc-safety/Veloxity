@@ -463,7 +463,7 @@ alone. C treats an invalid/unset secondary mixer as "default to primary" during
 mixer initialization. Voloxide's reflection path only treated values greater
 than or equal to the mixer count as invalid, so the default
 `SECONDARY_MIXER=-1` was not refreshed and ROSflight IO saw a zero secondary
-matrix. `voloxide_core/src/mixer/matrix.rs` now treats any value outside
+matrix. `crates/voloxide_core/src/mixer/matrix.rs` now treats any value outside
 `0..NUM_MIXERS` as invalid for reflection and mirrors the primary matrix when
 the secondary choice is unset.
 
@@ -566,7 +566,7 @@ Voloxide automated pre-fix behavior:
 
 Fix:
 
-- `ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp` now passes through
+- `sim/ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp` now passes through
   the original simulator message header timestamps for IMU, magnetometer,
   barometer, GNSS, airspeed, range, and battery.
 - The shim now consumes each sensor availability flag after copying it into the

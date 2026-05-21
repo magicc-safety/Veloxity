@@ -1,12 +1,26 @@
 [workspace]
 resolver = "3"
-members = ["nucleo", "pixracerpro", "voloxide_core", "voloxide_mavlink", "sim", "stm_32"]
+members = [
+  "boards/nucleo",
+  "boards/pixracerpro",
+  "comms/voloxide_mavlink",
+  "crates/voloxide_core",
+  "platforms/stm_32",
+  "sim/firmware",
+  "xtask",
+]
+default-members = [
+  "comms/voloxide_mavlink",
+  "crates/voloxide_core",
+  "sim/firmware",
+  "xtask",
+]
 
 # Define your core library as a shared dependency
 [workspace.dependencies]
-voloxide_core = { path = "./voloxide_core" }
-voloxide_mavlink = { path = "./voloxide_mavlink" }
-stm_32 = { path = "./stm_32" }
+voloxide_core = { path = "./crates/voloxide_core" }
+voloxide_mavlink = { path = "./comms/voloxide_mavlink" }
+stm_32 = { path = "./platforms/stm_32" }
 
 [workspace.lints.rust]
 

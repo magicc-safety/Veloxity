@@ -1,55 +1,140 @@
 <img src="assets/voloxide-logo.svg" alt="Voloxide logo" width="250" height="250" align="center">
 
-## Voloxide is a Rust-based port of the **ROSFlight** project, bringing real-time, high-performance flight control to the Rust ecosystem. This project leverages Rust's safety and concurrency features to create reliable, maintainable flight control firmware.
+## Voloxide
 
-## Workspace Structure
+Voloxide is a Rust-based port of the **ROSFlight** project. The repository is organized as a
+single Rust workspace because the core firmware contracts, protocol adapters, board firmware, and
+simulator endpoint evolve together.
 
-| Crate | Target | Purpose |
-|---|---|---|
-| `voloxide_core` | host | `no_std` algorithm library: board I/O, world scheduler, estimator, controller, mixer, communication contracts |
-| `voloxide_mavlink` | host / `thumbv7em-none-eabihf` | MAVLink communication implementation for the core `CommInterface` contract |
-| `stm_32` | `thumbv7em-none-eabihf` | STM32/Embassy HAL and peripheral drivers |
-| `nucleo` | `thumbv7em-none-eabihf` | Binary with `BoardIo` and PWM drivers for the Nucleo-H753ZI dev board |
-| `pixracerpro` | `thumbv7em-none-eabihf` | Binary with `BoardIo` and PWM drivers for the Pixracer Pro flight controller |
-| `sim` | host | Binary with `BoardIo` and PWM drivers for host-side simulation via Zenoh |
+## Repository Structure
 
-MAVLink message types are code-generated at build time by `voloxide_mavlink/build.rs` from
-`voloxide_mavlink/mavlink_definitions/` using the `mavspec` crate. They are internal to the
+| Path | Role |
+|---|---|
+| `crates/voloxide_core` | `no_std` flight-control library: contracts, scheduler, state, estimator, controller, mixer, sensors, PWM, RC, and params |
+| `comms/voloxide_mavlink` | MAVLink communication implementation for the core `CommInterface` contract |
+| `platforms/stm_32` | STM32/Embassy platform and peripheral drivers shared by STM32 boards |
+| `boards/nucleo` | Nucleo-H753ZI firmware application package |
+| `boards/pixracerpro` | Pixracer Pro firmware application package |
+| `sim/firmware` | Host-side simulator firmware FFI/staticlib used by the ROS 2 shim |
+| `sim/ros2/voloxide_sil_board_shim` | ROS 2 shim that exposes the Voloxide simulator firmware as a ROSflight SIL board |
+| `docs/tutorials` | Supported ROScopter and ROSplane operator tutorials |
+| `scripts` | Supported ROScopter and ROSplane demo helpers |
+| `xtask` | Repo-specific build/test command wrapper |
+
+MAVLink message types are code-generated at build time by `comms/voloxide_mavlink/build.rs` from
+`comms/voloxide_mavlink/mavlink_definitions/` using the `mavspec` crate. They are internal to the
 `voloxide_mavlink` communication implementation.
+
+## Build And Test
+
+Run Rust commands from the Voloxide repo root:
+
+```bash
+cd /run/host/home/skink/projects/voloxide_proj/Voloxide
+```
+
+Root `cargo build` uses the workspace `default-members`, which are intentionally host-compatible.
+It builds the core library, MAVLink implementation, simulator FFI library, and `xtask`; it does not
+try to build embedded firmware for the host target.
+
+```bash
+cargo build
+```
+
+Use the repo command wrapper for the common checks:
+
+```bash
+cargo xtask check-host
+cargo xtask test-host
+```
+
+Build the simulator static library used by the ROS 2 shim:
+
+```bash
+cargo xtask build-sim-lib
+```
+
+Equivalent direct command:
+
+```bash
+cargo build -p sim --lib
+```
 
 ## Prerequisites
 
-- Rust toolchain with the `thumbv7em-none-eabihf` target:
+- Rust toolchain.
+- For embedded board firmware, add the Cortex-M target:
   ```bash
   rustup target add thumbv7em-none-eabihf
   ```
-- `probe-rs` for flashing and running on hardware:
+- For flashing and running on hardware, install `probe-rs`:
   ```bash
   cargo install probe-rs-tools
   ```
-- A debug probe connected to the target board (e.g., ST-Link on the Nucleo).
+- For ROSflight SIL demos, source the ROSflight workspace from the parent `voloxide_proj` directory:
+  ```bash
+  cd /run/host/home/skink/projects/voloxide_proj
+  source scripts/source_rosflight_env.zsh
+  source install/setup.zsh
+  ```
+- For the recommended ROS 2 middleware:
+  ```bash
+  sudo apt-get install -y ros-jazzy-rmw-zenoh-cpp
+  ```
 
-## Building
+## ROSflight SIL
+
+Build the Rust simulator firmware static library and ROS 2 shim:
 
 ```bash
+cd /run/host/home/skink/projects/voloxide_proj/Voloxide
+cargo xtask build-sim-lib
 
-# Build for the Pixracer Pro (embedded target)
-cargo build -p pixracerpro --target thumbv7em-none-eabihf
-
-# Build for the Nucleo-H753ZI (embedded target)
-cargo build -p nucleo --target thumbv7em-none-eabihf
-
-# Format code
-cargo fmt
+cd /run/host/home/skink/projects/voloxide_proj
+colcon build --base-paths Voloxide/sim/ros2/voloxide_sil_board_shim \
+  --packages-select voloxide_sil_board_shim
+source install/setup.zsh
 ```
 
-## Flashing and Running
+Run the supported ROScopter waypoint demo:
 
-The embedded runner is configured in `.cargo/config.toml`:
+```bash
+cd /run/host/home/skink/projects/voloxide_proj
+Voloxide/scripts/run_voloxide_waypoint_demo.zsh
+```
 
-```toml
-[target.thumbv7em-none-eabihf]
-runner = "probe-rs run --chip STM32H743IIKx"
+Run the supported ROSplane fixed-wing demo:
+
+```bash
+cd /run/host/home/skink/projects/voloxide_proj
+Voloxide/scripts/run_voloxide_rosplane_demo.zsh
+```
+
+The current ROSflight 2.0 software-in-the-loop workflow uses the ROS 2 shim in
+`sim/ros2/voloxide_sil_board_shim`. The shim calls the Rust simulator firmware through a C FFI
+static library and exposes the same simulator firmware endpoint contract as the upstream C
+`sil_board`.
+
+Detailed operator guides:
+
+- [Run ROScopter Waypoint Following With Voloxide](docs/tutorials/voloxide-roscopter-waypoints.md)
+- [Run ROSplane Fixed-Wing Waypoint Following With Voloxide](docs/tutorials/voloxide-rosplane-waypoints.md)
+
+## Embedded Firmware
+
+Embedded board firmware is built explicitly because those packages target
+`thumbv7em-none-eabihf`:
+
+```bash
+cargo xtask check-board pixracerpro
+cargo xtask check-board nucleo
+```
+
+Equivalent direct commands:
+
+```bash
+cargo build -p pixracerpro --target thumbv7em-none-eabihf
+cargo build -p nucleo --target thumbv7em-none-eabihf
 ```
 
 ### Nucleo-H753ZI
@@ -64,38 +149,31 @@ cargo run -p nucleo --target thumbv7em-none-eabihf --bin voloxide
 cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
 ```
 
-Both boards run the same `voloxide` binary entry point. Each binary wires its board, `voloxide_mavlink::MavlinkInterface`, quadrotor body components, state manager, and PWM driver into the shared `World` scheduler.
-
-### Sim
-
-```bash
-cargo run -p sim --bin voloxide
-```
-
-The direct `sim` binary is a legacy host-side path. The current ROSflight 2.0 software-in-the-loop
-workflow uses the ROS 2 shim in `ros2/voloxide_sil_board_shim`, which exposes the same simulator
-firmware endpoint contract as the upstream C `sil_board`.
-
-For the current ROSflight 2.0 software-in-the-loop workflow, see:
-
-- [Connect Voloxide Firmware To ROSflight SIL](tutorial/voloxide-firmware-bridge.md)
-- [Run ROScopter Waypoint Following With Voloxide](tutorial/voloxide-roscopter-waypoints.md)
+Both boards run a `voloxide` binary entry point. Each binary wires its board, `MavlinkInterface`,
+quadrotor body components, state manager, and PWM driver into the shared `World` scheduler.
 
 ## Debugging
 
-To enable defmt logging, uncomment the `defmt` dependency in the relevant crate's `Cargo.toml` and the `link-arg=-Tdefmt.x` line in `.cargo/config.toml`. Then uncomment `defmt::` calls in the source. defmt output is read via `probe-rs`.
+To enable defmt logging, uncomment the `defmt` dependency in the relevant crate's `Cargo.toml` and
+the `link-arg=-Tdefmt.x` line in `.cargo/config.toml`. Then uncomment `defmt::` calls in the
+source. defmt output is read via `probe-rs`.
 
 ## MAVLink
 
-The MAVLink parser (`voloxide_mavlink::parser`) is board-agnostic. It operates on raw `&[u8]` bytes: `MavlinkParser::feed_byte` accumulates bytes and returns a frame once the start byte, length, and CRC all match. `process_mavlink_frame` decodes the frame into a typed `Rosflight` dialect message.
+The MAVLink parser (`voloxide_mavlink::parser`) is board-agnostic. It operates on raw `&[u8]`
+bytes: `MavlinkParser::feed_byte` accumulates bytes and returns a frame once the start byte,
+length, and CRC all match. `process_mavlink_frame` decodes the frame into a typed `Rosflight`
+dialect message.
 
-`voloxide_mavlink::MavlinkInterface` implements the `voloxide_core::comm::interface::CommInterface<B: BoardIo>` trait and wires the parser into the main loop via `comm`.
+`voloxide_mavlink::MavlinkInterface` implements the
+`voloxide_core::comm::interface::CommInterface<B: BoardIo>` trait and wires the parser into the
+main loop via `comm`.
 
 ## Branching Strategy
 
 Branch names follow the convention `[username]/[feature]`:
 
-```
+```text
 johndoe/param_server
 ```
 
@@ -105,4 +183,6 @@ This project is licensed under the [NO IDEA](LICENSE).
 
 ## Acknowledgments
 
-This project is a port of [ROSFlight](https://github.com/rosflight/rosflight), originally written in C++. See the [ROSFlight docs](https://docs.rosflight.org/latest/) for protocol and system context.
+This project is a port of [ROSFlight](https://github.com/rosflight/rosflight), originally written
+in C++. See the [ROSFlight docs](https://docs.rosflight.org/latest/) for protocol and system
+context.

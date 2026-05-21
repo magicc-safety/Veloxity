@@ -3,9 +3,8 @@
 This document records the current ROSflight/ROScopter SIL state for Voloxide. It is a recovery log,
 not the operator tutorial. For runnable instructions, use:
 
-- `tutorial/voloxide-firmware-bridge.md`
-- `tutorial/voloxide-roscopter-waypoints.md`
-- `tutorial/sil-findings.md`
+- `docs/tutorials/voloxide-roscopter-waypoints.md`
+- `docs/tutorials/voloxide-rosplane-waypoints.md`
 
 ## Current Boundary
 
@@ -19,11 +18,11 @@ not the operator tutorial. For runnable instructions, use:
 
 Commit `f0786e3` on `main` fixed the Voloxide SIL firmware endpoint:
 
-- `ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp` runs two Voloxide firmware iterations
+- `sim/ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp` runs two Voloxide firmware iterations
   per SIL manager tick to match upstream C SIL behavior.
-- `sim/src/ffi.rs` consumes sensor snapshots edge-triggered by timestamp so the second firmware
+- `sim/firmware/src/ffi.rs` consumes sensor snapshots edge-triggered by timestamp so the second firmware
   iteration does not reconsume the same IMU sample.
-- `sim/src/ffi.rs`, `sim/src/board.rs`, and `voloxide_core/src/packets.rs` keep GNSS latitude and
+- `sim/firmware/src/ffi.rs` and `crates/voloxide_core/src/packets.rs` keep GNSS latitude and
   longitude in degrees, matching ROSflight C behavior.
 
 ## Current Working Waypoint Configuration

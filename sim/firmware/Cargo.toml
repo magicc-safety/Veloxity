@@ -1,0 +1,19 @@
+[package]
+name = "sim"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+voloxide_core = { workspace = true }
+voloxide_mavlink = { workspace = true }
+
+chrono = { version = "0.4" }
+critical-section = { version = "1.2.0", features = ["std"] }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

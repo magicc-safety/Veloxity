@@ -630,7 +630,7 @@ This is the first concrete use of the ports/events model.
 
 ### Files Added
 
-`voloxide_core/src/events.rs`
+`crates/voloxide_core/src/events.rs`
 
 - Adds `EventQueue<T, const N: usize>`.
 - Uses a fixed-size ring buffer backed by `[Option<T>; N]`.
@@ -647,7 +647,7 @@ This is the first concrete use of the ports/events model.
 - Adds `ParamEventQueues`.
 - Adds focused unit tests for FIFO order and non-draining iteration.
 
-`voloxide_core/src/ports.rs`
+`crates/voloxide_core/src/ports.rs`
 
 - Adds initial port types:
   - `ParamsReadPort`
@@ -658,7 +658,7 @@ This is the first concrete use of the ports/events model.
 - These are intentionally narrow capability wrappers.
 - The scheduler or high-level orchestration code is expected to construct ports from world fields.
 
-`voloxide_core/src/param_system.rs`
+`crates/voloxide_core/src/param_system.rs`
 
 - Adds `ParamApplyCtx`.
 - Adds `apply_param_requests`.
@@ -667,14 +667,14 @@ This is the first concrete use of the ports/events model.
 
 ### Files Modified
 
-`voloxide_core/src/lib.rs`
+`crates/voloxide_core/src/lib.rs`
 
 - Exposes new modules:
   - `events`
   - `ports`
   - `param_system`
 
-`voloxide_core/src/comm_manager.rs`
+`crates/voloxide_core/src/comm_manager.rs`
 
 - Imports `CommResponse`, `ParamEventQueues`, and `ParamSetRequested`.
 - Changes `act_on_messages` so it no longer returns `Option<ParamId>`.
@@ -689,7 +689,7 @@ This is the first concrete use of the ports/events model.
 - Adds `send_comm_responses`, which drains `CommResponse` events and sends `PARAM_VALUE`.
 - `send_comm_responses` also updates `CommManager::sysid` when the accepted response is for `PARAM_SYSTEM_ID`, preserving existing sysid behavior while moving it to the response stage.
 
-`voloxide_core/src/rosflight.rs`
+`crates/voloxide_core/src/rosflight.rs`
 
 - Adds a `param_events: ParamEventQueues` field to `ROSFlight`.
 - Initializes it in `ROSFlight::init`.
@@ -701,7 +701,7 @@ This is the first concrete use of the ports/events model.
 - Clears `param_events.changes` after the stage.
 - Removes the old later `if let Some(param_id) = changed_param_id` callback block.
 
-`voloxide_core/src/param_reactions.rs`
+`crates/voloxide_core/src/param_reactions.rs`
 
 - Adds named systems for parameter-change subscribers.
 - Adds `RcParamChangedCtx`.
@@ -713,7 +713,7 @@ This is the first concrete use of the ports/events model.
 - `command_on_param_changed` preserves the existing failsafe-config update behavior for `PARAM_FAILSAFE_THROTTLE` and `PARAM_FIXED_WING`.
 - Adds focused coverage for command-manager reaction filtering.
 
-`voloxide_core/src/rc.rs`
+`crates/voloxide_core/src/rc.rs`
 
 - `Rc::param_change_callback` no longer takes `Board` or `CommManager`.
 - `Rc::log_switch_mappings` no longer takes `CommManager`.
@@ -721,7 +721,7 @@ This is the first concrete use of the ports/events model.
 - RC mapping behavior is preserved.
 - Logging still goes through the existing global `log_info!` path for now.
 
-`voloxide_core/src/sensors.rs`
+`crates/voloxide_core/src/sensors.rs`
 
 - Adds `SensorBus`.
 - Adds `ProcessedSensors`.
@@ -730,7 +730,7 @@ This is the first concrete use of the ports/events model.
 - Both resources have `clear` helpers.
 - Adds focused coverage that default sensor resources are empty.
 
-`voloxide_core/src/sensor_systems.rs`
+`crates/voloxide_core/src/sensor_systems.rs`
 
 - Adds `SensorProcessorSet`.
 - Adds `process_sensor_bus`.
@@ -739,7 +739,7 @@ This is the first concrete use of the ports/events model.
 - The default processor set uses the current real IMU and magnetometer processors plus passthrough processors for the remaining sensor types.
 - Tests show a raw RC packet moving into `ProcessedSensors::rc` and being consumed from `SensorBus::rc`.
 
-`voloxide_core/src/board.rs`
+`crates/voloxide_core/src/board.rs`
 
 - Adds default `BoardTrait::update_sensor_bus`.
 - The default implementation clears the named sensor bus.
@@ -783,7 +783,7 @@ Former stale full-package test status:
 
 A new test-only support module has been started:
 
-`voloxide_core/src/test_support.rs`
+`crates/voloxide_core/src/test_support.rs`
 
 - Compiled only under `#[cfg(test)]`.
 - Adds `TestBoard`.
@@ -883,7 +883,7 @@ The exact order after `pixracerpro` can change based on hardware priorities, but
 
 ## Sim Migration Progress
 
-`sim/src/board.rs`
+`sim/firmware/src/board.rs`
 
 - The old HList-oriented sim board has been deleted and replaced.
 - The replacement board implements `BoardTrait` with `HNil` associated sensor types for the old HList path.
@@ -910,7 +910,7 @@ The exact order after `pixracerpro` can change based on hardware priorities, but
 - Default Zenoh endpoint: `tcp/127.0.0.1:7447`.
 - This can be changed with `VOLOXIDE_ZENOH_ENDPOINT`.
 
-`sim/src/bin/voloxide.rs`
+`sim/firmware/src/bin/voloxide.rs`
 
 - The old `ROSFlight`/HList sim binary has been deleted and replaced.
 - The replacement binary instantiates the new `World`.
@@ -1031,7 +1031,7 @@ Acceptance criteria for each additional scheduler/component slice:
 
 ## World Scheduler Progress
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - Adds parallel `World<B, BT, CI, PD>`.
 - This is separate from the existing `ROSFlight` type.
@@ -1072,14 +1072,14 @@ Acceptance criteria for each additional scheduler/component slice:
   - PWM command output
 - It does not change the existing `ROSFlight::run` path.
 
-`voloxide_core/src/estimator.rs`
+`crates/voloxide_core/src/estimator.rs`
 
 - Adds `NamedEstimator`.
 - This adapts estimators away from HList inputs in the new scheduler path.
 - The trait takes `ProcessedSensors`, `Params`, and `dt`.
 - It returns the estimator state type.
 
-`voloxide_core/src/estimator/quad_estimator.rs`
+`crates/voloxide_core/src/estimator/quad_estimator.rs`
 
 - Implements `NamedEstimator` for `QuadEstimator`.
 - The current implementation adapts `ProcessedSensors::{imu, mag}` back into the existing estimator input HList internally.
@@ -1106,7 +1106,7 @@ New testing requirement:
 
 ## Sim PWM Output Progress
 
-`sim/src/pwm.rs`
+`sim/firmware/src/pwm.rs`
 
 - The parallel sim already publishes PWM output to Zenoh on `sim/pwm_output`.
 - The `World` control stage now reaches this driver through `PwmDriver::send_commands`.
@@ -1130,7 +1130,7 @@ Validation:
 
 ## Named Telemetry Progress
 
-`voloxide_core/src/comm_manager.rs`
+`crates/voloxide_core/src/comm_manager.rs`
 
 - Adds `CommManager::send_named_telemetry_streams`.
 - This is the telemetry equivalent of the old HList-based `send_telemetry_streams`.
@@ -1150,7 +1150,7 @@ Validation:
 - The old HList telemetry method remains in place as the behavioral reference.
 - The new method is now called from the `World` control stage after estimator/controller/mixer/PWM output.
 
-`voloxide_core/src/test_support.rs`
+`crates/voloxide_core/src/test_support.rs`
 
 - Extends `RecordingCommLink` to count telemetry messages.
 - Records the last output-raw message so telemetry payload mapping can be asserted in tests.
@@ -1173,7 +1173,7 @@ Validation:
 
 ## Board Boundary Progress
 
-`voloxide_core/src/board.rs`
+`crates/voloxide_core/src/board.rs`
 
 - Adds `BoardIo`.
 - `BoardIo` is the smaller board-facing trait for the new `World` path.
@@ -1186,28 +1186,28 @@ Validation:
 - Existing `BoardTrait` remains for the legacy HList path.
 - A blanket `impl<T: BoardTrait> BoardIo for T` keeps old boards working while the new path migrates.
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - `World` now requires `B: BoardIo` instead of `B: BoardTrait`.
 - This removes HList-associated board types from the `World` type boundary.
 
-`voloxide_core/src/comm_manager.rs`
+`crates/voloxide_core/src/comm_manager.rs`
 
 - `CommManager` now requires `B: BoardIo`.
 - The legacy HList telemetry method keeps a local `B: BoardTrait` bound because it still accepts `B::ProcessedSensorSet`.
 - The named telemetry method uses `ProcessedSensors` and only needs `BoardIo`.
 
-`voloxide_core/src/pwm.rs`
+`crates/voloxide_core/src/pwm.rs`
 
 - `PwmDriver::flush` and `PwmDriver::send_commands` now accept `B: BoardIo`.
 - This lets the new scheduler output path use a board interface without HList-associated types.
 
-`voloxide_core/src/rc.rs`
+`crates/voloxide_core/src/rc.rs`
 
 - Removes the unnecessary `BoardTrait` bound from `Rc::init`.
 - RC initialization currently reads params and does not need board access.
 
-`voloxide_core/src/comm_manager/comm_link_trait.rs`
+`crates/voloxide_core/src/comm_manager/comm_link_trait.rs`
 
 - `CommInterface` now accepts `B: BoardIo`.
 - The MAVLink implementation also now only requires `BoardIo`.
@@ -1221,7 +1221,7 @@ Validation:
 
 ## Sim Board Boundary Progress
 
-`sim/src/board.rs`
+`sim/firmware/src/board.rs`
 
 - The sim board now implements `BoardIo` directly.
 - It no longer implements `BoardTrait`.
@@ -1229,7 +1229,7 @@ Validation:
 - It no longer imports `HNil`.
 - This makes the new sim path independent of the legacy HList board boundary.
 
-`sim/src/pwm.rs`
+`sim/firmware/src/pwm.rs`
 
 - The PWM component tests now use a direct `BoardIo` test board.
 - The test board no longer needs `BoardTrait` or `HNil`.
@@ -1242,7 +1242,7 @@ Validation:
 
 ## Named Estimator Progress
 
-`voloxide_core/src/estimator/quad_estimator.rs`
+`crates/voloxide_core/src/estimator/quad_estimator.rs`
 
 - Extracts the quad estimator math into `QuadEstimator::estimate_packets`.
 - The legacy HList `Estimator::estimate` entry point now delegates into `estimate_packets`.
@@ -1264,7 +1264,7 @@ Validation:
 
 ## World Sensor Health Progress
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - Adds IMU health tracking to the new `World` path.
 - Mirrors the legacy 100 ms `IMU_NOT_RESPONDING` timeout.
@@ -1296,7 +1296,7 @@ Design correction:
 - The sensor/calibration system owns completion.
 - Historical note: this slice deferred communication ACK success until the relevant calibration flag had been cleared by processing. Later ROSflight 2.0 parity review corrected the ACK timing so calibration commands now ACK success immediately when accepted/started.
 
-`voloxide_core/src/comm_manager.rs`
+`crates/voloxide_core/src/comm_manager.rs`
 
 - Historical: added a pending calibration ACK slot in `CommManager`.
 - Current behavior: calibration commands set the corresponding `CalibrationFlags` and queue immediate success ACKs when accepted.
@@ -1304,12 +1304,12 @@ Design correction:
 - Current behavior: calibration completion/failure affects state/logs, not command ACK timing.
 - Non-calibration commands still use the immediate command ACK path.
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - Historical: after sensor processing and sensor health/calibration updates, World called `send_completed_calibration_ack`.
 - Current behavior: World observes calibration completion for state transitions and logs, while the command ACK has already been queued by the command service.
 
-`voloxide_core/src/test_support.rs`
+`crates/voloxide_core/src/test_support.rs`
 
 - `RecordingCommLink` now records command ACK count and last command ACK.
 
@@ -1346,7 +1346,7 @@ Design correction:
 - The scheduler should call a PWM output system after state updates.
 - The PWM system should only touch hardware/sim output when the desired output state changes.
 
-`voloxide_core/src/pwm_system.rs`
+`crates/voloxide_core/src/pwm_system.rs`
 
 - Adds `PwmOutputState`.
 - Adds `sync_pwm_output_state`.
@@ -1356,7 +1356,7 @@ Design correction:
 - On disable, it flushes the PWM driver so hardware/sim output receives the disabled state.
 - It returns `Ok(true)` only when it changed PWM output state.
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - Adds `pwm_output: PwmOutputState` to `World`.
 - Initializes it from `pwm.is_enabled`.
@@ -1391,14 +1391,14 @@ Design correction:
 - Telemetry can still report computed actuator commands.
 - PWM command writes should be gated by explicit `PwmOutputState`.
 
-`voloxide_core/src/pwm_system.rs`
+`crates/voloxide_core/src/pwm_system.rs`
 
 - Adds `write_pwm_commands`.
 - `write_pwm_commands` sends commands only when `PwmOutputState` is enabled.
 - It returns `false` when output is disabled and no PWM driver write occurred.
 - It returns `true` after writing commands to the PWM driver.
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - `run_control_stages_if_new_imu` now delegates PWM writes to `write_pwm_commands`.
 - The control stage still stores `latest_actuator_commands`.
@@ -1484,11 +1484,11 @@ What to check if resuming from here:
 - Run `cargo check -p sim`.
 - If these pass, the command-event slice should be commit-ready.
 - If they fail, likely places to inspect are:
-  - `voloxide_core/src/events.rs`
-  - `voloxide_core/src/command_system.rs`
-  - `voloxide_core/src/comm_manager.rs::act_on_messages`
-  - `voloxide_core/src/world.rs::run_comm_param_sensor_stages_only`
-  - legacy compatibility wiring in `voloxide_core/src/rosflight.rs`
+  - `crates/voloxide_core/src/events.rs`
+  - `crates/voloxide_core/src/command_system.rs`
+  - `crates/voloxide_core/src/comm_manager.rs::act_on_messages`
+  - `crates/voloxide_core/src/world.rs::run_comm_param_sensor_stages_only`
+  - legacy compatibility wiring in `crates/voloxide_core/src/rosflight.rs`
 
 ## Command Event Progress
 
@@ -1500,32 +1500,32 @@ Design correction:
 - A command/calibration system should apply that request to calibration resources.
 - Completion ACKs should still wait until processing clears the relevant calibration flag.
 
-`voloxide_core/src/events.rs`
+`crates/voloxide_core/src/events.rs`
 
 - Adds `CalibrationRequested`.
 - Adds `CommandEventQueues`.
 - Adds fixed-capacity calibration request queue storage.
 
-`voloxide_core/src/command_system.rs`
+`crates/voloxide_core/src/command_system.rs`
 
 - Adds `CalibrationRequestCtx`.
 - Adds `apply_calibration_requests`.
 - This system drains calibration request events and sets the requested `CalibrationFlags`.
 
-`voloxide_core/src/comm_manager.rs`
+`crates/voloxide_core/src/comm_manager.rs`
 
 - `act_on_messages` now receives `CommandEventQueues`.
 - Calibration commands push `CalibrationRequested`.
 - Calibration commands no longer mutate `CalibrationFlags` directly.
 - Calibration ACK behavior was later corrected to ROSflight 2.0 parity: the command ACK is sent when calibration starts, not when it completes.
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - Adds `command_events: CommandEventQueues`.
 - Schedules `command_system::apply_calibration_requests` after comm message handling and before sensor processing.
 - Sensor processing owns calibration completion/failure state and logs; it does not emit a second command ACK.
 
-`voloxide_core/src/rosflight.rs`
+`crates/voloxide_core/src/rosflight.rs`
 
 - Adds legacy compatibility wiring so the old loop also drains `CommandEventQueues`.
 - This keeps the legacy path compiling while the new World path matures.
@@ -1559,30 +1559,30 @@ Design correction:
 - The command system should apply the request to `CommandManager`.
 - World should schedule that command system before RC/command/state/control stages use the command state.
 
-`voloxide_core/src/events.rs`
+`crates/voloxide_core/src/events.rs`
 
 - Adds `OffboardControlRequested`.
 - Adds fixed-capacity offboard control request queue storage to `CommandEventQueues`.
 
-`voloxide_core/src/command_system.rs`
+`crates/voloxide_core/src/command_system.rs`
 
 - Adds `OffboardControlCtx`.
 - Adds `apply_offboard_control_requests`.
 - This system drains offboard request events and calls `CommandManager::set_new_offboard_command`.
 
-`voloxide_core/src/comm_manager.rs`
+`crates/voloxide_core/src/comm_manager.rs`
 
 - `act_on_messages` now pushes `OffboardControlRequested` when an offboard control message is received.
 - It no longer calls `CommandManager::set_new_offboard_command` directly.
 - `act_on_messages` no longer receives `&mut CommandManager`.
 - This narrows comms access to the command subsystem and improves blame/diagnosis when command state changes.
 
-`voloxide_core/src/world.rs`
+`crates/voloxide_core/src/world.rs`
 
 - Schedules `apply_offboard_control_requests` in `run_comm_param_sensor_stages_only`.
 - The offboard command request is applied before later command/state/control stages consume command state.
 
-`voloxide_core/src/rosflight.rs`
+`crates/voloxide_core/src/rosflight.rs`
 
 - Adds legacy compatibility scheduling for `apply_offboard_control_requests`.
 
@@ -1696,21 +1696,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `ParamDefaultsRequested`.
   - Adds a fixed-capacity param-defaults request queue to `CommandEventQueues`.
-- `voloxide_core/src/command_system.rs`
+- `crates/voloxide_core/src/command_system.rs`
   - Adds `ParamDefaultsCtx`.
   - Adds `apply_param_defaults_requests`.
   - Adds component coverage for default reset application.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits `ParamDefaultsRequested` for `RosflightCmd::SetParamDefaults`.
   - Stores a pending defaults ACK.
   - Sends the ACK after the scheduler confirms that defaults were applied.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Schedules default-reset request application in the World comm/param/sensor stage.
   - Sends the deferred defaults ACK after the apply stage.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the same scheduling step in the legacy compatibility path.
 
 Tests added:
@@ -1771,21 +1771,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `ParamListRequested`.
   - Adds a fixed-capacity list request queue to `ParamEventQueues`.
-- `voloxide_core/src/param_system.rs`
+- `crates/voloxide_core/src/param_system.rs`
   - Adds `ParamListState`.
   - Adds `ParamListCtx`.
   - Adds `service_param_list_requests`.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits list request events.
   - Removes param iterator ownership from `act_on_messages`.
   - Narrows the `act_on_messages` signature.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Owns `ParamListState`.
   - Schedules `service_param_list_requests` before comm responses are sent.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the same compatibility scheduling in the legacy path.
 
 Tests added:
@@ -1834,10 +1834,10 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Replaces status telemetry placeholder fields with command-manager accessors.
   - Adds a focused test for offboard status reporting.
-- `voloxide_core/src/test_support.rs`
+- `crates/voloxide_core/src/test_support.rs`
   - Records the latest status message so telemetry tests can assert field contents.
 
 Tests added:
@@ -1886,9 +1886,9 @@ Files changed in this slice:
 
 - `voloxide_core/mavlink_definitions/rosflight.xml`
   - Changes `ROSFLIGHT_STATUS.rc_override` from `uint8_t` to `uint16_t`.
-- `voloxide_core/src/comm_messages.rs`
+- `crates/voloxide_core/src/comm_messages.rs`
   - Changes `RosflightStatusMsg::rc_override` from `u8` to `u16`.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Widens the current boolean override value to `u16` when building status messages.
 
 Validation status:
@@ -1948,12 +1948,12 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/command_manager.rs`
+- `crates/voloxide_core/src/command_manager.rs`
   - Adds upstream-style override constants.
   - Stores and exposes `get_rc_override()`.
   - Produces a bitmask during muxing.
   - Adds focused unit tests for stick/throttle and inactive-offboard override bits.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Publishes the command-manager override bitmask in status telemetry.
 
 Validation status:
@@ -2015,15 +2015,15 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/mixer.rs`
+- `crates/voloxide_core/src/mixer.rs`
   - Adds `MixerOutputType`.
   - Adds `Mixer::output_types()`.
-- `voloxide_core/src/mixer/quad_mixer.rs`
+- `crates/voloxide_core/src/mixer/quad_mixer.rs`
   - Reports four motor-owned outputs.
-- `voloxide_core/src/pwm_system.rs`
+- `crates/voloxide_core/src/pwm_system.rs`
   - Reworks `compose_pwm_outputs` around typed ownership.
   - Adds focused tests for aux-owned slots inside the primary range and motor safety mapping.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Passes `self.mixer.output_types()` into PWM composition.
 
 Validation:
@@ -2072,7 +2072,7 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Passes composed `pwm_outputs` into named telemetry instead of primary `actuator_commands`.
   - Extends the control-stage test to assert aux-composed channels are present in `ROSFLIGHT_OUTPUT_RAW`.
 
@@ -2142,18 +2142,18 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/controller.rs`
+- `crates/voloxide_core/src/controller.rs`
   - Adds `RcTrimCalibrator`.
-- `voloxide_core/src/controller/quad_controller.rs`
+- `crates/voloxide_core/src/controller/quad_controller.rs`
   - Adds controller-owned RC trim torque calculation.
   - Refactors normal control through a shared PID helper while preserving armed gating.
-- `voloxide_core/src/command_manager.rs`
+- `crates/voloxide_core/src/command_manager.rs`
   - Adds read-only `rc_control()`.
-- `voloxide_core/src/command_system.rs`
+- `crates/voloxide_core/src/command_system.rs`
   - Routes RC trim calibration through the controller and adds torque output to existing params.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Wires controller and command-manager resources into the RC trim command system.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the compatibility scheduling in the legacy path.
 
 Tests added or updated:
@@ -2238,22 +2238,22 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `VersionRequested`.
   - Adds a fixed-capacity version request queue to `CommandEventQueues`.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits version requests instead of direct version/ACK responses.
   - Removes the param-defaults pending ACK slot because the command system now owns default-reset success/failure ACKs directly.
   - Keeps calibration pending ACK only for accepted calibration work whose success depends on later sensor-processing completion.
-- `voloxide_core/src/command_system.rs`
+- `crates/voloxide_core/src/command_system.rs`
   - Adds state-read gating to command actions.
   - Adds version request handling.
   - Adds tests for armed rejection and version behavior.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Schedules version requests.
   - Passes state read access into state-gated command systems.
   - Adds a World test proving armed command rejection does not mutate params.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the state-gated command-system scheduling in the legacy loop.
 
 Tests added or updated:
@@ -2337,21 +2337,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds companion input event types.
   - Adds fixed-capacity companion input queues.
   - Adds `CompanionEventQueues`.
-- `voloxide_core/src/companion_system.rs`
+- `crates/voloxide_core/src/companion_system.rs`
   - Adds grouped companion input state resources.
   - Adds systems to drain companion input queues and store latest facts.
-- `voloxide_core/src/lib.rs`
+- `crates/voloxide_core/src/lib.rs`
   - Exposes the new grouped companion system module.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits companion input events for heartbeat, aux command, and external attitude messages.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Owns companion input queues and state resources.
   - Schedules companion input application after comm parsing.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors companion input scheduling in the legacy loop.
 
 Tests added:
@@ -2419,12 +2419,12 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/estimator.rs`
+- `crates/voloxide_core/src/estimator.rs`
   - Adds `estimate_named_with_external_attitude` to `NamedEstimator`.
-- `voloxide_core/src/estimator/quad_estimator.rs`
+- `crates/voloxide_core/src/estimator/quad_estimator.rs`
   - Adds external attitude consumption for the named estimator path.
   - Adds focused estimator coverage.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Passes pending external attitude into the estimator stage.
   - Proves the pending value is consumed by the scheduler.
 
@@ -2501,11 +2501,11 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/pwm_system.rs`
+- `crates/voloxide_core/src/pwm_system.rs`
   - Adds `PWM_OUTPUT_CHANNELS`.
   - Adds `compose_pwm_outputs`.
   - Adds focused aux composition tests.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Uses `compose_pwm_outputs` before PWM writes.
   - Extends World control-stage coverage to prove aux values reach the PWM command slice.
 
@@ -2572,19 +2572,19 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `ResetOriginRequested`.
   - Adds `ConfigInfoRequested`.
   - Adds fixed-capacity queues for both request types.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits reset-origin and config-info requests instead of using inline placeholder ACK logic.
-- `voloxide_core/src/command_system.rs`
+- `crates/voloxide_core/src/command_system.rs`
   - Adds `ResetOriginCtx`.
   - Adds `ConfigInfoCtx`.
   - Adds request application systems that currently emit failed ACKs.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Schedules the new request application systems.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the same compatibility scheduling in the legacy loop.
 
 Tests added:
@@ -2655,14 +2655,14 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Changes completed-work ACK helpers to queue `CommResponse::CmdAck`.
   - Updates tests to assert ACKs are not transmitted until `send_comm_responses`.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Queues parameter-default ACKs.
   - Historical: queued calibration-completion ACKs before the later parity correction.
   - Historical: moved the scheduler response flush after sensor processing so calibration completion ACKs could transmit in the same scheduler call.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors completed ACK queueing and later response flushing in the legacy loop.
 
 Tests updated:
@@ -2714,16 +2714,16 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `CommEventQueues`.
   - Removes response storage from `ParamEventQueues`.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Adds a `comm_events` resource.
   - Wires parameter response emit ports to `comm_events.responses`.
   - Sends responses from `comm_events`.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the same resource split in the legacy path.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Accepts `CommEventQueues` in command parsing.
   - Drains `CommEventQueues` in response sending.
   - Updates tests to use the distinct queue.
@@ -2790,21 +2790,21 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/board.rs`
+- `crates/voloxide_core/src/board.rs`
   - Adds default board command hooks to `BoardIo` and `BoardTrait`.
   - Forwards hooks through the legacy `BoardTrait` to `BoardIo` blanket implementation.
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `BoardCommandRequested`.
   - Adds `board_command_requests` to `CommandEventQueues`.
-- `voloxide_core/src/command_system.rs`
+- `crates/voloxide_core/src/command_system.rs`
   - Adds `BoardCommandCtx`.
   - Adds `apply_board_command_requests`.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits board command requests for the board/persistence command arms.
   - Defers ACK when the request is queued.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Schedules board command requests through the new command-system stage.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the same scheduling step in the legacy path.
 
 Tests added:
@@ -2865,7 +2865,7 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `sim/src/board.rs`
+- `sim/firmware/src/board.rs`
   - Adds a parameter-store path to the sim board.
   - Implements `BoardIo::read_params`.
   - Implements `BoardIo::write_params`.
@@ -2924,18 +2924,18 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `CommResponse::Statustext`.
-- `voloxide_core/src/log_system.rs`
+- `crates/voloxide_core/src/log_system.rs`
   - Adds the logger-to-comm-response drain system.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Sends queued statustext responses through `send_comm_responses`.
   - Removes the direct statustext helper.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Schedules log draining before comm responses are sent.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors log draining into queued responses in the legacy loop.
-- `voloxide_core/src/test_support.rs`
+- `crates/voloxide_core/src/test_support.rs`
   - Records statustext messages for tests.
 
 Tests added or updated:
@@ -2988,11 +2988,11 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/bodytype.rs`
+- `crates/voloxide_core/src/bodytype.rs`
   - Adds HList-free `BodyModel`.
-- `voloxide_core/src/bodytype/quadrotor.rs`
+- `crates/voloxide_core/src/bodytype/quadrotor.rs`
   - Implements `BodyModel` for `Quadrotor`.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Switches the scheduler body bound from `BodyType` to `BodyModel`.
 
 Validation:
@@ -3026,9 +3026,9 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/test_support.rs`
+- `crates/voloxide_core/src/test_support.rs`
   - Moves `TestBoard` from `BoardTrait` to direct `BoardIo`.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Updates test imports from `BoardTrait` to `BoardIo`.
 
 Validation:
@@ -3634,7 +3634,7 @@ Design now implemented:
 - Updated Nucleo's `ROSFlight::init` call to pass `Params` and the PWM driver.
 - Added Nucleo's missing `panic-halt` dependency and panic handler import.
 - Removed `pub mod hlist`.
-- Deleted `voloxide_core/src/hlist.rs`.
+- Deleted `crates/voloxide_core/src/hlist.rs`.
 
 Current boundary status:
 
@@ -3772,19 +3772,19 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `RcTrimCalibrationRequested`.
   - Adds `rc_trim_calibration_requests` to `CommandEventQueues`.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits RC trim calibration requests for `RosflightCmd::RcCalibration`.
-- `voloxide_core/src/command_system.rs`
+- `crates/voloxide_core/src/command_system.rs`
   - Adds `RcTrimCalibrationCtx`.
   - Adds `apply_rc_trim_calibration_requests`.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Schedules RC trim calibration requests.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors scheduling in the legacy path.
-- `voloxide_core/src/controller/quad_controller.rs`
+- `crates/voloxide_core/src/controller/quad_controller.rs`
   - Adds equilibrium torque params to armed controller output.
 
 Tests added:
@@ -3844,15 +3844,15 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `CommResponse::CmdAck`.
   - Adds `CommResponse::Version`.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Enqueues version and immediate command ACK responses.
   - Sends the new response variants from `send_comm_responses`.
-- `voloxide_core/src/test_support.rs`
+- `crates/voloxide_core/src/test_support.rs`
   - Records version messages for tests.
-- `voloxide_core/src/param_system.rs`
+- `crates/voloxide_core/src/param_system.rs`
   - Updates tests to handle the expanded response enum.
 
 Tests added:
@@ -3898,12 +3898,12 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Narrows `ParamSetRequested`.
-- `voloxide_core/src/param_system.rs`
+- `crates/voloxide_core/src/param_system.rs`
   - Moves set-request name resolution into `apply_param_requests`.
   - Reuses the same parameter-name resolution logic for request-read by name.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Removes direct parameter-definition lookup from `PARAM_SET`.
   - Removes the now-unused direct `send_param_value` helper.
 
@@ -3982,20 +3982,20 @@ Compile-time boundary improvement:
 
 Files changed in this slice:
 
-- `voloxide_core/src/comm_messages.rs`
+- `crates/voloxide_core/src/comm_messages.rs`
   - Derives `PartialEq` for `ParamIdentifier` so request events can be compared in tests.
-- `voloxide_core/src/events.rs`
+- `crates/voloxide_core/src/events.rs`
   - Adds `ParamReadRequested`.
   - Adds a fixed-capacity read request queue to `ParamEventQueues`.
-- `voloxide_core/src/param_system.rs`
+- `crates/voloxide_core/src/param_system.rs`
   - Adds `ParamReadCtx`.
   - Adds `service_param_read_requests`.
   - Adds parameter identifier resolution by index or name.
-- `voloxide_core/src/comm_manager.rs`
+- `crates/voloxide_core/src/comm_manager.rs`
   - Emits read request events and does not directly read/send parameter values for this path.
-- `voloxide_core/src/world.rs`
+- `crates/voloxide_core/src/world.rs`
   - Schedules request-read servicing before comm responses are sent.
-- `voloxide_core/src/rosflight.rs`
+- `crates/voloxide_core/src/rosflight.rs`
   - Mirrors the same compatibility scheduling in the legacy path.
 
 Tests added:
@@ -4055,8 +4055,8 @@ Reason for this change:
 
 Design now implemented:
 
-- Updated `pixracerpro/src/bin/voloxide.rs` to instantiate `World`.
-- Updated `nucleo/src/bin/voloxide.rs` to instantiate `World`.
+- Updated `boards/pixracerpro/src/bin/voloxide.rs` to instantiate `World`.
+- Updated `boards/nucleo/src/bin/voloxide.rs` to instantiate `World`.
 - Both embedded loops now call `world.run_comm_param_sensor_stages()`, matching the sim entrypoint.
 - Removed a stale PixRacerPro board comment that referred to ROSFlight.
 
@@ -4085,7 +4085,7 @@ Reason for this change:
 
 Design now implemented:
 
-- Removed `voloxide_core/src/rosflight.rs`.
+- Removed `crates/voloxide_core/src/rosflight.rs`.
 - Removed the `pub mod rosflight` export from `voloxide_core`.
 - Updated current README wording to describe `World`, `BoardIo`, and PWM drivers instead of the old `Configuration`/`ROSFlight`/`BoardTrait` wiring.
 
@@ -4109,13 +4109,13 @@ Validation:
 Reason for this change:
 
 - `params` is the active parameter API used by core, sim, PixRacerPro, and Nucleo.
-- The old `voloxide_core/src/params.rs` file was no longer exported and had no live call sites.
+- The old `crates/voloxide_core/src/params.rs` file was no longer exported and had no live call sites.
 - Keeping the stale module made the parameter boundary look duplicated after the event/port parameter migration.
 
 Design now implemented:
 
-- Removed `voloxide_core/src/params.rs`.
-- Removed the stale commented `pub mod params` line from `voloxide_core/src/lib.rs`.
+- Removed `crates/voloxide_core/src/params.rs`.
+- Removed the stale commented `pub mod params` line from `crates/voloxide_core/src/lib.rs`.
 - Removed a stale commented `crate::params::Params` import from `packets.rs`.
 
 Current status after this slice:
@@ -4137,14 +4137,14 @@ Validation:
 
 Reason for this change:
 
-- `voloxide_core/src/units.rs` was no longer exported.
+- `crates/voloxide_core/src/units.rs` was no longer exported.
 - Active source had no references to `crate::units` or the old `ROSFlightTimestamp` type.
 - Keeping the file left another unused pre-`World` API surface in core.
 
 Design now implemented:
 
-- Removed `voloxide_core/src/units.rs`.
-- Removed the stale commented module line from `voloxide_core/src/lib.rs`.
+- Removed `crates/voloxide_core/src/units.rs`.
+- Removed the stale commented module line from `crates/voloxide_core/src/lib.rs`.
 
 Current status after this slice:
 
@@ -4300,13 +4300,13 @@ Validation:
 
 Reason for this change:
 
-- The old `voloxide_core/src/params/param_types.rs` scaffolding was not exported.
+- The old `crates/voloxide_core/src/params/param_types.rs` scaffolding was not exported.
 - Active parameter IDs, values, defaults, and definitions now live in `params`.
 - Keeping the stale directory left a second, inactive parameter model beside the active one.
 
 Design now implemented:
 
-- Removed `voloxide_core/src/params/param_types.rs`.
+- Removed `crates/voloxide_core/src/params/param_types.rs`.
 
 Current status after this slice:
 
@@ -4315,7 +4315,7 @@ Current status after this slice:
 
 Validation:
 
-- `rg --files voloxide_core/src | sort` shows no `voloxide_core/src/params/...` files.
+- `rg --files voloxide_core/src | sort` shows no `crates/voloxide_core/src/params/...` files.
 - `cargo check -p voloxide_core --lib` passes.
 - `cargo check -p sim` passes.
 - `cargo test -p voloxide_core world::tests --lib` passes.
@@ -4332,7 +4332,7 @@ Reason for this change:
 
 Design now implemented:
 
-- Renamed `voloxide_core/src/params2.rs` to `voloxide_core/src/params.rs`.
+- Renamed `crates/voloxide_core/src/params2.rs` to `crates/voloxide_core/src/params.rs`.
 - Updated core, sim, PixRacerPro, and Nucleo imports from `params2` to `params`.
 - Updated the architecture log references for the current active parameter module.
 
@@ -5383,7 +5383,7 @@ These points are the final compatibility list discovered by the comprehensive RO
 ### Final Compatibility Points Progress
 
 - Final Compatibility Point 1: complete.
-  - Implemented in `voloxide_core/src/control.rs`.
+  - Implemented in `crates/voloxide_core/src/control.rs`.
   - Covered by `world_control_stage_flags_non_advancing_imu_time`.
 
 - Final Compatibility Point 2: complete.

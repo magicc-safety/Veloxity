@@ -226,7 +226,8 @@ Preferred approach:
 stack:
 
 ```text
-sim -> zenoh -> zenoh-transport -> rsa -> num-bigint-dig
+The deprecated direct-Zenoh simulator path has been removed; the simulator package now builds
+through the ROS 2 shim FFI/staticlib path.
 ```
 
 It appears because Zenoh brings in RSA support through its transport/security stack. It is not part
