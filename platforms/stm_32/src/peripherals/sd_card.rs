@@ -8,8 +8,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 
-//use defmt::trace;
-
 use voloxide_core::errors;
 use voloxide_core::packets;
 
@@ -75,13 +73,10 @@ impl SdCard {
         let mut card_size = 0usize;
 
         // Should print 400kHz for initialization
-        //trace!("uSD: Configured clock: {}", self.sdmmc.clock().0);
 
         // Initialize the SD card
         if let Err(_e) = self.sdmmc.init_card(mhz(4)).await {
-            //trace!("uSD: Failed to initialize SD card: {:?}", e);
         } else {
-            //trace!("uSD: Initialized SD card");
         }
 
         // Get card information
@@ -89,24 +84,16 @@ impl SdCard {
             Ok(card) => {
                 card_blocks = card.csd.block_count() as usize;
                 card_size = card.csd.card_size() as usize;
-
-                //defmt::trace!("uSD: SD card initialized.");
             }
-            Err(_e) => {
-                //defmt::error!("uSD: Failed to get card details: {:?}", e);
-            }
+            Err(_e) => {}
         }
         let _block_size = card_size / card_blocks;
         // any block_size other than 512 is an error!
-
-        //defmt::trace!(
         //    "uSD: ( {} blocks ) * ( {} bytes/block) = card size {} bytes",
         //    card_blocks,
         //    block_size,
         //    card_size
         //);
-
-        //trace!("uSD: Done Init Card");
 
         // Read stored values from sd and push to SD_READ_SIGNAL
 
@@ -122,7 +109,6 @@ impl SdCard {
         SD_READ_SIGNAL.signal(Ok(param_packet));
 
         loop {
-            // if there is new data, write to disk
             match SD_WRITE_SIGNAL.wait().await {
                 Ok(mut packet) => {
                     let result = self.write(&packet, card_blocks).await;
@@ -136,9 +122,7 @@ impl SdCard {
                     }
                     SD_READ_SIGNAL.signal(Ok(packet));
                 }
-                Err(_e) => {
-                    //trace!("uSD: Error here");
-                }
+                Err(_e) => {}
             }
         }
     }
@@ -146,6 +130,5 @@ impl SdCard {
 
 #[embassy_executor::task]
 pub async fn task(mut sd_card: SdCard) {
-    //defmt::trace!("uSD task");
     sd_card.run().await;
 }

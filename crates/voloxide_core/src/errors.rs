@@ -19,7 +19,6 @@ impl Default for EstimatorError {
     }
 }
 
-// #[derive(Debug, Clone, Copy, Format)]
 #[derive(Debug, Clone, Copy)]
 pub enum SensorError {
     GenericSensorError(&'static str),

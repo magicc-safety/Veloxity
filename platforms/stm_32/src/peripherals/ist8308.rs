@@ -14,8 +14,6 @@ use embassy_time::Duration;
 use embassy_time::Timer;
 
 // Other
-//use core::f32;
-//use embassy_time::Instant;
 
 pub static MAG_SIGNAL: Signal<
     CriticalSectionRawMutex,
@@ -164,7 +162,6 @@ impl Ist8308Sensor {
         // Set ODR
         const CNTL2_REG: u8 = 0x31;
         const CNTL2_VAL_CONT_ODR100_MODE: u8 = 0x08; //Continuous (100Hz) mode
-        // const CNTL2_VAL_SINGLE_MODE: u8 = 0x01; // Single mode
         if self
             .dev
             .write(ADDRESS, &[CNTL2_REG, CNTL2_VAL_CONT_ODR100_MODE])
@@ -178,7 +175,6 @@ impl Ist8308Sensor {
         }
 
         let loop_period = Duration::from_hz(100);
-        // let mut previous_timestamp_us: u64 = 0u64;
         loop {
             let timestamp = synch_at(loop_period) + Duration::from_micros(900);
             Timer::at(timestamp).await;
@@ -220,9 +216,6 @@ impl Ist8308Sensor {
                     temperature: 0.0f32,
                 };
                 MAG_SIGNAL.signal(Ok(mag_packet)); // make data available for other tasks
-                // defmt::info!("Mag data: {:?} ", flux);
-
-                // defmt::info!("{:?} {:?} us",timestamp_us, timestamp_us-previous_timestamp_us);
                 // previous_timestamp_us = timestamp_us;
             }
         }

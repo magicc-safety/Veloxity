@@ -64,12 +64,9 @@ impl SbusRC {
                         chan[i] = (extract_chan(&buffer, 8 + i * 11) - 172.0) / 1639.0;
                     }
                     // get the two binary channels
-                    // defmt::info!("I got to here!");
-                    // defmt::info!("Channels inside SBUS (before scaling): {}", chan);
                     chan[0 + SBUS_11_BIT_CHANNELS] = ((((dig) & 0x01) as f32) - 172.0) / 1639.0; // rosflight weird scaling
                     chan[1 + SBUS_11_BIT_CHANNELS] =
                         ((((dig >> 1) & 0x01) as f32) - 172.0) / 1639.0; // rosflight weird scaling
-                    // defmt::info!("Channels inside SBUS (after scaling): {}", chan);
 
                     let header = packets::RosflightPacketHeader {
                         timestamp: Instant::now().as_micros(),

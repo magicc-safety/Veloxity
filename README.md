@@ -157,12 +157,6 @@ cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
 Both boards run a `voloxide` binary entry point. Each binary wires its board, `MavlinkInterface`,
 quadrotor body components, state manager, and PWM driver into the shared `World` scheduler.
 
-## Debugging
-
-To enable defmt logging, uncomment the `defmt` dependency in the relevant crate's `Cargo.toml` and
-the `link-arg=-Tdefmt.x` line in `.cargo/config.toml`. Then uncomment `defmt::` calls in the
-source. defmt output is read via `probe-rs`.
-
 ## MAVLink
 
 The MAVLink parser (`voloxide_mavlink::parser`) is board-agnostic. It operates on raw `&[u8]`

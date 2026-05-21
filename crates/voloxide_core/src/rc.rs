@@ -203,11 +203,6 @@ impl Rc {
             self.switches[i].channel = channel_num;
             self.switches[i].mapped = channel_num > 3 && channel_num < rc_num_channels;
 
-            // // debugging code to see if we mapped it or not...
-            // if self.switches[i].mapped {
-            // } else {
-            // }
-
             let direction_param_id = match channel_num {
                 4 => Some(ParamId::PARAM_RC_SWITCH_5_DIRECTION),
                 5 => Some(ParamId::PARAM_RC_SWITCH_6_DIRECTION),

@@ -10,9 +10,6 @@ use super::pps;
 use voloxide_core::errors;
 use voloxide_core::packets;
 
-// use defmt::info;
-//use defmt::trace;
-
 const BUFFER_LEN: usize = 512;
 
 fn unix_seconds_from_utc(year: u16, month: u8, day: u8, hour: u8, min: u8, sec: u8) -> i64 {
@@ -44,27 +41,13 @@ pub struct PvtPayload {
     pub min: u8,
     pub sec: u8, // UTC
 
-    pub valid: u8, // validity flags
-    // pub unused1:u4,         // uint8_t :4;
-    // pub valid_mag:u1,       // uint8_t validMag :1;
-    // pub fully_resolved:u1,  // uint8_t fullyResolved :1;
-    // pub valid_time:u1,      // uint8_t validTime :1;
-    // pub valid_date:u1,      // uint8_t validDate :1;
+    pub valid: u8,    // validity flags
     pub t_acc: u32,   // ns, time accuracy estimate
     pub nano: i32,    // ns, Fraction of second -1e9 to 1e9 (UTC)
     pub fix_type: u8, // 0 none, 1 dead reckoning, 2 2D, 3 3D, 4 GNS+dead reckoning combined, 5 time only fix
 
     pub flags: u8,
-    // pub carr_soln:u2,	    // uint8_t carrSoln :2;
-    // pub head_veh_valid:u1,  // uint8_t headVehValid :1;
-    // pub psm_state:u3,       // uint8_t psmState:3;
-    // pub diff_soln:u1,       // uint8_t diffSoln:1;
-    // pub gnss_fix_ok:u1,      // uint8_t gnssFixOK :1;
     pub flags2: u8,
-    // pub confirmed_time:u1,  // uint8_t confirmedTime:1;
-    // pub confirmed_date:u1,  // uint8_t confirmedDate:1;
-    // pub confirmed_avai:u1,  // uint8_t confirmedAvai:1;
-    // pub unused2:u5,         // uint8_t :5;
     pub num_sv: u8, // satellites used in solution
     pub lon: i32,
     pub lat: i32, // degx10^-7
@@ -82,9 +65,6 @@ pub struct PvtPayload {
     pub p_dop: u16,    // 0.01 (percent)
 
     flags3: u16,
-    // pub unused3:u11,        // uint16_t : 11;
-    // pub last_correction_age:u4,
-    // pub invalid_llh:u1,
     pub reserved1: u8,
     pub head_veh: i32, // degx10^-5, vehicle heading
     pub mag_dec: i16,  // degx 10^-2
@@ -130,7 +110,6 @@ pub struct UbloxSensor {
     pub protocol: Protocol,
     pub baudrate: Bitrate,
     pub nav_period_ms: u16,
-    //   pub pps_period_ms: u16 // always set to 1 second
 }
 
 static PPS_PERIOD_US: u32 = 1000000u32;
@@ -149,7 +128,7 @@ fn checksum(buffer: &[u8]) -> (u8, u8) {
 }
 
 fn make_packet(class: u8, id: u8, payload: &[u8], buffer: &mut [u8]) -> bool {
-    let length = payload.len() as usize; // returns a usize
+    let length = payload.len();
 
     // Check for payload too big
     if length + 8 > buffer.len() {
@@ -167,13 +146,11 @@ fn make_packet(class: u8, id: u8, payload: &[u8], buffer: &mut [u8]) -> bool {
     buffer[6..length + 6].copy_from_slice(payload);
 
     // checksum
-    //let mut ck_a = 0u8;
-    //let mut ck_b = 0u8;
     let (ck_a, ck_b) = checksum(&buffer[2..length + 6]);
     buffer[length + 6] = ck_a;
     buffer[length + 7] = ck_b;
 
-    true // return a buffer
+    true
 }
 
 impl UbloxSensor {
@@ -184,11 +161,9 @@ impl UbloxSensor {
             // Make the expected ack packet
             let mut ack: [u8; 10] = [0u8; 10];
             let _result = make_packet(0x05, 0x01, &[class, id], &mut ack); // ack packet is class=0x05 id=0x01
-            // info!("Made ack packet: {:x} ", ack);
 
             // send packet
             let result = self.uart.write(&buffer[0..payload.len() + 8]).await;
-            // info!("Sent ubx packet class: {:#02X} id: {:#02X} result: {:?}", class, id, result);
             if let Ok(_size) = result {
                 // check it it was successful
                 let result = self.look_for_ack(&ack).await;
@@ -199,7 +174,6 @@ impl UbloxSensor {
     }
 
     async fn cfg_prt(&mut self, _baud: u32) -> bool {
-        // return error
         match self.protocol {
             Protocol::M8 => {
                 let mut payload = [0u8; 20]; // #define CFG_PRT_LENGTH 20
@@ -294,7 +268,6 @@ impl UbloxSensor {
     }
 
     async fn cfg_msg(&mut self, class: u8, id: u8, decimation_rate: u8) -> bool {
-        // return error.
         let payload = [class, id, decimation_rate];
         self.tx(0x06, 0x01, &payload).await
     }
@@ -311,21 +284,17 @@ impl UbloxSensor {
         .await
         {
             Ok(Ok(_size)) => {
-                // info!("Looking for ACK, received {} bytes: {:x}", size, buffer[0..size]);
                 for subarray in buffer.windows(ack.len()) {
                     if ack == subarray {
-                        // info!("buffer {}\n ack: {:#02X}\nsubarray: {:#02X}", size, ack, subarray);
                         return true;
                     }
                 }
             }
             Ok(Err(_read_err)) => {
                 // underlying UART/read error from self.uart.read(...)
-                // info!("UART read error while looking for ACK: {:?}", read_err);
             }
             Err(_timeout_err) => {
                 // with_timeout timed out
-                // info!("Timed out waiting for UART read while looking for ACK: {:?}", timeout_err);
             }
         }
         false
@@ -344,25 +313,19 @@ impl UbloxSensor {
         for _retries in 0..30 {
             for baud in bauds {
                 // try baud rate
-                // info!("Try {} baud", baud);
                 // set stm32 baud rate
                 let _result: Result<(), usart::ConfigError> = self.uart.set_baudrate(baud);
-                // info!("Set baud result: {:?}", result);
 
                 // set ublox the desired baud rate
                 let result = self.cfg_prt(self.baudrate as u32).await;
-                // info!("Cfg prt result: {:?}", result);
 
                 if result {
-                    // info!("Synced baudrate to {}", baud);
                     let _result: Result<(), usart::ConfigError> =
                         self.uart.set_baudrate(self.baudrate as u32);
                     return true;
                 }
-                // info!("{:?} baud not configured", baud);
             }
         }
-        // info!("Failed to sync baudrate after all attempts");
         false
     }
 
@@ -502,9 +465,7 @@ impl UbloxSensor {
                         } else {
                             n += 1;
                         }
-                    } else
-                    // if(n==p->length+7) // Checksum B (the end)
-                    {
+                    } else {
                         n = 0;
                         if p.b == c {
                             // we found a valid packet
@@ -580,7 +541,6 @@ impl UbloxSensor {
                                 let t0 = pps_timestamp as u64; // top of seconds
                                 let t1 = end_of_packet_timestamp.as_micros();
                                 let nav_dt = (self.nav_period_ms as u64) * 1000;
-                                //let pps_dt = (self.pps_period_ms as u64)*1000;
 
                                 // phase offset from t0, doesn't matter if its a little old
                                 // we are just counting off how many nav times we are behind the time pulse.
@@ -638,12 +598,11 @@ impl UbloxSensor {
                     }
                 }
             }
-        } // loop
+        }
     }
 }
 
 #[embassy_executor::task]
 pub async fn task(mut ublox: UbloxSensor) {
-    //trace!("Start UBLOX");
     ublox.run().await;
 }

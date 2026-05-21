@@ -14,9 +14,6 @@ use crate::synch_at;
 use voloxide_core::errors;
 use voloxide_core::packets;
 
-//use defmt::info;
-//use defmt::trace;
-
 // Device dependent
 const SPI_READ: u8 = 0x80;
 const SPI_WRITE: u8 = 0x00;
@@ -33,7 +30,6 @@ const INT_SOURCE_REG: u8 = 0x64;
 const INT_THS_L_REG: u8 = 0x65;
 const INT_THS_H_REG: u8 = 0x66;
 const STATUS_REG: u8 = 0x67;
-//const OUT_FLUX: u8 =  0x68;
 const OUT_TEMP: u8 = 0x6E;
 
 // Chip ID
@@ -72,9 +68,7 @@ impl Iis2mdcSensor {
         // Check Chip ID
         let who_am_i = self.read_register(WHO_AM_I_REG).await?;
         if who_am_i == WHO_AM_I {
-            //info!("WHO_AM_I = {:#02x} success", who_am_i);
         } else {
-            //info!("WHO_AM_I = {:#02x} failure", who_am_i);
             return Err(errors::SensorError::GenericSensorError(
                 "IIS2MDC Chip ID mismatch",
             ));
@@ -143,7 +137,6 @@ impl Iis2mdcSensor {
 
         // Read the status register
         let status = self.read_register(STATUS_REG).await?;
-        //info!("STATUS_SENSOR = {:#02x}. Shold be 0x00", status);
 
         // Read calibration registers
         let mut offset = [0u8; 7];
@@ -159,8 +152,6 @@ impl Iis2mdcSensor {
             (((offset[3] as u16) | (offset[4] as u16) << 8) as i16) * 3 / 2,
             (((offset[5] as u16) | (offset[6] as u16) << 8) as i16) * 3 / 2,
         ];
-
-        //info!("OFFSET_REGISTERS (not used) = {:?}", offset);
 
         Ok(status)
     }
@@ -237,7 +228,6 @@ impl Iis2mdcSensor {
         let _status = match self.initialize_sensor().await {
             Ok(status) => status,
             Err(e) => {
-                //trace!("Failed to initialize sensor: {:?}", e);
                 MAG_SIGNAL.signal(Err(e));
                 return;
             }

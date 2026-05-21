@@ -656,7 +656,7 @@ impl From<ControlType> for OffboardControlMode {
             ControlType::Rate => OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
             ControlType::Passthrough => OffboardControlMode::ModePassThrough,
             ControlType::Angle => OffboardControlMode::ModeRollPitchYawrateThrottle,
-            _ => OffboardControlMode::ModeRollPitchYawrateThrottle, // qx cannot ever be anything but rate, passthrough, or angle... so to satisfy match statement, set to angle... TODO clean up logic here
+            ControlType::Throttle => OffboardControlMode::ModeRollPitchYawrateThrottle,
         }
     }
 }

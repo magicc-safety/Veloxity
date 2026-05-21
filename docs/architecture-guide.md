@@ -144,7 +144,7 @@ sim
 ├── depends on voloxide_core
 ├── depends on voloxide_mavlink
 ├── provides FFI board/PWM adapters for ROS 2 shim
-└── still contains an older direct Zenoh sim binary path
+└── exposes the simulator firmware through the ROS 2 shim FFI path
 
 sim/ros2/voloxide_sil_board_shim
 ├── is a ROS 2 rclcpp package in this repo

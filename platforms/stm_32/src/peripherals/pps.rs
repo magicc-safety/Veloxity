@@ -4,7 +4,6 @@ use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 
 use voloxide_core::packets;
-//use defmt::trace;
 
 pub static PPS_SIGNAL: Signal<CriticalSectionRawMutex, packets::PpsPacket> =
     Signal::<CriticalSectionRawMutex, packets::PpsPacket>::new();
@@ -16,7 +15,6 @@ pub struct PpsSensor {
 impl PpsSensor {
     pub async fn run(&mut self) {
         loop {
-            //trace!("PPS did a thing!");
             self.pps.wait_for_rising_edge().await;
             let timestamp = Instant::now();
             let status = 1;

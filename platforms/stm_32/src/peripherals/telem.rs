@@ -5,8 +5,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
 use embassy_time::Timer;
 
-//use defmt::trace;
-
 use voloxide_core::comm::interface::EmbeddedComInterface;
 use voloxide_core::errors;
 
@@ -16,19 +14,11 @@ pub static RX_BUFF_SIZE: usize = 4 * 2048;
 pub static TELEM_TX: Pipe<CriticalSectionRawMutex, TX_BUFF_SIZE> = Pipe::new();
 pub static TELEM_RX: Pipe<CriticalSectionRawMutex, RX_BUFF_SIZE> = Pipe::new();
 
-// pub static LOGGER_CHANNEL: Channel<CriticalSectionRawMutex, packets::LogPacket, 64> = Channel::new();
-// pub static TELEMETRY_CHANNEL: Channel<CriticalSectionRawMutex, packets::RosflightPacket, 64> =
-//    Channel::new();
-// pub static IMU_CHANNEL: Channel<CriticalSectionRawMutex, packets::ImuPacket, 64> = Channel::new();
-
-// ----------------------------- Telemetry Specific Structures ----------------------------
-
 pub struct BasicProcessor;
 
 impl EmbeddedComInterface for BasicProcessor {
     async fn process_bytes(&mut self, buf: &[u8], num_bytes: usize) {
         TELEM_RX.write_all(&buf[0..num_bytes]).await;
-        //defmt::trace!("Heartbeat: gets {} bytes", num_bytes);
     }
 }
 
@@ -67,13 +57,11 @@ impl<ECI: EmbeddedComInterface> TelemRx<ECI> {
             let result = self.uart_rx.read_until_idle(&mut buf).await;
             match result {
                 Err(_) => {
-                    // defmt::trace!("System: Uart read error");
                     Timer::after_millis(1).await;
                 }
                 Ok(n) => {
                     if n > 0 && n <= RX_BUFF_SIZE {
                         // added the above if statement to match phil's code
-                        // defmt::trace!("Heartbeat: Got {} bytes", n);
                         self.byte_processor.process_bytes(&buf, n).await;
                     }
                 }
@@ -89,6 +77,5 @@ pub async fn task_rx(mut telem_rx: TelemRx<BasicProcessor>) {
 
 #[embassy_executor::task]
 pub async fn task_tx(mut telem_tx: TelemTx) {
-    //info!("task_tx");
     telem_tx.run().await;
 }

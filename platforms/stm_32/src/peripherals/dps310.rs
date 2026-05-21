@@ -14,9 +14,6 @@ use crate::synch_at;
 use voloxide_core::errors;
 use voloxide_core::packets;
 
-//use defmt::info;
-//use defmt::trace;
-
 // Device dependent
 const SPI_READ: u8 = 0x80;
 const SPI_WRITE: u8 = 0x00;
@@ -94,7 +91,6 @@ impl Dps310Sensor {
         const PRODUCT_ID: u8 = 0x10;
         let id = self.read_register(PRODUCT_ID_REG).await?;
         if id != PRODUCT_ID {
-            //trace!(
             //    "Failure: ID = {:#02x} failure. Should be {:#02x}",
             //    id,
             //    PRODUCT_ID
@@ -107,7 +103,6 @@ impl Dps310Sensor {
         const COEF_READY: u8 = 0x80;
         let coef_rdy = self.read_register(MEAS_CFG_REG).await?;
         if (coef_rdy & COEF_READY) == 0x00 {
-            //trace!("Failure: COEF_READY = {:#02x}", coef_rdy);
             return Err(errors::SensorError::GenericSensorError(
                 "Calibration coefficients not ready",
             ));
@@ -142,7 +137,6 @@ impl Dps310Sensor {
         cal[4] = compliment((buf[13] << 8) | buf[14], 16); // C20
         cal[8] = compliment((buf[15] << 8) | buf[16], 16); // C21
         cal[5] = compliment((buf[17] << 8) | buf[18], 16); // C30
-        //info!("Calibration Constants = {:?}", cal);
 
         Ok(cal)
     }
@@ -159,7 +153,6 @@ impl Dps310Sensor {
         // CHECK TEMPERATURE SOURCE
         const COEF_SRCE_REG: u8 = 0x28;
         let temp_source = self.read_register(COEF_SRCE_REG).await? & 0x80;
-        //info!("Temperature Source {:#02x}", temp_source);
 
         // TEMPERATURE CONFIG
         const TMP_CFG_REG: u8 = 0x07;
@@ -268,23 +261,19 @@ impl Dps310Sensor {
         let mut cal = match self.initialize_sensor().await {
             Ok(cal) => cal,
             Err(e) => {
-                //trace!("Failed to initialize sensor: {:?}", e);
                 BARO_SIGNAL.signal(Err(e));
                 return;
             }
         };
         if let Err(e) = self.pressure_config().await {
-            //trace!("Failed to configure pressure: {:?}", e);
             BARO_SIGNAL.signal(Err(e));
             return;
         }
         if let Err(e) = self.temperature_config().await {
-            //trace!("Failed to configure temperature: {:?}", e);
             BARO_SIGNAL.signal(Err(e));
             return;
         }
         if let Err(e) = self.measurement_configuration().await {
-            //trace!("Failed to configure measurement: {:?}", e);
             BARO_SIGNAL.signal(Err(e));
             return;
         }
@@ -298,7 +287,6 @@ impl Dps310Sensor {
             Timer::at(timestamp).await;
 
             // process pressure data
-            // let ((raw_p, status_high), (raw_t, status_low)) = join!(pressure_fut, temperature_fut).await;
             let (raw_p, status_high) = match self.get_pressure_data().await {
                 Ok(data) => data,
                 Err(e) => {

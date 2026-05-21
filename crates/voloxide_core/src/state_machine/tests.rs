@@ -1,6 +1,3 @@
-/*
-Unit tests
-*/
 use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::{ErrorFlag, Event, StateMachine, StateManager};
 

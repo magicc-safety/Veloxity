@@ -10,29 +10,14 @@ use embassy_time::{Instant, Timer};
 use embedded_hal_async::spi::SpiDevice as _;
 use voloxide_core::errors;
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
-//use defmt::info;
 
 // Device dependent
 const SPI_READ: u8 = 0x00;
 const SPI_WRITE: u8 = 0x80;
 
 // Registers
-// const OFFSET_REG: u8 = 0x45;
-// const WHO_AM_I_REG: u8 = 0x4F;
-
-// const CFG_REG_A: u8 = 0x60;
-// const CFG_REG_B: u8 = 0x61;
-// const CFG_REG_C: u8 = 0x62;
-// const INT_CTRL_REG: u8 = 0x63;
-// const INT_SOURCE_REG: u8 = 0x64;
-// const INT_THS_L_REG: u8 = 0x65;
-// const INT_THS_H_REG: u8 = 0x66;
-// const STATUS_REG: u8 = 0x67;
-// const OUT_FLUX: u8 =  0x68;
-// const OUT_TEMP: u8 =  0x6E;
 
 // Chip ID
-// const WHO_AM_I: u8 = 0x40;
 
 pub static IMU_SIGNAL: Signal<CriticalSectionRawMutex, Result<ImuPacket, errors::SensorError>> =
     Signal::<CriticalSectionRawMutex, Result<ImuPacket, errors::SensorError>>::new();
@@ -50,7 +35,6 @@ pub struct Adis16500Sensor {
     pub dec_rate: DecRate,
     pub drdy: ExtiInput<'static>,
     pub reset: Output<'static>,
-    //pub timer: SimplePwm<'static,TIM14>,
     pub timer: TimerEnum,
 }
 
@@ -59,7 +43,6 @@ const ADIS_BUFFBYTES32: usize = 34;
 const BURST_READ: u8 = 0x68;
 
 impl Adis16500Sensor {
-    // TODO: Comment says 16us required delay, but is hardcoded to 100. Intentional?
     async fn read_register(&mut self, reg_addr: u8) -> Result<u16, errors::SensorError> {
         let tx = [reg_addr | SPI_READ, 0x00];
         self.dev.write(&tx).await.map_err(|e| match e {
@@ -86,7 +69,6 @@ impl Adis16500Sensor {
         self.dev.write(&tx).await.map_err(|e| match e {
             _ => errors::SensorError::GenericSensorError("SPI failed: write_register"),
         })?;
-        // TODO: I think these read delays could be unnecessary for the write function. Ask Phil
         Timer::after_micros(100).await; // (100) Required 16us delay till you can read again
 
         let hi = ((value >> 8) & 0x00FF) as u8; //
@@ -102,18 +84,11 @@ impl Adis16500Sensor {
     async fn initialize_sensor(&mut self) -> Result<u16, errors::SensorError> {
         self.reset.set_low(); // Hold in reset
 
-        // Start external sync clock
-        // let mut sync_clk = self.timer.ch1();
-        // sync_clk.enable();
-        // sync_clk.set_duty_cycle_fraction(1,2); // .set_duty_cycle(ch1.max_duty_cycle()/2);
         let _ = self.timer.enable(pwm::TimerChannel::Ch1);
         let _ = self.timer.set_duty_cycle(pwm::TimerChannel::Ch1, 500); // 500 us
 
         Timer::after_micros(1000).await;
 
-        // Hardware reset
-        // self.reset.set_low();
-        // Timer::after_micros(100).await; // Stay low at least 10 us
         self.reset.set_high();
         Timer::after_millis(300).await; // Data sheet specifies 255ms for power-on startup empirically 300 is required
 
@@ -121,10 +96,7 @@ impl Adis16500Sensor {
         const ADIS16500_PROD_ID_ADDR: u8 = 0x72;
         const ADIS16500_PROD_ID: u16 = 0x4074;
         let prod_id = self.read_register(ADIS16500_PROD_ID_ADDR).await?;
-        if prod_id == ADIS16500_PROD_ID {
-            //info!("PROD_ID = {:#04X} success",prod_id);
-        } else {
-            //info!("PROD_ID = {:#04X} failure should be {:#04X}",prod_id, ADIS16500_PROD_ID);
+        if prod_id != ADIS16500_PROD_ID {
             return Err(errors::SensorError::GenericSensorError(
                 "ADIS16500 ID mismatch",
             ));
@@ -138,12 +110,9 @@ impl Adis16500Sensor {
         const ADIS16500_DEC_RATE: u8 = 0x64; // decimation
         // [15:11] don't care
         // [10:0] decimation rate minus 1, e.g., use 5-1 = 4
-        //let dec_rate :u16 = ( (self.sample_period.as_micros() as u16))/500u16 - 1u16; // decimation rate:  0 for 2000 Hz, 2000/400-1 = 4 for 400 Hz.
-        //self.write_register(ADIS16500_DEC_RATE, dec_rate).await;
 
         self.write_register(ADIS16500_DEC_RATE, self.dec_rate as u16)
             .await?;
-        //info!("Dec rate = {:#04X}",(self.dec_rate as u16));
 
         // Miscellaneous Control Register (MSC_CTRL)
         const ADIS16500_MSC_CTRL: u8 = 0x60;
@@ -165,24 +134,18 @@ impl Adis16500Sensor {
         if (self.dec_rate as u16) == 0 {
             // 2000Hz, sample rate, use 16-bit data mode
             self.write_register(ADIS16500_MSC_CTRL, 0x0085).await?; // values 0b0000 0000 1000 0101 = 0x0085
-        //self.write_register(ADIS16500_MSC_CTRL, 0x0081).await; // values 0b0000 0000 1000 0101 = 0x0085
         } else {
-            // use 32-bit data mode
             self.write_register(ADIS16500_MSC_CTRL, 0x0285).await?; // values 0b0000 0010 1000 0101 = 0x0285
-            //self.write_register(ADIS16500_MSC_CTRL, 0x0281).await; // values 0b0000 0010 1000 0101 = 0x0285
         }
 
         const ADIS16500_DIAG_STAT: u8 = 0x02;
         let diag_stat = self.read_register(ADIS16500_DIAG_STAT).await?;
 
         if diag_stat != 0 {
-            //info!("Diag Stat = {:#04X} failure should be {:#04X}",diag_stat, 0u16);
             return Err(errors::SensorError::GenericSensorError(
                 "ADIS16500 diagnostic status error",
             ));
         }
-
-        //info!("Diag Stat = {:#04X} success",diag_stat);
         Ok(diag_stat)
     }
 
@@ -327,7 +290,6 @@ impl Adis16500Sensor {
         let _status = match self.initialize_sensor().await {
             Ok(status) => status,
             Err(e) => {
-                //trace!("Failed to initialize sensor: {:?}", e);
                 IMU_SIGNAL.signal(Err(e));
                 return;
             }

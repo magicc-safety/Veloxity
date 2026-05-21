@@ -312,7 +312,6 @@ impl ImuProcessor {
                         flags.remove(CalibrationFlags::ACCEL);
                     }
                 }
-                // return None; // Removed this so we don't get IMU errors while calibrating
             }
             packet.gyro[0] -= param_float(params, ParamId::PARAM_GYRO_X_BIAS) as f64;
             packet.gyro[1] -= param_float(params, ParamId::PARAM_GYRO_Y_BIAS) as f64;

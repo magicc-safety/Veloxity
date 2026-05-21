@@ -14,8 +14,6 @@ use embassy_time::Duration;
 use embassy_time::Timer;
 
 // Other
-//use embassy_time::with_timeout;
-//use embassy_time::Instant;
 
 pub static PITOT_SIGNAL: Signal<
     CriticalSectionRawMutex,
@@ -65,7 +63,6 @@ impl Ms4525Sensor {
         let mut sum_pressure: u32 = 0;
         let mut sum_temperature: u32 = 0;
         let mut sum_count: u32 = 0;
-        //let mut previous_timestamp_us: u64 = 0u64;
 
         loop {
             let timestamp = synch_at(loop_period);
@@ -93,7 +90,6 @@ impl Ms4525Sensor {
             let timestamp_us = timestamp.as_micros();
 
             if timestamp_us % sample_period_us == 0 {
-                //let dt = timestamp_us-previous_timestamp_us;
                 if sum_count > 0 {
                     let avg_pressure = ((f64::from(sum_pressure) / (sum_count as f64) - 1638.3f64)
                         / 6553.2f64
@@ -114,10 +110,7 @@ impl Ms4525Sensor {
                         ..Default::default()
                     };
                     PITOT_SIGNAL.signal(Ok(pitot_packet)); // make data available for other tasks.
-
-                //defmt::info!("{:?} {:?} us {:?} count",timestamp_us, dt, sum_count);
                 } else {
-                    //defmt::error!("{:?} {:?} us",timestamp_us, dt);
                     PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
                         "MS4525 Pitot failed: no valid data",
                     )));

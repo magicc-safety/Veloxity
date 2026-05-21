@@ -8,9 +8,6 @@ use libm::{cos, sin, sqrt};
 
 use nalgebra::{Quaternion, SVector as Vector, UnitQuaternion};
 
-// Removed hardcoded DT - now using actual timestamps
-// const DT: f64 = 1.0/400.0f64;
-
 const G: f64 = 9.80665; // Gravity in m/s^2
 
 #[derive(Debug, Clone, Copy)]

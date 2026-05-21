@@ -13,11 +13,8 @@ include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 
 static mut PARAM_STORE: Option<Params> = None;
 
-// we need a way of passing RcPacket from it's ROS definition to a "packet" form that we can process
-
 pub struct Board {
-    #[allow(dead_code)]
-    probe: [Output<'static>; 4],
+    _probe: [Output<'static>; 4],
     pub start_time: embassy_time::Instant,
     pending_reset_to_bootloader: Option<bool>,
 }
@@ -140,7 +137,6 @@ impl BoardIo for Board {
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         let mut n = 0;
-        //let len = byte_count;
         let len = bytes.len();
 
         loop {
@@ -205,27 +201,11 @@ impl BoardIo for Board {
 }
 
 impl Board {
-    #[allow(dead_code)]
-    fn probe_hi(&mut self, id: usize) {
-        self.probe[id].set_high(); // so we can see something on the logic analyzer.
-    }
-
-    #[allow(dead_code)]
-    fn probe_lo(&mut self, id: usize) {
-        self.probe[id].set_low(); // so we can see something on the logic analyzer.
-    }
-
-    #[allow(dead_code)]
-    fn probe_tog(&mut self, id: usize) {
-        self.probe[id].toggle(); // so we can see something on the logic analyzer.
-    }
-
     pub fn new() -> (Board, BoardPwmDriver) {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(8));
 
         let start_time = embassy_time::Instant::now();
 
-        //let t = TestBoard{p: embassy_stm32::init(clock_config())};
         // SPI1 Bus ///////////////////////////////////////////
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
         spi1_config.frequency = mhz(1);
@@ -349,7 +329,6 @@ impl Board {
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
         let _ = spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
-        // TODO: What priority should VCP be?
         spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
 
         //GPS USART7
@@ -587,7 +566,7 @@ impl Board {
 
         (
             Board {
-                probe,
+                _probe: probe,
                 start_time,
                 pending_reset_to_bootloader: None,
             },

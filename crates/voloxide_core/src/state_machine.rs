@@ -55,9 +55,6 @@ pub(crate) enum StateMachine {
 impl StateMachine {
     // New state machine starts in the Preflight state.
     pub fn new() -> Self {
-        // let sm = State { state: Init, error_flags: ErrorFlag::empty() };
-        // sm.state.on_event(sm, Event::INITIALIZED)
-
         StateMachine::Init(State::<Init>::default())
     }
 

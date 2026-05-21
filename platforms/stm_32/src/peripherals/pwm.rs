@@ -68,7 +68,6 @@ impl ServoMonstrosity {
     }
     pub fn disable(&mut self, ch: usize) -> Result<(), TimerError> {
         let (ix, chan) = self.chan_list[ch];
-        //trace!(
         //    "PWM: Accessing index {}, array len: {}",
         //    ix,
         //    self.chan_list.len()
@@ -199,7 +198,6 @@ impl PixRacerProServoMonstrosity {
     }
     pub fn disable(&mut self, ch: usize) -> Result<(), TimerError> {
         let (ix, chan) = self.chan_list[ch];
-        //trace!(
         //    "PWM: Accessing index {}, array len: {}",
         //    ix,
         //    self.chan_list.len()

@@ -7,8 +7,6 @@ use libm::{atan2, cos, pow, sin, sqrt};
 use nalgebra::Quaternion;
 use nalgebra::SVector as Vector;
 
-// DT is now passed as a parameter from the main loop (matches C implementation)
-
 /// Clamps a value between a lower and upper bound.
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
     if value < min {
@@ -19,8 +17,6 @@ fn clamp(value: f64, min: f64, max: f64) -> f64 {
         value
     }
 }
-
-// ============== PID Controller (Unchanged) ==============
 
 #[derive(Debug, Clone, Copy)]
 pub struct Pid {
@@ -119,16 +115,6 @@ impl Pid {
     }
 }
 
-// ============== Controller Data Structures ==============
-
-/// **A new struct to bundle all controller inputs.**
-// #[derive(Debug, Clone, Copy)]
-// pub struct ControllerInput {
-//     pub attitude: AttitudeState,
-//     pub commanded_rates: Vector<f64, 3>,
-//     pub commanded_thrust: f64,
-// }
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ControllerOutput {
     pub u: [f64; 10],
@@ -168,7 +154,7 @@ impl ControllerOutput {
         [self.u[6], self.u[7], self.u[8], self.u[9]]
     }
 
-    pub fn legacy_quad_thrust(&self) -> f64 {
+    pub fn quad_thrust_command(&self) -> f64 {
         -self.u[2]
     }
 }
@@ -178,8 +164,6 @@ impl Default for ControllerOutput {
         Self { u: [0.0; 10] }
     }
 }
-
-// ============== Quadcopter Controller Implementation ==============
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct QuadController {

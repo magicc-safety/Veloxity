@@ -15,8 +15,7 @@ include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 static mut PARAM_STORE: Option<Params> = None;
 
 pub struct Board {
-    #[allow(dead_code)]
-    probe: [Output<'static>; 3], // PixRacerPro exposes three probe pins.
+    _probe: [Output<'static>; 3],
     pub start_time: embassy_time::Instant,
     test_pin_1: Output<'static>,
     test_pin_2: Output<'static>,
@@ -72,7 +71,6 @@ impl BoardIo for Board {
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         let mut n = 0;
-        //let len = byte_count;
         let len = bytes.len();
         loop {
             match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
@@ -90,7 +88,6 @@ impl BoardIo for Board {
                 }
             }
         }
-        //Some(Ok(n))
         Some(Ok(len))
     }
 
@@ -137,21 +134,6 @@ impl BoardIo for Board {
 }
 
 impl Board {
-    #[allow(dead_code)]
-    fn probe_hi(&mut self, id: usize) {
-        self.probe[id].set_high(); // so we can see something on the logic analyzer.
-    }
-
-    #[allow(dead_code)]
-    fn probe_lo(&mut self, id: usize) {
-        self.probe[id].set_low(); // so we can see something on the logic analyzer.
-    }
-
-    #[allow(dead_code)]
-    fn probe_tog(&mut self, id: usize) {
-        self.probe[id].toggle(); // so we can see something on the logic analyzer.
-    }
-
     pub fn new() -> (Board, PixRacerProServoMonstrosity) {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
 
@@ -234,29 +216,6 @@ impl Board {
         let llv3hp_sensor = peripherals::llv3hp::Llv3hpSensor {
             dev: I2cDevice::new(i2c1_bus),
         };
-
-        // // Telemetry UART - The documentation puts telemetry on USART8, but according to Phil this is RC telemetry, not Mavlink
-        // UART2 is currently not in use. We use UART3 for our Mavlink Serial connection to ROS2.
-        // let mut uart2config = usart::Config::default();
-        // uart2config.baudrate = 921600;
-        // let mut uart2 = Uart::new(
-        //     p.USART2,
-        //     p.PD6,
-        //     p.PD5,
-        //     Usart2Irqs,
-        //     p.DMA2_CH4,
-        //     p.DMA2_CH5,
-        //     uart2config,
-        // )
-        // .unwrap();
-        // let (mut uart2_tx, mut uart2_rx) = uart2.split();
-
-        // let telem2_rx = peripherals::telem::TelemRx {
-        //     uart_rx: uart2_rx,
-        //     byte_processor: stm_32::peripherals::telem::BasicProcessor {},
-        // };
-
-        // let telem2_tx = peripherals::telem::TelemTx { uart_tx: uart2_tx };
 
         // Companion Computer UART - Austin's documentation references uart3 instead of 2 for companion computer
         let mut uart3config = usart::Config::default();
@@ -477,10 +436,10 @@ impl Board {
         );
         let timer4 = SimplePwm::new(
             p.TIM4,
-            None, // Some(ch4_pin),
+            None,
             Some(tim4_ch2_pin),
-            Some(tim4_ch3_pin), // Some(ch7_pin),
-            None,               // Some(ch8_pin),
+            Some(tim4_ch3_pin),
+            None,
             Hertz::hz(400),
             Default::default(),
         );
@@ -489,7 +448,7 @@ impl Board {
             Some(tim2_ch1_pin),
             None,
             None,
-            None, // Some(ch9_pin),
+            None,
             Hertz::hz(400),
             Default::default(),
         );
@@ -538,7 +497,7 @@ impl Board {
         ];
         (
             Board {
-                probe,
+                _probe: probe,
                 start_time,
                 test_pin_1,
                 test_pin_2,

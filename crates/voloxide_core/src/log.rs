@@ -165,14 +165,6 @@ impl Logger {
 // at the top of the crate, then using `log_<info, warn, error, or debug>!("{}", var);`,
 // or by using `crate::log_<info, warn, error, or debug>!("{}", var);` directly.
 
-// EXAMPLES:
-// crate::log_info!("Test");
-// crate::log_info!("0000000000000000000000000000000000000000000000000000000000000000000000000000000000");
-// crate::log_debug!("DEBUG TEST");
-// crate::log_warn!("\0");
-// crate::log_error!("Error test");
-// log_info!("Example with import!");
-
 #[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => { $crate::log::Logger::info(format_args!($($arg)*)) };

@@ -1,5 +1,4 @@
 use crate::synch_at;
-//use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::i2c::I2c;
@@ -23,7 +22,6 @@ pub struct DlhrL20GSensor {
 }
 
 impl DlhrL20GSensor {
-    //pub async fn run( &mut self, mut i2c: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>)
     pub async fn run(&mut self) {
         const ADDRESS: u8 = 0x29;
         const START: u8 = 0xAC;
@@ -61,8 +59,6 @@ impl DlhrL20GSensor {
 
                 let pressure = 1.25 * fs * (f64::from(u32_pressure) / 16777216.0 - 0.1); // Pa
                 let temperature = 125.0 * f64::from(u32_temperature) / 16777216.0 - 40.0; // C
-
-                //if status == 0x0040
                 {
                     let header = packets::RosflightPacketHeader {
                         timestamp: timestamp.as_micros(),

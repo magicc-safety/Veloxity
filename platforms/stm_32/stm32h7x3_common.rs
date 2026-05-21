@@ -2,8 +2,6 @@ use core::default::Default;
 use core::option::Option::Some;
 use embassy_stm32::{Config, rcc};
 
-//use defmt::*;
-
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::InterruptExecutor;
@@ -31,45 +29,26 @@ use embassy_stm32::usb::Driver;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
-//use {defmt_rtt as _, panic_probe as _};
-
-
-// pub struct UartResources {
-//     pub uart: usart::BufferedUart<'static>,
-// }
-
-// All STM32 SPI's
-#[allow(dead_code)]
-static SPI1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static SPI2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static SPI3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static SPI4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static SPI5_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI5_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static SPI6_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
+pub static SPI6_BUS: StaticCell<Mutex<CriticalSectionRawMutex, spi::Spi<'static, Async>>> =
     StaticCell::new();
 
-// All STM32 I2C's
-#[allow(dead_code)]
-static I2C1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
+pub static I2C1_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static I2C2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
+pub static I2C2_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static I2C3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
+pub static I2C3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
-#[allow(dead_code)]
-static I2C4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
+pub static I2C4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async>>> =
     StaticCell::new();
 
 // All I2C Interrupts

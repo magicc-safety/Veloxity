@@ -89,8 +89,6 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
 
         let max_duty = self.max_duty_counts[channel] as f32;
         let raw_pwm = pwm_us / 2500.0 * max_duty;
-        //let raw_pwm = (pwm_us - 1000.0) / 1000.0 * max_duty;
-        //let raw_pwm = ((pwm_us - 1000.0) / 1000.0 * max_duty) * 1000.0 / 2500.0 + 1000.0;
 
         self.servos
             .set_duty_cycle(channel, raw_pwm as u16)
@@ -111,17 +109,6 @@ impl<'a> PwmDriver for BoardPwmDriver<'a> {
 
     fn flush<B: BoardIo>(&mut self, _board: &mut B) {
         // Hardware state is already applied in set_duty_cycle.
-        // let msg = OutputRaw {
-        //     header: Header {
-        //         stamp: Time {
-        //             sec: (now_us / 1_000_000) as i32,
-        //             nanosec: ((now_us % 1_000_000) * 1000) as u32,
-        //         },
-        //         frame_id: String::new(),
-        //     },
-        //     values: self.current_values,
-        // };
-        // TODO: Send via telemetry channel (similar to sim driver)
     }
 
     fn send_commands<B: BoardIo>(

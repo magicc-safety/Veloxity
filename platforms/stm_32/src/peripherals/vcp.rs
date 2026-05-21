@@ -8,7 +8,6 @@ use embassy_usb::Builder;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use voloxide_core::comm::interface::EmbeddedComInterface;
 use voloxide_core::errors::SensorError;
-// use defmt;
 
 pub const VCP_TX_BUFF_SIZE: usize = 2048;
 pub const VCP_RX_BUFF_SIZE: usize = 2048;
@@ -69,11 +68,8 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
         let vcp_fut = async {
             loop {
                 class.wait_connection().await;
-                // defmt::info!("Connected");
                 let result = Self::tx_rx(&mut byte_processor, &mut class).await;
-                if let Err(_) = result {
-                    // defmt::warn!("VCP error");
-                }
+                if let Err(_) = result {}
             }
         };
 
@@ -95,7 +91,6 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
                 Either::First(n) => {
                     if n > 0 {
                         if let Err(_) = class.write_packet(&tx_buf[..n]).await {
-                            // defmt::warn!("VCP TX failed, disconnecting.");
                             return Err(SensorError::GenericSensorError("VCP TX failed")); // Assume disconnect, return to outer loop
                         }
                     }
@@ -105,7 +100,6 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
                         byte_processor.process_bytes(&rx_buf[..n], n).await;
                     }
                     Err(_) => {
-                        // defmt::warn!("VCP RX failed, disconnecting.");
                         return Err(SensorError::GenericSensorError("VCP RX failed")); // Assume disconnect, return to outer loop
                     }
                     _ => {} // no data, do nothing

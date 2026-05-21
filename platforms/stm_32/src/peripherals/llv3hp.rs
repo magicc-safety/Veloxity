@@ -4,9 +4,8 @@ pub use embassy_sync::signal::Signal;
 use voloxide_core::{errors, packets};
 
 // I2C Specific
-use embassy_stm32::i2c::I2c;
-//use embassy_stm32::i2c::Master;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+use embassy_stm32::i2c::I2c;
 use embedded_hal_async::i2c::I2c as _;
 
 // Polled Sensors
@@ -15,9 +14,6 @@ use embassy_time::Duration;
 use embassy_time::Timer;
 
 // Other
-//use core::f32;
-//use embassy_time::Instant;
-// use defmt::info;
 
 pub static RANGE_SIGNAL: Signal<
     CriticalSectionRawMutex,
@@ -33,26 +29,10 @@ const ACQ_COMMAND: u8 = 0x00; // Device command
 const STATUS: u8 = 0x01; // System status
 const SIG_COUNT_VAL: u8 = 0x02; // Maximum acquisition count
 const ACQ_CONFIG_REG: u8 = 0x04; // Acquisition mode control
-//const LEGACY_RESET_EN: u8     = 0x06; // Enables unit reset
-//const SIGNAL_STRENGTH: u8     = 0x0E; // Received signal strength
 const DATA: u8 = 0x0F; // Distance measurement high byte
-//const FULL_DELAY_HIGH: u8     = 0x0F; // Distance measurement high byte
-//const FULL_DELAY_LOW: u8      = 0x10; // Distance measurement low byte
 const REF_COUNT_VAL: u8 = 0x12; // Reference acquisition count
-//const UNIT_ID_HIGH: u8        = 0x16; // Serial number high byte
-//const UNIT_ID_LOW: u8         = 0x17; // Serial number low byte
-//const I2C_ID_HIGH: u8         = 0x18; // Write serial number high byte for I2C address unlock
-//const I2C_ID_LOW: u8          = 0x19; // Write serial number low byte for I2C address unlock
-//const I2C_SEC_ADDR: u8        = 0x1A; // Write new I2C address after unlock
 const THRESHOLD_BYPASS: u8 = 0x1C; // Peak detection threshold bypass
-//const I2C_CONFIG: u8          = 0x1E; // Default address response control
-//const PEAK_STACK_HIGH_BYTE: u8 = 0x26; // Registers read successive values from the peak stack register (high byte)
-//const PEAK_STACK_LOW_BYTE: u8 = 0x27; // Registers read successive values from the peak stack register (low byte)
-//const COMMAND: u8             = 0x40; // State command
 const HEALTH_STATUS: u8 = 0x48; // Used to diagnose major hardware issues at initialization
-//const CORR_DATA: u8           = 0x52; // Correlation record data low byte
-//const CORR_DATA_SIGN: u8      = 0x53; // Correlation record data high byte
-//const POWER_CONTROL: u8       = 0x65; // Power state control
 
 impl Llv3hpSensor {
     async fn write_read(
@@ -104,7 +84,6 @@ impl Llv3hpSensor {
         }
 
         if (status[0] & 0x30) != 0x30 {
-            // defmt::error!("LLV3HP Lidar failed: bad STATUS {:02X}",status[0]);
             RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: bad STATUS",
             )));
@@ -125,28 +104,11 @@ impl Llv3hpSensor {
         }
 
         if (health[0] & 0x17) != 0x17 {
-            // defmt::error!("LLV3HP Lidar failed: bad HEALTH_STATUS {:02X}",health[0]);
             RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: bad HEALTH_STATUS",
             )));
             return;
         }
-
-        // This is just here for reference, use the default.
-        // let configuration: u8 = 0;
-        // let mut sig_count_max:u8 = 0x80;
-        // let mut acq_config_reg:u8 = 0x08;
-        // let mut ref_count_max:u8 = 0x05;
-        // let mut threshold_bypass:u8 = 0x00;       // let (sig_count_max, acq_config_reg, ref_count_max, threshold_bypass) = match configuration {
-        //     0 => (0x80, 0x08, 0x05, 0x00), // Default mode, balanced performance
-        //     1 => (0x1d, 0x08, 0x03, 0x00), // Short range, high speed
-        //     2 => (0x80, 0x00, 0x03, 0x00), // Default range, higher speed short range
-        //     3 => (0xff, 0x08, 0x05, 0x00), // Maximum range
-        //     4 => (0x80, 0x08, 0x05, 0x80), // High sensitivity detection, high erroneous measurements
-        //     5 => (0x80, 0x08, 0x05, 0xb0), // Low sensitivity detection, low erroneous measurements
-        //     6 => (0x04, 0x01, 0x03, 0x00), // Short range, high speed, higher error
-        //     _ => (0x80, 0x08, 0x05, 0x00), // Default case (using default mode as fallback)
-        // };
 
         let sig_count_max: u8 = 0x80;
         let acq_config_reg: u8 = 0x08;
@@ -215,17 +177,6 @@ impl Llv3hpSensor {
             let timestamp = synch_at(loop_period) + Duration::from_micros(5800);
             Timer::at(timestamp).await;
 
-            // Check System Status Register
-            // let mut status = [0u8;1];
-            // if self.write_read(ADDRESS,&[STATUS],&mut status ).await.is_err() {
-            //     RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: reading STATUS")));
-            //     continue;
-            // }
-            // if (status[0] & 0x30) != 0x30 {
-            //     RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("LLV3HP Lidar failed: bad STATUS")));
-            //     continue;
-            // }
-
             // Read Data
             let mut data = [0u8; 2];
             if self.write_read(ADDRESS, &[DATA], &mut data).await.is_err() {
@@ -251,8 +202,6 @@ impl Llv3hpSensor {
                     range_type: packets::RangeType::Lidar,
                 };
                 RANGE_SIGNAL.signal(Ok(range_packet)); // make data available for other tasks
-                //defmt::info!("{:?} ", range_packet);
-                //defmt::info!("{:?}", timestamp_us-last_timestamp_us);
             }
         }
     }
