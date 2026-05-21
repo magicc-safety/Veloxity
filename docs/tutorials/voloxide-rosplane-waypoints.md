@@ -14,23 +14,18 @@ It follows the upstream ROSflight ROSplane sim flow:
 
 ## Prerequisites
 
-From the workspace root:
+Source ROS 2 and the ROSflight workspace using your normal shell setup before running these
+commands. The Voloxide scripts use the environment you already sourced; they do not source external
+ROSflight helper scripts.
 
 ```bash
-cd /run/host/home/skink/projects/voloxide_proj
-source scripts/source_rosflight_env.zsh
-source install/setup.zsh
+cd ~/Voloxide
 ```
 
 Build the Voloxide sim library and ROS shim if needed:
 
 ```bash
-cd Voloxide
-cargo build -p sim --lib
-cd ..
-colcon build --base-paths Voloxide/sim/ros2/voloxide_sil_board_shim \
-  --packages-select voloxide_sil_board_shim
-source install/setup.zsh
+source scripts/build_and_source_ros2_shim.zsh
 ```
 
 Zenoh RMW is recommended for local graph stability:
@@ -38,81 +33,19 @@ Zenoh RMW is recommended for local graph stability:
 ```bash
 export ROS_LOG_DIR=/tmp/rosflight_logs
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export VOLOXIDE_SIM_PARAM_DIR="$PWD/Voloxide/target/voloxide-runtime/rosplane"
+export VOLOXIDE_SIM_PARAM_DIR="$PWD/target/voloxide-runtime/rosplane"
 ```
-
-## Working Visual Demo
-
-Run:
-
-```bash
-cd /run/host/home/skink/projects/voloxide_proj
-Voloxide/scripts/run_voloxide_rosplane_demo.zsh
-```
-
-This is the fixed-wing path that has been validated visually with Voloxide as
-the firmware endpoint. It deliberately uses VimFly for the aircraft takeoff and
-RC-override handoff, matching the ROSflight tutorial model more closely than the
-diagnostic deterministic RC helper.
-
-The script defaults to the validated tutorial mode:
-
-- `FIRMWARE=voloxide`
-- `USE_VIMFLY=true`
-- `USE_TRUTH_STATE_AUTONOMY=true`
-- `USE_STANDALONE_RVIZ=true`
-- `USE_WAYPOINT_VIZ=true`
-- `USE_ROSPLANE_GCS=false`
-- `MANUAL_TAKEOFF_BEFORE_ROSPLANE=true`
-- `RESET_VOLOXIDE_PARAMS=true`
-
-It starts the Zenoh router, launches fixed-wing standalone SIL with VimFly,
-seeds a ground state for firmware calibration, loads the standard ROSflight
-fixed-wing firmware parameters, refreshes the dynamics parameter cache, starts
-one RViz window, and then pauses.
-
-At the first pause:
-
-1. Click the VimFly window.
-2. Press `t` once to arm.
-3. Fly the aircraft manually under RC override.
-4. Do not press `r` yet.
-5. Press Enter in the script terminal only after the aircraft is airborne and
-   stable.
-
-The script then starts ROSplane from the truth-state adapter, starts the
-waypoint marker publisher, loads `fixedwing_mission.yaml`, and pauses again.
-
-At the second pause:
-
-1. Keep the aircraft flying manually.
-2. Press `r` once in VimFly to release RC override.
-3. Press Enter in the script terminal after `/status` shows `rc_override=0`.
-
-The standalone RViz window should show `/rviz/waypoint`, `/rviz/mesh`, and
-`/rviz/mesh_path`. The separate ROSplane GCS RViz window is disabled by default
-so there is only one visual window.
-
-It sets `VOLOXIDE_SIM_PARAM_DIR` to `Voloxide/target/voloxide-runtime/rosplane` by default.
-`target/` is ignored by Git, so saved SIL parameters cannot be accidentally committed. Override
-`VOLOXIDE_SIM_PARAM_DIR` to point at a different disposable runtime directory. By default the
-script deletes that store before launch and then loads the documented ROSflight fixed-wing
-parameter file, so saved Voloxide parameters from earlier tests do not define the demo flight
-configuration.
-
-Stop the demo with `Ctrl-C` in the script terminal.
 
 ## Manual Sequence
 
 Set the environment:
 
 ```bash
-cd /run/host/home/skink/projects/voloxide_proj
-source scripts/source_rosflight_env.zsh
-source install/setup.zsh
+cd ~/Voloxide
+source workspace/install/setup.zsh
 export ROS_LOG_DIR=/tmp/rosflight_logs
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export VOLOXIDE_SIM_PARAM_DIR="$PWD/Voloxide/target/voloxide-runtime/rosplane-manual"
+export VOLOXIDE_SIM_PARAM_DIR="$PWD/target/voloxide-runtime/rosplane-manual"
 mkdir -p "$VOLOXIDE_SIM_PARAM_DIR"
 ```
 
@@ -146,11 +79,10 @@ ROSplane:
 3. Fly the aircraft manually under RC override until it is airborne and stable.
 4. Do not press `r` yet.
 
-Start ROSplane from the truth-state adapter and start waypoint visualization:
+Start ROSplane from the truth-state adapter:
 
 ```bash
 ros2 launch voloxide_sil_board_shim rosplane_truth_state_autonomy.launch.py
-python3 Voloxide/scripts/rosplane_waypoint_markers.py
 ```
 
 Load the default fixed-wing mission:

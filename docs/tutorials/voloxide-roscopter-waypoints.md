@@ -1,6 +1,6 @@
 # Voloxide ROScopter Waypoint Demo
 
-This guide starts from the checked-out `voloxide_proj` workspace and runs the Voloxide/Rust firmware
+This guide starts from the checked-out `Voloxide` repository and runs the Voloxide/Rust firmware
 backend through the ROSflight 2.0 SIL and ROScopter waypoint stack.
 
 The validated setup uses:
@@ -15,12 +15,12 @@ The validated setup uses:
 
 ## Prerequisites
 
-From the workspace root:
+Source ROS 2 and the ROSflight workspace using your normal shell setup before running these
+commands. The Voloxide scripts use the environment you already sourced; they do not source external
+ROSflight helper scripts.
 
 ```bash
-cd /run/host/home/skink/projects/voloxide_proj
-source scripts/source_rosflight_env.zsh
-source install/setup.zsh
+cd ~/Voloxide
 ```
 
 Install Zenoh RMW if it is not already installed:
@@ -33,38 +33,8 @@ sudo apt-get install -y ros-jazzy-rmw-zenoh-cpp
 Build the Voloxide sim library and ROS shim, if you have not already done so:
 
 ```bash
-cd Voloxide
-cargo build -p sim --lib
-cd ..
-colcon build --base-paths Voloxide/sim/ros2/voloxide_sil_board_shim \
-  --packages-select voloxide_sil_board_shim
-source install/setup.zsh
+source scripts/build_and_source_ros2_shim.zsh
 ```
-
-## One-Command Demo
-
-Run:
-
-```bash
-cd /run/host/home/skink/projects/voloxide_proj
-Voloxide/scripts/run_voloxide_waypoint_demo.zsh
-```
-
-The script starts the Zenoh router, launches the Voloxide firmware bridge with RViz, runs firmware
-initialization and IMU calibration, starts ROScopter's estimator first, arms and waits for stationary
-barometer calibration, starts the ROScopter autonomy nodes and waypoint marker publisher, sets
-`/path_manager hold_last=true`, loads the default multirotor mission, and releases RC override.
-It sets `VOLOXIDE_SIM_PARAM_DIR` to `Voloxide/target/voloxide-runtime/roscopter` by default.
-`target/` is ignored by Git, so saved SIL parameters cannot be accidentally committed. Override
-`VOLOXIDE_SIM_PARAM_DIR` to point at a different disposable runtime directory. By default the
-script deletes that store before launch (`RESET_VOLOXIDE_PARAMS=true`) and then loads
-`rosflight_sim/params/multirotor_firmware/multirotor_combined.yaml`, so the flight demo uses the
-documented ROSflight parameter file rather than saved parameters from previous tests.
-For this external-estimator sim path it also sets firmware parameter `FILT_USE_ACC=0` before arming,
-so the firmware does not block actuator output on its internal accelerometer correction health gate
-while ROScopter is already feeding external attitude.
-
-Stop the demo with `Ctrl-C` in the script terminal.
 
 ## Manual Sequence
 
@@ -73,12 +43,11 @@ Use the manual sequence when debugging one stage at a time.
 Set the environment:
 
 ```bash
-cd /run/host/home/skink/projects/voloxide_proj
-source scripts/source_rosflight_env.zsh
-source install/setup.zsh
+cd ~/Voloxide
+source workspace/install/setup.zsh
 export ROS_LOG_DIR=/tmp/rosflight_logs
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export VOLOXIDE_SIM_PARAM_DIR="$PWD/Voloxide/target/voloxide-runtime/roscopter-manual"
+export VOLOXIDE_SIM_PARAM_DIR="$PWD/target/voloxide-runtime/roscopter-manual"
 mkdir -p "$VOLOXIDE_SIM_PARAM_DIR"
 ```
 
