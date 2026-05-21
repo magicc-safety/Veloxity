@@ -154,6 +154,19 @@ cargo run -p nucleo --target thumbv7em-none-eabihf --bin voloxide
 cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
 ```
 
+### Raspberry Pi Pico 2 W / RP2350
+
+```bash
+rustup target add thumbv8m.main-none-eabihf
+cargo xtask check-board pico2w
+```
+
+The Pico 2 W skeleton is split into `platforms/rp2350` for RP2350/Embassy concepts and
+`boards/pico2w` for board wiring. The intended architecture is core 0 running the Voloxide
+flight-control `World`, core 1 owning Wi-Fi UDP MAVLink transport, and PIO state machines owning
+PWM and sensor timing. Pin assignment, concrete PIO programs, and the core-1 Wi-Fi task are left as
+explicit board configuration work.
+
 Both boards run a `voloxide` binary entry point. Each binary wires its board, `MavlinkInterface`,
 quadrotor body components, state manager, and PWM driver into the shared `World` scheduler.
 

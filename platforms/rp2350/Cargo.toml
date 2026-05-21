@@ -1,0 +1,14 @@
+[package]
+name = "rp2350_platform"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embassy-rp = { version = "0.10.0", features = [
+  "rp235xa",
+  "critical-section-impl",
+  "rom-v2-intrinsics",
+] }
+
+[lints]
+workspace = true

@@ -2,9 +2,11 @@
 resolver = "3"
 members = [
   "boards/nucleo",
+  "boards/pico2w",
   "boards/pixracerpro",
   "comms/voloxide_mavlink",
   "crates/voloxide_core",
+  "platforms/rp2350",
   "platforms/stm_32",
   "sim/firmware",
   "xtask",
@@ -20,6 +22,7 @@ default-members = [
 [workspace.dependencies]
 voloxide_core = { path = "./crates/voloxide_core" }
 voloxide_mavlink = { path = "./comms/voloxide_mavlink" }
+rp2350_platform = { path = "./platforms/rp2350" }
 stm_32 = { path = "./platforms/stm_32" }
 
 [workspace.lints.rust]

@@ -1,0 +1,20 @@
+[package]
+name = "pico2w"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rp2350_platform = { workspace = true }
+voloxide_core = { workspace = true }
+voloxide_mavlink = { workspace = true }
+
+cortex-m-rt = { version = "0.7.0" }
+panic-halt = "1.0.0"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "voloxide"
+test = false
+bench = false

@@ -15,7 +15,7 @@ fn main() -> ExitCode {
             .and_then(|_| cargo(["test", "-p", "sim", "--lib"])),
         "check-board" => {
             let Some(board) = args.next() else {
-                eprintln!("missing board name: expected `nucleo` or `pixracerpro`");
+                eprintln!("missing board name: expected `nucleo`, `pixracerpro`, or `pico2w`");
                 return ExitCode::from(2);
             };
             match board.as_str() {
@@ -26,8 +26,17 @@ fn main() -> ExitCode {
                     "--target",
                     "thumbv7em-none-eabihf",
                 ]),
+                "pico2w" => cargo([
+                    "check",
+                    "-p",
+                    board.as_str(),
+                    "--target",
+                    "thumbv8m.main-none-eabihf",
+                ]),
                 _ => {
-                    eprintln!("unknown board `{board}`: expected `nucleo` or `pixracerpro`");
+                    eprintln!(
+                        "unknown board `{board}`: expected `nucleo`, `pixracerpro`, or `pico2w`"
+                    );
                     return ExitCode::from(2);
                 }
             }
@@ -70,7 +79,7 @@ fn print_usage() {
          commands:\n\
            check-host       check host-compatible workspace packages\n\
            test-host        run host-side Rust tests\n\
-           check-board      check embedded firmware: nucleo | pixracerpro\n\
+          check-board      check embedded firmware: nucleo | pixracerpro | pico2w\n\
           build-sim-lib    build the simulator static library for ROS 2"
     );
 }
