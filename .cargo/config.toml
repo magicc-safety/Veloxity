@@ -42,3 +42,14 @@ rustflags = [
   # "-C",
   # "link-arg=-Tdefmt.x",
 ]
+
+[target.thumbv8m.main-none-eabihf]
+runner = "probe-rs run --chip RP235x"
+rustflags = [
+  "-C",
+  "linker=rust-lld",
+  "-C",
+  "link-arg=--nmagic",
+  "-C",
+  "link-arg=-Tlink.x",
+]

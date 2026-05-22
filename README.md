@@ -140,6 +140,8 @@ cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
 ```bash
 rustup target add thumbv8m.main-none-eabihf
 cargo xtask check-board pico2w
+cargo xtask build-board pico2w
+cargo xtask flash-board pico2w
 ```
 
 The Pico 2 W skeleton is split into `platforms/rp2350` for RP2350/Embassy concepts and

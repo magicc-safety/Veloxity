@@ -18,28 +18,49 @@ fn main() -> ExitCode {
                 eprintln!("missing board name: expected `nucleo`, `pixracerpro`, or `pico2w`");
                 return ExitCode::from(2);
             };
-            match board.as_str() {
-                "nucleo" | "pixracerpro" => cargo([
-                    "check",
-                    "-p",
-                    board.as_str(),
-                    "--target",
-                    "thumbv7em-none-eabihf",
-                ]),
-                "pico2w" => cargo([
-                    "check",
-                    "-p",
-                    board.as_str(),
-                    "--target",
-                    "thumbv8m.main-none-eabihf",
-                ]),
-                _ => {
-                    eprintln!(
-                        "unknown board `{board}`: expected `nucleo`, `pixracerpro`, or `pico2w`"
-                    );
-                    return ExitCode::from(2);
-                }
-            }
+            let Some(target) = board_target(&board) else {
+                eprintln!("unknown board `{board}`: expected `nucleo`, `pixracerpro`, or `pico2w`");
+                return ExitCode::from(2);
+            };
+            cargo(["check", "-p", board.as_str(), "--target", target])
+        }
+        "build-board" => {
+            let Some(board) = args.next() else {
+                eprintln!("missing board name: expected `nucleo`, `pixracerpro`, or `pico2w`");
+                return ExitCode::from(2);
+            };
+            let Some(target) = board_target(&board) else {
+                eprintln!("unknown board `{board}`: expected `nucleo`, `pixracerpro`, or `pico2w`");
+                return ExitCode::from(2);
+            };
+            cargo([
+                "build",
+                "-p",
+                board.as_str(),
+                "--target",
+                target,
+                "--bin",
+                "voloxide",
+            ])
+        }
+        "flash-board" => {
+            let Some(board) = args.next() else {
+                eprintln!("missing board name: expected `pico2w`");
+                return ExitCode::from(2);
+            };
+            let Some(target) = board_target(&board) else {
+                eprintln!("unknown board `{board}`: expected `nucleo`, `pixracerpro`, or `pico2w`");
+                return ExitCode::from(2);
+            };
+            cargo([
+                "run",
+                "-p",
+                board.as_str(),
+                "--target",
+                target,
+                "--bin",
+                "voloxide",
+            ])
         }
         "build-sim-lib" => cargo(["build", "-p", "sim", "--lib"]),
         _ => {
@@ -52,6 +73,14 @@ fn main() -> ExitCode {
     match status {
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => ExitCode::from(code),
+    }
+}
+
+fn board_target(board: &str) -> Option<&'static str> {
+    match board {
+        "nucleo" | "pixracerpro" => Some("thumbv7em-none-eabihf"),
+        "pico2w" => Some("thumbv8m.main-none-eabihf"),
+        _ => None,
     }
 }
 
@@ -79,7 +108,9 @@ fn print_usage() {
          commands:\n\
            check-host       check host-compatible workspace packages\n\
            test-host        run host-side Rust tests\n\
-          check-board      check embedded firmware: nucleo | pixracerpro | pico2w\n\
-          build-sim-lib    build the simulator static library for ROS 2"
+           check-board      check embedded firmware: nucleo | pixracerpro | pico2w\n\
+           build-board      build embedded firmware: nucleo | pixracerpro | pico2w\n\
+           flash-board      build and flash embedded firmware with probe-rs\n\
+           build-sim-lib    build the simulator static library for ROS 2"
     );
 }
