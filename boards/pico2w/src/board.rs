@@ -119,11 +119,6 @@ impl BoardIo for Board {
                 Ok(None) => {}
                 Err(err) => sensors.baro = Some(Err(err.sensor_error())),
             }
-            match gy91.sample_mag(now_us) {
-                Ok(Some(mag)) => sensors.mag = Some(Ok(mag)),
-                Ok(None) => {}
-                Err(err) => sensors.mag = Some(Err(err.sensor_error())),
-            }
         }
     }
 

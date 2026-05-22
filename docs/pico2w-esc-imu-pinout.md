@@ -12,8 +12,8 @@ hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one SPI IMU
 - Power: the ESC has no BEC. Do not power the Pico 2 W from the ESC signal harness unless an
   external regulator is added. The Pico 2 W and ESC must share ground.
 - IMU/barometer module: GY-91-style breakout wired over SPI. The tested board reports MPU `WHO_AM_I`
-  `0x70` and BMP280 chip ID `0x58`. That behaves like an MPU6500-class accel/gyro plus BMP280, not
-  a confirmed MPU9250 plus AK8963 magnetometer.
+  `0x70` and BMP280 chip ID `0x58`. That behaves like an MPU6500-class accel/gyro plus BMP280.
+  Magnetometer support is not configured for this board target.
 
 ## Proposed Header GPIO Allocation
 
@@ -79,7 +79,7 @@ The IMU path should not cross the core boundary. Sensor samples should enter `vo
 
 The visible GY-91 header used for bring-up does not expose a data-ready interrupt pin. The current
 driver uses polled SPI. That is acceptable for first bring-up because MPU accel/gyro reads are direct
-SPI bursts; slower BMP280 and optional magnetometer reads are throttled separately.
+SPI bursts and slower BMP280 reads are throttled separately.
 
 ## DShot Notes
 
@@ -114,8 +114,7 @@ The `imu_spi_probe` firmware verified:
 - live accelerometer samples
 - live gyroscope samples
 - live BMP280 pressure/temperature samples
-- AK8963 magnetometer not detected over the MPU auxiliary I2C path
+- no magnetometer support configured
 
-The missing AK8963 is handled as an optional sensor. If a future module reports AK8963 `WHO_AM_I`
-`0x48`, the same driver path can publish magnetometer samples. On the tested module, Voloxide still
-publishes IMU and barometer data and leaves magnetometer absent.
+Voloxide publishes IMU and barometer data and leaves magnetometer absent for this board target. If a
+future external magnetometer is added, implement it as a separate sensor path.

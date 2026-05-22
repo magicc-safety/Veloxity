@@ -5,7 +5,7 @@ use rp2350_platform::hal::{
 };
 use voloxide_core::{
     errors::SensorError,
-    packets::{BaroPacket, ImuPacket, MagPacket, RosflightPacketHeader},
+    packets::{BaroPacket, ImuPacket, RosflightPacketHeader},
 };
 
 const GRAVITY: f64 = 9.80665;
@@ -13,26 +13,11 @@ const DEG_TO_RAD: f64 = 0.017453292519943295;
 
 const MPU_WHO_AM_I: u8 = 0x75;
 const MPU_PWR_MGMT_1: u8 = 0x6b;
-const MPU_USER_CTRL: u8 = 0x6a;
 const MPU_CONFIG: u8 = 0x1a;
 const MPU_GYRO_CONFIG: u8 = 0x1b;
 const MPU_ACCEL_CONFIG: u8 = 0x1c;
 const MPU_ACCEL_CONFIG2: u8 = 0x1d;
-const MPU_I2C_MST_CTRL: u8 = 0x24;
-const MPU_I2C_SLV0_ADDR: u8 = 0x25;
-const MPU_I2C_SLV0_REG: u8 = 0x26;
-const MPU_I2C_SLV0_CTRL: u8 = 0x27;
-const MPU_I2C_SLV0_DO: u8 = 0x63;
-const MPU_EXT_SENS_DATA_00: u8 = 0x49;
 const MPU_ACCEL_XOUT_H: u8 = 0x3b;
-
-const AK8963_ADDR: u8 = 0x0c;
-const AK8963_WIA: u8 = 0x00;
-const AK8963_ST1: u8 = 0x02;
-const AK8963_HXL: u8 = 0x03;
-const AK8963_CNTL1: u8 = 0x0a;
-const AK8963_CNTL2: u8 = 0x0b;
-const AK8963_ASAX: u8 = 0x10;
 
 const BMP_CHIP_ID: u8 = 0xd0;
 const BMP_CALIB_START: u8 = 0x88;
@@ -45,8 +30,6 @@ pub enum Gy91Error {
     Spi,
     InvalidMpuId(u8),
     InvalidBmpId(u8),
-    InvalidMagId(u8),
-    MagOverflow,
 }
 
 impl Gy91Error {
@@ -55,8 +38,6 @@ impl Gy91Error {
             Gy91Error::Spi => SensorError::GenericSensorError("gy91 spi error"),
             Gy91Error::InvalidMpuId(_) => SensorError::GenericSensorError("gy91 invalid mpu id"),
             Gy91Error::InvalidBmpId(_) => SensorError::GenericSensorError("gy91 invalid bmp id"),
-            Gy91Error::InvalidMagId(_) => SensorError::GenericSensorError("gy91 invalid mag id"),
-            Gy91Error::MagOverflow => SensorError::GenericSensorError("gy91 mag overflow"),
         }
     }
 }
@@ -65,7 +46,6 @@ impl Gy91Error {
 pub struct Gy91Ids {
     pub mpu: u8,
     pub bmp: u8,
-    pub mag: Option<u8>,
 }
 
 #[derive(Default)]
@@ -89,13 +69,10 @@ pub struct Gy91 {
     mpu_cs: Output<'static>,
     bmp_cs: Output<'static>,
     bmp_calibration: Bmp280Calibration,
-    mag_adjust: [f32; 3],
-    mag_present: bool,
     initialized: bool,
     ids: Option<Gy91Ids>,
     imu_seq: u32,
     last_baro_sample_us: u64,
-    last_mag_sample_us: u64,
 }
 
 impl Gy91 {
@@ -111,13 +88,10 @@ impl Gy91 {
             mpu_cs,
             bmp_cs,
             bmp_calibration: Bmp280Calibration::default(),
-            mag_adjust: [1.0; 3],
-            mag_present: false,
             initialized: false,
             ids: None,
             imu_seq: 0,
             last_baro_sample_us: 0,
-            last_mag_sample_us: 0,
         }
     }
 
@@ -141,17 +115,12 @@ impl Gy91 {
         self.mpu_write_reg(MPU_GYRO_CONFIG, 0x08)?;
         self.mpu_write_reg(MPU_ACCEL_CONFIG, 0x08)?;
         self.mpu_write_reg(MPU_ACCEL_CONFIG2, 0x03)?;
-        self.mpu_write_reg(MPU_USER_CTRL, 0x30)?;
-        self.mpu_write_reg(MPU_I2C_MST_CTRL, 0x0d)?;
 
         self.bmp_calibration = self.read_bmp_calibration()?;
         self.bmp_write_reg(BMP_CONFIG, 0xa0)?;
         self.bmp_write_reg(BMP_CTRL_MEAS, 0x4f)?;
 
-        let mag = self.init_ak8963()?;
-        self.mag_present = mag.is_some();
-
-        let ids = Gy91Ids { mpu, bmp, mag };
+        let ids = Gy91Ids { mpu, bmp };
         self.initialized = true;
         self.ids = Some(ids);
         Ok(ids)
@@ -216,41 +185,6 @@ impl Gy91 {
             pressure,
             temperature,
             altitude: 0.0,
-        }))
-    }
-
-    pub fn sample_mag(&mut self, now_us: u64) -> Result<Option<MagPacket>, Gy91Error> {
-        self.ensure_initialized()?;
-        if !self.mag_present {
-            return Ok(None);
-        }
-        if now_us < self.last_mag_sample_us.saturating_add(10_000) {
-            return Ok(None);
-        }
-
-        let st1 = self.ak8963_read_reg(AK8963_ST1)?;
-        if st1 & 0x01 == 0 {
-            return Ok(None);
-        }
-
-        let mut raw = [0_u8; 7];
-        self.ak8963_read_regs(AK8963_HXL, &mut raw)?;
-        if raw[6] & 0x08 != 0 {
-            return Err(Gy91Error::MagOverflow);
-        }
-
-        let mag_x = i16_le(raw[0], raw[1]) as f32 * self.mag_adjust[0] * 0.15;
-        let mag_y = i16_le(raw[2], raw[3]) as f32 * self.mag_adjust[1] * 0.15;
-        let mag_z = i16_le(raw[4], raw[5]) as f32 * self.mag_adjust[2] * 0.15;
-        self.last_mag_sample_us = now_us;
-
-        Ok(Some(MagPacket {
-            header: RosflightPacketHeader {
-                timestamp: now_us,
-                status: 0,
-            },
-            flux: [mag_x, mag_y, mag_z],
-            temperature: 0.0,
         }))
     }
 
@@ -340,60 +274,6 @@ impl Gy91 {
             dig_p9: i16_le(raw[22], raw[23]),
         })
     }
-
-    fn init_ak8963(&mut self) -> Result<Option<u8>, Gy91Error> {
-        let mag = self.ak8963_read_reg(AK8963_WIA)?;
-        if mag != 0x48 {
-            return Ok(None);
-        }
-
-        self.ak8963_write_reg(AK8963_CNTL2, 0x01)?;
-        ak8963_delay();
-        self.ak8963_write_reg(AK8963_CNTL1, 0x00)?;
-        ak8963_delay();
-        self.ak8963_write_reg(AK8963_CNTL1, 0x0f)?;
-        ak8963_delay();
-
-        let mut asa = [0_u8; 3];
-        self.ak8963_read_regs(AK8963_ASAX, &mut asa)?;
-        self.mag_adjust = [
-            ((asa[0] as f32 - 128.0) / 256.0) + 1.0,
-            ((asa[1] as f32 - 128.0) / 256.0) + 1.0,
-            ((asa[2] as f32 - 128.0) / 256.0) + 1.0,
-        ];
-
-        self.ak8963_write_reg(AK8963_CNTL1, 0x00)?;
-        ak8963_delay();
-        self.ak8963_write_reg(AK8963_CNTL1, 0x16)?;
-        ak8963_delay();
-        Ok(Some(mag))
-    }
-
-    fn ak8963_read_reg(&mut self, reg: u8) -> Result<u8, Gy91Error> {
-        let mut out = [0_u8; 1];
-        self.ak8963_read_regs(reg, &mut out)?;
-        Ok(out[0])
-    }
-
-    fn ak8963_read_regs(&mut self, reg: u8, out: &mut [u8]) -> Result<(), Gy91Error> {
-        if out.len() > 16 {
-            return Err(Gy91Error::Spi);
-        }
-        self.mpu_write_reg(MPU_I2C_SLV0_ADDR, AK8963_ADDR | 0x80)?;
-        self.mpu_write_reg(MPU_I2C_SLV0_REG, reg)?;
-        self.mpu_write_reg(MPU_I2C_SLV0_CTRL, 0x80 | out.len() as u8)?;
-        ak8963_delay();
-        self.mpu_read_regs(MPU_EXT_SENS_DATA_00, out)
-    }
-
-    fn ak8963_write_reg(&mut self, reg: u8, value: u8) -> Result<(), Gy91Error> {
-        self.mpu_write_reg(MPU_I2C_SLV0_ADDR, AK8963_ADDR)?;
-        self.mpu_write_reg(MPU_I2C_SLV0_REG, reg)?;
-        self.mpu_write_reg(MPU_I2C_SLV0_DO, value)?;
-        self.mpu_write_reg(MPU_I2C_SLV0_CTRL, 0x81)?;
-        ak8963_delay();
-        Ok(())
-    }
 }
 
 fn i16_be(msb: u8, lsb: u8) -> i16 {
@@ -406,12 +286,6 @@ fn u16_le(lsb: u8, msb: u8) -> u16 {
 
 fn i16_le(lsb: u8, msb: u8) -> i16 {
     i16::from_le_bytes([lsb, msb])
-}
-
-fn ak8963_delay() {
-    for _ in 0..1_000_000 {
-        core::hint::spin_loop();
-    }
 }
 
 fn compensate_bmp280(cal: &Bmp280Calibration, adc_p: i32, adc_t: i32) -> (f32, f32) {

@@ -19,8 +19,8 @@ Tested wiring:
 Leave `VIN` unconnected when using Pico 2 W `3V3`.
 
 The tested board did not expose an MPU data-ready interrupt pin on the visible header, so the current
-driver polls over SPI. The MPU accel/gyro path is a direct SPI burst. BMP280 and optional
-magnetometer reads are throttled separately.
+driver polls over SPI. The MPU accel/gyro path is a direct SPI burst. BMP280 reads are throttled
+separately.
 
 ## Build The Probe
 
@@ -52,14 +52,12 @@ Expected output on the tested module:
 ```text
 mpu9250 whoami 0x70
 bmp280 chipid 0x58
-ak8963 not detected
 imu seq=4 accel=(0.169,-0.129,10.185) gyro=(0.002,0.026,0.003) temp=28.66
 baro pressure=85626.7 temp=26.52
 ```
 
 The `0x70` MPU identity behaves like an MPU6500-class accel/gyro. The BMP280 ID `0x58` confirms the
-barometer. AK8963 magnetometer ID should be `0x48` when present; the tested module returned `0x00`
-through the MPU auxiliary I2C path, so the driver treats magnetometer as absent.
+barometer. Magnetometer support is not configured for this tested board target.
 
 ## Build Voloxide Firmware
 
@@ -77,12 +75,11 @@ VOLOXIDE_WIFI_SSID=MAGICC VOLOXIDE_WIFI_PASSWORD=magiccwifi \
 ```
 
 The board code wires the GY-91 driver into `SensorBus` without changing `voloxide_core`. Accel/gyro
-samples populate `sensors.imu`, BMP280 samples populate `sensors.baro`, and magnetometer samples
-populate `sensors.mag` only if AK8963 is detected.
+samples populate `sensors.imu`, and BMP280 samples populate `sensors.baro`.
 
 ## Current Limitations
 
-- Magnetometer is optional and was not detected on the tested module.
+- Magnetometer is not configured for this tested module.
 - The visible module header did not expose data-ready interrupt, so sampling is polled.
 - Sensor calibration is not complete. Use the current output for bring-up, not final flight tuning.
 - BMP280 altitude is currently left as `0.0`; pressure and temperature are populated.

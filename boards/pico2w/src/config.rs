@@ -81,7 +81,7 @@ impl Default for ImuSpiPinout {
             cs_gpio: 13,
             bmp_cs_gpio: 14,
             data_ready_gpio: None,
-            sensor: ImuSensorKind::UnspecifiedNineDof,
+            sensor: ImuSensorKind::Mpu6500Bmp280,
         }
     }
 }
@@ -94,8 +94,7 @@ pub enum HardwareSpiBus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImuSensorKind {
-    UnspecifiedNineDof,
-    Icm20948Candidate,
+    Mpu6500Bmp280,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -85,12 +85,6 @@ fn main() -> ! {
             trace_hex_byte(&mut uart, ids.mpu);
             trace(&mut uart, b"bmp280 chipid ");
             trace_hex_byte(&mut uart, ids.bmp);
-            if let Some(mag) = ids.mag {
-                trace(&mut uart, b"ak8963 whoami ");
-                trace_hex_byte(&mut uart, mag);
-            } else {
-                trace(&mut uart, b"ak8963 not detected\r\n");
-            }
         }
         Err(err) => {
             let mut writer = UartWriter(&mut uart);
@@ -136,22 +130,6 @@ fn main() -> ! {
             Err(err) => {
                 let mut writer = UartWriter(&mut uart);
                 let _ = writeln!(writer, "baro sample error: {:?}\r", err);
-            }
-        }
-
-        match gy91.sample_mag(now_us) {
-            Ok(Some(mag)) => {
-                let mut writer = UartWriter(&mut uart);
-                let _ = writeln!(
-                    writer,
-                    "mag flux=({:.1},{:.1},{:.1}) uT\r",
-                    mag.flux[0], mag.flux[1], mag.flux[2]
-                );
-            }
-            Ok(None) => {}
-            Err(err) => {
-                let mut writer = UartWriter(&mut uart);
-                let _ = writeln!(writer, "mag sample error: {:?}\r", err);
             }
         }
 
