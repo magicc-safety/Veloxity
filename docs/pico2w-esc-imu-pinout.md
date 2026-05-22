@@ -1,7 +1,7 @@
-# Pico 2 W ESC and IMU Pinout Draft
+# Pico 2 W ESC and IMU Pinout
 
 This is the first concrete wiring plan for the RP2350 / Pico 2 W board target. It keeps the first
-hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one 9-DOF IMU.
+hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one SPI IMU/barometer module.
 
 ## Electrical Assumptions
 
@@ -11,8 +11,9 @@ hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one 9-DOF I
   flight hardware testing.
 - Power: the ESC has no BEC. Do not power the Pico 2 W from the ESC signal harness unless an
   external regulator is added. The Pico 2 W and ESC must share ground.
-- IMU candidate: GY-91 MPU9250/BMP280 10DOF module. Exact module spec, supported voltage, exposed
-  pins, and preferred bus mode still need to be confirmed before adding driver dependencies.
+- IMU/barometer module: GY-91-style breakout wired over SPI. The tested board reports MPU `WHO_AM_I`
+  `0x70` and BMP280 chip ID `0x58`. That behaves like an MPU6500-class accel/gyro plus BMP280, not
+  a confirmed MPU9250 plus AK8963 magnetometer.
 
 ## Proposed Header GPIO Allocation
 
@@ -26,8 +27,8 @@ hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one 9-DOF I
 | IMU SPI1 SCK | GP10 | Hardware SPI, DMA-backed |
 | IMU SPI1 MOSI | GP11 | Hardware SPI, DMA-backed |
 | IMU SPI1 MISO | GP12 | Hardware SPI, DMA-backed |
-| IMU chip select | GP13 | Normal GPIO output |
-| IMU data-ready interrupt | GP14 | GPIO interrupt into the flight core |
+| IMU chip select | GP13 | MPU accel/gyro chip select |
+| BMP280 chip select | GP14 | BMP280 chip select |
 | Flight status LED | GP16 | Discrete LED |
 | Comms status LED | GP17 | Discrete LED |
 | Fault status LED | GP18 | Discrete LED |
@@ -39,7 +40,8 @@ hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one 9-DOF I
 | Future ADC1 | GP27 | Battery voltage/current path later |
 | Future ADC2 | GP28 | Battery voltage/current path later |
 
-Keep GP0/GP1 open for a debug UART during bring-up. Keep the Pico 2 W wireless pins owned by the
+GP0/GP1 are the default UART MAVLink transport in UART-only firmware. In Wi-Fi MAVLink firmware they
+are available for debug UART output during bring-up. Keep the Pico 2 W wireless pins owned by the
 CYW43 driver.
 
 ## PIO and DMA Allocation
@@ -61,7 +63,7 @@ driver or board routing forces timing that the hardware SPI peripheral cannot sa
 
 Core 0 remains the deterministic flight side:
 
-- owns IMU SPI sampling and data-ready interrupt handling,
+- owns IMU SPI sampling,
 - owns PIO DShot output frame preparation,
 - runs the Voloxide control loop,
 - publishes motor command frames into the PIO/DMA output queue.
@@ -72,8 +74,12 @@ Core 1 remains the communications side:
 - owns UDP MAVLink,
 - passes MAVLink bytes to core 0 through the mailbox.
 
-The IMU path should not cross the core boundary. Sensor samples should enter `voloxide_core` on
-core 0 so the control loop is not gated by Wi-Fi, UDP, or mailbox scheduling.
+The IMU path should not cross the core boundary. Sensor samples should enter `voloxide_core` on core
+0 so the control loop is not gated by Wi-Fi, UDP, or mailbox scheduling.
+
+The visible GY-91 header used for bring-up does not expose a data-ready interrupt pin. The current
+driver uses polled SPI. That is acceptable for first bring-up because MPU accel/gyro reads are direct
+SPI bursts; slower BMP280 and optional magnetometer reads are throttled separately.
 
 ## DShot Notes
 
@@ -85,17 +91,31 @@ Bidirectional DShot is a later feature. It requires line turnaround and input ca
 transmit frame. Keep GP6 reserved until we decide whether AM32 telemetry will use a separate TLM wire
 or true bidirectional DShot on each motor signal.
 
-## Next Step: Confirm GY-91 Details
+## Tested GY-91 Wiring
 
-The next hardware-specific step is to confirm the exact GY-91 module details and choose the driver
-stack for MPU9250 plus BMP280. Capture this before implementation:
+| Pico 2 W | GY-91 label | Function |
+| --- | --- | --- |
+| 3V3 | 3V3 | 3.3 V module power |
+| GND | GND | Common ground |
+| GP10 | SCL | SPI SCK |
+| GP11 | SDA | SPI MOSI |
+| GP12 | SDO/SA0 | SPI MISO |
+| GP13 | NCS | MPU SPI chip select |
+| GP14 | CSB | BMP280 SPI chip select |
 
-- product page or datasheet link for the exact GY-91 board,
-- silkscreen pin labels,
-- whether the board exposes SPI pins for the MPU9250 and BMP280 or only I2C,
-- voltage requirements for `VCC` and logic pins,
-- interrupt/data-ready pin availability,
-- whether the BMP280 should be ignored for the first bring-up or wired on the same bus now.
+Leave `VIN` unconnected when powering the board from Pico 2 W `3V3`.
 
-If SPI is available, keep the proposed SPI1 wiring. If the module is I2C-only, move the IMU path to
-the reserved GP20/GP21 I2C pins and leave GP10-GP14 open for a future high-rate SPI IMU.
+## Tested Sensor Results
+
+The `imu_spi_probe` firmware verified:
+
+- MPU `WHO_AM_I`: `0x70`
+- BMP280 chip ID: `0x58`
+- live accelerometer samples
+- live gyroscope samples
+- live BMP280 pressure/temperature samples
+- AK8963 magnetometer not detected over the MPU auxiliary I2C path
+
+The missing AK8963 is handled as an optional sensor. If a future module reports AK8963 `WHO_AM_I`
+`0x48`, the same driver path can publish magnetometer samples. On the tested module, Voloxide still
+publishes IMU and barometer data and leaves magnetometer absent.

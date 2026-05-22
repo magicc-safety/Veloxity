@@ -66,7 +66,8 @@ pub struct ImuSpiPinout {
     pub mosi_gpio: u8,
     pub miso_gpio: u8,
     pub cs_gpio: u8,
-    pub data_ready_gpio: u8,
+    pub bmp_cs_gpio: u8,
+    pub data_ready_gpio: Option<u8>,
     pub sensor: ImuSensorKind,
 }
 
@@ -78,7 +79,8 @@ impl Default for ImuSpiPinout {
             mosi_gpio: 11,
             miso_gpio: 12,
             cs_gpio: 13,
-            data_ready_gpio: 14,
+            bmp_cs_gpio: 14,
+            data_ready_gpio: None,
             sensor: ImuSensorKind::UnspecifiedNineDof,
         }
     }

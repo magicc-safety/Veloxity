@@ -1,6 +1,7 @@
 use crate::{
     comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
     config::Pico2WConfig,
+    gy91::Gy91,
     pwm::PioPwmDriver,
 };
 use embassy_time::Instant;
@@ -16,17 +17,19 @@ pub enum MavlinkTransport {
 pub struct Board {
     config: Pico2WConfig,
     mavlink: MavlinkTransport,
+    gy91: Option<Gy91>,
     params: Params,
     params_valid: bool,
     boot_time: Instant,
 }
 
 impl Board {
-    pub fn new_wifi(config: Pico2WConfig) -> (Self, PioPwmDriver) {
+    pub fn new_wifi(config: Pico2WConfig, gy91: Option<Gy91>) -> (Self, PioPwmDriver) {
         (
             Self {
                 config,
                 mavlink: MavlinkTransport::WifiMailbox(SHARED_MAVLINK_MAILBOX),
+                gy91,
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
@@ -35,11 +38,16 @@ impl Board {
         )
     }
 
-    pub fn new_uart(config: Pico2WConfig, uart: Uart<'static, Blocking>) -> (Self, PioPwmDriver) {
+    pub fn new_uart(
+        config: Pico2WConfig,
+        uart: Uart<'static, Blocking>,
+        gy91: Option<Gy91>,
+    ) -> (Self, PioPwmDriver) {
         (
             Self {
                 config,
                 mavlink: MavlinkTransport::Uart(uart),
+                gy91,
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
@@ -103,6 +111,20 @@ impl Board {
 impl BoardIo for Board {
     fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
         sensors.clear();
+        let now_us = self.clock_micros();
+        if let Some(gy91) = &mut self.gy91 {
+            sensors.imu = Some(gy91.sample_imu(now_us).map_err(|err| err.sensor_error()));
+            match gy91.sample_baro(now_us) {
+                Ok(Some(baro)) => sensors.baro = Some(Ok(baro)),
+                Ok(None) => {}
+                Err(err) => sensors.baro = Some(Err(err.sensor_error())),
+            }
+            match gy91.sample_mag(now_us) {
+                Ok(Some(mag)) => sensors.mag = Some(Ok(mag)),
+                Ok(None) => {}
+                Err(err) => sensors.mag = Some(Err(err.sensor_error())),
+            }
+        }
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {

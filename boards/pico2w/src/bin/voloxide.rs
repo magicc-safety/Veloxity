@@ -23,15 +23,16 @@ use embassy_time::{Duration, Instant, Timer};
 use panic_halt as _;
 #[cfg(feature = "wifi-mavlink")]
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
-use pico2w::{board, config::Pico2WConfig, pwm::PioPwmDriver};
+use pico2w::{board, config::Pico2WConfig, gy91::Gy91, pwm::PioPwmDriver};
 use rp2350_platform::hal::{
     self as rp,
+    gpio::{Level, Output},
+    spi::{Config as SpiConfig, Phase, Polarity, Spi},
     uart::{Config as UartConfig, Uart},
 };
 #[cfg(feature = "wifi-mavlink")]
 use rp2350_platform::hal::{
     Peri, bind_interrupts, dma,
-    gpio::{Level, Output},
     multicore::{Stack, spawn_core1},
     peripherals::{CORE1, DMA_CH0, PIN_23, PIN_24, PIN_25, PIN_29, PIO0},
     pio::{InterruptHandler as PioInterruptHandler, Pio},
@@ -349,6 +350,14 @@ fn mavlink_uart_config() -> UartConfig {
     config
 }
 
+fn gy91_spi_config() -> SpiConfig {
+    let mut config = SpiConfig::default();
+    config.frequency = 1_000_000;
+    config.polarity = Polarity::IdleLow;
+    config.phase = Phase::CaptureOnFirstTransition;
+    config
+}
+
 #[entry]
 fn main() -> ! {
     let peripherals = rp::init(Default::default());
@@ -368,6 +377,18 @@ fn main() -> ! {
 
         let config = Pico2WConfig::default();
         trace(&mut debug_uart, b"config ok\r\n");
+        let gy91 = Gy91::new(
+            Spi::new_blocking(
+                peripherals.SPI1,
+                peripherals.PIN_10,
+                peripherals.PIN_11,
+                peripherals.PIN_12,
+                gy91_spi_config(),
+            ),
+            Output::new(peripherals.PIN_13, Level::High),
+            Output::new(peripherals.PIN_14, Level::High),
+        );
+        trace(&mut debug_uart, b"gy91 spi ok\r\n");
 
         let mailbox = SHARED_MAVLINK_MAILBOX;
         spawn_wifi_core(
@@ -385,7 +406,7 @@ fn main() -> ! {
         );
         trace(&mut debug_uart, b"core1 wifi-mavlink ok\r\n");
 
-        let (mut board, pwm_driver) = board::Board::new_wifi(config);
+        let (mut board, pwm_driver) = board::Board::new_wifi(config, Some(gy91));
         trace(&mut debug_uart, b"board ok\r\n");
 
         let mut params = Params::default();
@@ -429,7 +450,18 @@ fn main() -> ! {
             peripherals.PIN_1,
             mavlink_uart_config(),
         );
-        let (mut board, pwm_driver) = board::Board::new_uart(config, mavlink_uart);
+        let gy91 = Gy91::new(
+            Spi::new_blocking(
+                peripherals.SPI1,
+                peripherals.PIN_10,
+                peripherals.PIN_11,
+                peripherals.PIN_12,
+                gy91_spi_config(),
+            ),
+            Output::new(peripherals.PIN_13, Level::High),
+            Output::new(peripherals.PIN_14, Level::High),
+        );
+        let (mut board, pwm_driver) = board::Board::new_uart(config, mavlink_uart, Some(gy91));
 
         let mut params = Params::default();
         if !board.read_params(&mut params) {
