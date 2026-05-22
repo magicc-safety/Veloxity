@@ -1,23 +1,48 @@
-use crate::{comms_core::MavlinkMailbox, config::Pico2WConfig, pwm::PioPwmDriver};
+use crate::{
+    comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
+    config::Pico2WConfig,
+    pwm::PioPwmDriver,
+};
+use embassy_time::Instant;
+use embedded_hal_nb::serial::{Read, Write};
+use rp2350_platform::hal::uart::{Blocking, Uart};
 use voloxide_core::{board::BoardIo, errors, params::Params, sensors::SensorBus};
+
+pub enum MavlinkTransport {
+    WifiMailbox(SharedMavlinkMailbox),
+    Uart(Uart<'static, Blocking>),
+}
 
 pub struct Board {
     config: Pico2WConfig,
-    mailbox: MavlinkMailbox,
+    mavlink: MavlinkTransport,
     params: Params,
     params_valid: bool,
-    micros: u64,
+    boot_time: Instant,
 }
 
 impl Board {
-    pub fn new(config: Pico2WConfig) -> (Self, PioPwmDriver) {
+    pub fn new_wifi(config: Pico2WConfig) -> (Self, PioPwmDriver) {
         (
             Self {
                 config,
-                mailbox: MavlinkMailbox::new(),
+                mavlink: MavlinkTransport::WifiMailbox(SHARED_MAVLINK_MAILBOX),
                 params: Params::default(),
                 params_valid: false,
-                micros: 0,
+                boot_time: Instant::now(),
+            },
+            PioPwmDriver::new(),
+        )
+    }
+
+    pub fn new_uart(config: Pico2WConfig, uart: Uart<'static, Blocking>) -> (Self, PioPwmDriver) {
+        (
+            Self {
+                config,
+                mavlink: MavlinkTransport::Uart(uart),
+                params: Params::default(),
+                params_valid: false,
+                boot_time: Instant::now(),
             },
             PioPwmDriver::new(),
         )
@@ -27,8 +52,51 @@ impl Board {
         self.config
     }
 
-    pub fn mavlink_mailbox_mut(&mut self) -> &mut MavlinkMailbox {
-        &mut self.mailbox
+    pub fn mavlink_mailbox(&self) -> Option<SharedMavlinkMailbox> {
+        match self.mavlink {
+            MavlinkTransport::WifiMailbox(mailbox) => Some(mailbox),
+            MavlinkTransport::Uart(_) => None,
+        }
+    }
+
+    fn uart_rx_read(
+        uart: &mut Uart<'static, Blocking>,
+        buf: &mut [u8],
+    ) -> Result<usize, errors::TelemError> {
+        let mut n = 0;
+        while n < buf.len() {
+            match Read::read(uart) {
+                Ok(byte) => {
+                    buf[n] = byte;
+                    n += 1;
+                }
+                Err(nb::Error::WouldBlock) => break,
+                Err(nb::Error::Other(_)) if n > 0 => break,
+                Err(nb::Error::Other(_)) => {
+                    return Err(errors::TelemError::GenericTelemError("uart read error"));
+                }
+            }
+        }
+        Ok(n)
+    }
+
+    fn uart_tx_write(
+        uart: &mut Uart<'static, Blocking>,
+        bytes: &[u8],
+    ) -> Result<usize, errors::TelemError> {
+        let mut n = 0;
+        while n < bytes.len() {
+            match Write::write(uart, bytes[n]) {
+                Ok(()) => n += 1,
+                Err(nb::Error::WouldBlock) => break,
+                Err(nb::Error::Other(_)) if n > 0 => break,
+                Err(nb::Error::Other(_)) => {
+                    return Err(errors::TelemError::GenericTelemError("uart write error"));
+                }
+            }
+        }
+        let _ = Write::flush(uart);
+        Ok(n)
     }
 }
 
@@ -38,19 +106,25 @@ impl BoardIo for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        Some(Ok(self.mailbox.read_into(buf)))
+        Some(match &mut self.mavlink {
+            MavlinkTransport::WifiMailbox(mailbox) => Ok(mailbox.read_into(buf)),
+            MavlinkTransport::Uart(uart) => Self::uart_rx_read(uart, buf),
+        })
     }
 
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        Some(Ok(self.mailbox.write_from(bytes)))
+        Some(match &mut self.mavlink {
+            MavlinkTransport::WifiMailbox(mailbox) => Ok(mailbox.write_from(bytes)),
+            MavlinkTransport::Uart(uart) => Self::uart_tx_write(uart, bytes),
+        })
     }
 
     fn clock_millis(&self) -> u32 {
-        (self.micros / 1000) as u32
+        (self.clock_micros() / 1000) as u32
     }
 
     fn clock_micros(&self) -> u64 {
-        self.micros
+        self.boot_time.elapsed().as_micros()
     }
 
     fn read_params(&mut self, params: &mut Params) -> bool {

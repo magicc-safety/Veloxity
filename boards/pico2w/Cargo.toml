@@ -4,13 +4,36 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[features]
+default = []
+wifi = ["wifi-mavlink"]
+wifi-mavlink = []
+
 [dependencies]
 rp2350_platform = { workspace = true }
 voloxide_core = { workspace = true }
 voloxide_mavlink = { workspace = true }
 
 cortex-m-rt = { version = "0.7.0" }
+critical-section = "1.2.0"
+cyw43 = "0.7.0"
+cyw43-pio = "0.10.0"
+embassy-executor = { version = "0.10.0", features = [
+  "platform-cortex-m",
+  "executor-thread",
+] }
+embassy-futures = "0.1.2"
+embassy-net = { version = "0.9.1", features = [
+  "dhcpv4",
+  "medium-ethernet",
+  "proto-ipv4",
+  "udp",
+] }
+embassy-time = "0.5.1"
+embedded-hal-nb = "1.0.0"
+nb = "1.1.0"
 panic-halt = "1.0.0"
+static_cell = "2.1"
 
 [lints]
 workspace = true
