@@ -6,3 +6,4 @@ pub mod config;
 pub mod gy91;
 pub mod ism330dhcx;
 pub mod pwm;
+pub mod rc_receiver;

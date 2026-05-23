@@ -31,6 +31,7 @@ impl Default for Pico2WConfig {
 pub struct Pico2WPinout {
     pub esc: DshotEscPinout,
     pub imu: ImuSpiPinout,
+    pub rc: RcReceiverPinout,
     pub leds: StatusLedPinout,
 }
 
@@ -39,6 +40,7 @@ impl Default for Pico2WPinout {
         Self {
             esc: DshotEscPinout::default(),
             imu: ImuSpiPinout::default(),
+            rc: RcReceiverPinout::default(),
             leds: StatusLedPinout::default(),
         }
     }
@@ -93,8 +95,43 @@ pub enum HardwareSpiBus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardwareUartBus {
+    Uart0,
+    Uart1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImuSensorKind {
     Mpu6500Bmp280,
+    Ism330dhcx,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RcReceiverPinout {
+    pub protocol: RcReceiverProtocol,
+    pub uart_bus: HardwareUartBus,
+    pub tx_gpio: u8,
+    pub rx_gpio: u8,
+    pub baudrate: u32,
+    pub pio_fallback_gpio: Option<u8>,
+}
+
+impl Default for RcReceiverPinout {
+    fn default() -> Self {
+        Self {
+            protocol: RcReceiverProtocol::Crsf,
+            uart_bus: HardwareUartBus::Uart1,
+            tx_gpio: 8,
+            rx_gpio: 9,
+            baudrate: 420_000,
+            pio_fallback_gpio: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RcReceiverProtocol {
+    Crsf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

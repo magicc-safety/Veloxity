@@ -1,4 +1,4 @@
-# Pico 2 W ESC, IMU, and Barometer Pinout
+# Pico 2 W ESC, IMU, Barometer, and RC Pinout
 
 This wiring plan keeps the high-rate flight IMU deterministic while preserving the slower GY-91/BMP280
 path as barometer-only. The new fast path is the Adafruit ISM330DHCX 6 DoF IMU on SPI with a
@@ -20,6 +20,9 @@ loop.
 - Barometer: the existing GY-91/BMP280 path is retained as a low-rate pressure/temperature source.
   The board code treats it as barometer-only; MPU accel/gyro samples from that board are ignored by
   the flight path.
+- RC receiver: RadioMaster RP4TD-M ExpressLRS over CRSF. The receiver is a 5 V device with a CRSF
+  UART bus interface and up to 500 Hz / F1000Hz refresh capability, so the default wiring uses Pico
+  UART1 rather than PIO soft serial.
 
 ## Proposed Header GPIO Allocation
 
@@ -30,6 +33,8 @@ loop.
 | ESC motor 3 signal | GP4 | DShot PIO output bit 2 |
 | ESC motor 4 signal | GP5 | DShot PIO output bit 3 |
 | ESC telemetry reserve | GP6 | Reserved for AM32 telemetry or bidirectional DShot later |
+| RC receiver UART1 TX | GP8 | Pico TX to receiver RX for CRSF telemetry/config |
+| RC receiver UART1 RX | GP9 | Receiver TX to Pico RX for CRSF channel frames |
 | ISM330DHCX SPI1 SCK | GP10 | Hardware SPI fast IMU bus |
 | ISM330DHCX SPI1 MOSI | GP11 | Hardware SPI fast IMU bus |
 | ISM330DHCX SPI1 MISO | GP12 | Hardware SPI fast IMU bus |
@@ -50,6 +55,29 @@ loop.
 GP0/GP1 are the default UART MAVLink transport in UART-only firmware. In Wi-Fi MAVLink firmware they
 are available for debug UART output during bring-up. Keep the Pico 2 W wireless pins owned by the
 CYW43 driver.
+
+## RadioMaster RP4TD-M CRSF Wiring
+
+Use the RP4TD-M as a CRSF serial receiver. Cross the UART data lines in the usual flight-controller
+style:
+
+| Pico 2 W | RP4TD-M label | Function |
+| --- | --- | --- |
+| 5V / VBUS-regulated 5 V rail | 5V | Receiver power |
+| GND | GND | Common ground |
+| GP8 / UART1 TX | RX | CRSF telemetry/config from Pico to receiver |
+| GP9 / UART1 RX | TX | CRSF RC frames from receiver to Pico |
+
+Do not power the RP4TD-M from Pico `3V3`; RadioMaster specifies DC 5.0 V for the RP4TD-M. The Pico
+GPIO side is still 3.3 V logic, so verify the receiver TX/RX pads are 3.3 V UART-level before
+connecting directly. If measurement or vendor data shows 5 V UART levels, add a level shifter on the
+receiver TX line before connecting it to GP9.
+
+The default firmware allocation is UART1 at 420000 baud, 8N1. Embassy UART RX interrupt/DMA service
+should parse CRSF frames in a board task and push completed `RcPacket`s into the board-local RC
+queue. `BoardIo::update_sensor_bus()` then drains the latest RC packet into `SensorBus` without
+blocking the flight loop. PIO is reserved as a fallback only if a later board revision needs
+soft-serial because UART1 pins are unavailable.
 
 ## ISM330DHCX SPI Wiring
 
@@ -106,6 +134,7 @@ Core 0 remains the deterministic flight side:
 - receives ISM330DHCX data-ready interrupts,
 - samples the ISM330DHCX over SPI through the Embassy-supported `ism330dhcx-rs` driver,
 - pushes completed IMU packets into a board-local queue,
+- receives CRSF frames on UART1 and pushes completed RC packets into a board-local queue,
 - runs the Voloxide control loop from queued sensor samples,
 - polls slow barometer data separately.
 
@@ -120,7 +149,8 @@ The IMU path should not cross the core boundary. Sensor samples should enter `vo
 
 ## Branch Status
 
-This branch prepares the architecture for the ISM330DHCX but does not yet complete the physical
-driver task. `BoardIo::update_sensor_bus()` drains IMU samples from the new ISM330DHCX queue and
-drains barometer samples from the GY-91/BMP280 path. The remaining hardware step is to add the
-Embassy SPI/interrupt task that configures the ISM330DHCX and pushes packets into that queue.
+This branch prepares the architecture for the ISM330DHCX and RP4TD-M but does not yet complete the
+physical driver tasks. `BoardIo::update_sensor_bus()` drains IMU samples from the new ISM330DHCX
+queue, RC samples from the CRSF receiver queue, and barometer samples from the GY-91/BMP280 path. The
+remaining hardware steps are to add the Embassy SPI/interrupt task that configures the ISM330DHCX
+and the Embassy UART1 CRSF task that parses RP4TD-M channel frames.

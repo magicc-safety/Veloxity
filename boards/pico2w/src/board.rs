@@ -4,6 +4,7 @@ use crate::{
     gy91::Gy91,
     ism330dhcx::{SHARED_ISM330DHCX_IMU_QUEUE, SharedIsm330dhcxImuQueue},
     pwm::PioPwmDriver,
+    rc_receiver::{SHARED_CRSF_RC_QUEUE, SharedCrsfRcQueue},
 };
 use embassy_time::Instant;
 use voloxide_core::{
@@ -21,6 +22,7 @@ enum MavlinkTransport {
 
 struct PicoSensorProducer {
     ism330dhcx_imu: SharedIsm330dhcxImuQueue,
+    crsf_rc: SharedCrsfRcQueue,
     gy91_baro: Option<Gy91>,
     pending_baro: Option<Result<BaroPacket, errors::SensorError>>,
 }
@@ -29,6 +31,7 @@ impl PicoSensorProducer {
     fn new(gy91_baro: Option<Gy91>) -> Self {
         Self {
             ism330dhcx_imu: SHARED_ISM330DHCX_IMU_QUEUE,
+            crsf_rc: SHARED_CRSF_RC_QUEUE,
             gy91_baro,
             pending_baro: None,
         }
@@ -49,6 +52,9 @@ impl PicoSensorProducer {
     fn drain_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         if let Some(imu) = self.ism330dhcx_imu.take_latest() {
             sensors.imu = Some(Ok(imu.cast()));
+        }
+        if let Some(rc) = self.crsf_rc.take_latest() {
+            sensors.rc = Some(Ok(rc));
         }
         if let Some(baro) = self.pending_baro.take() {
             sensors.baro = Some(baro);
