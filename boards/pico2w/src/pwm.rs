@@ -7,7 +7,7 @@ use voloxide_core::{
 pub struct PioPwmDriver {
     enabled_mask: u16,
     values: [u16; MAX_PWM_OUTPUTS],
-    rates_hz: [f64; MAX_PWM_OUTPUTS],
+    rates_hz: [f32; MAX_PWM_OUTPUTS],
 }
 
 impl PioPwmDriver {
@@ -26,7 +26,7 @@ impl Default for PioPwmDriver {
     }
 }
 
-impl PwmDriver for PioPwmDriver {
+impl PwmDriver<f32> for PioPwmDriver {
     fn len(&self) -> usize {
         MAX_PWM_OUTPUTS
     }
@@ -72,7 +72,7 @@ impl PwmDriver for PioPwmDriver {
 
     fn flush<B: BoardIo>(&mut self, _board: &mut B) {}
 
-    fn configure_output_rates(&mut self, rates_hz: &[f64]) -> Result<(), PwmError> {
+    fn configure_output_rates(&mut self, rates_hz: &[f32]) -> Result<(), PwmError> {
         for (slot, rate) in self.rates_hz.iter_mut().zip(rates_hz.iter().copied()) {
             *slot = rate;
         }
@@ -82,10 +82,10 @@ impl PwmDriver for PioPwmDriver {
     fn send_commands<B: BoardIo>(
         &mut self,
         board: &mut B,
-        commands: &[f64],
+        commands: &[f32],
     ) -> Result<(), PwmError> {
         for (channel, command) in commands.iter().copied().enumerate().take(self.len()) {
-            let duty = (command.clamp(0.0, 1.0) * u16::MAX as f64) as u16;
+            let duty = (command.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
             self.set_duty_cycle(channel, duty)?;
         }
         self.flush(board);

@@ -4,8 +4,9 @@
 use core::fmt::{self, Write};
 
 use cortex_m_rt::entry;
+use embassy_time::Instant;
 use panic_halt as _;
-use pico2w::gy91::{GY91_IMU_SAMPLE_INTERVAL_US, Gy91};
+use pico2w::gy91::{GY91_IMU_SAMPLE_RATE_HZ, Gy91};
 use rp2350_platform::hal::{
     self as rp,
     gpio::{Level, Output},
@@ -43,10 +44,8 @@ fn trace_hex_byte(uart: &mut Uart<'_, rp::uart::Blocking>, value: u8) {
     trace(uart, &bytes);
 }
 
-fn delay() {
-    for _ in 0..100_000 {
-        core::hint::spin_loop();
-    }
+fn elapsed_us(start: Instant) -> u64 {
+    start.elapsed().as_micros()
 }
 
 #[entry]
@@ -59,11 +58,7 @@ fn main() -> ! {
         peripherals.PIN_1,
         UartConfig::default(),
     );
-
-    trace(&mut uart, b"voloxide pico2w gy-91 spi probe\r\n");
-
-    let mpu_cs = Output::new(peripherals.PIN_13, Level::High);
-    let bmp_cs = Output::new(peripherals.PIN_14, Level::High);
+    trace(&mut uart, b"voloxide pico2w gy-91 spi bench\r\n");
 
     let mut spi_config = SpiConfig::default();
     spi_config.frequency = 1_000_000;
@@ -77,8 +72,12 @@ fn main() -> ! {
         peripherals.PIN_12,
         spi_config,
     );
+    let mut gy91 = Gy91::new(
+        spi,
+        Output::new(peripherals.PIN_13, Level::High),
+        Output::new(peripherals.PIN_14, Level::High),
+    );
 
-    let mut gy91 = Gy91::new(spi, mpu_cs, bmp_cs);
     match gy91.init() {
         Ok(ids) => {
             trace(&mut uart, b"mpu whoami ");
@@ -92,50 +91,35 @@ fn main() -> ! {
         }
     }
 
-    let mut now_us = 0_u64;
+    let mut synthetic_us = 0_u64;
     loop {
-        now_us = now_us.wrapping_add(GY91_IMU_SAMPLE_INTERVAL_US);
-        match gy91.sample_imu(now_us) {
-            Ok(Some(imu)) => {
-                let mut writer = UartWriter(&mut uart);
-                let _ = writeln!(
-                    writer,
-                    "imu seq={} accel=({:.3},{:.3},{:.3}) gyro=({:.3},{:.3},{:.3}) temp={:.2}\r",
-                    imu.seq,
-                    imu.accel[0],
-                    imu.accel[1],
-                    imu.accel[2],
-                    imu.gyro[0],
-                    imu.gyro[1],
-                    imu.gyro[2],
-                    imu.temperature
-                );
-            }
-            Ok(None) => {}
-            Err(err) => {
-                let mut writer = UartWriter(&mut uart);
-                let _ = writeln!(writer, "imu sample error: {:?}\r", err);
+        let raw_start = Instant::now();
+        let mut raw_count = 0_u32;
+        while elapsed_us(raw_start) < 1_000_000 {
+            let now_us = synthetic_us + elapsed_us(raw_start);
+            if gy91.sample_imu_unthrottled(now_us).is_ok() {
+                raw_count = raw_count.wrapping_add(1);
             }
         }
+        synthetic_us = synthetic_us.wrapping_add(1_000_000);
 
-        match gy91.sample_baro(now_us) {
-            Ok(Some(baro)) => {
-                let mut writer = UartWriter(&mut uart);
-                let _ = writeln!(
-                    writer,
-                    "baro pressure={:.1} temp={:.2}\r",
-                    baro.pressure, baro.temperature
-                );
-            }
-            Ok(None) => {}
-            Err(err) => {
-                let mut writer = UartWriter(&mut uart);
-                let _ = writeln!(writer, "baro sample error: {:?}\r", err);
+        let gated_start = Instant::now();
+        let mut gated_calls = 0_u32;
+        let mut gated_samples = 0_u32;
+        while elapsed_us(gated_start) < 1_000_000 {
+            gated_calls = gated_calls.wrapping_add(1);
+            let now_us = synthetic_us + elapsed_us(gated_start);
+            if matches!(gy91.sample_imu(now_us), Ok(Some(_))) {
+                gated_samples = gated_samples.wrapping_add(1);
             }
         }
+        synthetic_us = synthetic_us.wrapping_add(1_000_000);
 
-        for _ in 0..(GY91_IMU_SAMPLE_INTERVAL_US / 1_000) {
-            delay();
-        }
+        let mut writer = UartWriter(&mut uart);
+        let _ = writeln!(
+            writer,
+            "raw_imu_hz={} gated_imu_hz={} gated_calls={} target_hz={}\r",
+            raw_count, gated_samples, gated_calls, GY91_IMU_SAMPLE_RATE_HZ
+        );
     }
 }

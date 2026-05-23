@@ -8,11 +8,12 @@ use voloxide_core::{
     packets::{BaroPacket, ImuPacket, RosflightPacketHeader},
 };
 
-const GRAVITY: f64 = 9.80665;
-const DEG_TO_RAD: f64 = 0.017453292519943295;
+const GRAVITY: f32 = 9.80665;
+const DEG_TO_RAD: f32 = 0.017453292519943295;
 
 const MPU_WHO_AM_I: u8 = 0x75;
 const MPU_PWR_MGMT_1: u8 = 0x6b;
+const MPU_SMPLRT_DIV: u8 = 0x19;
 const MPU_CONFIG: u8 = 0x1a;
 const MPU_GYRO_CONFIG: u8 = 0x1b;
 const MPU_ACCEL_CONFIG: u8 = 0x1c;
@@ -24,6 +25,11 @@ const BMP_CALIB_START: u8 = 0x88;
 const BMP_CTRL_MEAS: u8 = 0xf4;
 const BMP_CONFIG: u8 = 0xf5;
 const BMP_PRESS_MSB: u8 = 0xf7;
+
+pub const GY91_IMU_SAMPLE_INTERVAL_US: u64 = 2_500;
+pub const GY91_IMU_SAMPLE_RATE_HZ: u32 = 1_000_000 / GY91_IMU_SAMPLE_INTERVAL_US as u32;
+pub const GY91_BARO_SAMPLE_INTERVAL_US: u64 = 20_000;
+pub const GY91_BARO_SAMPLE_RATE_HZ: u32 = 1_000_000 / GY91_BARO_SAMPLE_INTERVAL_US as u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gy91Error {
@@ -72,6 +78,7 @@ pub struct Gy91 {
     initialized: bool,
     ids: Option<Gy91Ids>,
     imu_seq: u32,
+    last_imu_sample_us: u64,
     last_baro_sample_us: u64,
 }
 
@@ -91,6 +98,7 @@ impl Gy91 {
             initialized: false,
             ids: None,
             imu_seq: 0,
+            last_imu_sample_us: 0,
             last_baro_sample_us: 0,
         }
     }
@@ -112,6 +120,7 @@ impl Gy91 {
 
         self.mpu_write_reg(MPU_PWR_MGMT_1, 0x01)?;
         self.mpu_write_reg(MPU_CONFIG, 0x03)?;
+        self.mpu_write_reg(MPU_SMPLRT_DIV, 0x00)?;
         self.mpu_write_reg(MPU_GYRO_CONFIG, 0x08)?;
         self.mpu_write_reg(MPU_ACCEL_CONFIG, 0x08)?;
         self.mpu_write_reg(MPU_ACCEL_CONFIG2, 0x03)?;
@@ -126,18 +135,33 @@ impl Gy91 {
         Ok(ids)
     }
 
-    pub fn sample_imu(&mut self, now_us: u64) -> Result<ImuPacket, Gy91Error> {
+    pub fn sample_imu(&mut self, now_us: u64) -> Result<Option<ImuPacket<f32>>, Gy91Error> {
+        self.ensure_initialized()?;
+        if now_us
+            < self
+                .last_imu_sample_us
+                .saturating_add(GY91_IMU_SAMPLE_INTERVAL_US)
+        {
+            return Ok(None);
+        }
+
+        let packet = self.sample_imu_unthrottled(now_us)?;
+        self.last_imu_sample_us = now_us;
+        Ok(Some(packet))
+    }
+
+    pub fn sample_imu_unthrottled(&mut self, now_us: u64) -> Result<ImuPacket<f32>, Gy91Error> {
         self.ensure_initialized()?;
         let mut raw = [0_u8; 14];
         self.mpu_read_regs(MPU_ACCEL_XOUT_H, &mut raw)?;
 
-        let accel_x = i16_be(raw[0], raw[1]) as f64;
-        let accel_y = i16_be(raw[2], raw[3]) as f64;
-        let accel_z = i16_be(raw[4], raw[5]) as f64;
+        let accel_x = i16_be(raw[0], raw[1]) as f32;
+        let accel_y = i16_be(raw[2], raw[3]) as f32;
+        let accel_z = i16_be(raw[4], raw[5]) as f32;
         let temp_raw = i16_be(raw[6], raw[7]) as f32;
-        let gyro_x = i16_be(raw[8], raw[9]) as f64;
-        let gyro_y = i16_be(raw[10], raw[11]) as f64;
-        let gyro_z = i16_be(raw[12], raw[13]) as f64;
+        let gyro_x = i16_be(raw[8], raw[9]) as f32;
+        let gyro_y = i16_be(raw[10], raw[11]) as f32;
+        let gyro_z = i16_be(raw[12], raw[13]) as f32;
 
         self.imu_seq = self.imu_seq.wrapping_add(1);
 
@@ -163,7 +187,11 @@ impl Gy91 {
 
     pub fn sample_baro(&mut self, now_us: u64) -> Result<Option<BaroPacket>, Gy91Error> {
         self.ensure_initialized()?;
-        if now_us < self.last_baro_sample_us.saturating_add(20_000) {
+        if now_us
+            < self
+                .last_baro_sample_us
+                .saturating_add(GY91_BARO_SAMPLE_INTERVAL_US)
+        {
             return Ok(None);
         }
 

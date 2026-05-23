@@ -1,52 +1,59 @@
 use super::AttitudeEstimate;
 use super::Estimator;
 use crate::comm::messages::messages::ExternalAttitudeMsg;
+use crate::math::FlightFloat;
 use crate::packets;
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
-use libm::{cos, sin, sqrt};
 
 use nalgebra::{Quaternion, SVector as Vector, UnitQuaternion};
 
-const G: f64 = 9.80665; // Gravity in m/s^2
+fn gravity<R: FlightFloat>() -> R {
+    <R as FlightFloat>::from_f32(9.80665)
+}
 
 #[derive(Debug, Clone, Copy)]
-pub struct AttitudeState {
-    pub q_hat: Quaternion<f64>,
-    pub q_dot: Quaternion<f64>,
-    pub body_rate: Vector<f64, 3>,
-    pub b_hat: Vector<f64, 3>,
+pub struct AttitudeState<R: FlightFloat> {
+    pub q_hat: Quaternion<R>,
+    pub q_dot: Quaternion<R>,
+    pub body_rate: Vector<R, 3>,
+    pub b_hat: Vector<R, 3>,
     pub is_healthy: bool,
 }
 
-impl Default for AttitudeState {
+impl<R: FlightFloat> Default for AttitudeState<R> {
     fn default() -> Self {
         Self {
-            q_hat: Quaternion::new(1.0, 0.0, 0.0, 0.0),
-            q_dot: Quaternion::new(0.0, 0.0, 0.0, 0.0),
-            body_rate: Vector::from([0.0, 0.0, 0.0]),
-            b_hat: Vector::from([0.0, 0.0, 0.0]),
+            q_hat: Quaternion::new(
+                <R as FlightFloat>::from_f32(1.0),
+                <R as FlightFloat>::from_f32(0.0),
+                <R as FlightFloat>::from_f32(0.0),
+                <R as FlightFloat>::from_f32(0.0),
+            ),
+            q_dot: Quaternion::from(Vector::from([<R as FlightFloat>::from_f32(0.0); 4])),
+            body_rate: Vector::from([<R as FlightFloat>::from_f32(0.0); 3]),
+            b_hat: Vector::from([<R as FlightFloat>::from_f32(0.0); 3]),
             is_healthy: false,
         }
     }
 }
 
-impl AttitudeEstimate for AttitudeState {
+impl<R: FlightFloat> AttitudeEstimate for AttitudeState<R> {
     fn q(&self) -> [f32; 4] {
         [
-            self.q_hat.w as f32,
-            self.q_hat.i as f32,
-            self.q_hat.j as f32,
-            self.q_hat.k as f32,
+            self.q_hat.w.to_f32_lossy(),
+            self.q_hat.i.to_f32_lossy(),
+            self.q_hat.j.to_f32_lossy(),
+            self.q_hat.k.to_f32_lossy(),
         ]
     }
 
     fn q_dot(&self) -> [f32; 4] {
         [
-            self.q_dot.w as f32,
-            self.q_dot.i as f32,
-            self.q_dot.j as f32,
-            self.q_dot.k as f32,
+            self.q_dot.w.to_f32_lossy(),
+            self.q_dot.i.to_f32_lossy(),
+            self.q_dot.j.to_f32_lossy(),
+            self.q_dot.k.to_f32_lossy(),
         ]
     }
 
@@ -55,76 +62,85 @@ impl AttitudeEstimate for AttitudeState {
     }
 }
 
-impl From<AttitudeState> for Vector<f64, 3> {
-    fn from(state: AttitudeState) -> Self {
+impl<R: FlightFloat> From<AttitudeState<R>> for Vector<R, 3> {
+    fn from(state: AttitudeState<R>) -> Self {
         quaternion_to_euler(state.q_hat)
     }
 }
 
-impl<'a> From<&'a AttitudeState> for Vector<f64, 3> {
-    fn from(state: &'a AttitudeState) -> Self {
+impl<'a, R: FlightFloat> From<&'a AttitudeState<R>> for Vector<R, 3> {
+    fn from(state: &'a AttitudeState<R>) -> Self {
         quaternion_to_euler(state.q_hat)
     }
 }
 
-pub struct QuadEstimator {
-    k_p: f64,
-    k_i: f64,
-    q_hat: Quaternion<f64>,
-    q_dot: Quaternion<f64>,
-    body_rate: Vector<f64, 3>,
-    b_hat: Vector<f64, 3>,
+pub struct QuadEstimator<R: FlightFloat> {
+    k_p: R,
+    k_i: R,
+    q_hat: Quaternion<R>,
+    q_dot: Quaternion<R>,
+    body_rate: Vector<R, 3>,
+    b_hat: Vector<R, 3>,
     is_initialized: bool, // Track if we've received first IMU packet
     last_acc_update_us: u64,
     last_extatt_update_us: u64,
 
     // Low-pass filter state
-    accel_lpf: Vector<f64, 3>, // Filtered accelerometer
-    gyro_lpf: Vector<f64, 3>,  // Filtered gyroscope
-    w1: Vector<f64, 3>,
-    w2: Vector<f64, 3>,
-    q_extatt: Option<Quaternion<f64>>,
+    accel_lpf: Vector<R, 3>, // Filtered accelerometer
+    gyro_lpf: Vector<R, 3>,  // Filtered gyroscope
+    w1: Vector<R, 3>,
+    w2: Vector<R, 3>,
+    q_extatt: Option<Quaternion<R>>,
 
     // LPF parameters (EMA alpha values) - matching C defaults
-    alpha_acc: f64,     // PARAM_ACC_ALPHA = 0.5 in C
-    alpha_gyro_xy: f64, // PARAM_GYRO_XY_ALPHA = 0.3 in C
-    alpha_gyro_z: f64,  // PARAM_GYRO_Z_ALPHA = 0.3 in C
+    alpha_acc: R,     // PARAM_ACC_ALPHA = 0.5 in C
+    alpha_gyro_xy: R, // PARAM_GYRO_XY_ALPHA = 0.3 in C
+    alpha_gyro_z: R,  // PARAM_GYRO_Z_ALPHA = 0.3 in C
 
     // Accelerometer gating
-    accel_margin: f64, // PARAM_FILTER_ACCEL_MARGIN = 0.1 in C
+    accel_margin: R, // PARAM_FILTER_ACCEL_MARGIN = 0.1 in C
 
     // Adaptive gains during initialization
     init_time_us: u64,   // PARAM_INIT_TIME = 3000ms = 3,000,000 μs in C
     first_imu_time: u64, // Track when first IMU arrived
 }
 
-impl QuadEstimator {
-    pub fn new(k_p: f64, k_i: f64) -> Self {
+impl<R: FlightFloat> QuadEstimator<R> {
+    pub fn new(k_p: R, k_i: R) -> Self {
         Self {
             k_p,
             k_i,
-            q_hat: Quaternion::new(1.0, 0.0, 0.0, 0.0),
-            q_dot: Quaternion::new(0.0, 0.0, 0.0, 0.0),
-            body_rate: Vector::from([0.0, 0.0, 0.0]),
-            b_hat: Vector::from([0.0, 0.0, 0.0]),
+            q_hat: Quaternion::new(
+                <R as FlightFloat>::from_f32(1.0),
+                <R as FlightFloat>::from_f32(0.0),
+                <R as FlightFloat>::from_f32(0.0),
+                <R as FlightFloat>::from_f32(0.0),
+            ),
+            q_dot: Quaternion::from(Vector::from([<R as FlightFloat>::from_f32(0.0); 4])),
+            body_rate: Vector::from([<R as FlightFloat>::from_f32(0.0); 3]),
+            b_hat: Vector::from([<R as FlightFloat>::from_f32(0.0); 3]),
             is_initialized: false,
             last_acc_update_us: 0,
             last_extatt_update_us: 0,
 
             // Initialize LPF state - accel starts at gravity pointing down (NED frame)
-            accel_lpf: Vector::from([0.0, 0.0, -G]),
-            gyro_lpf: Vector::from([0.0, 0.0, 0.0]),
-            w1: Vector::from([0.0, 0.0, 0.0]),
-            w2: Vector::from([0.0, 0.0, 0.0]),
+            accel_lpf: Vector::from([
+                <R as FlightFloat>::from_f32(0.0),
+                <R as FlightFloat>::from_f32(0.0),
+                -gravity::<R>(),
+            ]),
+            gyro_lpf: Vector::from([<R as FlightFloat>::from_f32(0.0); 3]),
+            w1: Vector::from([<R as FlightFloat>::from_f32(0.0); 3]),
+            w2: Vector::from([<R as FlightFloat>::from_f32(0.0); 3]),
             q_extatt: None,
 
             // LPF parameters matching C defaults
-            alpha_acc: 0.5,
-            alpha_gyro_xy: 0.3,
-            alpha_gyro_z: 0.3,
+            alpha_acc: <R as FlightFloat>::from_f32(0.5),
+            alpha_gyro_xy: <R as FlightFloat>::from_f32(0.3),
+            alpha_gyro_z: <R as FlightFloat>::from_f32(0.3),
 
             // Accelerometer gating - ±10% around 1g
-            accel_margin: 0.1,
+            accel_margin: <R as FlightFloat>::from_f32(0.1),
 
             // Adaptive gains - 3 second initialization period
             init_time_us: 3_000_000,
@@ -137,26 +153,26 @@ impl QuadEstimator {
     pub fn update_params(&mut self, params: &Params) {
         // Read base gains (not the 10× boosted values)
         if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_FILTER_KP_ACC) {
-            self.k_p = v as f64;
+            self.k_p = <R as FlightFloat>::from_f32(v);
         }
         if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_FILTER_KI) {
-            self.k_i = v as f64;
+            self.k_i = <R as FlightFloat>::from_f32(v);
         }
 
         // Read LPF alpha values
         if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_ACC_ALPHA) {
-            self.alpha_acc = v as f64;
+            self.alpha_acc = <R as FlightFloat>::from_f32(v);
         }
         if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_GYRO_XY_ALPHA) {
-            self.alpha_gyro_xy = v as f64;
+            self.alpha_gyro_xy = <R as FlightFloat>::from_f32(v);
         }
         if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_GYRO_Z_ALPHA) {
-            self.alpha_gyro_z = v as f64;
+            self.alpha_gyro_z = <R as FlightFloat>::from_f32(v);
         }
 
         // Read accelerometer gating margin
         if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_FILTER_ACCEL_MARGIN) {
-            self.accel_margin = v as f64;
+            self.accel_margin = <R as FlightFloat>::from_f32(v);
         }
 
         // Read initialization time (convert milliseconds to microseconds)
@@ -166,22 +182,34 @@ impl QuadEstimator {
     }
 }
 
-impl Default for QuadEstimator {
+impl<R: FlightFloat> Default for QuadEstimator<R> {
     fn default() -> Self {
-        Self::new(1.5, 0.05)
+        Self::new(
+            <R as FlightFloat>::from_f32(1.5),
+            <R as FlightFloat>::from_f32(0.05),
+        )
     }
 }
 
-impl QuadEstimator {
+impl<R: FlightFloat> QuadEstimator<R> {
     pub fn reset_state(&mut self) {
-        self.q_hat = Quaternion::new(1.0, 0.0, 0.0, 0.0);
-        self.q_dot = Quaternion::new(0.0, 0.0, 0.0, 0.0);
-        self.body_rate = Vector::from([0.0, 0.0, 0.0]);
-        self.b_hat = Vector::from([0.0, 0.0, 0.0]);
-        self.accel_lpf = Vector::from([0.0, 0.0, -G]);
-        self.gyro_lpf = Vector::from([0.0, 0.0, 0.0]);
-        self.w1 = Vector::from([0.0, 0.0, 0.0]);
-        self.w2 = Vector::from([0.0, 0.0, 0.0]);
+        self.q_hat = Quaternion::new(
+            <R as FlightFloat>::from_f32(1.0),
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(0.0),
+        );
+        self.q_dot = Quaternion::from(Vector::from([<R as FlightFloat>::from_f32(0.0); 4]));
+        self.body_rate = Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
+        self.b_hat = Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
+        self.accel_lpf = Vector::from([
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(0.0),
+            -gravity::<R>(),
+        ]);
+        self.gyro_lpf = Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
+        self.w1 = Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
+        self.w2 = Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
         self.q_extatt = None;
         self.is_initialized = false;
         self.last_acc_update_us = 0;
@@ -189,15 +217,15 @@ impl QuadEstimator {
     }
 
     pub fn reset_adaptive_bias(&mut self) {
-        self.b_hat = Vector::from([0.0, 0.0, 0.0]);
+        self.b_hat = Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
     }
 
     fn set_external_attitude_update(&mut self, external_attitude: ExternalAttitudeMsg) {
         let mut q = Quaternion::new(
-            external_attitude.qw as f64,
-            external_attitude.qx as f64,
-            external_attitude.qy as f64,
-            external_attitude.qz as f64,
+            <R as FlightFloat>::from_f32(external_attitude.qw),
+            <R as FlightFloat>::from_f32(external_attitude.qx),
+            <R as FlightFloat>::from_f32(external_attitude.qy),
+            <R as FlightFloat>::from_f32(external_attitude.qz),
         );
         q.normalize_mut();
         self.q_extatt = Some(q);
@@ -205,15 +233,15 @@ impl QuadEstimator {
 
     fn estimate_packets(
         &mut self,
-        imu: Option<packets::ImuPacket>,
+        imu: Option<packets::ImuPacket<R>>,
         _mag: Option<packets::MagPacket>,
         params: &Params,
-        dt: f64,
-    ) -> AttitudeState {
+        dt: R,
+    ) -> AttitudeState<R> {
         // Update parameters from parameter server (matches C behavior)
         self.update_params(params);
 
-        if dt < 0.0 {
+        if dt < <R as FlightFloat>::from_f32(0.0) {
             return AttitudeState {
                 q_hat: self.q_hat,
                 q_dot: self.q_dot,
@@ -244,20 +272,21 @@ impl QuadEstimator {
 
             // Apply low-pass filter to raw measurements (EMA filter)
             let raw_accel = Vector::from(imu_packet.accel);
+            let one = <R as FlightFloat>::from_f32(1.0);
             self.accel_lpf[0] =
-                (1.0 - self.alpha_acc) * raw_accel[0] + self.alpha_acc * self.accel_lpf[0];
+                (one - self.alpha_acc) * raw_accel[0] + self.alpha_acc * self.accel_lpf[0];
             self.accel_lpf[1] =
-                (1.0 - self.alpha_acc) * raw_accel[1] + self.alpha_acc * self.accel_lpf[1];
+                (one - self.alpha_acc) * raw_accel[1] + self.alpha_acc * self.accel_lpf[1];
             self.accel_lpf[2] =
-                (1.0 - self.alpha_acc) * raw_accel[2] + self.alpha_acc * self.accel_lpf[2];
+                (one - self.alpha_acc) * raw_accel[2] + self.alpha_acc * self.accel_lpf[2];
 
             let raw_gyro = Vector::from(imu_packet.gyro);
             self.gyro_lpf[0] =
-                (1.0 - self.alpha_gyro_xy) * raw_gyro[0] + self.alpha_gyro_xy * self.gyro_lpf[0];
+                (one - self.alpha_gyro_xy) * raw_gyro[0] + self.alpha_gyro_xy * self.gyro_lpf[0];
             self.gyro_lpf[1] =
-                (1.0 - self.alpha_gyro_xy) * raw_gyro[1] + self.alpha_gyro_xy * self.gyro_lpf[1];
+                (one - self.alpha_gyro_xy) * raw_gyro[1] + self.alpha_gyro_xy * self.gyro_lpf[1];
             self.gyro_lpf[2] =
-                (1.0 - self.alpha_gyro_z) * raw_gyro[2] + self.alpha_gyro_z * self.gyro_lpf[2];
+                (one - self.alpha_gyro_z) * raw_gyro[2] + self.alpha_gyro_z * self.gyro_lpf[2];
 
             let use_acc = param_int(params, ParamId::PARAM_FILTER_USE_ACC) != 0;
             let use_quad_int = param_int(params, ParamId::PARAM_FILTER_USE_QUAD_INT) != 0;
@@ -270,14 +299,15 @@ impl QuadEstimator {
                 + self.accel_lpf[2] * self.accel_lpf[2];
 
             let margin = self.accel_margin;
-            let lowerbound = (1.0 - margin) * (1.0 - margin) * G * G;
-            let upperbound = (1.0 + margin) * (1.0 + margin) * G * G;
+            let g = gravity();
+            let lowerbound = (one - margin) * (one - margin) * g * g;
+            let upperbound = (one + margin) * (one + margin) * g * g;
             let can_use_accel =
                 use_acc && accel_sqrd_norm > lowerbound && accel_sqrd_norm < upperbound;
 
-            let mut kp = 0.0;
+            let mut kp = <R as FlightFloat>::from_f32(0.0);
             let mut ki = self.k_i;
-            let mut w_err = Vector::from([0.0, 0.0, 0.0]);
+            let mut w_err = Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
 
             if can_use_accel {
                 w_err = accel_correction(self.q_hat, self.accel_lpf);
@@ -288,22 +318,27 @@ impl QuadEstimator {
             if let Some(q_extatt) = self.q_extatt.take() {
                 w_err = extatt_correction(self.q_hat, q_extatt);
                 kp = param_float(params, ParamId::PARAM_FILTER_KP_EXT);
-                let extatt_dt =
-                    current_time.saturating_sub(self.last_extatt_update_us) as f64 * 1e-6;
-                let scale_dt = if dt > 0.0 { extatt_dt / dt } else { 0.0 };
+                let extatt_dt = <R as FlightFloat>::from_u64(
+                    current_time.saturating_sub(self.last_extatt_update_us),
+                ) * <R as FlightFloat>::from_f32(1e-6);
+                let scale_dt = if dt > <R as FlightFloat>::from_f32(0.0) {
+                    extatt_dt / dt
+                } else {
+                    <R as FlightFloat>::from_f32(0.0)
+                };
                 w_err = w_err * scale_dt;
                 self.last_extatt_update_us = current_time;
             }
 
             if current_time < (param_int(params, ParamId::PARAM_INIT_TIME).max(0) as u64) * 1000 {
-                kp = self.k_p * 10.0;
-                ki = self.k_i * 10.0;
+                kp = self.k_p * <R as FlightFloat>::from_f32(10.0);
+                ki = self.k_i * <R as FlightFloat>::from_f32(10.0);
             }
 
-            self.b_hat = self.b_hat - (ki * w_err * dt);
+            self.b_hat -= w_err * (ki * dt);
 
             let wbar = self.smoothed_gyro_measurement(use_quad_int);
-            let wfinal = wbar - self.b_hat + kp * w_err;
+            let wfinal = wbar - self.b_hat + w_err * kp;
             self.integrate_angular_rate(wfinal, dt, use_mat_exp);
 
             self.body_rate = self.gyro_lpf - self.b_hat;
@@ -322,14 +357,10 @@ impl QuadEstimator {
         }
 
         let q = self.q_hat;
-        let is_healthy = !(q.w.is_nan()
-            || q.w.is_infinite()
-            || q.i.is_nan()
-            || q.i.is_infinite()
-            || q.j.is_nan()
-            || q.j.is_infinite()
-            || q.k.is_nan()
-            || q.k.is_infinite());
+        let is_healthy = q.w.is_finite_value()
+            && q.i.is_finite_value()
+            && q.j.is_finite_value()
+            && q.k.is_finite_value();
 
         AttitudeState {
             q_hat: self.q_hat,
@@ -340,9 +371,11 @@ impl QuadEstimator {
         }
     }
 
-    fn smoothed_gyro_measurement(&mut self, use_quad_int: bool) -> Vector<f64, 3> {
+    fn smoothed_gyro_measurement(&mut self, use_quad_int: bool) -> Vector<R, 3> {
         if use_quad_int {
-            let wbar = (self.w2 / -12.0) + self.w1 * (8.0 / 12.0) + self.gyro_lpf * (5.0 / 12.0);
+            let wbar = (self.w2 / <R as FlightFloat>::from_f32(-12.0))
+                + self.w1 * <R as FlightFloat>::from_f32(8.0 / 12.0)
+                + self.gyro_lpf * <R as FlightFloat>::from_f32(5.0 / 12.0);
             self.w2 = self.w1;
             self.w1 = self.gyro_lpf;
             wbar
@@ -351,10 +384,10 @@ impl QuadEstimator {
         }
     }
 
-    fn integrate_angular_rate(&mut self, omega: Vector<f64, 3>, dt: f64, use_mat_exp: bool) {
+    fn integrate_angular_rate(&mut self, omega: Vector<R, 3>, dt: R, use_mat_exp: bool) {
         let sqrd_norm_w = omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2];
-        if sqrd_norm_w == 0.0 {
-            self.q_dot = Quaternion::new(0.0, 0.0, 0.0, 0.0);
+        if sqrd_norm_w == <R as FlightFloat>::from_f32(0.0) {
+            self.q_dot = Quaternion::from(Vector::from([<R as FlightFloat>::from_f32(0.0); 4]));
             return;
         }
 
@@ -364,16 +397,17 @@ impl QuadEstimator {
         let current = self.q_hat;
 
         self.q_dot = Quaternion::new(
-            0.5 * (-p * current.i - q * current.j - r * current.k),
-            0.5 * (p * current.w + r * current.j - q * current.k),
-            0.5 * (q * current.w - r * current.i + p * current.k),
-            0.5 * (r * current.w + q * current.i - p * current.j),
+            <R as FlightFloat>::from_f32(0.5) * (-p * current.i - q * current.j - r * current.k),
+            <R as FlightFloat>::from_f32(0.5) * (p * current.w + r * current.j - q * current.k),
+            <R as FlightFloat>::from_f32(0.5) * (q * current.w - r * current.i + p * current.k),
+            <R as FlightFloat>::from_f32(0.5) * (r * current.w + q * current.i - p * current.j),
         );
 
         if use_mat_exp {
-            let norm_w = sqrt(sqrd_norm_w);
-            let t1 = cos((norm_w * dt) / 2.0);
-            let t2 = sin((norm_w * dt) / 2.0) / norm_w;
+            let norm_w = sqrd_norm_w.sqrt();
+            let half_angle = (norm_w * dt) / <R as FlightFloat>::from_f32(2.0);
+            let t1 = half_angle.cos();
+            let t2 = half_angle.sin() / norm_w;
             self.q_hat = Quaternion::new(
                 t1 * current.w + t2 * (-p * current.i - q * current.j - r * current.k),
                 t1 * current.i + t2 * (p * current.w + r * current.j - q * current.k),
@@ -387,10 +421,10 @@ impl QuadEstimator {
     }
 }
 
-impl Estimator for QuadEstimator {
-    type State = AttitudeState;
+impl<R: FlightFloat> Estimator<R> for QuadEstimator<R> {
+    type State = AttitudeState<R>;
 
-    fn estimate(&mut self, sensors: &ProcessedSensors, params: &Params, dt: f64) -> Self::State {
+    fn estimate(&mut self, sensors: &ProcessedSensors<R>, params: &Params, dt: R) -> Self::State {
         self.estimate_packets(sensors.imu, sensors.mag, params, dt)
     }
 
@@ -404,9 +438,9 @@ impl Estimator for QuadEstimator {
 
     fn estimate_with_external_attitude(
         &mut self,
-        sensors: &ProcessedSensors,
+        sensors: &ProcessedSensors<R>,
         params: &Params,
-        dt: f64,
+        dt: R,
         external_attitude: Option<ExternalAttitudeMsg>,
     ) -> Self::State {
         if let Some(external_attitude) = external_attitude {
@@ -416,10 +450,10 @@ impl Estimator for QuadEstimator {
     }
 }
 
-fn param_float(params: &Params, param_id: ParamId) -> f64 {
+fn param_float<R: FlightFloat>(params: &Params, param_id: ParamId) -> R {
     match params.get_by_id(param_id) {
-        ParamValue::Float(value) => value as f64,
-        _ => 0.0,
+        ParamValue::Float(value) => <R as FlightFloat>::from_f32(value),
+        _ => <R as FlightFloat>::from_f32(0.0),
     }
 }
 
@@ -430,65 +464,93 @@ fn param_int(params: &Params, param_id: ParamId) -> i32 {
     }
 }
 
-fn accel_correction(attitude: Quaternion<f64>, accel_lpf: Vector<f64, 3>) -> Vector<f64, 3> {
+fn accel_correction<R: FlightFloat>(
+    attitude: Quaternion<R>,
+    accel_lpf: Vector<R, 3>,
+) -> Vector<R, 3> {
     let accel_norm = accel_lpf.norm();
-    if accel_norm <= 1e-9 {
-        return Vector::from([0.0, 0.0, 0.0]);
+    if accel_norm <= <R as FlightFloat>::from_f32(1e-9) {
+        return Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
     }
 
     let a = accel_lpf / accel_norm;
-    let q_acc_inv = quaternion_between_vectors(Vector::from([0.0, 0.0, -1.0]), a);
+    let q_acc_inv = quaternion_between_vectors(
+        Vector::from([
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(-1.0),
+        ]),
+        a,
+    );
     let q_tilde = q_acc_inv * attitude;
     Vector::from([
-        -2.0 * q_tilde.w * q_tilde.i,
-        -2.0 * q_tilde.w * q_tilde.j,
-        0.0,
+        <R as FlightFloat>::from_f32(-2.0) * q_tilde.w * q_tilde.i,
+        <R as FlightFloat>::from_f32(-2.0) * q_tilde.w * q_tilde.j,
+        <R as FlightFloat>::from_f32(0.0),
     ])
 }
 
-fn quaternion_between_vectors(from: Vector<f64, 3>, to: Vector<f64, 3>) -> Quaternion<f64> {
+fn quaternion_between_vectors<R: FlightFloat>(
+    from: Vector<R, 3>,
+    to: Vector<R, 3>,
+) -> Quaternion<R> {
     let cross = from.cross(&to);
     let dot = from[0] * to[0] + from[1] * to[1] + from[2] * to[2];
-    let mut q = if dot < -0.999_999 {
-        Quaternion::new(0.0, 1.0, 0.0, 0.0)
+    let mut q = if dot < <R as FlightFloat>::from_f32(-0.999_999) {
+        Quaternion::new(
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(1.0),
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(0.0),
+        )
     } else {
-        Quaternion::new(1.0 + dot, cross[0], cross[1], cross[2])
+        Quaternion::new(
+            <R as FlightFloat>::from_f32(1.0) + dot,
+            cross[0],
+            cross[1],
+            cross[2],
+        )
     };
     q.normalize_mut();
     q
 }
 
-fn extatt_correction(attitude: Quaternion<f64>, external: Quaternion<f64>) -> Vector<f64, 3> {
+fn extatt_correction<R: FlightFloat>(
+    attitude: Quaternion<R>,
+    external: Quaternion<R>,
+) -> Vector<R, 3> {
     let (xhat, yhat, zhat) = quaternion_to_dcm_rows(attitude);
     let (xext, yext, zext) = quaternion_to_dcm_rows(external);
     xext.cross(&xhat) + yext.cross(&yhat) + zext.cross(&zhat)
 }
 
-fn quaternion_to_euler(q: Quaternion<f64>) -> Vector<f64, 3> {
+fn quaternion_to_euler<R: FlightFloat>(q: Quaternion<R>) -> Vector<R, 3> {
     let (roll, pitch, yaw) = UnitQuaternion::new_normalize(q).euler_angles();
     Vector::from([roll, pitch, yaw])
 }
 
-fn quaternion_to_dcm_rows(q: Quaternion<f64>) -> (Vector<f64, 3>, Vector<f64, 3>, Vector<f64, 3>) {
+fn quaternion_to_dcm_rows<R: FlightFloat>(
+    q: Quaternion<R>,
+) -> (Vector<R, 3>, Vector<R, 3>, Vector<R, 3>) {
     let w = q.w;
     let x = q.i;
     let y = q.j;
     let z = q.k;
     (
         Vector::from([
-            1.0 - 2.0 * (y * y + z * z),
-            2.0 * (x * y - z * w),
-            2.0 * (x * z + y * w),
+            <R as FlightFloat>::from_f32(1.0) - <R as FlightFloat>::from_f32(2.0) * (y * y + z * z),
+            <R as FlightFloat>::from_f32(2.0) * (x * y - z * w),
+            <R as FlightFloat>::from_f32(2.0) * (x * z + y * w),
         ]),
         Vector::from([
-            2.0 * (x * y + z * w),
-            1.0 - 2.0 * (x * x + z * z),
-            2.0 * (y * z - x * w),
+            <R as FlightFloat>::from_f32(2.0) * (x * y + z * w),
+            <R as FlightFloat>::from_f32(1.0) - <R as FlightFloat>::from_f32(2.0) * (x * x + z * z),
+            <R as FlightFloat>::from_f32(2.0) * (y * z - x * w),
         ]),
         Vector::from([
-            2.0 * (x * z - y * w),
-            2.0 * (y * z + x * w),
-            1.0 - 2.0 * (x * x + y * y),
+            <R as FlightFloat>::from_f32(2.0) * (x * z - y * w),
+            <R as FlightFloat>::from_f32(2.0) * (y * z + x * w),
+            <R as FlightFloat>::from_f32(1.0) - <R as FlightFloat>::from_f32(2.0) * (x * x + y * y),
         ]),
     )
 }
@@ -510,13 +572,13 @@ mod tests {
         params.set_by_id(ParamId::PARAM_FILTER_USE_MAT_EXP, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_INIT_TIME, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_FILTER_KP_EXT, ParamValue::Float(1.5));
-        let mut sensors = ProcessedSensors::default();
+        let mut sensors = ProcessedSensors::<f64>::default();
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 1_000,
                 status: 0,
             },
-            accel: [0.0, 0.0, -G],
+            accel: [0.0, 0.0, -9.80665],
             gyro: [0.0, 0.0, 0.0],
             temperature: 25.0,
             seq: 1,
@@ -550,13 +612,13 @@ mod tests {
         params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_INIT_TIME, ParamValue::Int(0));
         let mut estimator = QuadEstimator::default();
-        let mut sensors = ProcessedSensors::default();
+        let mut sensors = ProcessedSensors::<f64>::default();
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 1_000,
                 status: 0,
             },
-            accel: [0.0, 0.0, -G],
+            accel: [0.0, 0.0, -9.80665],
             gyro: [0.0, 0.0, 0.0],
             ..Default::default()
         });
@@ -584,13 +646,13 @@ mod tests {
         params.set_by_id(ParamId::PARAM_FIXED_WING, ParamValue::Int(1));
         params.set_by_id(ParamId::PARAM_INIT_TIME, ParamValue::Int(0));
         let mut estimator = QuadEstimator::default();
-        let mut sensors = ProcessedSensors::default();
+        let mut sensors = ProcessedSensors::<f64>::default();
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 1_000,
                 status: 0,
             },
-            accel: [0.0, 0.0, -G],
+            accel: [0.0, 0.0, -9.80665],
             gyro: [0.0, 0.0, 0.0],
             ..Default::default()
         });
@@ -620,13 +682,13 @@ mod tests {
         params.set_by_id(ParamId::PARAM_INIT_TIME, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_GYRO_Z_ALPHA, ParamValue::Float(0.0));
         let mut estimator = QuadEstimator::default();
-        let mut sensors = ProcessedSensors::default();
+        let mut sensors = ProcessedSensors::<f64>::default();
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 1_000,
                 status: 0,
             },
-            accel: [0.0, 0.0, -G],
+            accel: [0.0, 0.0, -9.80665],
             gyro: [0.0, 0.0, 1.0],
             ..Default::default()
         });
@@ -652,13 +714,13 @@ mod tests {
         params.set_by_id(ParamId::PARAM_FILTER_USE_MAT_EXP, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_INIT_TIME, ParamValue::Int(0));
         let mut estimator = QuadEstimator::default();
-        let mut sensors = ProcessedSensors::default();
+        let mut sensors = ProcessedSensors::<f64>::default();
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 1_000,
                 status: 0,
             },
-            accel: [0.0, 0.0, -G],
+            accel: [0.0, 0.0, -9.80665],
             gyro: [0.0, 0.0, 1.0],
             ..Default::default()
         });
@@ -680,13 +742,13 @@ mod tests {
         params.set_by_id(ParamId::PARAM_INIT_TIME, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_GYRO_Z_ALPHA, ParamValue::Float(0.0));
         let mut estimator = QuadEstimator::default();
-        let mut sensors = ProcessedSensors::default();
+        let mut sensors = ProcessedSensors::<f64>::default();
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 1_000,
                 status: 0,
             },
-            accel: [0.0, 0.0, -G],
+            accel: [0.0, 0.0, -9.80665],
             gyro: [0.0, 0.0, 1.0],
             ..Default::default()
         });
@@ -695,7 +757,7 @@ mod tests {
         sensors.imu.as_mut().unwrap().header.timestamp = 101_000;
         let state = estimator.estimate(&sensors, &params, 0.1);
 
-        assert!((state.q()[0] as f64 - cos(0.05)).abs() < 1e-6);
-        assert!((state.q()[3] as f64 - sin(0.05)).abs() < 1e-6);
+        assert!((state.q()[0] as f64 - 0.05_f64.cos()).abs() < 1e-6);
+        assert!((state.q()[3] as f64 - 0.05_f64.sin()).abs() < 1e-6);
     }
 }

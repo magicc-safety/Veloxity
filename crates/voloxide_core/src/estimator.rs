@@ -1,11 +1,12 @@
 use crate::{
-    comm::messages::messages::ExternalAttitudeMsg, params::Params, sensors::ProcessedSensors,
+    comm::messages::messages::ExternalAttitudeMsg, math::FlightFloat, params::Params,
+    sensors::ProcessedSensors,
 };
 pub mod quad;
 
-pub trait Estimator {
+pub trait Estimator<R: FlightFloat> {
     type State: AttitudeEstimate;
-    fn estimate(&mut self, sensors: &ProcessedSensors, params: &Params, dt: f64) -> Self::State;
+    fn estimate(&mut self, sensors: &ProcessedSensors<R>, params: &Params, dt: R) -> Self::State;
 
     fn reset(&mut self) {}
 
@@ -13,9 +14,9 @@ pub trait Estimator {
 
     fn estimate_with_external_attitude(
         &mut self,
-        sensors: &ProcessedSensors,
+        sensors: &ProcessedSensors<R>,
         params: &Params,
-        dt: f64,
+        dt: R,
         _external_attitude: Option<ExternalAttitudeMsg>,
     ) -> Self::State {
         self.estimate(sensors, params, dt)

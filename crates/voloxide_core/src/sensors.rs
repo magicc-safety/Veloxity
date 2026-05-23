@@ -2,12 +2,11 @@ pub mod health;
 pub mod ingestion;
 pub mod processors;
 
-use crate::{errors::SensorError, packets::*};
-use libm::pow;
+use crate::{errors::SensorError, math::FlightFloat, packets::*};
 
 #[derive(Default)]
-pub struct SensorBus {
-    pub imu: Option<Result<ImuPacket, SensorError>>,
+pub struct SensorBus<R: FlightFloat> {
+    pub imu: Option<Result<ImuPacket<R>, SensorError>>,
     pub mag: Option<Result<MagPacket, SensorError>>,
     pub baro: Option<Result<BaroPacket, SensorError>>,
     pub pitot: Option<Result<PitotPacket, SensorError>>,
@@ -18,7 +17,7 @@ pub struct SensorBus {
     pub attitude: Option<Result<AttitudePacket, SensorError>>,
 }
 
-impl SensorBus {
+impl<R: FlightFloat> SensorBus<R> {
     pub fn clear(&mut self) {
         self.imu = None;
         self.mag = None;
@@ -33,8 +32,8 @@ impl SensorBus {
 }
 
 #[derive(Default)]
-pub struct ProcessedSensors {
-    pub imu: Option<ImuPacket>,
+pub struct ProcessedSensors<R: FlightFloat> {
+    pub imu: Option<ImuPacket<R>>,
     pub mag: Option<MagPacket>,
     pub baro: Option<BaroPacket>,
     pub pitot: Option<PitotPacket>,
@@ -45,7 +44,7 @@ pub struct ProcessedSensors {
     pub attitude: Option<AttitudePacket>,
 }
 
-impl ProcessedSensors {
+impl<R: FlightFloat> ProcessedSensors<R> {
     pub fn clear(&mut self) {
         self.imu = None;
         self.mag = None;
@@ -58,10 +57,15 @@ impl ProcessedSensors {
         self.attitude = None;
     }
 
-    pub fn air_density(&self) -> f64 {
+    pub fn air_density(&self) -> R {
         self.baro
-            .map(|baro| 1.225 * pow(baro.pressure as f64 / 101_325.0, 0.809736894596450))
-            .unwrap_or(1.225)
+            .map(|baro| {
+                <R as FlightFloat>::from_f32(1.225)
+                    * (<R as FlightFloat>::from_f32(baro.pressure)
+                        / <R as FlightFloat>::from_f32(101_325.0))
+                    .powf(<R as FlightFloat>::from_f64(0.809736894596450))
+            })
+            .unwrap_or_else(|| <R as FlightFloat>::from_f32(1.225))
     }
 }
 
@@ -71,8 +75,8 @@ mod tests {
 
     #[test]
     fn sensor_resources_default_to_empty() {
-        let raw = SensorBus::default();
-        let processed = ProcessedSensors::default();
+        let raw = SensorBus::<f64>::default();
+        let processed = ProcessedSensors::<f64>::default();
 
         assert!(raw.imu.is_none());
         assert!(raw.rc.is_none());
@@ -82,15 +86,15 @@ mod tests {
 
     #[test]
     fn processed_sensors_reports_rosflight_air_density_from_baro_pressure() {
-        let mut processed = ProcessedSensors::default();
-        assert_eq!(processed.air_density(), 1.225);
+        let mut processed = ProcessedSensors::<f64>::default();
+        assert!((processed.air_density() - 1.225).abs() < 1e-6);
 
         processed.baro = Some(BaroPacket {
             pressure: 80_000.0,
             ..Default::default()
         });
 
-        let expected = 1.225 * libm::pow(80_000.0 / 101_325.0, 0.809736894596450);
-        assert!((processed.air_density() - expected).abs() < 1e-12);
+        let expected = 1.225 * (80_000.0_f64 / 101_325.0).powf(0.809736894596450);
+        assert!((processed.air_density() - expected).abs() < 1e-6);
     }
 }

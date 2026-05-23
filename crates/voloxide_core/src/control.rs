@@ -4,6 +4,7 @@ use crate::{
     companion::{AuxCommandState, ExternalAttitudeState},
     controller::{Controller, ControllerCtx, RcTrimCalibrator},
     estimator::{AttitudeEstimate, Estimator},
+    math::FlightFloat,
     mixer::{Mixer, MixerCtx, MixerStatus},
     params::Params,
     pwm::PwmDriver,
@@ -12,30 +13,32 @@ use crate::{
     state_machine::{ErrorFlag, Event, StateManager},
 };
 
-pub struct ControlPipelineResource<S, A> {
+pub struct ControlPipelineResource<S, A, R: FlightFloat> {
     pub latest_estimator_state: S,
     pub latest_actuator_commands: Option<A>,
-    pub latest_pwm_outputs: [f64; crate::pwm::system::PWM_OUTPUT_CHANNELS],
+    pub latest_pwm_outputs: [R; crate::pwm::system::PWM_OUTPUT_CHANNELS],
     pub latest_loop_time_us: u16,
     last_imu_time: u64,
 }
 
-impl<S, A> Default for ControlPipelineResource<S, A>
+impl<S, A, R> Default for ControlPipelineResource<S, A, R>
 where
     S: Default,
+    R: FlightFloat,
 {
     fn default() -> Self {
         Self {
             latest_estimator_state: Default::default(),
             latest_actuator_commands: None,
-            latest_pwm_outputs: [0.0; crate::pwm::system::PWM_OUTPUT_CHANNELS],
+            latest_pwm_outputs: [<R as FlightFloat>::from_f32(0.0);
+                crate::pwm::system::PWM_OUTPUT_CHANNELS],
             latest_loop_time_us: 0,
             last_imu_time: 0,
         }
     }
 }
 
-impl<S, A> ControlPipelineResource<S, A> {
+impl<S, A, R: FlightFloat> ControlPipelineResource<S, A, R> {
     pub(crate) fn last_imu_time(&self) -> u64 {
         self.last_imu_time
     }
@@ -48,7 +51,7 @@ impl<S, A> ControlPipelineResource<S, A> {
         &mut self,
         state: S,
         actuator_commands: A,
-        pwm_outputs: [f64; crate::pwm::system::PWM_OUTPUT_CHANNELS],
+        pwm_outputs: [R; crate::pwm::system::PWM_OUTPUT_CHANNELS],
         loop_time_us: u16,
     ) {
         self.latest_estimator_state = state;
@@ -58,19 +61,19 @@ impl<S, A> ControlPipelineResource<S, A> {
     }
 }
 
-pub struct ControlPipelineCtx<'a, B, E, C, M, PD>
+pub struct ControlPipelineCtx<'a, B, E, C, M, PD, R: FlightFloat>
 where
     B: BoardIo,
-    E: Estimator,
-    C: Controller<State = E::State> + RcTrimCalibrator,
-    M: Mixer<MixerInput = C::ControlOutput>,
-    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E: Estimator<R>,
+    C: Controller<R, State = E::State> + RcTrimCalibrator,
+    M: Mixer<R, MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[R]> + Copy,
     E::State: Copy + Default,
-    PD: PwmDriver,
+    PD: PwmDriver<R>,
 {
     pub board: &'a mut B,
     pub params: &'a Params,
-    pub sensors: &'a ProcessedSensors,
+    pub sensors: &'a ProcessedSensors<R>,
     pub external_attitude: &'a mut ExternalAttitudeState,
     pub aux_commands: &'a AuxCommandState,
     pub command: &'a CommandManager,
@@ -78,22 +81,23 @@ where
     pub estimator: &'a mut E,
     pub controller: &'a mut C,
     pub mixer: &'a mut M,
-    pub control_pipeline: &'a mut ControlPipelineResource<E::State, M::ActuatorCommands>,
+    pub control_pipeline: &'a mut ControlPipelineResource<E::State, M::ActuatorCommands, R>,
     pub pwm_output: &'a PwmOutputState,
     pub pwm: &'a mut PD,
 }
 
-pub fn run_control_pipeline_if_new_imu<B, E, C, M, PD>(
-    ctx: ControlPipelineCtx<'_, B, E, C, M, PD>,
+pub fn run_control_pipeline_if_new_imu<B, E, C, M, PD, R>(
+    ctx: ControlPipelineCtx<'_, B, E, C, M, PD, R>,
 ) -> bool
 where
     B: BoardIo,
-    E: Estimator,
-    C: Controller<State = E::State> + RcTrimCalibrator,
-    M: Mixer<MixerInput = C::ControlOutput>,
-    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E: Estimator<R>,
+    C: Controller<R, State = E::State> + RcTrimCalibrator,
+    M: Mixer<R, MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[R]> + Copy,
     E::State: Copy + Default,
-    PD: PwmDriver,
+    PD: PwmDriver<R>,
+    R: FlightFloat,
 {
     let Some(imu_packet) = ctx.sensors.imu else {
         return false;
@@ -118,7 +122,8 @@ where
         Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS),
         ctx.params,
     );
-    let dt = current_time.saturating_sub(last_imu_time) as f64 * 1e-6;
+    let dt = <R as FlightFloat>::from_u64(current_time.saturating_sub(last_imu_time))
+        * <R as FlightFloat>::from_f32(1e-6);
 
     let loop_start_us = ctx.board.clock_micros();
     let external_attitude = ctx.external_attitude.latest.take();
@@ -158,7 +163,10 @@ where
             params: ctx.params,
             rc_override: ctx.command.get_rc_override(),
             air_density: ctx.sensors.air_density(),
-            battery_voltage: ctx.sensors.battery.map(|battery| battery.voltage as f64),
+            battery_voltage: ctx
+                .sensors
+                .battery
+                .map(|battery| <R as FlightFloat>::from_f32(battery.voltage)),
         },
     );
     match mixer_run.status {

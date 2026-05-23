@@ -10,6 +10,21 @@ ROSflight does not select between these modes over MAVLink; the selected firmwar
 `VOLOXIDE_WIFI_SSID` is the infrastructure Wi-Fi network that the Pico joins, such as a router or
 lab access point. It is not a Pico-hosted access point.
 
+The Pico 2 W target opts into the bounded high-rate telemetry profile in Voloxide core:
+
+- `SMALL_IMU`: up to 400 Hz
+- `ATTITUDE_QUATERNION`: up to 100 Hz
+- `OUTPUT_RAW`, baro, mag, range, differential pressure: up to 50 Hz
+- battery: up to 25 Hz
+- GNSS: up to 10 Hz
+- RC raw: up to 100 Hz
+
+Core defaults remain upstream-like for other boards. MAVLink command, parameter, heartbeat,
+status, timesync, statustext, version, and hard-error replies are tagged as high-priority TX.
+Sensor telemetry is low-priority TX. The numeric priority type supports arbitrary values; the
+named constants are convenience bands only. Wi-Fi RX has the same queue structure, but current
+inbound ROSflight traffic is queued at the normal priority level.
+
 ## 1. Start In The Voloxide Repo
 
 ```bash
@@ -72,15 +87,14 @@ This image uses:
 
 ## 5. Find Or Confirm The Pico IP Address
 
-If you know the assigned address, use it directly. If not, run the UDP bridge without an address and
-wait for the firmware discovery beacon:
+If you know the assigned address, use it directly. You can also check your router's DHCP leases.
+The MAVLink tester requires the assigned address for Wi-Fi tests:
 
 ```bash
-python3 tools/udp_mavlink_bridge.py
+python3 tools/mavlink_tester.py --transport wifi --board 192.168.1.192 --duration-s 8
 ```
 
-When it prints `learned board=...`, use that IP address for tests. You can also check your router's
-DHCP leases.
+Use the IP address that matches your current Pico DHCP lease.
 
 ## 6. Run A UDP Latency Smoke Test
 
@@ -99,22 +113,22 @@ For a longer benchmark:
 python3 tools/udp_latency_test.py 192.168.1.192 --count 2000 --rate-hz 100 --timeout-ms 250 --payload-bytes 32
 ```
 
-## 7. Run The UDP MAVLink Bridge
+## 7. Decode MAVLink Sensor Telemetry
 
-With a known board IP:
-
-```bash
-python3 tools/udp_mavlink_bridge.py 192.168.1.192
-```
-
-Or auto-learn from the firmware beacon:
+Wi-Fi UDP:
 
 ```bash
-python3 tools/udp_mavlink_bridge.py
+python3 tools/mavlink_tester.py --transport wifi --board 192.168.1.192 --samples 1000 --duration-s 8
 ```
 
-The bridge is intentionally minimal. It is useful for bring-up, discovery, and seeing raw bytes.
-ROSflight-side tools should treat the firmware as normal MAVLink once the selected transport is up.
+Wired UART:
+
+```bash
+python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 921600 --samples 1000 --duration-s 8
+```
+
+The tester validates MAVLink v1 checksums, decodes `SMALL_IMU` and `SMALL_BARO`, and reports host
+receive intervals plus board timestamp intervals where the message carries a board timestamp.
 
 ## 8. Sanity Checks Before Flight Testing
 

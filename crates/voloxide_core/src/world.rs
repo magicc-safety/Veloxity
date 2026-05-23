@@ -1,7 +1,7 @@
 use crate::{
     board::BoardIo,
     comm::messages::messages::RosflightHardErrorMsg,
-    comm::{CommManager, interface::CommInterface},
+    comm::{CommManager, TelemetryRates, interface::CommInterface},
     command::CommandManager,
     command::service::{
         self as command_service, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx,
@@ -16,6 +16,7 @@ use crate::{
     estimator::Estimator,
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     log::drain::{self as log_drain, LogDrainCtx},
+    math::FlightFloat,
     params::reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
     params::service::{
         self as param_service, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx,
@@ -30,21 +31,21 @@ use crate::{
     sensors::ingestion::{SensorProcessorSet, process_sensor_bus},
     sensors::processors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
-    state_machine::{Event, StateManager},
+    state_machine::{ErrorFlag, Event, StateManager},
 };
 
 const IMU_TIMEOUT_US: u64 = 100_000;
 
-pub struct World<B, E, C, M, CI, PD>
+pub struct World<B, E, C, M, CI, PD, R: FlightFloat>
 where
     B: BoardIo,
-    E: Estimator,
-    C: Controller<State = E::State> + RcTrimCalibrator,
-    M: crate::mixer::Mixer<MixerInput = C::ControlOutput>,
-    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E: Estimator<R>,
+    C: Controller<R, State = E::State> + RcTrimCalibrator,
+    M: crate::mixer::Mixer<R, MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[R]> + Copy,
     E::State: Copy + Default,
     CI: CommInterface<B>,
-    PD: PwmDriver,
+    PD: PwmDriver<R>,
 {
     board: B,
     params: Params,
@@ -58,9 +59,9 @@ where
     aux_commands: AuxCommandState,
     external_attitude: ExternalAttitudeState,
     comm: CommManager<B, CI>,
-    raw_sensors: SensorBus,
-    processed_sensors: ProcessedSensors,
-    sensor_processors: SensorProcessorSet,
+    raw_sensors: SensorBus<R>,
+    processed_sensors: ProcessedSensors<R>,
+    sensor_processors: SensorProcessorSet<R>,
     rc: Rc,
     command: CommandManager,
     state: StateManager,
@@ -68,22 +69,23 @@ where
     estimator: E,
     controller: C,
     mixer: M,
-    control_pipeline: ControlPipelineResource<E::State, M::ActuatorCommands>,
+    control_pipeline: ControlPipelineResource<E::State, M::ActuatorCommands, R>,
     pwm_output: PwmOutputState,
     pwm: PD,
     last_imu_seen: u64,
 }
 
-impl<B, E, C, M, CI, PD> World<B, E, C, M, CI, PD>
+impl<B, E, C, M, CI, PD, R> World<B, E, C, M, CI, PD, R>
 where
     B: BoardIo,
-    E: Estimator,
-    C: Controller<State = E::State> + RcTrimCalibrator,
-    M: crate::mixer::Mixer<MixerInput = C::ControlOutput>,
-    M::ActuatorCommands: AsRef<[f64]> + Copy,
+    E: Estimator<R>,
+    C: Controller<R, State = E::State> + RcTrimCalibrator,
+    M: crate::mixer::Mixer<R, MixerInput = C::ControlOutput>,
+    M::ActuatorCommands: AsRef<[R]> + Copy,
     E::State: Copy + Default,
     CI: CommInterface<B>,
-    PD: PwmDriver,
+    PD: PwmDriver<R>,
+    R: FlightFloat,
 {
     pub fn init(
         mut board: B,
@@ -174,6 +176,10 @@ where
         self.run_control_and_mixing_stage_if_new_imu();
         self.run_telemetry_stage();
         true
+    }
+
+    pub fn set_telemetry_rates(&mut self, telemetry_rates: TelemetryRates) {
+        self.comm.set_telemetry_rates(telemetry_rates);
     }
 
     pub fn run_comm_param_sensor_stages(&mut self) {
@@ -312,6 +318,21 @@ where
     }
 
     fn apply_param_reactions(&mut self) {
+        for change in self.param_events.changes.iter() {
+            let Some(status) = self.mixer.on_param_changed(&self.params, change.id) else {
+                continue;
+            };
+            match status {
+                crate::mixer::MixerStatus::Healthy => self
+                    .state
+                    .update(Event::ERROR_CLEARED(ErrorFlag::INVALID_MIXER), &self.params),
+                crate::mixer::MixerStatus::InvalidMixer => self.state.update(
+                    Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER),
+                    &self.params,
+                ),
+            }
+        }
+
         reactions::rc_on_param_changed(RcParamChangedCtx {
             rc: &mut self.rc,
             params: ParamsReadPort::new(&self.params),
@@ -517,17 +538,17 @@ mod tests {
     #[derive(Default)]
     struct SensorStageBoard {
         current_time_us: u64,
-        imu: Option<ImuPacket>,
+        imu: Option<ImuPacket<f64>>,
         rc: Option<RcPacket>,
         update_count: usize,
     }
 
     impl BoardIo for SensorStageBoard {
-        fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+        fn update_sensor_bus<R: crate::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
             sensors.clear();
             self.update_count += 1;
             if let Some(imu) = self.imu.take() {
-                sensors.imu = Some(Ok(imu));
+                sensors.imu = Some(Ok(imu.cast()));
             }
             if let Some(rc) = self.rc.take() {
                 sensors.rc = Some(Ok(rc));
@@ -753,7 +774,7 @@ mod tests {
         }
     }
 
-    impl PwmDriver for TestPwm {
+    impl PwmDriver<f64> for TestPwm {
         fn len(&self) -> usize {
             0
         }
@@ -813,15 +834,16 @@ mod tests {
 
     type TestWorld = World<
         TestBoard,
-        quadrotor::Estimator,
-        quadrotor::Controller,
-        quadrotor::Mixer,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
         RecordingCommLink,
         TestPwm,
+        f64,
     >;
 
     fn test_world_with_params(params: Params) -> TestWorld {
-        let mixer = quadrotor::mixer(&params);
+        let mixer = quadrotor::mixer::<f64>(&params);
 
         TestWorld::init(
             TestBoard::default(),
@@ -979,15 +1001,16 @@ mod tests {
             update_count: 0,
         };
         let state = StateManager::new();
-        let mixer = quadrotor::mixer(&params);
+        let mixer = quadrotor::mixer::<f64>(&params);
 
         let mut world = World::<
             SensorStageBoard,
-            quadrotor::Estimator,
-            quadrotor::Controller,
-            quadrotor::Mixer,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
             SensorStageCommLink,
             TestPwm,
+            f64,
         >::init(
             board,
             params,

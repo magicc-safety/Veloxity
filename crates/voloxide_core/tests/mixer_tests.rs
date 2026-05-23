@@ -26,9 +26,17 @@ fn test_params() -> Params {
 }
 
 /// Helper to create a Mixer with deterministic parameters for testing
-fn create_test_mixer() -> MatrixMixer {
+fn create_test_mixer() -> MatrixMixer<f64> {
     let params = test_params();
     MatrixMixer::new(&params)
+}
+
+fn output_types(mixer: &MatrixMixer<f64>) -> &[voloxide_core::mixer::MixerOutputType] {
+    <MatrixMixer<f64> as Mixer<f64>>::output_types(mixer)
+}
+
+fn default_pwm_rates(mixer: &MatrixMixer<f64>) -> &[f64] {
+    <MatrixMixer<f64> as Mixer<f64>>::default_pwm_rates(mixer)
 }
 
 fn armed_state() -> StateManager {
@@ -41,7 +49,7 @@ fn armed_state() -> StateManager {
     state
 }
 
-fn controller_output(thrust: f64, torques: Vector<f64, 3>) -> ControllerOutput {
+fn controller_output(thrust: f64, torques: Vector<f64, 3>) -> ControllerOutput<f64> {
     ControllerOutput::from_forces_torques_and_passthrough(
         Vector::from([0.0, 0.0, -thrust]),
         torques,
@@ -49,7 +57,7 @@ fn controller_output(thrust: f64, torques: Vector<f64, 3>) -> ControllerOutput {
     )
 }
 
-fn mixer_ctx<'a>(state: &'a StateManager, params: &'a Params) -> MixerCtx<'a> {
+fn mixer_ctx<'a>(state: &'a StateManager, params: &'a Params) -> MixerCtx<'a, f64> {
     MixerCtx {
         state,
         params,
@@ -95,14 +103,14 @@ fn test_quad_emits_rosflight_ten_output_shape() {
     let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     assert_eq!(outputs.as_ref().len(), 10);
-    assert_eq!(mixer.output_types().len(), 10);
+    assert_eq!(output_types(&mixer).len(), 10);
     assert!(
-        mixer.output_types()[0..4]
+        output_types(&mixer)[0..4]
             .iter()
             .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Motor)
     );
     assert!(
-        mixer.output_types()[4..10]
+        output_types(&mixer)[4..10]
             .iter()
             .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Aux)
     );
@@ -162,14 +170,14 @@ fn test_custom_mixer_loads_rosflight_parameter_matrix_and_output_types() {
     let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     assert_eq!(
-        mixer.output_types()[0],
+        output_types(&mixer)[0],
         voloxide_core::mixer::MixerOutputType::Motor
     );
     assert_eq!(
-        mixer.output_types()[1],
+        output_types(&mixer)[1],
         voloxide_core::mixer::MixerOutputType::Aux
     );
-    assert_eq!(mixer.default_pwm_rates()[0], 490.0);
+    assert_eq!(default_pwm_rates(&mixer)[0], 490.0);
     assert!((outputs[0] - 0.2).abs() < 1e-6);
     assert_eq!(outputs[1], 0.0);
 }
@@ -193,6 +201,25 @@ fn test_invalid_primary_mixer_reports_status_without_mutating_state() {
 }
 
 #[test]
+fn mixer_config_refreshes_from_param_change_hook_not_mix_polling() {
+    let mut params = test_params();
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(2));
+    let state = armed_state();
+    let mut mixer = MatrixMixer::<f64>::new(&params);
+    let input = controller_output(0.4, Vector::from([0.0, 0.0, 0.0]));
+
+    params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(255));
+    let run_before_event = mixer.mix(&input, mixer_ctx(&state, &params));
+    assert_eq!(run_before_event.status, MixerStatus::Healthy);
+
+    let status = mixer.on_param_changed(&params, ParamId::PARAM_PRIMARY_MIXER);
+    assert_eq!(status, Some(MixerStatus::InvalidMixer));
+
+    let run_after_event = mixer.mix(&input, mixer_ctx(&state, &params));
+    assert_eq!(run_after_event.status, MixerStatus::InvalidMixer);
+}
+
+#[test]
 fn test_canned_hex_x_selection_uses_rosflight_output_ownership() {
     let mut params = test_params();
     params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(4));
@@ -204,17 +231,17 @@ fn test_canned_hex_x_selection_uses_rosflight_output_ownership() {
 
     assert_eq!(run.status, MixerStatus::Healthy);
     assert!(
-        mixer.output_types()[0..6]
+        output_types(&mixer)[0..6]
             .iter()
             .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Motor)
     );
     assert!(
-        mixer.output_types()[6..10]
+        output_types(&mixer)[6..10]
             .iter()
             .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Aux)
     );
-    assert_eq!(mixer.default_pwm_rates()[0], 490.0);
-    assert_eq!(mixer.default_pwm_rates()[8], 50.0);
+    assert_eq!(default_pwm_rates(&mixer)[0], 490.0);
+    assert_eq!(default_pwm_rates(&mixer)[8], 50.0);
     assert!(run.commands[0] > 0.0);
     assert_eq!(run.commands[6], 0.0);
 }
@@ -236,11 +263,11 @@ fn test_fixedwing_mixer_applies_reversal_params_before_mixing() {
     let outputs = mixer.mix(&input, mixer_ctx(&state, &params)).commands;
 
     assert_eq!(
-        mixer.output_types()[0],
+        output_types(&mixer)[0],
         voloxide_core::mixer::MixerOutputType::Servo
     );
     assert_eq!(
-        mixer.output_types()[4],
+        output_types(&mixer)[4],
         voloxide_core::mixer::MixerOutputType::Motor
     );
     assert!((outputs[0] + 0.4).abs() < 1e-6);

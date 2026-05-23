@@ -1619,6 +1619,7 @@ dependencies = [
  "embassy-executor 0.10.0",
  "embassy-futures",
  "embassy-net",
+ "embassy-sync",
  "embassy-time",
  "embedded-hal-nb",
  "nb 1.1.0",
@@ -2555,7 +2556,6 @@ dependencies = [
  "bitflags 2.10.0",
  "critical-section",
  "heapless 0.8.0",
- "libm",
  "nalgebra",
  "num-traits",
 ]

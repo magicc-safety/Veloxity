@@ -19,8 +19,8 @@ Tested wiring:
 Leave `VIN` unconnected when using Pico 2 W `3V3`.
 
 The tested board did not expose an MPU data-ready interrupt pin on the visible header, so the current
-driver polls over SPI. The MPU accel/gyro path is a direct SPI burst. BMP280 reads are throttled
-separately.
+driver polls over SPI. The MPU accel/gyro path is configured and rate-limited to 400 Hz. BMP280 reads
+are throttled separately to 50 Hz.
 
 ## Build The Probe
 
@@ -50,7 +50,7 @@ cat /dev/ttyACM0
 Expected output on the tested module:
 
 ```text
-mpu9250 whoami 0x70
+mpu whoami 0x70
 bmp280 chipid 0x58
 imu seq=4 accel=(0.169,-0.129,10.185) gyro=(0.002,0.026,0.003) temp=28.66
 baro pressure=85626.7 temp=26.52
@@ -77,9 +77,16 @@ VOLOXIDE_WIFI_SSID=MAGICC VOLOXIDE_WIFI_PASSWORD=magiccwifi \
 The board code wires the GY-91 driver into `SensorBus` without changing `voloxide_core`. Accel/gyro
 samples populate `sensors.imu`, and BMP280 samples populate `sensors.baro`.
 
+The current board rates are:
+
+| Sensor | Rate | Notes |
+| --- | ---: | --- |
+| MPU accel/gyro | 400 Hz | MPU output is left at 1 kHz and the board driver enforces a 2.5 ms minimum interval. |
+| BMP280 barometer | 50 Hz | Driver returns no baro sample until 20 ms have elapsed. |
+
 ## Current Limitations
 
 - Magnetometer is not configured for this tested module.
-- The visible module header did not expose data-ready interrupt, so sampling is polled.
+- The visible module header did not expose data-ready interrupt, so sampling is polled at an explicit 400 Hz max rate.
 - Sensor calibration is not complete. Use the current output for bring-up, not final flight tuning.
 - BMP280 altitude is currently left as `0.0`; pressure and temperature are populated.

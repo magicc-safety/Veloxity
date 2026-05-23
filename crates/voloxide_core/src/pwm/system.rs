@@ -1,6 +1,7 @@
 use crate::{
     board::BoardIo,
     comm::messages::{enums::RosflightAuxCmdType, messages::RosflightAuxCmdMsg},
+    math::FlightFloat,
     mixer::MixerOutputType,
     params::{ParamId, ParamValue, Params},
     pwm::{PwmDriver, PwmError},
@@ -27,7 +28,6 @@ impl PwmOutputState {
 pub struct PwmSyncCtx<'a, B, P>
 where
     B: BoardIo,
-    P: PwmDriver,
 {
     pub board: &'a mut B,
     pub pwm: &'a mut P,
@@ -35,10 +35,11 @@ where
     pub state: &'a StateManager,
 }
 
-pub fn sync_pwm_output_state<B, P>(ctx: PwmSyncCtx<'_, B, P>) -> Result<bool, PwmError>
+pub fn sync_pwm_output_state<B, P, R>(ctx: PwmSyncCtx<'_, B, P>) -> Result<bool, PwmError>
 where
     B: BoardIo,
-    P: PwmDriver,
+    P: PwmDriver<R>,
+    R: FlightFloat,
 {
     let desired_enabled = ctx.state.is_armed();
     if desired_enabled == ctx.output.enabled {
@@ -56,15 +57,16 @@ where
     Ok(true)
 }
 
-pub fn write_pwm_commands<B, P>(
+pub fn write_pwm_commands<B, P, R>(
     board: &mut B,
     pwm: &mut P,
     output: &PwmOutputState,
-    commands: &[f64],
+    commands: &[R],
 ) -> Result<bool, PwmError>
 where
     B: BoardIo,
-    P: PwmDriver,
+    P: PwmDriver<R>,
+    R: FlightFloat,
 {
     if !output.is_enabled() {
         return Ok(false);
@@ -74,30 +76,33 @@ where
     Ok(true)
 }
 
-pub fn compose_pwm_outputs(
-    primary_commands: &[f64],
+pub fn compose_pwm_outputs<R: FlightFloat>(
+    primary_commands: &[R],
     primary_output_types: &[MixerOutputType],
     aux_command: Option<&RosflightAuxCmdMsg>,
     state: &StateManager,
     params: &Params,
-) -> [f64; PWM_OUTPUT_CHANNELS] {
+) -> [R; PWM_OUTPUT_CHANNELS] {
     let idle_throttle = match params.get_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE) {
-        ParamValue::Float(value) => value as f64,
-        _ => 0.0,
+        ParamValue::Float(value) => <R as FlightFloat>::from_f32(value),
+        _ => <R as FlightFloat>::from_f32(0.0),
     };
     let spin_when_armed = match params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) {
         ParamValue::Int(value) => value != 0,
         _ => false,
     };
 
-    let mut outputs = [0.0; PWM_OUTPUT_CHANNELS];
+    let mut outputs = [<R as FlightFloat>::from_f32(0.0); PWM_OUTPUT_CHANNELS];
 
     for channel in 0..PWM_OUTPUT_CHANNELS {
         let primary_type = primary_output_types
             .get(channel)
             .copied()
             .unwrap_or(MixerOutputType::Aux);
-        let primary_value = primary_commands.get(channel).copied().unwrap_or(0.0);
+        let primary_value = primary_commands
+            .get(channel)
+            .copied()
+            .unwrap_or_else(|| <R as FlightFloat>::from_f32(0.0));
         let (output_type, value) = if primary_type == MixerOutputType::Aux {
             aux_output_for_channel(aux_command, channel)
         } else {
@@ -111,53 +116,59 @@ pub fn compose_pwm_outputs(
     outputs
 }
 
-fn aux_output_for_channel(
+fn aux_output_for_channel<R: FlightFloat>(
     aux_command: Option<&RosflightAuxCmdMsg>,
     channel: usize,
-) -> (MixerOutputType, f64) {
+) -> (MixerOutputType, R) {
     let Some(aux_command) = aux_command else {
-        return (MixerOutputType::Aux, 0.0);
+        return (MixerOutputType::Aux, <R as FlightFloat>::from_f32(0.0));
     };
 
     match aux_command.type_array[channel] {
-        RosflightAuxCmdType::Disabled => (MixerOutputType::Aux, 0.0),
+        RosflightAuxCmdType::Disabled => (MixerOutputType::Aux, <R as FlightFloat>::from_f32(0.0)),
         RosflightAuxCmdType::Servo => (
             MixerOutputType::Servo,
-            aux_command.aux_cmd_array[channel] as f64,
+            <R as FlightFloat>::from_f32(aux_command.aux_cmd_array[channel]),
         ),
         RosflightAuxCmdType::Motor => (
             MixerOutputType::Motor,
-            aux_command.aux_cmd_array[channel] as f64,
+            <R as FlightFloat>::from_f32(aux_command.aux_cmd_array[channel]),
         ),
     }
 }
 
-fn raw_output_for_type(
+fn raw_output_for_type<R: FlightFloat>(
     output_type: MixerOutputType,
-    value: f64,
+    value: R,
     state: &StateManager,
-    idle_throttle: f64,
+    idle_throttle: R,
     spin_when_armed: bool,
-) -> f64 {
+) -> R {
     match output_type {
-        MixerOutputType::Aux => 0.0,
-        MixerOutputType::Servo => value.clamp(-1.0, 1.0) * 0.5 + 0.5,
+        MixerOutputType::Aux => <R as FlightFloat>::from_f32(0.0),
+        MixerOutputType::Servo => {
+            value.clamp(
+                <R as FlightFloat>::from_f32(-1.0),
+                <R as FlightFloat>::from_f32(1.0),
+            ) * <R as FlightFloat>::from_f32(0.5)
+                + <R as FlightFloat>::from_f32(0.5)
+        }
         MixerOutputType::Gpio => {
-            if value > 0.0 {
-                1.0
+            if value > <R as FlightFloat>::from_f32(0.0) {
+                <R as FlightFloat>::from_f32(1.0)
             } else {
-                0.0
+                <R as FlightFloat>::from_f32(0.0)
             }
         }
         MixerOutputType::Motor => {
             if !state.is_armed() {
-                0.0
-            } else if value > 1.0 {
-                1.0
+                <R as FlightFloat>::from_f32(0.0)
+            } else if value > <R as FlightFloat>::from_f32(1.0) {
+                <R as FlightFloat>::from_f32(1.0)
             } else if value < idle_throttle && spin_when_armed {
                 idle_throttle
-            } else if value < 0.0 {
-                0.0
+            } else if value < <R as FlightFloat>::from_f32(0.0) {
+                <R as FlightFloat>::from_f32(0.0)
             } else {
                 value
             }
@@ -216,7 +227,7 @@ mod tests {
         }
     }
 
-    impl PwmDriver for TestPwm {
+    impl PwmDriver<f64> for TestPwm {
         fn len(&self) -> usize {
             4
         }
@@ -373,7 +384,7 @@ mod tests {
             MixerOutputType::Motor,
             MixerOutputType::Motor,
         ];
-        let outputs = compose_pwm_outputs(
+        let outputs: [f64; PWM_OUTPUT_CHANNELS] = compose_pwm_outputs(
             &[0.1, 0.2, 0.3, 0.4],
             &output_types,
             Some(&aux),
@@ -408,7 +419,7 @@ mod tests {
             MixerOutputType::Motor,
             MixerOutputType::Motor,
         ];
-        let outputs = compose_pwm_outputs(
+        let outputs: [f64; PWM_OUTPUT_CHANNELS] = compose_pwm_outputs(
             &[0.1, 0.2, 0.3, 0.4],
             &output_types,
             Some(&aux),
@@ -442,7 +453,7 @@ mod tests {
             MixerOutputType::Motor,
         ];
 
-        let outputs = compose_pwm_outputs(
+        let outputs: [f64; PWM_OUTPUT_CHANNELS] = compose_pwm_outputs(
             &[0.1, 0.2, 0.3, 0.4],
             &output_types,
             Some(&aux),
@@ -473,7 +484,7 @@ mod tests {
             MixerOutputType::Motor,
         ];
 
-        let outputs = compose_pwm_outputs(
+        let outputs: [f64; PWM_OUTPUT_CHANNELS] = compose_pwm_outputs(
             &[-2.0, 2.0, -0.1, 0.1, -0.5, 1.5],
             &output_types,
             None,

@@ -79,7 +79,8 @@ The IMU path should not cross the core boundary. Sensor samples should enter `vo
 
 The visible GY-91 header used for bring-up does not expose a data-ready interrupt pin. The current
 driver uses polled SPI. That is acceptable for first bring-up because MPU accel/gyro reads are direct
-SPI bursts and slower BMP280 reads are throttled separately.
+SPI bursts, the MPU path is explicitly rate-limited to 400 Hz, and slower BMP280 reads are throttled
+to 50 Hz separately.
 
 ## DShot Notes
 

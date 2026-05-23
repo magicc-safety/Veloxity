@@ -1,4 +1,4 @@
-use crate::{errors, params::Params, sensors::SensorBus};
+use crate::{errors, math::FlightFloat, params::Params, sensors::SensorBus};
 pub mod dummy;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -9,12 +9,30 @@ pub struct BackupData {
     pub do_rearm: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SerialTxPriority(pub u8);
+
+impl SerialTxPriority {
+    pub const LOW: Self = Self(32);
+    pub const NORMAL: Self = Self(128);
+    pub const HIGH: Self = Self(224);
+}
+
+pub type SerialRxPriority = SerialTxPriority;
+
 pub trait BoardIo {
-    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+    fn update_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         sensors.clear();
     }
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>>;
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>>;
+    fn serial_tx_write_priority(
+        &mut self,
+        bytes: &[u8],
+        _priority: SerialTxPriority,
+    ) -> Option<Result<usize, errors::TelemError>> {
+        self.serial_tx_write(bytes)
+    }
 
     fn clock_millis(&self) -> u32;
     fn clock_micros(&self) -> u64;

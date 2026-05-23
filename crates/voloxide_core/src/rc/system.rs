@@ -1,18 +1,18 @@
 use crate::{
-    command::CommandManager, params::Params, rc::Rc, sensors::ProcessedSensors,
+    command::CommandManager, math::FlightFloat, params::Params, rc::Rc, sensors::ProcessedSensors,
     state_machine::StateManager,
 };
 
-pub struct RcCommandStateCtx<'a> {
+pub struct RcCommandStateCtx<'a, R: FlightFloat> {
     pub now_ms: u32,
-    pub sensors: &'a ProcessedSensors,
+    pub sensors: &'a ProcessedSensors<R>,
     pub rc: &'a mut Rc,
     pub command: &'a mut CommandManager,
     pub state: &'a mut StateManager,
     pub params: &'a Params,
 }
 
-pub fn run_rc_command_state(ctx: RcCommandStateCtx<'_>) {
+pub fn run_rc_command_state<R: FlightFloat>(ctx: RcCommandStateCtx<'_, R>) {
     if let Some(rc_packet) = ctx.sensors.rc {
         ctx.rc.receive(&rc_packet);
     }
@@ -45,7 +45,7 @@ mod tests {
                 chan: [0.5; RC_PACKET_CHANNELS],
                 lol: false,
             }),
-            ..ProcessedSensors::default()
+            ..ProcessedSensors::<f64>::default()
         };
         let mut rc = Rc::new();
         let mut command = CommandManager::new();
@@ -77,7 +77,7 @@ mod tests {
                 chan: [0.5; RC_PACKET_CHANNELS],
                 lol: false,
             }),
-            ..ProcessedSensors::default()
+            ..ProcessedSensors::<f64>::default()
         };
         let mut rc = Rc::new();
         let mut command = CommandManager::new();

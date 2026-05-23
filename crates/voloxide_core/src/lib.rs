@@ -9,6 +9,7 @@ pub mod errors;
 pub mod estimator;
 pub mod events;
 pub mod log;
+pub mod math;
 pub mod mixer;
 pub mod packets;
 pub mod params;

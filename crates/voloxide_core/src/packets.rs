@@ -1,5 +1,7 @@
 pub static PARAM_PACKET_SIZE: usize = 2048;
 
+use crate::math::FlightFloat;
+
 pub const ADC_MAX_CHANNELS: usize = 21;
 pub const RC_PACKET_CHANNELS: usize = 24;
 
@@ -59,12 +61,32 @@ pub struct BatteryPacket {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ImuPacket {
+pub struct ImuPacket<R: FlightFloat> {
     pub header: RosflightPacketHeader,
-    pub accel: [f64; 3],
-    pub gyro: [f64; 3],
+    pub accel: [R; 3],
+    pub gyro: [R; 3],
     pub temperature: f32,
     pub seq: u32,
+}
+
+impl<R: FlightFloat> ImuPacket<R> {
+    pub fn cast<T: FlightFloat>(self) -> ImuPacket<T> {
+        ImuPacket {
+            header: self.header,
+            accel: [
+                <T as FlightFloat>::from_flight_float(self.accel[0]),
+                <T as FlightFloat>::from_flight_float(self.accel[1]),
+                <T as FlightFloat>::from_flight_float(self.accel[2]),
+            ],
+            gyro: [
+                <T as FlightFloat>::from_flight_float(self.gyro[0]),
+                <T as FlightFloat>::from_flight_float(self.gyro[1]),
+                <T as FlightFloat>::from_flight_float(self.gyro[2]),
+            ],
+            temperature: self.temperature,
+            seq: self.seq,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -158,5 +180,35 @@ impl Default for ParamPacket {
             header: RosflightPacketHeader::default(),
             values: [0u8; PARAM_PACKET_SIZE],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imu_packet_cast_preserves_values_across_flight_float_types() {
+        let packet = ImuPacket::<f32> {
+            header: RosflightPacketHeader {
+                timestamp: 42,
+                status: 7,
+            },
+            accel: [1.0, -2.0, 3.5],
+            gyro: [0.1, -0.2, 0.3],
+            temperature: 24.0,
+            seq: 9,
+        };
+
+        let widened = packet.cast::<f64>();
+        assert_eq!(widened.header.timestamp, packet.header.timestamp);
+        assert_eq!(widened.header.status, packet.header.status);
+        assert_eq!(widened.accel, [1.0, -2.0, 3.5]);
+        assert_eq!(
+            widened.gyro,
+            [0.1_f32 as f64, -0.2_f32 as f64, 0.3_f32 as f64]
+        );
+        assert_eq!(widened.temperature, 24.0);
+        assert_eq!(widened.seq, 9);
     }
 }

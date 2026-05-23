@@ -12,6 +12,7 @@ use crate::events::{
     ParamListRequested, ParamReadRequested, ParamSetRequested, RcTrimCalibrationRequested,
     ResetOriginRequested, VersionRequested,
 };
+use crate::math::FlightFloat;
 use crate::packets::{RC_PACKET_CHANNELS, RangeType};
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
@@ -23,6 +24,90 @@ const STATUS_INTERVAL_US: u64 = 100_000; // 10 Hz
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
 const OUTPUT_RAW_IMU_DIVISOR: u64 = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TelemetryRates {
+    pub imu_hz: u16,
+    pub attitude_hz: u16,
+    pub output_raw_hz: u16,
+    pub diff_pressure_hz: u16,
+    pub baro_hz: u16,
+    pub mag_hz: u16,
+    pub range_hz: u16,
+    pub battery_hz: u16,
+    pub gnss_hz: u16,
+    pub rc_hz: u16,
+    pub output_raw_imu_divisor: u64,
+}
+
+impl TelemetryRates {
+    pub const fn upstream() -> Self {
+        Self {
+            imu_hz: 0,
+            attitude_hz: 0,
+            output_raw_hz: 0,
+            diff_pressure_hz: 0,
+            baro_hz: 0,
+            mag_hz: 0,
+            range_hz: 0,
+            battery_hz: 0,
+            gnss_hz: 0,
+            rc_hz: 0,
+            output_raw_imu_divisor: OUTPUT_RAW_IMU_DIVISOR,
+        }
+    }
+
+    pub const fn bounded_high_rate_transport() -> Self {
+        Self {
+            imu_hz: 0,
+            attitude_hz: 50,
+            output_raw_hz: 0,
+            diff_pressure_hz: 50,
+            baro_hz: 25,
+            mag_hz: 25,
+            range_hz: 50,
+            battery_hz: 25,
+            gnss_hz: 10,
+            rc_hz: 100,
+            output_raw_imu_divisor: 0,
+        }
+    }
+}
+
+impl Default for TelemetryRates {
+    fn default() -> Self {
+        Self::upstream()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TelemetryRateState {
+    imu_us: u64,
+    attitude_us: u64,
+    output_raw_us: u64,
+    diff_pressure_us: u64,
+    baro_us: u64,
+    mag_us: u64,
+    range_us: u64,
+    battery_us: u64,
+    gnss_us: u64,
+    rc_us: u64,
+}
+
+fn stream_due(now_us: u64, last_us: &mut u64, rate_hz: u16) -> bool {
+    if rate_hz == 0 {
+        return true;
+    }
+
+    let interval_us = 1_000_000_u64 / rate_hz as u64;
+    if *last_us == 0 || now_us.saturating_sub(*last_us) >= interval_us {
+        *last_us = now_us;
+        true
+    } else {
+        false
+    }
+}
+
 pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
     let mut buffer = [0u8; 16];
     let input_bytes = input.as_bytes();
@@ -63,6 +148,8 @@ where
     last_heartbeat_us: u64,
     last_status_send_us: u64,
     output_raw_imu_count: u64,
+    telemetry_rates: TelemetryRates,
+    telemetry_rate_state: TelemetryRateState,
 
     pub sysid: u8,
     comm_link: T,
@@ -80,6 +167,8 @@ where
             last_heartbeat_us: now_us,
             last_status_send_us: now_us,
             output_raw_imu_count: 0,
+            telemetry_rates: TelemetryRates::upstream(),
+            telemetry_rate_state: TelemetryRateState::default(),
 
             sysid: 1,
             comm_link,
@@ -98,11 +187,17 @@ where
             .handle_incoming_messages(board, &mut self.msgs);
     }
 
+    pub fn set_telemetry_rates(&mut self, telemetry_rates: TelemetryRates) {
+        self.telemetry_rates = telemetry_rates;
+        self.telemetry_rate_state = TelemetryRateState::default();
+        self.output_raw_imu_count = 0;
+    }
+
     fn targets_this_system(&self, target_system: u8) -> bool {
         target_system == self.sysid
     }
 
-    pub fn send_named_telemetry_streams<S, A>(
+    pub fn send_named_telemetry_streams<S, A, R>(
         &mut self,
         board: &mut B,
         now_us: u64,
@@ -110,13 +205,14 @@ where
         command_manager: &CommandManager,
         params: &Params,
         estimator_state: &S,
-        processed_sensors: &ProcessedSensors,
+        processed_sensors: &ProcessedSensors<R>,
         actuator_commands: &A,
         sensor_error_count: u16,
         loop_time_us: u16,
     ) where
         S: AttitudeEstimate,
-        A: AsRef<[f64]>,
+        A: AsRef<[R]>,
+        R: FlightFloat,
     {
         if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US {
             self.send_rosflight_heartbeat(
@@ -155,19 +251,25 @@ where
         }
 
         if let Some(imu_packet) = processed_sensors.imu {
-            self.send_rosflight_small_imu(
-                board,
-                SmallImuMsg {
-                    temperature: imu_packet.temperature,
-                    time_boot_us: imu_packet.header.timestamp,
-                    xacc: imu_packet.accel[0] as f32,
-                    yacc: imu_packet.accel[1] as f32,
-                    zacc: imu_packet.accel[2] as f32,
-                    xgyro: imu_packet.gyro[0] as f32,
-                    ygyro: imu_packet.gyro[1] as f32,
-                    zgyro: imu_packet.gyro[2] as f32,
-                },
-            );
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.imu_us,
+                self.telemetry_rates.imu_hz,
+            ) {
+                self.send_rosflight_small_imu(
+                    board,
+                    SmallImuMsg {
+                        temperature: imu_packet.temperature,
+                        time_boot_us: imu_packet.header.timestamp,
+                        xacc: imu_packet.accel[0].to_f32_lossy(),
+                        yacc: imu_packet.accel[1].to_f32_lossy(),
+                        zacc: imu_packet.accel[2].to_f32_lossy(),
+                        xgyro: imu_packet.gyro[0].to_f32_lossy(),
+                        ygyro: imu_packet.gyro[1].to_f32_lossy(),
+                        zgyro: imu_packet.gyro[2].to_f32_lossy(),
+                    },
+                );
+            }
 
             let q = estimator_state.q();
             let qd = estimator_state.q_dot();
@@ -175,132 +277,191 @@ where
             let pitchspeed = 2.0 * (q[0] * qd[2] - q[1] * qd[3] - q[2] * qd[0] + q[3] * qd[1]);
             let yawspeed = 2.0 * (q[0] * qd[3] - q[1] * qd[2] - q[2] * qd[1] + q[3] * qd[0]);
 
-            self.send_rosflight_attitude_quaternion(
-                board,
-                AttitudeQuaternionMsg {
-                    time_boot_ms: (imu_packet.header.timestamp / 1000) as u32,
-                    q1: q[0],
-                    q2: q[1],
-                    q3: q[2],
-                    q4: q[3],
-                    rollspeed,
-                    pitchspeed,
-                    yawspeed,
-                },
-            );
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.attitude_us,
+                self.telemetry_rates.attitude_hz,
+            ) {
+                self.send_rosflight_attitude_quaternion(
+                    board,
+                    AttitudeQuaternionMsg {
+                        time_boot_ms: (imu_packet.header.timestamp / 1000) as u32,
+                        q1: q[0],
+                        q2: q[1],
+                        q3: q[2],
+                        q4: q[3],
+                        rollspeed,
+                        pitchspeed,
+                        yawspeed,
+                    },
+                );
+            }
 
-            if self.output_raw_imu_count % OUTPUT_RAW_IMU_DIVISOR == 0 {
+            let output_raw_due = if self.telemetry_rates.output_raw_hz == 0 {
+                self.telemetry_rates.output_raw_imu_divisor != 0
+                    && self.output_raw_imu_count % self.telemetry_rates.output_raw_imu_divisor == 0
+            } else {
+                stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.output_raw_us,
+                    self.telemetry_rates.output_raw_hz,
+                )
+            };
+            if output_raw_due {
                 self.send_output_raw(board, actuator_commands);
             }
             self.output_raw_imu_count = self.output_raw_imu_count.wrapping_add(1);
         }
 
         if let Some(packet) = processed_sensors.pitot {
-            self.send_rosflight_diff_pressure(
-                board,
-                DiffPressureMsg {
-                    velocity: packet.indicated_airspeed,
-                    diff_pressure: packet.differential_pressure,
-                    temperature: packet.temperature,
-                },
-            );
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.diff_pressure_us,
+                self.telemetry_rates.diff_pressure_hz,
+            ) {
+                self.send_rosflight_diff_pressure(
+                    board,
+                    DiffPressureMsg {
+                        velocity: packet.indicated_airspeed,
+                        diff_pressure: packet.differential_pressure,
+                        temperature: packet.temperature,
+                    },
+                );
+            }
         }
 
         if let Some(packet) = processed_sensors.baro {
-            self.send_rosflight_small_baro(
-                board,
-                SmallBaroMsg {
-                    altitude: packet.altitude,
-                    pressure: packet.pressure,
-                    temperature: packet.temperature,
-                },
-            );
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.baro_us,
+                self.telemetry_rates.baro_hz,
+            ) {
+                self.send_rosflight_small_baro(
+                    board,
+                    SmallBaroMsg {
+                        altitude: packet.altitude,
+                        pressure: packet.pressure,
+                        temperature: packet.temperature,
+                    },
+                );
+            }
         }
 
         if let Some(packet) = processed_sensors.mag {
-            self.send_rosflight_small_mag(
-                board,
-                SmallMagMsg {
-                    xmag: packet.flux[0],
-                    ymag: packet.flux[1],
-                    zmag: packet.flux[2],
-                },
-            );
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.mag_us,
+                self.telemetry_rates.mag_hz,
+            ) {
+                self.send_rosflight_small_mag(
+                    board,
+                    SmallMagMsg {
+                        xmag: packet.flux[0],
+                        ymag: packet.flux[1],
+                        zmag: packet.flux[2],
+                    },
+                );
+            }
         }
 
         if let Some(packet) = processed_sensors.range {
-            self.send_rosflight_small_range(
-                board,
-                SmallRangeMsg {
-                    type_: match packet.range_type {
-                        RangeType::Sonar => RosflightRangeType::RosflightRangeSonar,
-                        RangeType::Lidar => RosflightRangeType::RosflightRangeLidar,
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.range_us,
+                self.telemetry_rates.range_hz,
+            ) {
+                self.send_rosflight_small_range(
+                    board,
+                    SmallRangeMsg {
+                        type_: match packet.range_type {
+                            RangeType::Sonar => RosflightRangeType::RosflightRangeSonar,
+                            RangeType::Lidar => RosflightRangeType::RosflightRangeLidar,
+                        },
+                        range: packet.range,
+                        max_range: packet.max_range,
+                        min_range: packet.min_range,
                     },
-                    range: packet.range,
-                    max_range: packet.max_range,
-                    min_range: packet.min_range,
-                },
-            );
+                );
+            }
         }
 
         if let Some(packet) = processed_sensors.battery {
-            self.send_rosflight_battery_status(
-                board,
-                BatteryStatusMsg {
-                    battery_voltage: packet.voltage,
-                    battery_current: packet.current,
-                },
-            );
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.battery_us,
+                self.telemetry_rates.battery_hz,
+            ) {
+                self.send_rosflight_battery_status(
+                    board,
+                    BatteryStatusMsg {
+                        battery_voltage: packet.voltage,
+                        battery_current: packet.current,
+                    },
+                );
+            }
         }
 
         if let Some(packet) = processed_sensors.gnss {
-            self.send_rosflight_gnss(
-                board,
-                RosflightGnssMsg {
-                    rosflight_timestamp: packet.header.timestamp,
-                    seconds: packet.unix_seconds,
-                    nanos: packet.unix_nanos,
-                    fix_type: packet.fix_type,
-                    num_sat: packet.num_sats,
-                    lat: packet.lat,
-                    lon: packet.lon,
-                    height: packet.height,
-                    vel_n: packet.vel_n,
-                    vel_e: packet.vel_e,
-                    vel_d: packet.vel_d,
-                    s_acc: packet.s_acc,
-                    h_acc: packet.h_acc,
-                    v_acc: packet.v_acc,
-                },
-            );
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.gnss_us,
+                self.telemetry_rates.gnss_hz,
+            ) {
+                self.send_rosflight_gnss(
+                    board,
+                    RosflightGnssMsg {
+                        rosflight_timestamp: packet.header.timestamp,
+                        seconds: packet.unix_seconds,
+                        nanos: packet.unix_nanos,
+                        fix_type: packet.fix_type,
+                        num_sat: packet.num_sats,
+                        lat: packet.lat,
+                        lon: packet.lon,
+                        height: packet.height,
+                        vel_n: packet.vel_n,
+                        vel_e: packet.vel_e,
+                        vel_d: packet.vel_d,
+                        s_acc: packet.s_acc,
+                        h_acc: packet.h_acc,
+                        v_acc: packet.v_acc,
+                    },
+                );
+            }
         }
 
         if let Some(packet) = processed_sensors.rc {
-            let mut channels = [0u16; RC_PACKET_CHANNELS];
-            let count = (packet.n_chan as usize).min(8).min(RC_PACKET_CHANNELS);
-            for (dst, src) in channels.iter_mut().zip(packet.chan.iter()).take(count) {
-                *dst = (*src * 1000.0 + 1000.0) as u16;
-            }
+            if stream_due(
+                now_us,
+                &mut self.telemetry_rate_state.rc_us,
+                self.telemetry_rates.rc_hz,
+            ) {
+                let mut channels = [0u16; RC_PACKET_CHANNELS];
+                let count = (packet.n_chan as usize).min(8).min(RC_PACKET_CHANNELS);
+                for (dst, src) in channels.iter_mut().zip(packet.chan.iter()).take(count) {
+                    *dst = (*src * 1000.0 + 1000.0) as u16;
+                }
 
-            self.send_rosflight_rc_raw(
-                board,
-                RcChannelsMsg {
-                    time_boot_ms: board.clock_millis(),
-                    chancount: 0,
-                    channels,
-                    rssi: 0,
-                },
-            );
+                self.send_rosflight_rc_raw(
+                    board,
+                    RcChannelsMsg {
+                        time_boot_ms: board.clock_millis(),
+                        chancount: 0,
+                        channels,
+                        rssi: 0,
+                    },
+                );
+            }
         }
     }
 
-    fn send_output_raw<A>(&mut self, board: &mut B, actuator_commands: &A)
+    fn send_output_raw<A, R>(&mut self, board: &mut B, actuator_commands: &A)
     where
-        A: AsRef<[f64]>,
+        A: AsRef<[R]>,
+        R: FlightFloat,
     {
         let mut values = [0.0f32; 14];
         for (dst, src) in values.iter_mut().zip(actuator_commands.as_ref().iter()) {
-            *dst = *src as f32;
+            *dst = src.to_f32_lossy();
         }
         self.send_rosflight_output_raw(
             board,
@@ -1050,9 +1211,9 @@ mod tests {
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad::AttitudeState::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
         let actuator_commands = [0.1, 0.2, 0.3, 0.4];
-        let mut processed_sensors = ProcessedSensors::default();
+        let mut processed_sensors = ProcessedSensors::<f64>::default();
         processed_sensors.imu = Some(crate::packets::ImuPacket {
             header: crate::packets::RosflightPacketHeader {
                 timestamp: 9_000,
@@ -1153,8 +1314,8 @@ mod tests {
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad::AttitudeState::default();
-        let mut processed_sensors = ProcessedSensors::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let mut processed_sensors = ProcessedSensors::<f64>::default();
         processed_sensors.imu = Some(crate::packets::ImuPacket::default());
 
         for i in 0..8 {
@@ -1197,6 +1358,78 @@ mod tests {
     }
 
     #[test]
+    fn explicit_telemetry_rates_bound_high_rate_streams() {
+        let mut board = TestBoard {
+            current_time_us: 1_000,
+            tx_write_count: 0,
+            ..Default::default()
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        manager.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let mut processed_sensors = ProcessedSensors::<f64>::default();
+        processed_sensors.imu = Some(crate::packets::ImuPacket::default());
+        processed_sensors.baro = Some(crate::packets::BaroPacket::default());
+
+        let send_at = |manager: &mut CommManager<TestBoard, RecordingCommLink>,
+                       board: &mut TestBoard,
+                       now_us: u64| {
+            board.current_time_us = now_us;
+            manager.send_named_telemetry_streams(
+                board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &processed_sensors,
+                &[0.0; 4],
+                0,
+                0,
+            );
+        };
+
+        send_at(&mut manager, &mut board, 1_000);
+        assert_eq!(manager.comm_link().imu_count, 1);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 0);
+
+        send_at(&mut manager, &mut board, 2_000);
+        assert_eq!(manager.comm_link().imu_count, 2);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 0);
+
+        send_at(&mut manager, &mut board, 3_500);
+        assert_eq!(manager.comm_link().imu_count, 3);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 0);
+
+        send_at(&mut manager, &mut board, 11_000);
+        assert_eq!(manager.comm_link().imu_count, 4);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 0);
+
+        send_at(&mut manager, &mut board, 21_000);
+        assert_eq!(manager.comm_link().imu_count, 5);
+        assert_eq!(manager.comm_link().attitude_count, 2);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 0);
+
+        send_at(&mut manager, &mut board, 41_000);
+        assert_eq!(manager.comm_link().imu_count, 6);
+        assert_eq!(manager.comm_link().attitude_count, 3);
+        assert_eq!(manager.comm_link().baro_count, 2);
+        assert_eq!(manager.comm_link().output_raw_count, 0);
+    }
+
+    #[test]
     fn named_rc_telemetry_matches_upstream_raw_channel_packing() {
         let mut board = TestBoard {
             current_time_us: 1_234_000,
@@ -1207,8 +1440,8 @@ mod tests {
         let state_manager = StateManager::new();
         let command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad::AttitudeState::default();
-        let mut processed_sensors = ProcessedSensors::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let mut processed_sensors = ProcessedSensors::<f64>::default();
         let mut rc_packet = crate::packets::RcPacket::default();
         rc_packet.n_chan = RC_PACKET_CHANNELS as u32;
         let test_channels = [
@@ -1255,8 +1488,8 @@ mod tests {
         let state_manager = StateManager::new();
         let mut command_manager = CommandManager::new();
         let params = Params::new();
-        let estimator_state = crate::estimator::quad::AttitudeState::default();
-        let processed_sensors = ProcessedSensors::default();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let processed_sensors = ProcessedSensors::<f64>::default();
         let actuator_commands = [0.0, 0.0, 0.0, 0.0];
 
         command_manager.set_new_offboard_command(

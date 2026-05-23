@@ -1,19 +1,20 @@
 use crate::{
+    math::FlightFloat,
     params::{ParamId, ParamValue, Params},
     sensors::ProcessedSensors,
     state_machine::{ErrorFlag, Event, StateManager},
 };
 
-pub struct SensorHealthCtx<'a> {
+pub struct SensorHealthCtx<'a, R: FlightFloat> {
     pub now_us: u64,
-    pub sensors: &'a ProcessedSensors,
+    pub sensors: &'a ProcessedSensors<R>,
     pub params: &'a Params,
     pub state: &'a mut StateManager,
     pub last_imu_seen: &'a mut u64,
     pub imu_timeout_us: u64,
 }
 
-pub fn update_sensor_health(ctx: SensorHealthCtx<'_>) {
+pub fn update_sensor_health<R: FlightFloat>(ctx: SensorHealthCtx<'_, R>) {
     if ctx.sensors.imu.is_some() {
         *ctx.last_imu_seen = ctx.now_us;
         ctx.state.update(
@@ -58,7 +59,7 @@ mod tests {
 
     const TEST_IMU_TIMEOUT_US: u64 = 100_000;
 
-    fn imu_packet(timestamp: u64) -> ImuPacket {
+    fn imu_packet(timestamp: u64) -> ImuPacket<f64> {
         ImuPacket {
             header: RosflightPacketHeader {
                 timestamp,
@@ -79,7 +80,7 @@ mod tests {
         let mut last_imu_seen = 0;
         let sensors = ProcessedSensors {
             imu: Some(imu_packet(1)),
-            ..ProcessedSensors::default()
+            ..ProcessedSensors::<f64>::default()
         };
 
         update_sensor_health(SensorHealthCtx {
@@ -105,7 +106,7 @@ mod tests {
         let mut last_imu_seen = 0;
         let sensors = ProcessedSensors {
             imu: Some(imu_packet(1)),
-            ..ProcessedSensors::default()
+            ..ProcessedSensors::<f64>::default()
         };
 
         update_sensor_health(SensorHealthCtx {
@@ -126,7 +127,7 @@ mod tests {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
         let mut last_imu_seen = 0;
-        let sensors = ProcessedSensors::default();
+        let sensors = ProcessedSensors::<f64>::default();
 
         update_sensor_health(SensorHealthCtx {
             now_us: TEST_IMU_TIMEOUT_US + 1,
@@ -153,7 +154,7 @@ mod tests {
         let mut last_imu_seen = 0;
         let sensors = ProcessedSensors {
             imu: Some(imu_packet(5)),
-            ..ProcessedSensors::default()
+            ..ProcessedSensors::<f64>::default()
         };
 
         update_sensor_health(SensorHealthCtx {

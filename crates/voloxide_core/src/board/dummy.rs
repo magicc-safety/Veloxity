@@ -1,5 +1,6 @@
 use crate::board::BoardIo;
 use crate::errors;
+use crate::math::FlightFloat;
 use crate::packets;
 use crate::sensors::SensorBus;
 
@@ -9,9 +10,9 @@ pub struct DummyBoard {
 }
 
 impl BoardIo for DummyBoard {
-    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+    fn update_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         sensors.clear();
-        sensors.imu = Some(Ok(packets::ImuPacket::default()));
+        sensors.imu = Some(Ok(packets::ImuPacket::<R>::default()));
         sensors.mag = Some(Ok(packets::MagPacket::default()));
         sensors.baro = Some(Ok(packets::BaroPacket::default()));
         sensors.pitot = Some(Ok(packets::PitotPacket::default()));
@@ -54,7 +55,7 @@ mod tests {
     #[test]
     fn dummy_board_populates_named_sensor_bus() {
         let mut board = DummyBoard::default();
-        let mut sensors = SensorBus::default();
+        let mut sensors = SensorBus::<f64>::default();
 
         BoardIo::update_sensor_bus(&mut board, &mut sensors);
 

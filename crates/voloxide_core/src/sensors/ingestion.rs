@@ -1,4 +1,5 @@
 use crate::{
+    math::FlightFloat,
     packets::*,
     params::Params,
     sensors::processors::{
@@ -10,7 +11,8 @@ use crate::{
 };
 
 pub struct SensorProcessorSet<
-    ImuProc = ImuProcessor,
+    R: FlightFloat,
+    ImuProc = ImuProcessor<R>,
     MagProc = MagProcessor,
     BaroProc = BaroProcessor,
     PitotProc = PitotProcessor,
@@ -20,6 +22,7 @@ pub struct SensorProcessorSet<
     RcProc = PassthroughRcProcessor,
     AttitudeProc = PassthroughAttitudeProcessor,
 > {
+    _real: core::marker::PhantomData<R>,
     pub imu: ImuProc,
     pub mag: MagProc,
     pub baro: BaroProc,
@@ -31,9 +34,20 @@ pub struct SensorProcessorSet<
     pub attitude: AttitudeProc,
 }
 
-impl<ImuProc, MagProc, BaroProc, PitotProc, RangeProc, GnssProc, BatteryProc, RcProc, AttitudeProc>
-    Default
+impl<
+    R,
+    ImuProc,
+    MagProc,
+    BaroProc,
+    PitotProc,
+    RangeProc,
+    GnssProc,
+    BatteryProc,
+    RcProc,
+    AttitudeProc,
+> Default
     for SensorProcessorSet<
+        R,
         ImuProc,
         MagProc,
         BaroProc,
@@ -45,6 +59,7 @@ impl<ImuProc, MagProc, BaroProc, PitotProc, RangeProc, GnssProc, BatteryProc, Rc
         AttitudeProc,
     >
 where
+    R: FlightFloat,
     ImuProc: Default,
     MagProc: Default,
     BaroProc: Default,
@@ -57,6 +72,7 @@ where
 {
     fn default() -> Self {
         Self {
+            _real: core::marker::PhantomData,
             imu: ImuProc::default(),
             mag: MagProc::default(),
             baro: BaroProc::default(),
@@ -71,6 +87,7 @@ where
 }
 
 pub fn process_sensor_bus<
+    R,
     ImuProc,
     MagProc,
     BaroProc,
@@ -81,9 +98,10 @@ pub fn process_sensor_bus<
     RcProc,
     AttitudeProc,
 >(
-    raw: &mut SensorBus,
-    processed: &mut ProcessedSensors,
+    raw: &mut SensorBus<R>,
+    processed: &mut ProcessedSensors<R>,
     processors: &mut SensorProcessorSet<
+        R,
         ImuProc,
         MagProc,
         BaroProc,
@@ -97,7 +115,8 @@ pub fn process_sensor_bus<
     flags: &mut CalibrationFlags,
     params: &mut Params,
 ) where
-    ImuProc: SensorPacketProcessor<ImuPacket>,
+    R: FlightFloat,
+    ImuProc: SensorPacketProcessor<ImuPacket<R>>,
     MagProc: SensorPacketProcessor<MagPacket>,
     BaroProc: SensorPacketProcessor<BaroPacket>,
     PitotProc: SensorPacketProcessor<PitotPacket>,
@@ -133,9 +152,10 @@ mod tests {
 
     #[test]
     fn process_sensor_bus_moves_raw_packets_into_named_processed_fields() {
-        let mut raw = SensorBus::default();
-        let mut processed = ProcessedSensors::default();
+        let mut raw = SensorBus::<f64>::default();
+        let mut processed = ProcessedSensors::<f64>::default();
         let mut processors = SensorProcessorSet::<
+            f64,
             PassthroughImuProcessor,
             PassthroughMagProcessor,
             PassthroughBaroProcessor,

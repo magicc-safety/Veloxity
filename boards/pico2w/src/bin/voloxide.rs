@@ -40,18 +40,37 @@ use rp2350_platform::hal::{
 #[cfg(feature = "wifi-mavlink")]
 use static_cell::StaticCell;
 use voloxide_core::{
-    board::BoardIo, params::Params, state_machine::StateManager, vehicle::quadrotor, world::World,
+    board::BoardIo, comm::TelemetryRates, params::Params, state_machine::StateManager,
+    vehicle::quadrotor, world::World,
 };
 use voloxide_mavlink::MavlinkInterface;
 
+type PicoReal = f32;
+
 type Pico2WWorld = World<
     board::Board,
-    quadrotor::Estimator,
-    quadrotor::Controller,
-    quadrotor::Mixer,
+    quadrotor::Estimator<PicoReal>,
+    quadrotor::Controller<PicoReal>,
+    quadrotor::Mixer<PicoReal>,
     MavlinkInterface,
     PioPwmDriver,
+    PicoReal,
 >;
+
+#[cfg(feature = "wifi-mavlink")]
+const WIFI_MAVLINK_TELEMETRY_RATES: TelemetryRates = TelemetryRates {
+    imu_hz: 200,
+    attitude_hz: 50,
+    output_raw_hz: 0,
+    diff_pressure_hz: 25,
+    baro_hz: 25,
+    mag_hz: 25,
+    range_hz: 25,
+    battery_hz: 10,
+    gnss_hz: 10,
+    rc_hz: 50,
+    output_raw_imu_divisor: 0,
+};
 
 #[cfg(feature = "wifi-mavlink")]
 static mut CORE1_STACK: Stack<65536> = Stack::new();
@@ -214,7 +233,10 @@ async fn wifi_mavlink_task(
                     }
                 } else {
                     peer = Some(metadata);
-                    let _ = mailbox.push_rx(&udp_rx[..n]);
+                    let _ = mailbox.push_rx_priority(
+                        &udp_rx[..n],
+                        voloxide_core::board::SerialRxPriority::NORMAL,
+                    );
                 }
             }
             Either::First(Err(_)) | Either::Second(()) => {}
@@ -251,16 +273,21 @@ struct WifiCoreResources {
 
 fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> Pico2WWorld {
     let mixer = quadrotor::mixer(&params);
-    Pico2WWorld::init(
+    let mut world = Pico2WWorld::init(
         board,
         params,
         MavlinkInterface::new(),
         StateManager::new(),
-        quadrotor::Estimator::default(),
-        quadrotor::Controller::default(),
+        quadrotor::Estimator::<PicoReal>::default(),
+        quadrotor::Controller::<PicoReal>::default(),
         mixer,
         pwm_driver,
-    )
+    );
+    #[cfg(feature = "wifi-mavlink")]
+    world.set_telemetry_rates(WIFI_MAVLINK_TELEMETRY_RATES);
+    #[cfg(not(feature = "wifi-mavlink"))]
+    world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
+    world
 }
 
 #[cfg(feature = "wifi-mavlink")]
@@ -269,40 +296,16 @@ fn trace(uart: &mut Uart<'_, rp::uart::Blocking>, message: &[u8]) {
     let _ = uart.blocking_flush();
 }
 
-#[cfg(feature = "wifi-mavlink")]
+#[cfg(not(feature = "wifi-mavlink"))]
+fn trace(uart: &mut Uart<'_, rp::uart::Blocking>, message: &[u8]) {
+    let _ = uart.blocking_write(message);
+    let _ = uart.blocking_flush();
+}
+
+#[cfg(any(feature = "wifi-mavlink", not(feature = "wifi-mavlink")))]
 fn trace_delay() {
     for _ in 0..100_000 {
         core::hint::spin_loop();
-    }
-}
-
-#[cfg(feature = "wifi-mavlink")]
-fn trace_wifi_state(uart: &mut Uart<'_, rp::uart::Blocking>, state: u32) {
-    match state {
-        1 => trace(uart, b"wifi init\r\n"),
-        2 => trace(uart, b"wifi cyw43 new\r\n"),
-        3 => trace(uart, b"wifi joining\r\n"),
-        4 => trace(uart, b"wifi join retry\r\n"),
-        5 => trace(uart, b"wifi joined\r\n"),
-        6 => trace(uart, b"wifi wait link\r\n"),
-        7 => trace(uart, b"wifi wait dhcp\r\n"),
-        8 => trace(uart, b"wifi dhcp ok\r\n"),
-        9 => trace(uart, b"wifi udp ok\r\n"),
-        10 => trace(uart, b"wifi missing config\r\n"),
-        20 => trace(uart, b"core1 entry\r\n"),
-        21 => trace(uart, b"core1 executor\r\n"),
-        22 => trace(uart, b"wifi task token ok\r\n"),
-        23 => trace(uart, b"wifi task spawn ok\r\n"),
-        24 => trace(uart, b"wifi task token failed\r\n"),
-        25 => trace(uart, b"wifi task spawn failed\r\n"),
-        31 => trace(uart, b"wifi config ok\r\n"),
-        32 => trace(uart, b"wifi firmware refs ok\r\n"),
-        33 => trace(uart, b"wifi pins ok\r\n"),
-        34 => trace(uart, b"wifi pio ok\r\n"),
-        35 => trace(uart, b"wifi spi ok\r\n"),
-        36 => trace(uart, b"wifi cyw43 ready\r\n"),
-        37 => trace(uart, b"wifi control init ok\r\n"),
-        _ => {}
     }
 }
 
@@ -420,36 +423,27 @@ fn main() -> ! {
         let mut world = init_world(board, params, pwm_driver);
         trace(&mut debug_uart, b"world ok\r\n");
 
-        let mut loops = 0_u32;
-        let mut last_core1_heartbeat = 0_u32;
-        let mut last_wifi_state = 0_u32;
         loop {
             world.run_once();
-            loops = loops.wrapping_add(1);
-            if loops <= 10 || loops % 10_000 == 0 {
-                trace(&mut debug_uart, b"world tick\r\n");
-            }
-            let stats = mailbox.stats();
-            if stats.core1_heartbeats != last_core1_heartbeat {
-                trace(&mut debug_uart, b"core1 tick\r\n");
-                last_core1_heartbeat = stats.core1_heartbeats;
-            }
-            if stats.wifi_state != last_wifi_state {
-                trace_wifi_state(&mut debug_uart, stats.wifi_state);
-                last_wifi_state = stats.wifi_state;
-            }
         }
     }
 
     #[cfg(not(feature = "wifi-mavlink"))]
     {
-        let config = Pico2WConfig::default();
-        let mavlink_uart = Uart::new_blocking(
+        let mut mavlink_uart = Uart::new_blocking(
             peripherals.UART0,
             peripherals.PIN_0,
             peripherals.PIN_1,
             mavlink_uart_config(),
         );
+        for _ in 0..5 {
+            trace(&mut mavlink_uart, b"voloxide pico2w uart preflight\r\n");
+            trace_delay();
+        }
+
+        let config = Pico2WConfig::default();
+        trace(&mut mavlink_uart, b"config ok\r\n");
+        trace(&mut mavlink_uart, b"mavlink uart ok\r\n");
         let gy91 = Gy91::new(
             Spi::new_blocking(
                 peripherals.SPI1,

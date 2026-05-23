@@ -1,4 +1,4 @@
-use crate::board::BoardIo;
+use crate::{board::BoardIo, math::FlightFloat};
 
 pub mod system;
 
@@ -16,7 +16,7 @@ pub enum PwmOutputProtocol {
     Dshot,
 }
 
-pub const STANDARD_PWM_DEFAULT_RATE_HZ: f64 = 50.0;
+pub const STANDARD_PWM_DEFAULT_RATE_HZ: f32 = 50.0;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct DshotCommand {
@@ -29,11 +29,15 @@ impl DshotCommand {
     pub const MAX_THROTTLE: u16 = 2047;
     pub const FRAME_BITS: usize = 16;
 
-    pub fn from_normalized(value: f64) -> Self {
-        let normalized = value.clamp(0.0, 1.0);
-        let span = (Self::MAX_THROTTLE - Self::MIN_THROTTLE) as f64;
+    pub fn from_normalized<R: FlightFloat>(value: R) -> Self {
+        let normalized = value.clamp(
+            <R as FlightFloat>::from_f32(0.0),
+            <R as FlightFloat>::from_f32(1.0),
+        );
+        let span = <R as FlightFloat>::from_u64((Self::MAX_THROTTLE - Self::MIN_THROTTLE) as u64);
         Self {
-            throttle: (normalized * span + Self::MIN_THROTTLE as f64) as u16,
+            throttle: (normalized * span + <R as FlightFloat>::from_u64(Self::MIN_THROTTLE as u64))
+                .to_f32_lossy() as u16,
             telemetry: false,
         }
     }
@@ -50,29 +54,33 @@ impl DshotCommand {
     }
 }
 
-pub fn output_protocol_for_rate(rate_hz: f64) -> Result<PwmOutputProtocol, PwmError> {
-    if !rate_hz.is_finite() || rate_hz < 0.0 {
+pub fn output_protocol_for_rate<R: FlightFloat>(rate_hz: R) -> Result<PwmOutputProtocol, PwmError> {
+    if !rate_hz.is_finite() || rate_hz < <R as FlightFloat>::from_f32(0.0) {
         return Err(PwmError::InvalidRate);
     }
 
-    if rate_hz <= 490.0 {
+    if rate_hz <= <R as FlightFloat>::from_f32(490.0) {
         Ok(PwmOutputProtocol::StandardPwm)
-    } else if (150_000.0..=1_200_000.0).contains(&rate_hz) {
+    } else if rate_hz >= <R as FlightFloat>::from_f32(150_000.0)
+        && rate_hz <= <R as FlightFloat>::from_f32(1_200_000.0)
+    {
         Ok(PwmOutputProtocol::Dshot)
     } else {
         Err(PwmError::InvalidRate)
     }
 }
 
-pub fn effective_output_rate_hz(rate_hz: f64) -> Result<f64, PwmError> {
+pub fn effective_output_rate_hz<R: FlightFloat>(rate_hz: R) -> Result<R, PwmError> {
     let protocol = output_protocol_for_rate(rate_hz)?;
     match protocol {
-        PwmOutputProtocol::StandardPwm if rate_hz == 0.0 => Ok(STANDARD_PWM_DEFAULT_RATE_HZ),
+        PwmOutputProtocol::StandardPwm if rate_hz == <R as FlightFloat>::from_f32(0.0) => {
+            Ok(<R as FlightFloat>::from_f32(STANDARD_PWM_DEFAULT_RATE_HZ))
+        }
         _ => Ok(rate_hz),
     }
 }
 
-pub trait PwmDriver {
+pub trait PwmDriver<R: FlightFloat> {
     fn len(&self) -> usize;
     fn is_enabled(&self) -> bool;
 
@@ -104,16 +112,12 @@ pub trait PwmDriver {
     ///
     /// Boards that cannot change rates at runtime may ignore this hook, but
     /// the core still propagates the mixer-owned rate resource explicitly.
-    fn configure_output_rates(&mut self, _rates_hz: &[f64]) -> Result<(), PwmError> {
+    fn configure_output_rates(&mut self, _rates_hz: &[R]) -> Result<(), PwmError> {
         Ok(())
     }
 
     // actually loops over the channels (up to self.len()) and sends pwm commands via set_duty_cycle
-    fn send_commands<B: BoardIo>(
-        &mut self,
-        board: &mut B,
-        commands: &[f64],
-    ) -> Result<(), PwmError>;
+    fn send_commands<B: BoardIo>(&mut self, board: &mut B, commands: &[R]) -> Result<(), PwmError>;
 }
 
 #[cfg(test)]

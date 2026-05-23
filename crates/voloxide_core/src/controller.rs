@@ -1,20 +1,21 @@
 pub mod quad;
 use crate::command::CombinedControl;
+use crate::math::FlightFloat;
 use crate::params::Params;
 use crate::state_machine::StateManager;
 
-pub struct ControllerCtx<'a> {
+pub struct ControllerCtx<'a, R: FlightFloat> {
     pub state_manager: &'a mut StateManager,
     pub command: &'a CombinedControl,
     pub params: &'a Params,
-    pub air_density: f64,
-    pub dt: f64,
+    pub air_density: R,
+    pub dt: R,
 }
 
-pub trait Controller {
+pub trait Controller<R: FlightFloat> {
     type State;
     type ControlOutput;
-    fn control(&mut self, state: &Self::State, ctx: ControllerCtx<'_>) -> Self::ControlOutput;
+    fn control(&mut self, state: &Self::State, ctx: ControllerCtx<'_, R>) -> Self::ControlOutput;
     fn update_gains(&mut self, params: &Params);
 }
 

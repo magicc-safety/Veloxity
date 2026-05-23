@@ -2,7 +2,7 @@ use crate::generated::dialects::rosflight::{Rosflight, messages as mav_messages}
 use crate::parser;
 use mavio::Frame;
 use mavio::prelude::*;
-use voloxide_core::board;
+use voloxide_core::board::{self, SerialTxPriority};
 use voloxide_core::comm::interface::CommInterface;
 use voloxide_core::comm::messages::{Messages, Store, messages as core_messages};
 
@@ -45,6 +45,7 @@ impl MavlinkInterface {
         board: &mut B,
         system_id: u8,
         msg: T,
+        priority: SerialTxPriority,
     ) {
         let frame = match self.frame_builder(system_id, msg) {
             Ok(f) => f,
@@ -87,7 +88,7 @@ impl MavlinkInterface {
         buf[pos..pos + 2].copy_from_slice(&crc.to_le_bytes());
         pos += 2;
 
-        board.serial_tx_write(&buf[..pos]);
+        board.serial_tx_write_priority(&buf[..pos], priority);
     }
 
     fn process_rosflight_message(&mut self, message: Rosflight, msgs: &mut Messages) {
@@ -140,7 +141,12 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightStatusMsg,
     ) {
-        self.send_message(board, system_id, mav_messages::RosflightStatus::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::RosflightStatus::from(msg),
+            SerialTxPriority::HIGH,
+        );
     }
     fn send_timesync(
         &mut self,
@@ -148,7 +154,12 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::TimesyncMsg,
     ) -> bool {
-        self.send_message(board, system_id, mav_messages::Timesync::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::Timesync::from(msg),
+            SerialTxPriority::HIGH,
+        );
         return true;
     }
     fn send_named_value(
@@ -157,7 +168,12 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::ParamValueMsg,
     ) {
-        self.send_message(board, system_id, mav_messages::ParamValue::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::ParamValue::from(msg),
+            SerialTxPriority::HIGH,
+        );
     }
     fn send_heartbeat(
         &mut self,
@@ -165,7 +181,12 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::HeartbeatMsg,
     ) -> bool {
-        self.send_message(board, system_id, mav_messages::Heartbeat::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::Heartbeat::from(msg),
+            SerialTxPriority::HIGH,
+        );
         return true;
     }
     fn send_version(
@@ -174,7 +195,12 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightVersionMsg,
     ) {
-        self.send_message(board, system_id, mav_messages::RosflightVersion::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::RosflightVersion::from(msg),
+            SerialTxPriority::HIGH,
+        );
     }
     fn send_diff_pressure(
         &mut self,
@@ -182,13 +208,28 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::DiffPressureMsg,
     ) {
-        self.send_message(board, system_id, mav_messages::DiffPressure::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::DiffPressure::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_baro(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallBaroMsg) {
-        self.send_message(board, system_id, mav_messages::SmallBaro::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::SmallBaro::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_imu(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallImuMsg) {
-        self.send_message(board, system_id, mav_messages::SmallImu::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::SmallImu::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_attitude(
         &mut self,
@@ -200,6 +241,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::AttitudeQuaternion::from(msg),
+            SerialTxPriority::LOW,
         );
     }
     fn send_output_raw(
@@ -212,19 +254,40 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightOutputRaw::from(msg),
+            SerialTxPriority::LOW,
         );
     }
     fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: core_messages::RcChannelsMsg) {
-        self.send_message(board, system_id, mav_messages::RcChannels::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::RcChannels::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_range(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallRangeMsg) {
-        self.send_message(board, system_id, mav_messages::SmallRange::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::SmallRange::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_mag(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallMagMsg) {
-        self.send_message(board, system_id, mav_messages::SmallMag::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::SmallMag::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: core_messages::RosflightGnssMsg) {
-        self.send_message(board, system_id, mav_messages::RosflightGnss::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::RosflightGnss::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_cmd_ack(
         &mut self,
@@ -232,7 +295,12 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightCmdAckMsg,
     ) {
-        self.send_message(board, system_id, mav_messages::RosflightCmdAck::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::RosflightCmdAck::from(msg),
+            SerialTxPriority::HIGH,
+        );
     }
     fn send_rc_channels(
         &mut self,
@@ -240,7 +308,12 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RcChannelsMsg,
     ) {
-        self.send_message(board, system_id, mav_messages::RcChannels::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::RcChannels::from(msg),
+            SerialTxPriority::LOW,
+        );
     }
     fn send_battery_status(
         &mut self,
@@ -252,10 +325,16 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightBatteryStatus::from(msg),
+            SerialTxPriority::LOW,
         );
     }
     fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: core_messages::StatustextMsg) {
-        self.send_message(board, system_id, mav_messages::Statustext::from(msg));
+        self.send_message(
+            board,
+            system_id,
+            mav_messages::Statustext::from(msg),
+            SerialTxPriority::HIGH,
+        );
     }
     fn send_hard_error(
         &mut self,
@@ -267,6 +346,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightHardError::from(msg),
+            SerialTxPriority::HIGH,
         );
     }
 }

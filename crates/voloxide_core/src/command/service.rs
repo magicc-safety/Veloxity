@@ -712,7 +712,7 @@ mod tests {
         rc.run(0, &params, &mut state);
         let mut command = CommandManager::new();
         command.run(0, &params, &mut rc, &mut state);
-        let mut controller = QuadController::default();
+        let mut controller = QuadController::<f64>::default();
         let mut requests = EventQueue::<
             RcTrimCalibrationRequested,
             RC_TRIM_CALIBRATION_REQUEST_QUEUE_CAPACITY,

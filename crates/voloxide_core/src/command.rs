@@ -35,7 +35,7 @@ pub const OVERRIDE_OFFBOARD_T_INACTIVE: u16 = 0x200;
 pub struct ControlChannel {
     pub active: bool,
     pub control_type: ControlType,
-    pub value: f64,
+    pub value: f32,
 }
 
 impl Default for ControlChannel {
@@ -182,15 +182,15 @@ impl CommandManager {
             ParamValue::Int(axis) => {
                 match axis {
                     // Note: `axis` is an i32, not `&i32`, so no deref `*` needed
-                    0 => self.multirotor_failsafe_command.fx.value = failsafe_throttle as f64,
-                    1 => self.multirotor_failsafe_command.fy.value = failsafe_throttle as f64,
-                    _ => self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64,
+                    0 => self.multirotor_failsafe_command.fx.value = failsafe_throttle,
+                    1 => self.multirotor_failsafe_command.fy.value = failsafe_throttle,
+                    _ => self.multirotor_failsafe_command.fz.value = failsafe_throttle,
                 }
             }
             // Error case: it's the wrong type.
             // We log the error and apply a safe default (Fz).
             _ => {
-                self.multirotor_failsafe_command.fz.value = failsafe_throttle as f64;
+                self.multirotor_failsafe_command.fz.value = failsafe_throttle;
             }
         }
 
@@ -271,19 +271,19 @@ impl CommandManager {
         self.last_offboard_command_us = now_us;
         self.offboard_command.stamp_ms = (now_us / 1000) as u32;
 
-        self.offboard_command.qx.value = msg.qx as f64;
-        self.offboard_command.qy.value = msg.qy as f64;
-        self.offboard_command.qz.value = msg.qz as f64;
-        self.offboard_command.fx.value = msg.fx as f64;
-        self.offboard_command.fy.value = msg.fy as f64;
-        self.offboard_command.fz.value = msg.fz as f64;
+        self.offboard_command.qx.value = msg.qx;
+        self.offboard_command.qy.value = msg.qy;
+        self.offboard_command.qz.value = msg.qz;
+        self.offboard_command.fx.value = msg.fx;
+        self.offboard_command.fy.value = msg.fy;
+        self.offboard_command.fz.value = msg.fz;
         for (channel, value) in self
             .offboard_command
             .passthrough
             .iter_mut()
             .zip(msg.passthrough.iter())
         {
-            channel.value = *value as f64;
+            channel.value = *value;
             channel.control_type = ControlType::Passthrough;
         }
 
@@ -333,10 +333,10 @@ impl CommandManager {
     /// Port of C++ `interpret_rc` (command_manager.cpp:101)
     fn interpret_rc(&mut self, rc: &Rc, params: &Params) {
         // Read all stick values from the RC unit
-        self.rc_command.qx.value = rc.stick(Stick::X) as f64;
-        self.rc_command.qy.value = rc.stick(Stick::Y) as f64;
-        self.rc_command.qz.value = rc.stick(Stick::Z) as f64;
-        let f_stick_value = rc.stick(Stick::F) as f64;
+        self.rc_command.qx.value = rc.stick(Stick::X);
+        self.rc_command.qy.value = rc.stick(Stick::Y);
+        self.rc_command.qz.value = rc.stick(Stick::Z);
+        let f_stick_value = rc.stick(Stick::F);
 
         // C++: line 109, logic for F-axis (type-safe)
         match params.get_by_id(ParamId::PARAM_RC_F_AXIS) {
@@ -428,11 +428,11 @@ impl CommandManager {
             match roll_pitch_type {
                 ControlType::Rate => {
                     let max_rollrate = match params.get_by_id(ParamId::PARAM_RC_MAX_ROLLRATE) {
-                        ParamValue::Float(val) => val as f64,
+                        ParamValue::Float(val) => val,
                         _ => 1.0,
                     };
                     let max_pitchrate = match params.get_by_id(ParamId::PARAM_RC_MAX_PITCHRATE) {
-                        ParamValue::Float(val) => val as f64,
+                        ParamValue::Float(val) => val,
                         _ => 1.0,
                     };
                     self.rc_command.qx.value *= max_rollrate;
@@ -440,11 +440,11 @@ impl CommandManager {
                 }
                 ControlType::Angle => {
                     let max_roll = match params.get_by_id(ParamId::PARAM_RC_MAX_ROLL) {
-                        ParamValue::Float(val) => val as f64,
+                        ParamValue::Float(val) => val,
                         _ => 1.0,
                     };
                     let max_pitch = match params.get_by_id(ParamId::PARAM_RC_MAX_PITCH) {
-                        ParamValue::Float(val) => val as f64,
+                        ParamValue::Float(val) => val,
                         _ => 1.0,
                     };
                     self.rc_command.qx.value *= max_roll;
@@ -455,7 +455,7 @@ impl CommandManager {
 
             self.rc_command.qz.control_type = ControlType::Rate;
             let max_yawrate = match params.get_by_id(ParamId::PARAM_RC_MAX_YAWRATE) {
-                ParamValue::Float(val) => val as f64,
+                ParamValue::Float(val) => val,
                 _ => 1.0,
             };
             self.rc_command.qz.value *= max_yawrate;
@@ -481,7 +481,7 @@ impl CommandManager {
         &mut self,
         rc: &Rc,
         stick: Stick,
-        deviation_param: f64,
+        deviation_param: f32,
         lag_time_ms: u32,
         now_ms: u32,
     ) -> bool {
@@ -489,7 +489,7 @@ impl CommandManager {
             return true;
         }
 
-        if (rc.stick(stick) as f64).abs() <= deviation_param {
+        if (rc.stick(stick)).abs() <= deviation_param {
             return false;
         }
 
@@ -499,7 +499,7 @@ impl CommandManager {
 
     fn do_attitude_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32) -> u16 {
         let deviation_param = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
-            ParamValue::Float(val) => val as f64, // Convert f32 to f64
+            ParamValue::Float(val) => val,
             _ => {
                 0.1 // Default value from C++ params
             }
