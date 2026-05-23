@@ -19,6 +19,7 @@ pub struct ControlPipelineResource<S, A, R: FlightFloat> {
     pub latest_pwm_outputs: [R; crate::pwm::system::PWM_OUTPUT_CHANNELS],
     pub latest_loop_time_us: u16,
     last_imu_time: u64,
+    pwm_rates_configured: bool,
 }
 
 impl<S, A, R> Default for ControlPipelineResource<S, A, R>
@@ -34,8 +35,18 @@ where
                 crate::pwm::system::PWM_OUTPUT_CHANNELS],
             latest_loop_time_us: 0,
             last_imu_time: 0,
+            pwm_rates_configured: false,
         }
     }
+}
+
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ControlPipelineTiming {
+    pub estimator_us: u16,
+    pub controller_us: u16,
+    pub mixer_us: u16,
+    pub pwm_us: u16,
 }
 
 impl<S, A, R: FlightFloat> ControlPipelineResource<S, A, R> {
@@ -45,6 +56,18 @@ impl<S, A, R: FlightFloat> ControlPipelineResource<S, A, R> {
 
     pub(crate) fn set_last_imu_time(&mut self, timestamp: u64) {
         self.last_imu_time = timestamp;
+    }
+
+    pub(crate) fn pwm_rates_configured(&self) -> bool {
+        self.pwm_rates_configured
+    }
+
+    pub(crate) fn set_pwm_rates_configured(&mut self) {
+        self.pwm_rates_configured = true;
+    }
+
+    pub(crate) fn invalidate_pwm_rates(&mut self) {
+        self.pwm_rates_configured = false;
     }
 
     pub(crate) fn set_latest(
@@ -84,10 +107,20 @@ where
     pub control_pipeline: &'a mut ControlPipelineResource<E::State, M::ActuatorCommands, R>,
     pub pwm_output: &'a PwmOutputState,
     pub pwm: &'a mut PD,
+    #[cfg(feature = "timing-diagnostics")]
+    pub timing: Option<&'a mut ControlPipelineTiming>,
 }
 
 pub fn run_control_pipeline_if_new_imu<B, E, C, M, PD, R>(
-    ctx: ControlPipelineCtx<'_, B, E, C, M, PD, R>,
+    #[cfg_attr(not(feature = "timing-diagnostics"), allow(unused_mut))] mut ctx: ControlPipelineCtx<
+        '_,
+        B,
+        E,
+        C,
+        M,
+        PD,
+        R,
+    >,
 ) -> bool
 where
     B: BoardIo,
@@ -127,12 +160,21 @@ where
 
     let loop_start_us = ctx.board.clock_micros();
     let external_attitude = ctx.external_attitude.latest.take();
+    #[cfg(feature = "timing-diagnostics")]
+    let estimator_start_us = ctx.board.clock_micros();
     let state = ctx.estimator.estimate_with_external_attitude(
         ctx.sensors,
         ctx.params,
         dt,
         external_attitude,
     );
+    #[cfg(feature = "timing-diagnostics")]
+    {
+        let elapsed_us = elapsed_u16(estimator_start_us, ctx.board.clock_micros());
+        if let Some(timing) = &mut ctx.timing {
+            timing.estimator_us = elapsed_us;
+        }
+    }
 
     if state.is_healthy() {
         ctx.state.update(
@@ -146,6 +188,8 @@ where
         );
     }
 
+    #[cfg(feature = "timing-diagnostics")]
+    let controller_start_us = ctx.board.clock_micros();
     let controls = ctx.controller.control(
         &state,
         ControllerCtx {
@@ -156,6 +200,16 @@ where
             dt,
         },
     );
+    #[cfg(feature = "timing-diagnostics")]
+    {
+        let elapsed_us = elapsed_u16(controller_start_us, ctx.board.clock_micros());
+        if let Some(timing) = &mut ctx.timing {
+            timing.controller_us = elapsed_us;
+        }
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    let mixer_start_us = ctx.board.clock_micros();
     let mixer_run = ctx.mixer.mix(
         &controls,
         MixerCtx {
@@ -177,13 +231,27 @@ where
             .state
             .update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER), ctx.params),
     }
-    let actuator_commands = mixer_run.commands;
-    if ctx
-        .pwm
-        .configure_output_rates(ctx.mixer.default_pwm_rates())
-        .is_err()
+    #[cfg(feature = "timing-diagnostics")]
     {
-        crate::log_warn!("PWM driver rejected mixer default output rates");
+        let elapsed_us = elapsed_u16(mixer_start_us, ctx.board.clock_micros());
+        if let Some(timing) = &mut ctx.timing {
+            timing.mixer_us = elapsed_us;
+        }
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    let pwm_start_us = ctx.board.clock_micros();
+    let actuator_commands = mixer_run.commands;
+    if !ctx.control_pipeline.pwm_rates_configured() {
+        if ctx
+            .pwm
+            .configure_output_rates(ctx.mixer.default_pwm_rates())
+            .is_ok()
+        {
+            ctx.control_pipeline.set_pwm_rates_configured();
+        } else {
+            crate::log_warn!("PWM driver rejected mixer default output rates");
+        }
     }
     let pwm_outputs = compose_pwm_outputs(
         actuator_commands.as_ref(),
@@ -195,6 +263,13 @@ where
     if let Err(error) = write_pwm_commands(ctx.board, ctx.pwm, ctx.pwm_output, &pwm_outputs) {
         crate::log_warn!("PWM driver rejected output command: {:?}", error);
     }
+    #[cfg(feature = "timing-diagnostics")]
+    {
+        let elapsed_us = elapsed_u16(pwm_start_us, ctx.board.clock_micros());
+        if let Some(timing) = &mut ctx.timing {
+            timing.pwm_us = elapsed_us;
+        }
+    }
     let loop_time_us = ctx
         .board
         .clock_micros()
@@ -203,4 +278,9 @@ where
     ctx.control_pipeline
         .set_latest(state, actuator_commands, pwm_outputs, loop_time_us);
     true
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn elapsed_u16(start_us: u64, end_us: u64) -> u16 {
+    end_us.saturating_sub(start_us).min(u16::MAX as u64) as u16
 }

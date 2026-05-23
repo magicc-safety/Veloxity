@@ -10,13 +10,16 @@ use rp2350_platform::hal::uart::{Blocking, Uart};
 use voloxide_core::{
     board::{BoardIo, SerialTxPriority},
     errors,
+    packets::{BaroPacket, ImuPacket},
     params::Params,
     sensors::SensorBus,
 };
 
 const UART_TX_QUEUE_CAPACITY: usize = 4096;
+const UART_TX_SERVICE_MAX_BYTES: usize = 96;
+const UART_TX_SERVICE_MAX_US: u64 = 250;
 
-pub enum MavlinkTransport {
+enum MavlinkTransport {
     WifiMailbox(SharedMavlinkMailbox),
     Uart(Uart<'static, Blocking>),
 }
@@ -73,11 +76,55 @@ impl UartTxQueue {
     }
 }
 
+struct PicoSensorProducer {
+    gy91: Option<Gy91>,
+    pending_imu: Option<Result<ImuPacket<f32>, errors::SensorError>>,
+    pending_baro: Option<Result<BaroPacket, errors::SensorError>>,
+}
+
+impl PicoSensorProducer {
+    fn new(gy91: Option<Gy91>) -> Self {
+        Self {
+            gy91,
+            pending_imu: None,
+            pending_baro: None,
+        }
+    }
+
+    fn sample_due(&mut self, now_us: u64) {
+        let Some(gy91) = &mut self.gy91 else {
+            return;
+        };
+
+        match gy91.sample_imu(now_us) {
+            Ok(Some(imu)) => self.pending_imu = Some(Ok(imu)),
+            Ok(None) => {}
+            Err(err) => self.pending_imu = Some(Err(err.sensor_error())),
+        }
+        match gy91.sample_baro(now_us) {
+            Ok(Some(baro)) => self.pending_baro = Some(Ok(baro)),
+            Ok(None) => {}
+            Err(err) => self.pending_baro = Some(Err(err.sensor_error())),
+        }
+    }
+
+    fn drain_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        if let Some(imu) = self.pending_imu.take() {
+            sensors.imu = Some(imu.map(|packet| packet.cast()));
+        }
+        if let Some(baro) = self.pending_baro.take() {
+            sensors.baro = Some(baro);
+        }
+    }
+}
+
 pub struct Board {
     config: Pico2WConfig,
     mavlink: MavlinkTransport,
     uart_tx_queue: UartTxQueue,
-    gy91: Option<Gy91>,
+    sensors: PicoSensorProducer,
+    #[cfg(feature = "timing-diagnostics")]
+    last_serial_rx_count: usize,
     params: Params,
     params_valid: bool,
     boot_time: Instant,
@@ -90,7 +137,9 @@ impl Board {
                 config,
                 mavlink: MavlinkTransport::WifiMailbox(SHARED_MAVLINK_MAILBOX),
                 uart_tx_queue: UartTxQueue::new(),
-                gy91,
+                sensors: PicoSensorProducer::new(gy91),
+                #[cfg(feature = "timing-diagnostics")]
+                last_serial_rx_count: 0,
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
@@ -109,7 +158,9 @@ impl Board {
                 config,
                 mavlink: MavlinkTransport::Uart(uart),
                 uart_tx_queue: UartTxQueue::new(),
-                gy91,
+                sensors: PicoSensorProducer::new(gy91),
+                #[cfg(feature = "timing-diagnostics")]
+                last_serial_rx_count: 0,
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
@@ -153,10 +204,22 @@ impl Board {
     fn uart_tx_drain(
         uart: &mut Uart<'static, Blocking>,
         queue: &mut UartTxQueue,
-    ) -> Result<(), errors::TelemError> {
-        while let Some(byte) = queue.pop() {
+        max_bytes: usize,
+        max_us: u64,
+    ) -> Result<usize, errors::TelemError> {
+        let start_us = Instant::now().as_micros();
+        let mut drained = 0;
+        while drained < max_bytes {
+            let Some(byte) = queue.pop() else {
+                break;
+            };
             match Write::write(uart, byte) {
-                Ok(()) => {}
+                Ok(()) => {
+                    drained += 1;
+                    if Instant::now().as_micros().saturating_sub(start_us) >= max_us {
+                        break;
+                    }
+                }
                 Err(nb::Error::WouldBlock) => {
                     queue.head = if queue.head == 0 {
                         UART_TX_QUEUE_CAPACITY - 1
@@ -171,17 +234,14 @@ impl Board {
                 }
             }
         }
-        Ok(())
+        Ok(drained)
     }
 
     fn uart_tx_enqueue(
-        uart: &mut Uart<'static, Blocking>,
         queue: &mut UartTxQueue,
         bytes: &[u8],
         priority: SerialTxPriority,
     ) -> Result<usize, errors::TelemError> {
-        Self::uart_tx_drain(uart, queue)?;
-
         if bytes.len() > queue.free() {
             if priority >= SerialTxPriority::HIGH {
                 queue.clear();
@@ -194,7 +254,6 @@ impl Board {
             return Ok(0);
         }
 
-        Self::uart_tx_drain(uart, queue)?;
         Ok(bytes.len())
     }
 }
@@ -205,26 +264,19 @@ impl BoardIo for Board {
         sensors: &mut SensorBus<R>,
     ) {
         sensors.clear();
-        let now_us = self.clock_micros();
-        if let Some(gy91) = &mut self.gy91 {
-            match gy91.sample_imu(now_us) {
-                Ok(Some(imu)) => sensors.imu = Some(Ok(imu.cast())),
-                Ok(None) => {}
-                Err(err) => sensors.imu = Some(Err(err.sensor_error())),
-            }
-            match gy91.sample_baro(now_us) {
-                Ok(Some(baro)) => sensors.baro = Some(Ok(baro)),
-                Ok(None) => {}
-                Err(err) => sensors.baro = Some(Err(err.sensor_error())),
-            }
-        }
+        self.sensors.drain_into(sensors);
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        Some(match &mut self.mavlink {
+        let result = match &mut self.mavlink {
             MavlinkTransport::WifiMailbox(mailbox) => Ok(mailbox.read_into(buf)),
             MavlinkTransport::Uart(uart) => Self::uart_rx_read(uart, buf),
-        })
+        };
+        #[cfg(feature = "timing-diagnostics")]
+        {
+            self.last_serial_rx_count = result.as_ref().ok().copied().unwrap_or(0);
+        }
+        Some(result)
     }
 
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -240,10 +292,26 @@ impl BoardIo for Board {
             MavlinkTransport::WifiMailbox(mailbox) => {
                 Ok(mailbox.write_from_priority(bytes, priority))
             }
-            MavlinkTransport::Uart(uart) => {
-                Self::uart_tx_enqueue(uart, &mut self.uart_tx_queue, bytes, priority)
+            MavlinkTransport::Uart(_) => {
+                Self::uart_tx_enqueue(&mut self.uart_tx_queue, bytes, priority)
             }
         })
+    }
+
+    fn serial_flush(&mut self) {
+        if let MavlinkTransport::Uart(uart) = &mut self.mavlink {
+            let _ = Self::uart_tx_drain(
+                uart,
+                &mut self.uart_tx_queue,
+                UART_TX_SERVICE_MAX_BYTES,
+                UART_TX_SERVICE_MAX_US,
+            );
+        }
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn serial_rx_last_count(&self) -> usize {
+        self.last_serial_rx_count
     }
 
     fn clock_millis(&self) -> u32 {
@@ -266,5 +334,10 @@ impl BoardIo for Board {
         self.params = *params;
         self.params_valid = true;
         true
+    }
+
+    fn run_deferred_board_actions(&mut self) {
+        let now_us = self.clock_micros();
+        self.sensors.sample_due(now_us);
     }
 }

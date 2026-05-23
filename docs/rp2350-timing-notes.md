@@ -20,6 +20,27 @@ The `wifi` or `wifi-mavlink` feature enables the Wi-Fi transport:
 The core does not know whether the board selected UART or Wi-Fi. The core exposes generic
 `TelemetryRates`; the Pico board chooses a profile based on the build feature.
 
+## Current Core0 Execution Model
+
+Core0 now runs `World` continuously:
+
+```rust
+loop {
+    world.run_once();
+}
+```
+
+Timers and peripheral code are event producers, not permission to run the world loop. The Pico board
+implementation owns one MAVLink endpoint internally: UART in the default build, or the core1 Wi-Fi
+mailbox when `wifi`/`wifi-mavlink` is enabled. `voloxide_core` still sees only the `BoardIo` serial
+byte contract.
+
+UART transmit is opportunistic and bounded. MAVLink writes enqueue bytes into the board queue; the
+world loop services a small TX budget through `serial_flush()` after inbound communication, sensor
+ingestion, control, and telemetry enqueue work. The Wi-Fi build keeps CYW43, DHCP, UDP RX/TX, and
+the UDP MAVLink bridge on core1. Core1 pushes inbound UDP bytes into the same logical RX pipe used by
+the UART build and drains outbound bytes from the same logical TX pipe.
+
 ## Current Sensor Rates
 
 The GY-91-style module is connected over SPI1:
@@ -28,8 +49,38 @@ The GY-91-style module is connected over SPI1:
 - BMP280 pressure/temperature: 50 Hz board gate, using a 20 ms minimum interval;
 - magnetometer: absent for this tested module target.
 
-The MPU hardware sample divider is left at 1 kHz. Voloxide currently polls the module because the
-visible module header does not expose a data-ready interrupt pin.
+The MPU hardware sample divider is left at 1 kHz. The visible module header does not expose a
+data-ready interrupt pin, so the current Pico board path uses the board clock as the sensor event
+source. GY-91 SPI transactions happen in Pico board producer service, and `BoardIo::update_sensor_bus`
+only drains pending samples into `SensorBus`.
+
+## Timing Semantics
+
+Pico 2 W firmware initializes RP2350 `clk_sys` at 250 MHz using the HAL's RP235x default
+`CoreVoltage::V1_10` setting. The lower `sysclk-225mhz` and `sysclk-200mhz` build features are kept
+as diagnostic fallbacks; selecting no sysclk feature uses 250 MHz.
+
+`World::run_once_measured()` reports board-local pass timing:
+
+- `comm_us`: inbound MAVLink parsing and command/parameter event service;
+- `sensor_us`: draining pending board samples, sensor processing, health, and log responses;
+- `control_us`: estimator, controller, mixer, and PWM writes when a new IMU sample advances time;
+- `telemetry_us`: telemetry enqueue plus bounded `serial_flush()` service;
+- `had_rx`, `had_sensor`, `had_imu`, and `ran_control`: coarse pass classification.
+
+The `timing-diagnostics` feature emits compact MAVLink `STATUSTEXT` summaries for test runs only.
+`PERF` gives the coarse pass buckets above. `PERC` splits control into estimator, controller, mixer,
+and PWM output work. `PERS` splits sensor handling into board-sample drain, sensor processing, health,
+and log/response work. `PERT` splits RC/output housekeeping, telemetry enqueue, bounded TX flush, and
+deferred board service. These values are measured on the board with the board microsecond clock; UART
+or Wi-Fi only carries the already-collected summaries to the tester.
+
+Existing ROSflight status `loop_time_us` is still the control pipeline time, preserving wire
+compatibility. Idle and RX-only passes can therefore have measured pass time without changing
+`loop_time_us`; that status field only advances when the IMU-driven control pipeline runs.
+Board deferred producer service, including the current GY-91 SPI sampling hook, runs at the end of
+the pass after bounded telemetry flush so it cannot delay control for a sample already drained in
+that pass.
 
 ## Release-Mode Measurements
 
@@ -68,11 +119,11 @@ Result:
 Conclusion: the wired UART build can sustain the 500 Hz IMU stream in release mode with comfortable
 control-loop margin.
 
-### UART, 500 Hz IMU Gate, SysTick 4 kHz Service Scheduler
+### Historical UART, 500 Hz IMU Gate, SysTick 4 kHz Service Scheduler
 
-The Pico board now uses SysTick to pace core0 service work. The interrupt does not run Voloxide
-itself; it only increments a bounded pending-tick counter. `world.run_once()` still runs in thread
-mode with single ownership of `World`.
+Earlier firmware used SysTick to pace core0 service work. The interrupt did not run Voloxide itself;
+it only incremented a bounded pending-tick counter. `world.run_once()` still ran in thread mode with
+single ownership of `World`.
 
 The IMU/control gate remains 500 Hz. The scheduler service rate is 4 kHz so synchronous UART TX/RX
 and telemetry work can be serviced between accepted IMU samples.
@@ -116,7 +167,7 @@ Conclusion: Wi-Fi telemetry throttling reduces pressure, but the CYW43 path stil
 RP2350 system. This is acceptable for high-level companion commands with firmware-side stabilization
 and timeouts, but it is not a deterministic inner-loop control link.
 
-### Wi-Fi, 500 Hz IMU Gate, 200 Hz Telemetry Target, SysTick 4 kHz Service Scheduler
+### Historical Wi-Fi, 500 Hz IMU Gate, 200 Hz Telemetry Target, SysTick 4 kHz Service Scheduler
 
 Result:
 
@@ -154,19 +205,16 @@ as a separate change.
 
 ## Scheduler Check
 
-The Pico firmware uses a board-only SysTick scheduler on core0:
-
-- SysTick fires at 4 kHz.
-- The SysTick exception increments a bounded pending-tick counter.
-- `world.run_once()` runs in thread mode, not interrupt context.
-- `World` remains single-owner and synchronous.
-- The board driver still gates IMU samples at 500 Hz and barometer samples at 50 Hz.
-- The Wi-Fi build continues to run Embassy on core1 for CYW43 and UDP tasks.
+The Pico firmware no longer gates core0 `World` execution with SysTick. `World` remains single-owner
+and synchronous in thread mode, but it is always runnable. Board peripherals produce events into
+queues or pending-sample slots, and each world pass drains what is available without performing
+unbounded TX work.
 
 This is deliberately not an Embassy interrupt executor migration. Embassy interrupt executors are
-available, and the RP-aware path should use `embassy-rp`'s `executor-interrupt` feature with a
-software IRQ such as `SWI_IRQ_0`. That is a larger follow-up because the `World` owner would need to
-move into a `'static` task and executor/pender ownership must be kept compatible with core1 Wi-Fi.
+available, and the RP-aware path could use `embassy-rp`'s `executor-interrupt` feature with a
+software IRQ such as `SWI_IRQ_0`. That remains a larger follow-up because the `World` owner would
+need to move into a `'static` task and executor/pender ownership must stay compatible with core1
+Wi-Fi.
 
 ## Practical Assessment
 

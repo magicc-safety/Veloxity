@@ -141,12 +141,16 @@ Release-mode results from the current RP2350 branch:
 
 | Build | IMU telemetry | Board timestamp p99 | Firmware loop p99 | Notes |
 | --- | ---: | ---: | ---: | --- |
-| UART, 500 Hz gate, SysTick 4 kHz service | 498.4 Hz | 2.249 ms | 298 us | Clean wired path. |
-| Wi-Fi, 500 Hz gate, 200 Hz telemetry target, SysTick 4 kHz service | 157.0 Hz | 6.758 ms | 838 us | CYW43 work still adds jitter. |
+| UART, 500 Hz gate, historical SysTick 4 kHz service | 498.4 Hz | 2.249 ms | 298 us | Clean wired path. |
+| Wi-Fi, 500 Hz gate, 200 Hz telemetry target, historical SysTick 4 kHz service | 157.0 Hz | 6.758 ms | 838 us | CYW43 work still adds jitter. |
 
 The Wi-Fi number is intentionally lower than the internal sensor gate. ROSflight should not rely on
 the Wi-Fi path for deterministic sub-10 ms control. The RP2350 firmware must own stabilization,
 failsafe behavior, and command timeout handling.
+
+Current firmware no longer uses SysTick to grant world-loop passes. Core0 runs `World` continuously;
+MAVLink writes enqueue into board-local queues, bounded TX service happens from `serial_flush()`, and
+GY-91 SPI sampling is produced by board service before `update_sensor_bus()` drains pending samples.
 
 ## 8. Sanity Checks Before Flight Testing
 

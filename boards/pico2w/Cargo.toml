@@ -8,6 +8,12 @@ build = "build.rs"
 default = []
 wifi = ["wifi-mavlink"]
 wifi-mavlink = []
+timing-diagnostics = ["voloxide_core/timing-diagnostics"]
+# Pico 2 W defaults to 250 MHz at the HAL's RP235x default 1.10 V core voltage.
+# Lower sysclk features are retained as diagnostic fallbacks.
+sysclk-200mhz = []
+sysclk-225mhz = []
+sysclk-250mhz = []
 
 [dependencies]
 rp2350_platform = { workspace = true }

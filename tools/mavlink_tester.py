@@ -13,6 +13,7 @@ MAVLINK_V1_STX = 0xFE
 SMALL_IMU = 181
 SMALL_BARO = 183
 ROSFLIGHT_STATUS = 191
+STATUSTEXT = 253
 CRC_EXTRA = {
     0: 50,
     20: 214,
@@ -234,6 +235,67 @@ def decode_sensor_frame(frame):
             ),
             "loop_time_us": loop_time_us,
         }
+    if frame["msgid"] == STATUSTEXT and len(payload) == 51:
+        text = payload[1:].split(b"\0", 1)[0].decode("ascii", errors="replace")
+        perf = parse_perf_text(text)
+        if perf is not None:
+            return {
+                "name": "perf",
+                "board_us": None,
+                "values": (),
+                "text": text,
+                "perf": perf,
+            }
+    return None
+
+
+def parse_perf_text(text):
+    parts = text.split()
+    try:
+        if len(parts) == 9 and parts[0] == "PERF":
+            return {
+                "kind": "summary",
+                "class": parts[1],
+                "count": int(parts[2][1:]),
+                "pass_us": int(parts[3][1:]),
+                "comm_us": int(parts[4][1:]),
+                "sensor_us": int(parts[5][1:]),
+                "control_us": int(parts[6][1:]),
+                "telemetry_us": int(parts[7][1:]),
+                "max_us": int(parts[8][1:]),
+            }
+        if len(parts) == 7 and parts[0] == "PERC":
+            return {
+                "kind": "control_detail",
+                "class": parts[1],
+                "count": int(parts[2][1:]),
+                "estimator_us": int(parts[3][1:]),
+                "controller_us": int(parts[4][1:]),
+                "mixer_us": int(parts[5][1:]),
+                "pwm_us": int(parts[6][1:]),
+            }
+        if len(parts) == 7 and parts[0] == "PERS":
+            return {
+                "kind": "sensor_detail",
+                "class": parts[1],
+                "count": int(parts[2][1:]),
+                "sensor_update_us": int(parts[3][1:]),
+                "sensor_process_us": int(parts[4][1:]),
+                "sensor_health_us": int(parts[5][1:]),
+                "log_response_us": int(parts[6][1:]),
+            }
+        if len(parts) == 7 and parts[0] == "PERT":
+            return {
+                "kind": "board_detail",
+                "class": parts[1],
+                "count": int(parts[2][1:]),
+                "rc_us": int(parts[3][1:]),
+                "telemetry_enqueue_us": int(parts[4][1:]),
+                "tx_flush_us": int(parts[5][1:]),
+                "board_service_us": int(parts[6][1:]),
+            }
+    except (ValueError, IndexError):
+        return None
     return None
 
 
@@ -292,12 +354,105 @@ def summarize(name, records):
         )
 
 
+def summarize_perf(records):
+    if not records:
+        print("perf: no timing diagnostic frames")
+        return
+    labels = {
+        "I": "idle",
+        "R": "rx-only",
+        "S": "sensor-only",
+        "U": "imu-no-control",
+        "C": "control",
+    }
+    print(f"perf: frames={len(records)}")
+    for cls in ["I", "R", "S", "U", "C"]:
+        rows = [
+            record["perf"]
+            for record in records
+            if record["perf"]["kind"] == "summary" and record["perf"]["class"] == cls
+        ]
+        if not rows:
+            continue
+        total_count = sum(row["count"] for row in rows)
+        if total_count == 0:
+            continue
+
+        def weighted(field):
+            return sum(row[field] * row["count"] for row in rows) / total_count
+
+        max_us = max(row["max_us"] for row in rows)
+        print(
+            f"  {labels[cls]}: n={total_count} "
+            f"pass_avg={weighted('pass_us'):.1f}us "
+            f"comm={weighted('comm_us'):.1f}us "
+            f"sensor={weighted('sensor_us'):.1f}us "
+            f"control={weighted('control_us'):.1f}us "
+            f"telemetry={weighted('telemetry_us'):.1f}us "
+            f"pass_max={max_us}us"
+        )
+        detail_groups = [
+            (
+                "control detail",
+                "control_detail",
+                [
+                    ("estimator", "estimator_us"),
+                    ("controller", "controller_us"),
+                    ("mixer", "mixer_us"),
+                    ("pwm", "pwm_us"),
+                ],
+            ),
+            (
+                "sensor detail",
+                "sensor_detail",
+                [
+                    ("update", "sensor_update_us"),
+                    ("process", "sensor_process_us"),
+                    ("health", "sensor_health_us"),
+                    ("logs", "log_response_us"),
+                ],
+            ),
+            (
+                "board/tx detail",
+                "board_detail",
+                [
+                    ("rc", "rc_us"),
+                    ("telem_enq", "telemetry_enqueue_us"),
+                    ("tx_flush", "tx_flush_us"),
+                    ("board", "board_service_us"),
+                ],
+            ),
+        ]
+        for title, kind, fields in detail_groups:
+            detail_rows = [
+                record["perf"]
+                for record in records
+                if record["perf"]["kind"] == kind and record["perf"]["class"] == cls
+            ]
+            if not detail_rows:
+                continue
+            detail_count = sum(row["count"] for row in detail_rows)
+            if detail_count == 0:
+                continue
+
+            def detail_weighted(field):
+                return sum(row[field] * row["count"] for row in detail_rows) / detail_count
+
+            details = " ".join(
+                f"{label}={detail_weighted(field):.1f}us" for label, field in fields
+            )
+            print(f"    {title}: {details}")
+
+
 def main():
     args = parse_args()
     parser = MavlinkV1Parser(validate_crc=not args.no_crc)
-    records = {"imu": [], "baro": [], "status": []}
+    records = {"imu": [], "baro": [], "status": [], "perf": []}
     shown = 0
     deadline = time.monotonic() + args.duration_s if args.duration_s > 0 else None
+    rx_bytes = 0
+    first_rx_ns = None
+    last_rx_ns = None
 
     if args.transport == "uart":
         source = open_uart(args)
@@ -336,17 +491,27 @@ def main():
                 data, _addr = source.recvfrom(4096)
 
             host_ns = time.monotonic_ns()
+            if host_ns >= record_after_ns:
+                rx_bytes += len(data)
+                first_rx_ns = first_rx_ns or host_ns
+                last_rx_ns = host_ns
             for frame in parser.feed(data):
                 decoded = decode_sensor_frame(frame)
                 if decoded is None:
                     continue
                 name = decoded["name"]
                 if shown < args.show:
-                    print(
-                        f"{name} seq={frame['seq']} sys={frame['sysid']} "
-                        f"comp={frame['compid']} board_us={decoded['board_us']} "
-                        f"values={tuple(round(v, 4) for v in decoded['values'])}"
-                    )
+                    if name == "perf":
+                        print(
+                            f"{name} seq={frame['seq']} sys={frame['sysid']} "
+                            f"comp={frame['compid']} text={decoded['text']}"
+                        )
+                    else:
+                        print(
+                            f"{name} seq={frame['seq']} sys={frame['sysid']} "
+                            f"comp={frame['compid']} board_us={decoded['board_us']} "
+                            f"values={tuple(round(v, 4) for v in decoded['values'])}"
+                        )
                     shown += 1
                 if host_ns < record_after_ns:
                     continue
@@ -360,6 +525,7 @@ def main():
                             if "loop_time_us" in decoded
                             else {}
                         ),
+                        **({"text": decoded["text"], "perf": decoded["perf"]} if name == "perf" else {}),
                     }
                 )
     finally:
@@ -371,6 +537,13 @@ def main():
     summarize("imu", records["imu"])
     summarize("baro", records["baro"])
     summarize("status", records["status"])
+    summarize_perf(records["perf"])
+    if first_rx_ns is not None and last_rx_ns is not None and last_rx_ns > first_rx_ns:
+        duration_s = (last_rx_ns - first_rx_ns) / 1_000_000_000.0
+        print(
+            f"rx bytes: {rx_bytes} over {duration_s:.2f}s "
+            f"= {rx_bytes / duration_s:.1f} B/s"
+        )
     if args.diagnostics:
         print(
             f"parser: candidates={parser.candidates} invalid_crc={parser.invalid_crc} "

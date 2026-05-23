@@ -3,13 +3,8 @@
 
 #[cfg(feature = "wifi-mavlink")]
 use core::ptr::addr_of_mut;
-use core::sync::atomic::{AtomicU32, Ordering};
 
-use cortex_m::{
-    asm,
-    peripheral::{SYST, syst::SystClkSource},
-};
-use cortex_m_rt::{entry, exception};
+use cortex_m_rt::entry;
 #[cfg(feature = "wifi-mavlink")]
 use cyw43::{JoinOptions, aligned_bytes};
 #[cfg(feature = "wifi-mavlink")]
@@ -29,8 +24,10 @@ use panic_halt as _;
 #[cfg(feature = "wifi-mavlink")]
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
 use pico2w::{board, config::Pico2WConfig, gy91::Gy91, pwm::PioPwmDriver};
+use rp2350_platform::hal::clocks::ClockConfig;
 use rp2350_platform::hal::{
     self as rp,
+    config::Config as HalConfig,
     gpio::{Level, Output},
     spi::{Config as SpiConfig, Phase, Polarity, Spi},
     uart::{Config as UartConfig, Uart},
@@ -51,6 +48,13 @@ use voloxide_core::{
 use voloxide_mavlink::MavlinkInterface;
 
 type PicoReal = f32;
+
+#[cfg(any(
+    all(feature = "sysclk-200mhz", feature = "sysclk-225mhz"),
+    all(feature = "sysclk-200mhz", feature = "sysclk-250mhz"),
+    all(feature = "sysclk-225mhz", feature = "sysclk-250mhz"),
+))]
+compile_error!("select only one sysclk overclock feature");
 
 type Pico2WWorld = World<
     board::Board,
@@ -86,11 +90,6 @@ static mut CYW43_STATE: cyw43::State = cyw43::State::new();
 
 #[cfg(feature = "wifi-mavlink")]
 const UDP_LATENCY_MAGIC: &[u8; 4] = b"VXL1";
-
-const CORE0_SCHEDULER_HZ: u32 = 4_000;
-const MAX_PENDING_CORE0_TICKS: u32 = 4;
-
-static CORE0_PENDING_TICKS: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(feature = "wifi-mavlink")]
 bind_interrupts!(struct Irqs {
@@ -371,51 +370,32 @@ fn gy91_spi_config() -> SpiConfig {
     config
 }
 
-fn configure_core0_scheduler(mut syst: SYST) {
-    let clk_sys_hz = rp::clocks::clk_sys_freq();
-    let ticks_per_period = clk_sys_hz / CORE0_SCHEDULER_HZ;
-    syst.set_clock_source(SystClkSource::Core);
-    syst.set_reload(ticks_per_period.saturating_sub(1));
-    syst.clear_current();
-    syst.enable_interrupt();
-    syst.enable_counter();
-}
+fn hal_config() -> HalConfig {
+    #[cfg(feature = "sysclk-225mhz")]
+    {
+        return HalConfig::new(ClockConfig::system_freq(225_000_000).unwrap());
+    }
 
-fn run_world_on_core0_scheduler(mut world: Pico2WWorld) -> ! {
-    loop {
-        let pending = CORE0_PENDING_TICKS.swap(0, Ordering::AcqRel);
-        if pending == 0 {
-            asm::wfi();
-            continue;
-        }
+    #[cfg(all(not(feature = "sysclk-225mhz"), feature = "sysclk-200mhz"))]
+    {
+        return HalConfig::new(ClockConfig::system_freq(200_000_000).unwrap());
+    }
 
-        for _ in 0..pending {
-            world.run_once();
-        }
+    #[cfg(not(any(feature = "sysclk-225mhz", feature = "sysclk-200mhz")))]
+    {
+        HalConfig::new(ClockConfig::system_freq(250_000_000).unwrap())
     }
 }
 
-#[exception]
-fn SysTick() {
-    let mut current = CORE0_PENDING_TICKS.load(Ordering::Relaxed);
-    while current < MAX_PENDING_CORE0_TICKS {
-        match CORE0_PENDING_TICKS.compare_exchange_weak(
-            current,
-            current + 1,
-            Ordering::Release,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(next) => current = next,
-        }
+fn run_world_on_core0(mut world: Pico2WWorld) -> ! {
+    loop {
+        world.run_once();
     }
 }
 
 #[entry]
 fn main() -> ! {
-    let peripherals = rp::init(Default::default());
-    let core = cortex_m::Peripherals::take().unwrap();
-    configure_core0_scheduler(core.SYST);
+    let peripherals = rp::init(hal_config());
 
     #[cfg(feature = "wifi-mavlink")]
     {
@@ -475,7 +455,7 @@ fn main() -> ! {
         let world = init_world(board, params, pwm_driver);
         trace(&mut debug_uart, b"world ok\r\n");
 
-        run_world_on_core0_scheduler(world);
+        run_world_on_core0(world);
     }
 
     #[cfg(not(feature = "wifi-mavlink"))]
@@ -514,6 +494,6 @@ fn main() -> ! {
         }
 
         let world = init_world(board, params, pwm_driver);
-        run_world_on_core0_scheduler(world);
+        run_world_on_core0(world);
     }
 }

@@ -33,8 +33,168 @@ use crate::{
     sensors::{ProcessedSensors, SensorBus},
     state_machine::{ErrorFlag, Event, StateManager},
 };
+#[cfg(feature = "timing-diagnostics")]
+use crate::{
+    comm::messages::{enums::Severity, messages::StatustextMsg},
+    control::ControlPipelineTiming,
+    events::CommResponse,
+};
+#[cfg(feature = "timing-diagnostics")]
+use core::fmt::Write;
+#[cfg(feature = "timing-diagnostics")]
+use heapless::String;
 
 const IMU_TIMEOUT_US: u64 = 100_000;
+#[cfg(feature = "timing-diagnostics")]
+const TIMING_DIAGNOSTIC_INTERVAL_US: u64 = 1_000_000;
+#[cfg(feature = "timing-diagnostics")]
+const TIMING_CLASS_COUNT: usize = 5;
+
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WorldRunStats {
+    pub total_us: u16,
+    pub comm_us: u16,
+    pub sensor_us: u16,
+    pub control_us: u16,
+    pub telemetry_us: u16,
+    pub sensor_update_us: u16,
+    pub sensor_process_us: u16,
+    pub sensor_health_us: u16,
+    pub log_response_us: u16,
+    pub rc_us: u16,
+    pub estimator_us: u16,
+    pub controller_us: u16,
+    pub mixer_us: u16,
+    pub pwm_us: u16,
+    pub telemetry_enqueue_us: u16,
+    pub tx_flush_us: u16,
+    pub board_service_us: u16,
+    pub had_rx: bool,
+    pub had_sensor: bool,
+    pub had_imu: bool,
+    pub ran_control: bool,
+}
+
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SensorStagePresence {
+    had_sensor: bool,
+    had_imu: bool,
+}
+
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SensorStageTiming {
+    presence: SensorStagePresence,
+    update_us: u16,
+    process_us: u16,
+    health_us: u16,
+    log_response_us: u16,
+}
+
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TimingBucket {
+    count: u32,
+    total_us_sum: u32,
+    comm_us_sum: u32,
+    sensor_us_sum: u32,
+    control_us_sum: u32,
+    telemetry_us_sum: u32,
+    sensor_update_us_sum: u32,
+    sensor_process_us_sum: u32,
+    sensor_health_us_sum: u32,
+    log_response_us_sum: u32,
+    rc_us_sum: u32,
+    estimator_us_sum: u32,
+    controller_us_sum: u32,
+    mixer_us_sum: u32,
+    pwm_us_sum: u32,
+    telemetry_enqueue_us_sum: u32,
+    tx_flush_us_sum: u32,
+    board_service_us_sum: u32,
+    total_us_max: u16,
+}
+
+#[cfg(feature = "timing-diagnostics")]
+impl TimingBucket {
+    fn record(&mut self, stats: WorldRunStats) {
+        self.count = self.count.saturating_add(1);
+        self.total_us_sum = self.total_us_sum.saturating_add(stats.total_us as u32);
+        self.comm_us_sum = self.comm_us_sum.saturating_add(stats.comm_us as u32);
+        self.sensor_us_sum = self.sensor_us_sum.saturating_add(stats.sensor_us as u32);
+        self.control_us_sum = self.control_us_sum.saturating_add(stats.control_us as u32);
+        self.telemetry_us_sum = self
+            .telemetry_us_sum
+            .saturating_add(stats.telemetry_us as u32);
+        self.sensor_update_us_sum = self
+            .sensor_update_us_sum
+            .saturating_add(stats.sensor_update_us as u32);
+        self.sensor_process_us_sum = self
+            .sensor_process_us_sum
+            .saturating_add(stats.sensor_process_us as u32);
+        self.sensor_health_us_sum = self
+            .sensor_health_us_sum
+            .saturating_add(stats.sensor_health_us as u32);
+        self.log_response_us_sum = self
+            .log_response_us_sum
+            .saturating_add(stats.log_response_us as u32);
+        self.rc_us_sum = self.rc_us_sum.saturating_add(stats.rc_us as u32);
+        self.estimator_us_sum = self
+            .estimator_us_sum
+            .saturating_add(stats.estimator_us as u32);
+        self.controller_us_sum = self
+            .controller_us_sum
+            .saturating_add(stats.controller_us as u32);
+        self.mixer_us_sum = self.mixer_us_sum.saturating_add(stats.mixer_us as u32);
+        self.pwm_us_sum = self.pwm_us_sum.saturating_add(stats.pwm_us as u32);
+        self.telemetry_enqueue_us_sum = self
+            .telemetry_enqueue_us_sum
+            .saturating_add(stats.telemetry_enqueue_us as u32);
+        self.tx_flush_us_sum = self
+            .tx_flush_us_sum
+            .saturating_add(stats.tx_flush_us as u32);
+        self.board_service_us_sum = self
+            .board_service_us_sum
+            .saturating_add(stats.board_service_us as u32);
+        self.total_us_max = self.total_us_max.max(stats.total_us);
+    }
+
+    fn avg(sum: u32, count: u32) -> u32 {
+        if count == 0 { 0 } else { sum / count }
+    }
+}
+
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TimingDiagnostics {
+    last_emit_us: u64,
+    buckets: [TimingBucket; TIMING_CLASS_COUNT],
+}
+
+#[cfg(feature = "timing-diagnostics")]
+impl TimingDiagnostics {
+    fn new(now_us: u64) -> Self {
+        Self {
+            last_emit_us: now_us,
+            buckets: [TimingBucket::default(); TIMING_CLASS_COUNT],
+        }
+    }
+
+    fn record(&mut self, stats: WorldRunStats) {
+        self.buckets[timing_class_index(stats)].record(stats);
+    }
+
+    fn due(&self, now_us: u64) -> bool {
+        now_us.saturating_sub(self.last_emit_us) >= TIMING_DIAGNOSTIC_INTERVAL_US
+    }
+
+    fn reset(&mut self, now_us: u64) {
+        self.last_emit_us = now_us;
+        self.buckets = [TimingBucket::default(); TIMING_CLASS_COUNT];
+    }
+}
 
 pub struct World<B, E, C, M, CI, PD, R: FlightFloat>
 where
@@ -73,6 +233,8 @@ where
     pwm_output: PwmOutputState,
     pwm: PD,
     last_imu_seen: u64,
+    #[cfg(feature = "timing-diagnostics")]
+    timing_diagnostics: TimingDiagnostics,
 }
 
 impl<B, E, C, M, CI, PD, R> World<B, E, C, M, CI, PD, R>
@@ -160,6 +322,8 @@ where
             pwm_output,
             pwm,
             last_imu_seen: now_us,
+            #[cfg(feature = "timing-diagnostics")]
+            timing_diagnostics: TimingDiagnostics::new(now_us),
         };
         if do_rearm_after_hardfault {
             world
@@ -170,12 +334,86 @@ where
     }
 
     pub fn run_once(&mut self) -> bool {
+        #[cfg(feature = "timing-diagnostics")]
+        {
+            let _ = self.run_once_measured();
+            return true;
+        }
+
+        #[cfg(not(feature = "timing-diagnostics"))]
+        {
+            self.run_communication_and_parameter_service_stage();
+            self.run_sensor_ingestion_and_health_stage();
+            self.run_rc_command_state_stages();
+            self.run_control_and_mixing_stage_if_new_imu();
+            self.run_telemetry_stage();
+            self.board.serial_flush();
+            self.board.run_deferred_board_actions();
+            true
+        }
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    pub fn run_once_measured(&mut self) -> WorldRunStats {
+        let pass_start_us = self.board.clock_micros();
+        let comm_start_us = self.board.clock_micros();
         self.run_communication_and_parameter_service_stage();
-        self.run_sensor_ingestion_and_health_stage();
+        let had_rx = self.board.serial_rx_pending() || self.board.serial_rx_last_count() > 0;
+        let comm_us = elapsed_u16(comm_start_us, self.board.clock_micros());
+
+        let sensor_start_us = self.board.clock_micros();
+        let sensor_timing = self.run_sensor_ingestion_and_health_stage_measured();
+        let sensor_us = elapsed_u16(sensor_start_us, self.board.clock_micros());
+
+        let rc_start_us = self.board.clock_micros();
         self.run_rc_command_state_stages();
-        self.run_control_and_mixing_stage_if_new_imu();
+        let rc_us = elapsed_u16(rc_start_us, self.board.clock_micros());
+
+        let mut control_timing = ControlPipelineTiming::default();
+        let control_start_us = self.board.clock_micros();
+        let ran_control =
+            self.run_control_and_mixing_stage_if_new_imu_measured(&mut control_timing);
+        let control_us = elapsed_u16(control_start_us, self.board.clock_micros());
+
+        let telemetry_start_us = self.board.clock_micros();
+        let telemetry_enqueue_start_us = self.board.clock_micros();
         self.run_telemetry_stage();
-        true
+        let telemetry_enqueue_us =
+            elapsed_u16(telemetry_enqueue_start_us, self.board.clock_micros());
+        let tx_flush_start_us = self.board.clock_micros();
+        self.board.serial_flush();
+        let tx_flush_us = elapsed_u16(tx_flush_start_us, self.board.clock_micros());
+        let telemetry_us = elapsed_u16(telemetry_start_us, self.board.clock_micros());
+
+        let board_service_start_us = self.board.clock_micros();
+        self.board.run_deferred_board_actions();
+        let board_service_us = elapsed_u16(board_service_start_us, self.board.clock_micros());
+
+        let stats = WorldRunStats {
+            total_us: elapsed_u16(pass_start_us, self.board.clock_micros()),
+            comm_us,
+            sensor_us,
+            control_us,
+            telemetry_us,
+            sensor_update_us: sensor_timing.update_us,
+            sensor_process_us: sensor_timing.process_us,
+            sensor_health_us: sensor_timing.health_us,
+            log_response_us: sensor_timing.log_response_us,
+            rc_us,
+            estimator_us: control_timing.estimator_us,
+            controller_us: control_timing.controller_us,
+            mixer_us: control_timing.mixer_us,
+            pwm_us: control_timing.pwm_us,
+            telemetry_enqueue_us,
+            tx_flush_us,
+            board_service_us,
+            had_rx,
+            had_sensor: sensor_timing.presence.had_sensor,
+            had_imu: sensor_timing.presence.had_imu,
+            ran_control,
+        };
+        self.record_timing_diagnostics(stats);
+        stats
     }
 
     pub fn set_telemetry_rates(&mut self, telemetry_rates: TelemetryRates) {
@@ -202,6 +440,39 @@ where
         self.run_sensor_ingestion_stage();
         self.update_sensor_health_and_calibration(now_us);
         self.drain_logs_and_send_responses();
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn run_sensor_ingestion_and_health_stage_measured(&mut self) -> SensorStageTiming {
+        let now_us = self.board.clock_micros();
+
+        let update_start_us = self.board.clock_micros();
+        self.board.update_sensor_bus(&mut self.raw_sensors);
+        let update_us = elapsed_u16(update_start_us, self.board.clock_micros());
+        let sensor_presence = SensorStagePresence {
+            had_sensor: raw_sensor_present(&self.raw_sensors),
+            had_imu: self.raw_sensors.imu.is_some(),
+        };
+
+        let process_start_us = self.board.clock_micros();
+        self.process_sensor_bus_after_update();
+        let process_us = elapsed_u16(process_start_us, self.board.clock_micros());
+
+        let health_start_us = self.board.clock_micros();
+        self.update_sensor_health_and_calibration(now_us);
+        let health_us = elapsed_u16(health_start_us, self.board.clock_micros());
+
+        let log_start_us = self.board.clock_micros();
+        self.drain_logs_and_send_responses();
+        let log_response_us = elapsed_u16(log_start_us, self.board.clock_micros());
+
+        SensorStageTiming {
+            presence: sensor_presence,
+            update_us,
+            process_us,
+            health_us,
+            log_response_us,
+        }
     }
 
     fn process_comm_stage(&mut self) {
@@ -322,6 +593,7 @@ where
             let Some(status) = self.mixer.on_param_changed(&self.params, change.id) else {
                 continue;
             };
+            self.control_pipeline.invalidate_pwm_rates();
             match status {
                 crate::mixer::MixerStatus::Healthy => self
                     .state
@@ -362,6 +634,43 @@ where
         }
     }
 
+    #[cfg(feature = "timing-diagnostics")]
+    fn run_sensor_ingestion_stage(&mut self) -> SensorStagePresence {
+        self.board.update_sensor_bus(&mut self.raw_sensors);
+        let sensor_presence = SensorStagePresence {
+            had_sensor: raw_sensor_present(&self.raw_sensors),
+            had_imu: self.raw_sensors.imu.is_some(),
+        };
+        self.process_sensor_bus_after_update();
+        sensor_presence
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn process_sensor_bus_after_update(&mut self) {
+        let calibration_flags_before = self.cal_flags;
+        process_sensor_bus(
+            &mut self.raw_sensors,
+            &mut self.processed_sensors,
+            &mut self.sensor_processors,
+            &mut self.cal_flags,
+            &mut self.params,
+        );
+        if calibration_flags_before.contains(CalibrationFlags::GYRO)
+            && !self.cal_flags.contains(CalibrationFlags::GYRO)
+            && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)
+        {
+            self.estimator.reset_adaptive_bias();
+        }
+        if calibration_flags_before.contains(CalibrationFlags::ACCEL)
+            && !self.cal_flags.contains(CalibrationFlags::ACCEL)
+            && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
+        {
+            self.estimator.reset();
+            self.control_pipeline = ControlPipelineResource::default();
+        }
+    }
+
+    #[cfg(not(feature = "timing-diagnostics"))]
     fn run_sensor_ingestion_stage(&mut self) {
         self.board.update_sensor_bus(&mut self.raw_sensors);
         let calibration_flags_before = self.cal_flags;
@@ -394,8 +703,6 @@ where
         });
         self.comm
             .send_comm_responses(&mut self.board, &mut self.comm_events);
-        self.board.serial_flush();
-        self.board.run_deferred_board_actions();
     }
 
     fn update_sensor_health_and_calibration(&mut self, now_us: u64) {
@@ -465,6 +772,31 @@ where
             control_pipeline: &mut self.control_pipeline,
             pwm_output: &self.pwm_output,
             pwm: &mut self.pwm,
+            #[cfg(feature = "timing-diagnostics")]
+            timing: None,
+        })
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn run_control_and_mixing_stage_if_new_imu_measured(
+        &mut self,
+        timing: &mut ControlPipelineTiming,
+    ) -> bool {
+        run_control_pipeline_if_new_imu(ControlPipelineCtx {
+            board: &mut self.board,
+            params: &self.params,
+            sensors: &self.processed_sensors,
+            external_attitude: &mut self.external_attitude,
+            aux_commands: &self.aux_commands,
+            command: &self.command,
+            state: &mut self.state,
+            estimator: &mut self.estimator,
+            controller: &mut self.controller,
+            mixer: &mut self.mixer,
+            control_pipeline: &mut self.control_pipeline,
+            pwm_output: &self.pwm_output,
+            pwm: &mut self.pwm,
+            timing: Some(timing),
         })
     }
 
@@ -482,6 +814,66 @@ where
             &self.control_pipeline.latest_pwm_outputs,
             sensor_error_count,
             self.control_pipeline.latest_loop_time_us,
+        );
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn record_timing_diagnostics(&mut self, stats: WorldRunStats) {
+        let now_us = self.board.clock_micros();
+        self.timing_diagnostics.record(stats);
+        if !self.timing_diagnostics.due(now_us) {
+            return;
+        }
+
+        for (index, label) in [b'I', b'R', b'S', b'U', b'C'].iter().copied().enumerate() {
+            let bucket = self.timing_diagnostics.buckets[index];
+            if bucket.count == 0 {
+                continue;
+            }
+            let mut text = String::<50>::new();
+            let _ = write!(
+                text,
+                "PERF {} n{} p{} m{} s{} k{} t{} x{}",
+                label as char,
+                bucket.count,
+                TimingBucket::avg(bucket.total_us_sum, bucket.count),
+                TimingBucket::avg(bucket.comm_us_sum, bucket.count),
+                TimingBucket::avg(bucket.sensor_us_sum, bucket.count),
+                TimingBucket::avg(bucket.control_us_sum, bucket.count),
+                TimingBucket::avg(bucket.telemetry_us_sum, bucket.count),
+                bucket.total_us_max,
+            );
+
+            let mut bytes = [0_u8; 50];
+            let payload = text.as_bytes();
+            bytes[..payload.len()].copy_from_slice(payload);
+            self.comm_events.responses.push_or_log(
+                CommResponse::Statustext(StatustextMsg {
+                    severity: Severity::Debug,
+                    text: bytes,
+                }),
+                "timing diagnostics",
+            );
+
+            self.push_timing_diagnostic_text(format_timing_control_detail(label, bucket));
+            self.push_timing_diagnostic_text(format_timing_sensor_detail(label, bucket));
+            self.push_timing_diagnostic_text(format_timing_board_detail(label, bucket));
+        }
+
+        self.timing_diagnostics.reset(now_us);
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn push_timing_diagnostic_text(&mut self, text: String<50>) {
+        let mut bytes = [0_u8; 50];
+        let payload = text.as_bytes();
+        bytes[..payload.len()].copy_from_slice(payload);
+        self.comm_events.responses.push_or_log(
+            CommResponse::Statustext(StatustextMsg {
+                severity: Severity::Debug,
+                text: bytes,
+            }),
+            "timing diagnostics",
         );
     }
 
@@ -509,6 +901,87 @@ where
         } else {
             self.board.led1_off();
         }
+    }
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn elapsed_u16(start_us: u64, end_us: u64) -> u16 {
+    end_us.saturating_sub(start_us).min(u16::MAX as u64) as u16
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn format_timing_control_detail(label: u8, bucket: TimingBucket) -> String<50> {
+    let mut text = String::<50>::new();
+    let _ = write!(
+        text,
+        "PERC {} n{} e{} c{} m{} w{}",
+        label as char,
+        bucket.count,
+        TimingBucket::avg(bucket.estimator_us_sum, bucket.count),
+        TimingBucket::avg(bucket.controller_us_sum, bucket.count),
+        TimingBucket::avg(bucket.mixer_us_sum, bucket.count),
+        TimingBucket::avg(bucket.pwm_us_sum, bucket.count),
+    );
+    text
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn format_timing_sensor_detail(label: u8, bucket: TimingBucket) -> String<50> {
+    let mut text = String::<50>::new();
+    let _ = write!(
+        text,
+        "PERS {} n{} u{} r{} h{} l{}",
+        label as char,
+        bucket.count,
+        TimingBucket::avg(bucket.sensor_update_us_sum, bucket.count),
+        TimingBucket::avg(bucket.sensor_process_us_sum, bucket.count),
+        TimingBucket::avg(bucket.sensor_health_us_sum, bucket.count),
+        TimingBucket::avg(bucket.log_response_us_sum, bucket.count),
+    );
+    text
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn format_timing_board_detail(label: u8, bucket: TimingBucket) -> String<50> {
+    let mut text = String::<50>::new();
+    let _ = write!(
+        text,
+        "PERT {} n{} a{} q{} f{} b{}",
+        label as char,
+        bucket.count,
+        TimingBucket::avg(bucket.rc_us_sum, bucket.count),
+        TimingBucket::avg(bucket.telemetry_enqueue_us_sum, bucket.count),
+        TimingBucket::avg(bucket.tx_flush_us_sum, bucket.count),
+        TimingBucket::avg(bucket.board_service_us_sum, bucket.count),
+    );
+    text
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn raw_sensor_present<R: FlightFloat>(sensors: &SensorBus<R>) -> bool {
+    sensors.imu.is_some()
+        || sensors.mag.is_some()
+        || sensors.baro.is_some()
+        || sensors.pitot.is_some()
+        || sensors.range.is_some()
+        || sensors.gnss.is_some()
+        || sensors.battery.is_some()
+        || sensors.rc.is_some()
+        || sensors.attitude.is_some()
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn timing_class_index(stats: WorldRunStats) -> usize {
+    if stats.ran_control {
+        4
+    } else if stats.had_imu {
+        3
+    } else if stats.had_sensor {
+        2
+    } else if stats.had_rx {
+        1
+    } else {
+        0
     }
 }
 
@@ -541,6 +1014,7 @@ mod tests {
         imu: Option<ImuPacket<f64>>,
         rc: Option<RcPacket>,
         update_count: usize,
+        rx_pending: bool,
     }
 
     impl BoardIo for SensorStageBoard {
@@ -567,6 +1041,10 @@ mod tests {
             bytes: &[u8],
         ) -> Option<Result<usize, crate::errors::TelemError>> {
             Some(Ok(bytes.len()))
+        }
+
+        fn serial_rx_pending(&self) -> bool {
+            self.rx_pending
         }
 
         fn clock_millis(&self) -> u32 {
@@ -999,6 +1477,7 @@ mod tests {
                 lol: false,
             }),
             update_count: 0,
+            rx_pending: false,
         };
         let state = StateManager::new();
         let mixer = quadrotor::mixer::<f64>(&params);
@@ -1047,6 +1526,113 @@ mod tests {
                 .get_errors()
                 .contains(crate::state_machine::ErrorFlag::RC_LOST)
         );
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    #[test]
+    fn world_run_stats_classifies_idle_rx_sensor_and_control_passes() {
+        let mut idle_world = test_world();
+        let idle = idle_world.run_once_measured();
+        assert!(!idle.had_rx);
+        assert!(!idle.had_sensor);
+        assert!(!idle.had_imu);
+        assert!(!idle.ran_control);
+
+        let params = Params::new();
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut rx_world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard {
+                rx_pending: true,
+                ..Default::default()
+            },
+            params,
+            SensorStageCommLink,
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        let rx_only = rx_world.run_once_measured();
+        assert!(rx_only.had_rx);
+        assert!(!rx_only.had_sensor);
+        assert!(!rx_only.ran_control);
+
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut sensor_world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard {
+                current_time_us: 20_000,
+                rc: Some(RcPacket {
+                    header: RosflightPacketHeader {
+                        timestamp: 20_000,
+                        status: 0,
+                    },
+                    n_chan: 1,
+                    chan: [0.5; RC_PACKET_CHANNELS],
+                    lol: false,
+                }),
+                ..Default::default()
+            },
+            params,
+            SensorStageCommLink,
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        let sensor_only = sensor_world.run_once_measured();
+        assert!(sensor_only.had_sensor);
+        assert!(!sensor_only.had_imu);
+        assert!(!sensor_only.ran_control);
+
+        sensor_world.board.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 22_000,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.1, 0.2, 0.3],
+            temperature: 25.0,
+            seq: 1,
+        });
+        sensor_world.board.current_time_us = 22_000;
+        let first_imu = sensor_world.run_once_measured();
+        assert!(first_imu.had_imu);
+        assert!(!first_imu.ran_control);
+
+        sensor_world.board.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 24_000,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.1, 0.2, 0.3],
+            temperature: 25.0,
+            seq: 2,
+        });
+        sensor_world.board.current_time_us = 24_000;
+        let control = sensor_world.run_once_measured();
+        assert!(control.had_imu);
+        assert!(control.ran_control);
     }
 
     #[test]
@@ -1377,6 +1963,72 @@ mod tests {
         assert_eq!(world.pwm.configure_count, 1);
         assert_eq!(world.pwm.last_rate_len, 10);
         assert_eq!(world.pwm.last_rates, [0.0; 10]);
+
+        world
+            .processed_sensors
+            .imu
+            .as_mut()
+            .unwrap()
+            .header
+            .timestamp = 3;
+        assert!(world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.configure_count, 1);
+    }
+
+    #[test]
+    fn world_control_stage_reconfigures_pwm_rates_after_mixer_param_change() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(11));
+        let mut world = test_world_with_params(params);
+        world.processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        assert!(!world.run_control_stages_if_new_imu());
+        world
+            .processed_sensors
+            .imu
+            .as_mut()
+            .unwrap()
+            .header
+            .timestamp = 2;
+        assert!(world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.configure_count, 1);
+
+        world
+            .params
+            .set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(0));
+        world
+            .param_events
+            .changes
+            .push(crate::events::ParamChanged {
+                id: ParamId::PARAM_PRIMARY_MIXER,
+                old: ParamValue::Int(11),
+                new: ParamValue::Int(0),
+                param_id_bytes: [0; 16],
+            })
+            .unwrap();
+        world.apply_param_reactions();
+
+        world
+            .processed_sensors
+            .imu
+            .as_mut()
+            .unwrap()
+            .header
+            .timestamp = 3;
+        assert!(world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.configure_count, 2);
+        assert_eq!(world.pwm.last_rate_len, 10);
+        assert_eq!(world.pwm.last_rates, [50.0; 10]);
     }
 
     #[test]

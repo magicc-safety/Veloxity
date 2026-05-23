@@ -78,9 +78,11 @@ The IMU path should not cross the core boundary. Sensor samples should enter `vo
 0 so the control loop is not gated by Wi-Fi, UDP, or mailbox scheduling.
 
 The visible GY-91 header used for bring-up does not expose a data-ready interrupt pin. The current
-driver uses polled SPI. That is acceptable for first bring-up because MPU accel/gyro reads are direct
-SPI bursts, the MPU path is explicitly rate-limited to 500 Hz, and slower BMP280 reads are throttled
-to 50 Hz separately.
+Pico board path uses the board clock as the sensor event source: board service performs rate-limited
+SPI samples and stores pending packets, while `BoardIo::update_sensor_bus()` only drains those
+pending packets into core. That is acceptable for first bring-up because MPU accel/gyro reads are
+direct SPI bursts, the MPU path is explicitly rate-limited to 500 Hz, and slower BMP280 reads are
+throttled to 50 Hz separately.
 
 ## DShot Notes
 

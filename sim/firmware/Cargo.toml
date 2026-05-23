@@ -3,6 +3,10 @@ name = "sim"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+timing-diagnostics = ["voloxide_core/timing-diagnostics"]
+
 [lib]
 crate-type = ["rlib", "staticlib"]
 

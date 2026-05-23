@@ -33,6 +33,13 @@ pub trait BoardIo {
     ) -> Option<Result<usize, errors::TelemError>> {
         self.serial_tx_write(bytes)
     }
+    fn serial_rx_pending(&self) -> bool {
+        false
+    }
+    #[cfg(feature = "timing-diagnostics")]
+    fn serial_rx_last_count(&self) -> usize {
+        0
+    }
 
     fn clock_millis(&self) -> u32;
     fn clock_micros(&self) -> u64;
