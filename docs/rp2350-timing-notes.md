@@ -68,6 +68,31 @@ Result:
 Conclusion: the wired UART build can sustain the 500 Hz IMU stream in release mode with comfortable
 control-loop margin.
 
+### UART, 500 Hz IMU Gate, SysTick 4 kHz Service Scheduler
+
+The Pico board now uses SysTick to pace core0 service work. The interrupt does not run Voloxide
+itself; it only increments a bounded pending-tick counter. `world.run_once()` still runs in thread
+mode with single ownership of `World`.
+
+The IMU/control gate remains 500 Hz. The scheduler service rate is 4 kHz so synchronous UART TX/RX
+and telemetry work can be serviced between accepted IMU samples.
+
+Result:
+
+- IMU frames: 9470
+- host interval: average 2.007 ms, p99 2.326 ms, max 2.797 ms
+- board timestamp interval: average 2.006 ms, p99 2.249 ms, max 2.257 ms
+- IMU telemetry rate: 498.4 Hz
+- barometer telemetry rate: 23.5 Hz
+- status telemetry rate: 10.0 Hz
+- firmware loop time: min 169 us, average 219.7 us, p99 298 us, max 300 us
+- parser invalid CRC count: 1
+
+Earlier scheduler trials at 500 Hz, 1 kHz, and 2 kHz service rates did not leave enough service turns
+for the synchronous UART transmit path and reduced observed IMU telemetry to 375.6 Hz, 424.5 Hz, and
+469.6 Hz respectively. The final 4 kHz service rate recovers the wired 500 Hz stream without changing
+the 500 Hz IMU/control gate.
+
 ### Wi-Fi, 500 Hz IMU Gate, 200 Hz Telemetry Target
 
 Command:
@@ -91,6 +116,23 @@ Conclusion: Wi-Fi telemetry throttling reduces pressure, but the CYW43 path stil
 RP2350 system. This is acceptable for high-level companion commands with firmware-side stabilization
 and timeouts, but it is not a deterministic inner-loop control link.
 
+### Wi-Fi, 500 Hz IMU Gate, 200 Hz Telemetry Target, SysTick 4 kHz Service Scheduler
+
+Result:
+
+- IMU frames: 2670
+- host interval: average 6.369 ms, p99 13.542 ms, max 104.136 ms
+- board timestamp interval: average 6.369 ms, p99 6.758 ms, max 12.877 ms
+- IMU telemetry rate: 157.0 Hz
+- barometer telemetry rate: 23.5 Hz
+- status telemetry rate: 9.9 Hz
+- firmware loop time: min 219 us, average 429.0 us, p99 838 us, max 1060 us
+- parser invalid CRC count: 3
+
+The scheduler change improves Wi-Fi firmware loop p99 compared with the earlier 937 us result, but
+it does not fix the CYW43/UDP throughput limit. That limit remains in the board transport path, not
+in Voloxide core math.
+
 ## RAM Placement Check
 
 The current Pico linker script defines:
@@ -112,27 +154,19 @@ as a separate change.
 
 ## Scheduler Check
 
-The current Pico firmware uses a synchronous core0 loop:
+The Pico firmware uses a board-only SysTick scheduler on core0:
 
-```rust
-loop {
-    world.run_once();
-}
-```
+- SysTick fires at 4 kHz.
+- The SysTick exception increments a bounded pending-tick counter.
+- `world.run_once()` runs in thread mode, not interrupt context.
+- `World` remains single-owner and synchronous.
+- The board driver still gates IMU samples at 500 Hz and barometer samples at 50 Hz.
+- The Wi-Fi build continues to run Embassy on core1 for CYW43 and UDP tasks.
 
-The board driver gates IMU and barometer sampling by timestamp. The Wi-Fi build runs Embassy on
-core1 for CYW43 and UDP tasks.
-
-Embassy interrupt executors are available in the dependency stack, and the STM32 platform already
-uses `InterruptExecutor` for prioritized async work. The Pico board has not yet enabled
-`executor-interrupt` or converted core0 into an interrupt-driven executor. That change should be a
-dedicated scheduler refactor:
-
-- enable the proper Embassy executor interrupt feature for Pico;
-- use a timer interrupt or real IMU DRDY interrupt when a sensor exposes one;
-- keep Wi-Fi work on core1;
-- ensure core0 control work cannot block on telemetry TX;
-- re-run release timing after the scheduler change.
+This is deliberately not an Embassy interrupt executor migration. Embassy interrupt executors are
+available, and the RP-aware path should use `embassy-rp`'s `executor-interrupt` feature with a
+software IRQ such as `SWI_IRQ_0`. That is a larger follow-up because the `World` owner would need to
+move into a `'static` task and executor/pender ownership must be kept compatible with core1 Wi-Fi.
 
 ## Practical Assessment
 

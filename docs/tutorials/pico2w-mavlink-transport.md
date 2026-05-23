@@ -141,8 +141,8 @@ Release-mode results from the current RP2350 branch:
 
 | Build | IMU telemetry | Board timestamp p99 | Firmware loop p99 | Notes |
 | --- | ---: | ---: | ---: | --- |
-| UART, 500 Hz gate | 497.9 Hz | 2.017 ms | 264 us | Clean wired path. |
-| Wi-Fi, 500 Hz gate, 200 Hz telemetry target | 162.6 Hz | 6.571 ms | 937 us | Throttling helps but CYW43 work still adds jitter. |
+| UART, 500 Hz gate, SysTick 4 kHz service | 498.4 Hz | 2.249 ms | 298 us | Clean wired path. |
+| Wi-Fi, 500 Hz gate, 200 Hz telemetry target, SysTick 4 kHz service | 157.0 Hz | 6.758 ms | 838 us | CYW43 work still adds jitter. |
 
 The Wi-Fi number is intentionally lower than the internal sensor gate. ROSflight should not rely on
 the Wi-Fi path for deterministic sub-10 ms control. The RP2350 firmware must own stabilization,

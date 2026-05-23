@@ -3,8 +3,13 @@
 
 #[cfg(feature = "wifi-mavlink")]
 use core::ptr::addr_of_mut;
+use core::sync::atomic::{AtomicU32, Ordering};
 
-use cortex_m_rt::entry;
+use cortex_m::{
+    asm,
+    peripheral::{SYST, syst::SystClkSource},
+};
+use cortex_m_rt::{entry, exception};
 #[cfg(feature = "wifi-mavlink")]
 use cyw43::{JoinOptions, aligned_bytes};
 #[cfg(feature = "wifi-mavlink")]
@@ -81,6 +86,11 @@ static mut CYW43_STATE: cyw43::State = cyw43::State::new();
 
 #[cfg(feature = "wifi-mavlink")]
 const UDP_LATENCY_MAGIC: &[u8; 4] = b"VXL1";
+
+const CORE0_SCHEDULER_HZ: u32 = 4_000;
+const MAX_PENDING_CORE0_TICKS: u32 = 4;
+
+static CORE0_PENDING_TICKS: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(feature = "wifi-mavlink")]
 bind_interrupts!(struct Irqs {
@@ -361,9 +371,51 @@ fn gy91_spi_config() -> SpiConfig {
     config
 }
 
+fn configure_core0_scheduler(mut syst: SYST) {
+    let clk_sys_hz = rp::clocks::clk_sys_freq();
+    let ticks_per_period = clk_sys_hz / CORE0_SCHEDULER_HZ;
+    syst.set_clock_source(SystClkSource::Core);
+    syst.set_reload(ticks_per_period.saturating_sub(1));
+    syst.clear_current();
+    syst.enable_interrupt();
+    syst.enable_counter();
+}
+
+fn run_world_on_core0_scheduler(mut world: Pico2WWorld) -> ! {
+    loop {
+        let pending = CORE0_PENDING_TICKS.swap(0, Ordering::AcqRel);
+        if pending == 0 {
+            asm::wfi();
+            continue;
+        }
+
+        for _ in 0..pending {
+            world.run_once();
+        }
+    }
+}
+
+#[exception]
+fn SysTick() {
+    let mut current = CORE0_PENDING_TICKS.load(Ordering::Relaxed);
+    while current < MAX_PENDING_CORE0_TICKS {
+        match CORE0_PENDING_TICKS.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::Release,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+}
+
 #[entry]
 fn main() -> ! {
     let peripherals = rp::init(Default::default());
+    let core = cortex_m::Peripherals::take().unwrap();
+    configure_core0_scheduler(core.SYST);
 
     #[cfg(feature = "wifi-mavlink")]
     {
@@ -420,12 +472,10 @@ fn main() -> ! {
         }
         trace(&mut debug_uart, b"params ok\r\n");
 
-        let mut world = init_world(board, params, pwm_driver);
+        let world = init_world(board, params, pwm_driver);
         trace(&mut debug_uart, b"world ok\r\n");
 
-        loop {
-            world.run_once();
-        }
+        run_world_on_core0_scheduler(world);
     }
 
     #[cfg(not(feature = "wifi-mavlink"))]
@@ -463,9 +513,7 @@ fn main() -> ! {
             let _ = board.write_params(&params);
         }
 
-        let mut world = init_world(board, params, pwm_driver);
-        loop {
-            world.run_once();
-        }
+        let world = init_world(board, params, pwm_driver);
+        run_world_on_core0_scheduler(world);
     }
 }
