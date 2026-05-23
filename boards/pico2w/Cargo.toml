@@ -19,6 +19,7 @@ voloxide_mavlink = { workspace = true }
 
 cortex-m = "0.7.7"
 cortex-m-rt = { version = "0.7.0" }
+crsf = "2.0.1"
 critical-section = "1.2.0"
 cyw43 = "0.7.0"
 cyw43-pio = "0.10.0"

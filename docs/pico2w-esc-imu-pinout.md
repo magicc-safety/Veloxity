@@ -74,10 +74,10 @@ connecting directly. If measurement or vendor data shows 5 V UART levels, add a 
 receiver TX line before connecting it to GP9.
 
 The default firmware allocation is UART1 at 420000 baud, 8N1. Embassy UART RX interrupt/DMA service
-should parse CRSF frames in a board task and push completed `RcPacket`s into the board-local RC
-queue. `BoardIo::update_sensor_bus()` then drains the latest RC packet into `SensorBus` without
-blocking the flight loop. PIO is reserved as a fallback only if a later board revision needs
-soft-serial because UART1 pins are unavailable.
+feeds bytes into the `crsf` crate's `no_std` `PacketParser`; completed RC channel packets are mapped
+into `RcPacket` and pushed into the board-local RC queue. `BoardIo::update_sensor_bus()` then drains
+the latest RC packet into `SensorBus` without blocking the flight loop. PIO is reserved as a fallback
+only if a later board revision needs soft-serial because UART1 pins are unavailable.
 
 ## ISM330DHCX SPI Wiring
 
@@ -152,5 +152,6 @@ The IMU path should not cross the core boundary. Sensor samples should enter `vo
 This branch prepares the architecture for the ISM330DHCX and RP4TD-M but does not yet complete the
 physical driver tasks. `BoardIo::update_sensor_bus()` drains IMU samples from the new ISM330DHCX
 queue, RC samples from the CRSF receiver queue, and barometer samples from the GY-91/BMP280 path. The
-remaining hardware steps are to add the Embassy SPI/interrupt task that configures the ISM330DHCX
-and the Embassy UART1 CRSF task that parses RP4TD-M channel frames.
+remaining hardware step is to add the Embassy SPI/interrupt task that configures the ISM330DHCX.
+The RP4TD-M path already uses the `crsf` parser crate and has a UART1 receiver task shape; hardware
+validation still needs the receiver wired and bound.

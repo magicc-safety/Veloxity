@@ -19,13 +19,16 @@ use embassy_net::{
     Config as NetConfig, IpAddress, IpEndpoint, StackResources,
     udp::{PacketMetadata, UdpMetadata, UdpSocket},
 };
-#[cfg(feature = "wifi-mavlink")]
-use embassy_time::Instant;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use panic_halt as _;
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
+use pico2w::rc_receiver::{CRSF_BAUDRATE, CrsfRcParser, SHARED_CRSF_RC_QUEUE};
 use pico2w::{board, config::Pico2WConfig, gy91::Gy91, pwm::PioPwmDriver};
 use rp2350_platform::hal::clocks::ClockConfig;
+#[cfg(not(feature = "wifi-mavlink"))]
+use rp2350_platform::hal::peripherals::{DMA_CH0, DMA_CH1, UART0};
+#[cfg(not(feature = "wifi-mavlink"))]
+use rp2350_platform::hal::uart::UartTx;
 use rp2350_platform::hal::{
     self as rp,
     config::Config as HalConfig,
@@ -41,10 +44,9 @@ use rp2350_platform::hal::{
     pio::{InterruptHandler as PioInterruptHandler, Pio},
 };
 use rp2350_platform::hal::{bind_interrupts, dma};
-#[cfg(not(feature = "wifi-mavlink"))]
 use rp2350_platform::hal::{
-    peripherals::{DMA_CH0, DMA_CH1, UART0},
-    uart::{Async as UartAsync, InterruptHandler as UartInterruptHandler, UartRx, UartTx},
+    peripherals::{DMA_CH2, DMA_CH3, UART1},
+    uart::{Async as UartAsync, InterruptHandler as UartInterruptHandler, UartRx},
 };
 use static_cell::StaticCell;
 use voloxide_core::{
@@ -85,7 +87,6 @@ const WIFI_MAVLINK_TELEMETRY_RATES: TelemetryRates = TelemetryRates {
 
 #[cfg(feature = "wifi-mavlink")]
 static mut CORE1_STACK: Stack<65536> = Stack::new();
-#[cfg(not(feature = "wifi-mavlink"))]
 static CORE0_EXECUTOR: StaticCell<Executor> = StaticCell::new();
 #[cfg(feature = "wifi-mavlink")]
 static CORE1_EXECUTOR: StaticCell<Executor> = StaticCell::new();
@@ -108,29 +109,52 @@ const WIFI_TX_DATAGRAMS_PER_PASS: usize = 3;
 const UART_TX_BATCH_BYTES: usize = 256;
 #[cfg(not(feature = "wifi-mavlink"))]
 const UART_RX_CHUNK_BYTES: usize = 16;
-#[cfg(not(feature = "wifi-mavlink"))]
 const UART_IDLE_DELAY_US: u64 = 50;
+const CRSF_RX_CHUNK_BYTES: usize = 8;
 
 bind_interrupts!(struct Irqs {
     #[cfg(feature = "wifi-mavlink")]
     PIO0_IRQ_0 => PioInterruptHandler<PIO0>;
     #[cfg(not(feature = "wifi-mavlink"))]
     UART0_IRQ => UartInterruptHandler<UART0>;
+    UART1_IRQ => UartInterruptHandler<UART1>;
     DMA_IRQ_0 =>
         #[cfg(feature = "wifi-mavlink")]
         dma::InterruptHandler<DMA_CH0>,
         #[cfg(not(feature = "wifi-mavlink"))]
         dma::InterruptHandler<DMA_CH0>,
         #[cfg(not(feature = "wifi-mavlink"))]
-        dma::InterruptHandler<DMA_CH1>;
+        dma::InterruptHandler<DMA_CH1>,
+        dma::InterruptHandler<DMA_CH2>,
+        dma::InterruptHandler<DMA_CH3>;
 });
 
-#[cfg(not(feature = "wifi-mavlink"))]
 #[embassy_executor::task]
 async fn world_task(mut world: Pico2WWorld) -> ! {
     loop {
         world.run_once();
         Timer::after(Duration::from_micros(1)).await;
+    }
+}
+
+fn crsf_uart_config() -> UartConfig {
+    let mut config = UartConfig::default();
+    config.baudrate = CRSF_BAUDRATE;
+    config
+}
+
+#[embassy_executor::task]
+async fn crsf_rx_task(mut uart_rx: UartRx<'static, UartAsync>) -> ! {
+    let mut parser = CrsfRcParser::new();
+    let mut rx = [0_u8; CRSF_RX_CHUNK_BYTES];
+    loop {
+        if uart_rx.read(&mut rx).await.is_ok() {
+            if let Some(packet) = parser.push_bytes(&rx, Instant::now().as_micros()) {
+                SHARED_CRSF_RC_QUEUE.push_from_receiver_task(packet);
+            }
+        } else {
+            Timer::after(Duration::from_micros(UART_IDLE_DELAY_US)).await;
+        }
     }
 }
 
@@ -462,13 +486,6 @@ fn hal_config() -> HalConfig {
     HalConfig::new(ClockConfig::system_freq(300_000_000).unwrap())
 }
 
-#[cfg(feature = "wifi-mavlink")]
-fn run_world_on_core0(mut world: Pico2WWorld) -> ! {
-    loop {
-        world.run_once();
-    }
-}
-
 #[entry]
 fn main() -> ! {
     let peripherals = rp::init(hal_config());
@@ -531,7 +548,27 @@ fn main() -> ! {
         let world = init_world(board, params, pwm_driver);
         trace(&mut debug_uart, b"world ok\r\n");
 
-        run_world_on_core0(world);
+        let crsf_uart = Uart::new(
+            peripherals.UART1,
+            peripherals.PIN_8,
+            peripherals.PIN_9,
+            Irqs,
+            peripherals.DMA_CH2,
+            peripherals.DMA_CH3,
+            crsf_uart_config(),
+        );
+        let (_crsf_tx, crsf_rx) = crsf_uart.split();
+        trace(&mut debug_uart, b"crsf uart ok\r\n");
+
+        let executor = CORE0_EXECUTOR.init(Executor::new());
+        executor.run(|spawner| {
+            if let Ok(token) = crsf_rx_task(crsf_rx) {
+                spawner.spawn(token);
+            }
+            if let Ok(token) = world_task(world) {
+                spawner.spawn(token);
+            }
+        });
     }
 
     #[cfg(not(feature = "wifi-mavlink"))]
@@ -568,6 +605,16 @@ fn main() -> ! {
             mavlink_uart_config(),
         );
         let (uart_tx, uart_rx) = mavlink_uart.split();
+        let crsf_uart = Uart::new(
+            peripherals.UART1,
+            peripherals.PIN_8,
+            peripherals.PIN_9,
+            Irqs,
+            peripherals.DMA_CH2,
+            peripherals.DMA_CH3,
+            crsf_uart_config(),
+        );
+        let (_crsf_tx, crsf_rx) = crsf_uart.split();
         let mailbox = SHARED_MAVLINK_MAILBOX;
         let executor = CORE0_EXECUTOR.init(Executor::new());
         executor.run(|spawner| {
@@ -575,6 +622,9 @@ fn main() -> ! {
                 spawner.spawn(token);
             }
             if let Ok(token) = uart_rx_task(uart_rx, mailbox) {
+                spawner.spawn(token);
+            }
+            if let Ok(token) = crsf_rx_task(crsf_rx) {
                 spawner.spawn(token);
             }
             if let Ok(token) = world_task(world) {

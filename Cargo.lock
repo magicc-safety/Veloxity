@@ -350,6 +350,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
 name = "crc-any"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -359,10 +368,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc-catalog"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
+
+[[package]]
 name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
+name = "crsf"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e160c6e430573968c2824e0ccf123eddd42817c5a2cb7d6ff3c2162c3b7ce00"
+dependencies = [
+ "bitfield 0.14.0",
+ "crc",
+ "snafu",
+]
 
 [[package]]
 name = "crunchy"
@@ -1676,6 +1702,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "critical-section",
+ "crsf",
  "cyw43",
  "cyw43-pio",
  "embassy-executor 0.10.0",
@@ -2176,6 +2203,27 @@ dependencies = [
  "cfg-if",
  "heapless 0.9.3",
  "managed",
+]
+
+[[package]]
+name = "snafu"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e84b3f4eacbf3a1ce05eac6763b4d629d60cbc94d632e4092c54ade71f1e1a2"
+dependencies = [
+ "snafu-derive",
+]
+
+[[package]]
+name = "snafu-derive"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
