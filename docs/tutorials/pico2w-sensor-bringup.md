@@ -1,6 +1,9 @@
 # Pico 2 W Sensor Bring-Up
 
-This guide documents the Pico 2 W GY-91-style SPI sensor bring-up used on the RP2350 branch.
+This guide documents the original Pico 2 W GY-91-style SPI sensor bring-up used on the RP2350
+branch. On the ISM330DHCX prep branch, this GY-91 path is no longer the flight IMU path: the
+high-rate accel/gyro source is moving to the Adafruit ISM330DHCX over SPI with data-ready
+interrupts, and the GY-91/BMP280 path is retained as barometer-only.
 
 ## Hardware
 
@@ -18,9 +21,9 @@ Tested wiring:
 
 Leave `VIN` unconnected when using Pico 2 W `3V3`.
 
-The tested board did not expose an MPU data-ready interrupt pin on the visible header, so the current
-driver polls over SPI. The MPU accel/gyro path is configured and rate-limited to 500 Hz. BMP280 reads
-are throttled separately to 50 Hz.
+The tested board did not expose an MPU data-ready interrupt pin on the visible header. That is the
+reason it is being retired as the flight IMU. BMP280 reads remain useful and are throttled
+separately to 50 Hz.
 
 ## Build The Probe
 
@@ -74,19 +77,21 @@ VOLOXIDE_WIFI_SSID=MAGICC VOLOXIDE_WIFI_PASSWORD=magiccwifi \
   cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --features wifi
 ```
 
-The board code wires the GY-91 driver into `SensorBus` without changing `voloxide_core`. Accel/gyro
-samples populate `sensors.imu`, and BMP280 samples populate `sensors.baro`.
+The board code now drains IMU samples from the ISM330DHCX queue and drains BMP280 samples from the
+GY-91 barometer path. GY-91 accel/gyro samples do not populate `sensors.imu` in the flight firmware
+on the ISM330DHCX prep branch.
 
-The current board rates are:
+The intended board rates are:
 
 | Sensor | Rate | Notes |
 | --- | ---: | --- |
-| MPU accel/gyro | 500 Hz | MPU output is left at 1 kHz and the board driver enforces a 2.0 ms minimum interval. |
+| ISM330DHCX accel/gyro | 400-500 Hz target | Data-ready interrupt should push completed IMU packets into the board queue. |
 | BMP280 barometer | 50 Hz | Driver returns no baro sample until 20 ms have elapsed. |
 
 ## Current Limitations
 
 - Magnetometer is not configured for this tested module.
-- The visible module header did not expose data-ready interrupt, so sampling is polled at an explicit 500 Hz max rate.
+- The visible GY-91 module header did not expose data-ready interrupt, so it is no longer used as the flight IMU.
+- The ISM330DHCX Embassy SPI/interrupt task still needs to be completed before this branch produces new IMU samples.
 - Sensor calibration is not complete. Use the current output for bring-up, not final flight tuning.
 - BMP280 altitude is currently left as `0.0`; pressure and temperature are populated.

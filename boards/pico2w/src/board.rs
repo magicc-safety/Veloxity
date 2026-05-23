@@ -2,106 +2,44 @@ use crate::{
     comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
     config::Pico2WConfig,
     gy91::Gy91,
+    ism330dhcx::{SHARED_ISM330DHCX_IMU_QUEUE, SharedIsm330dhcxImuQueue},
     pwm::PioPwmDriver,
 };
 use embassy_time::Instant;
-use embedded_hal_nb::serial::{Read, Write};
-use rp2350_platform::hal::uart::{Blocking, Uart};
 use voloxide_core::{
     board::{BoardIo, SerialTxPriority},
     errors,
-    packets::{BaroPacket, ImuPacket},
+    packets::BaroPacket,
     params::Params,
     sensors::SensorBus,
 };
 
-const UART_TX_QUEUE_CAPACITY: usize = 4096;
-const UART_TX_SERVICE_MAX_BYTES: usize = 96;
-const UART_TX_SERVICE_MAX_US: u64 = 250;
-
 enum MavlinkTransport {
     WifiMailbox(SharedMavlinkMailbox),
-    Uart(Uart<'static, Blocking>),
-}
-
-struct UartTxQueue {
-    bytes: [u8; UART_TX_QUEUE_CAPACITY],
-    head: usize,
-    tail: usize,
-    len: usize,
-}
-
-impl UartTxQueue {
-    const fn new() -> Self {
-        Self {
-            bytes: [0; UART_TX_QUEUE_CAPACITY],
-            head: 0,
-            tail: 0,
-            len: 0,
-        }
-    }
-
-    fn clear(&mut self) {
-        self.head = 0;
-        self.tail = 0;
-        self.len = 0;
-    }
-
-    fn free(&self) -> usize {
-        UART_TX_QUEUE_CAPACITY - self.len
-    }
-
-    fn push_slice(&mut self, bytes: &[u8]) -> bool {
-        if bytes.len() > self.free() {
-            return false;
-        }
-
-        for byte in bytes {
-            self.bytes[self.tail] = *byte;
-            self.tail = (self.tail + 1) % UART_TX_QUEUE_CAPACITY;
-            self.len += 1;
-        }
-        true
-    }
-
-    fn pop(&mut self) -> Option<u8> {
-        if self.len == 0 {
-            return None;
-        }
-
-        let byte = self.bytes[self.head];
-        self.head = (self.head + 1) % UART_TX_QUEUE_CAPACITY;
-        self.len -= 1;
-        Some(byte)
-    }
+    UartMailbox(SharedMavlinkMailbox),
 }
 
 struct PicoSensorProducer {
-    gy91: Option<Gy91>,
-    pending_imu: Option<Result<ImuPacket<f32>, errors::SensorError>>,
+    ism330dhcx_imu: SharedIsm330dhcxImuQueue,
+    gy91_baro: Option<Gy91>,
     pending_baro: Option<Result<BaroPacket, errors::SensorError>>,
 }
 
 impl PicoSensorProducer {
-    fn new(gy91: Option<Gy91>) -> Self {
+    fn new(gy91_baro: Option<Gy91>) -> Self {
         Self {
-            gy91,
-            pending_imu: None,
+            ism330dhcx_imu: SHARED_ISM330DHCX_IMU_QUEUE,
+            gy91_baro,
             pending_baro: None,
         }
     }
 
     fn sample_due(&mut self, now_us: u64) {
-        let Some(gy91) = &mut self.gy91 else {
+        let Some(gy91_baro) = &mut self.gy91_baro else {
             return;
         };
 
-        match gy91.sample_imu(now_us) {
-            Ok(Some(imu)) => self.pending_imu = Some(Ok(imu)),
-            Ok(None) => {}
-            Err(err) => self.pending_imu = Some(Err(err.sensor_error())),
-        }
-        match gy91.sample_baro(now_us) {
+        match gy91_baro.sample_baro(now_us) {
             Ok(Some(baro)) => self.pending_baro = Some(Ok(baro)),
             Ok(None) => {}
             Err(err) => self.pending_baro = Some(Err(err.sensor_error())),
@@ -109,8 +47,8 @@ impl PicoSensorProducer {
     }
 
     fn drain_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
-        if let Some(imu) = self.pending_imu.take() {
-            sensors.imu = Some(imu.map(|packet| packet.cast()));
+        if let Some(imu) = self.ism330dhcx_imu.take_latest() {
+            sensors.imu = Some(Ok(imu.cast()));
         }
         if let Some(baro) = self.pending_baro.take() {
             sensors.baro = Some(baro);
@@ -121,25 +59,27 @@ impl PicoSensorProducer {
 pub struct Board {
     config: Pico2WConfig,
     mavlink: MavlinkTransport,
-    uart_tx_queue: UartTxQueue,
     sensors: PicoSensorProducer,
     #[cfg(feature = "timing-diagnostics")]
     last_serial_rx_count: usize,
+    #[cfg(feature = "timing-diagnostics")]
+    diag_index: u8,
     params: Params,
     params_valid: bool,
     boot_time: Instant,
 }
 
 impl Board {
-    pub fn new_wifi(config: Pico2WConfig, gy91: Option<Gy91>) -> (Self, PioPwmDriver) {
+    pub fn new_wifi(config: Pico2WConfig, gy91_baro: Option<Gy91>) -> (Self, PioPwmDriver) {
         (
             Self {
                 config,
                 mavlink: MavlinkTransport::WifiMailbox(SHARED_MAVLINK_MAILBOX),
-                uart_tx_queue: UartTxQueue::new(),
-                sensors: PicoSensorProducer::new(gy91),
+                sensors: PicoSensorProducer::new(gy91_baro),
                 #[cfg(feature = "timing-diagnostics")]
                 last_serial_rx_count: 0,
+                #[cfg(feature = "timing-diagnostics")]
+                diag_index: 0,
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
@@ -148,19 +88,16 @@ impl Board {
         )
     }
 
-    pub fn new_uart(
-        config: Pico2WConfig,
-        uart: Uart<'static, Blocking>,
-        gy91: Option<Gy91>,
-    ) -> (Self, PioPwmDriver) {
+    pub fn new_uart(config: Pico2WConfig, gy91_baro: Option<Gy91>) -> (Self, PioPwmDriver) {
         (
             Self {
                 config,
-                mavlink: MavlinkTransport::Uart(uart),
-                uart_tx_queue: UartTxQueue::new(),
-                sensors: PicoSensorProducer::new(gy91),
+                mavlink: MavlinkTransport::UartMailbox(SHARED_MAVLINK_MAILBOX),
+                sensors: PicoSensorProducer::new(gy91_baro),
                 #[cfg(feature = "timing-diagnostics")]
                 last_serial_rx_count: 0,
+                #[cfg(feature = "timing-diagnostics")]
+                diag_index: 0,
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
@@ -176,85 +113,8 @@ impl Board {
     pub fn mavlink_mailbox(&self) -> Option<SharedMavlinkMailbox> {
         match self.mavlink {
             MavlinkTransport::WifiMailbox(mailbox) => Some(mailbox),
-            MavlinkTransport::Uart(_) => None,
+            MavlinkTransport::UartMailbox(mailbox) => Some(mailbox),
         }
-    }
-
-    fn uart_rx_read(
-        uart: &mut Uart<'static, Blocking>,
-        buf: &mut [u8],
-    ) -> Result<usize, errors::TelemError> {
-        let mut n = 0;
-        while n < buf.len() {
-            match Read::read(uart) {
-                Ok(byte) => {
-                    buf[n] = byte;
-                    n += 1;
-                }
-                Err(nb::Error::WouldBlock) => break,
-                Err(nb::Error::Other(_)) if n > 0 => break,
-                Err(nb::Error::Other(_)) => {
-                    return Err(errors::TelemError::GenericTelemError("uart read error"));
-                }
-            }
-        }
-        Ok(n)
-    }
-
-    fn uart_tx_drain(
-        uart: &mut Uart<'static, Blocking>,
-        queue: &mut UartTxQueue,
-        max_bytes: usize,
-        max_us: u64,
-    ) -> Result<usize, errors::TelemError> {
-        let start_us = Instant::now().as_micros();
-        let mut drained = 0;
-        while drained < max_bytes {
-            let Some(byte) = queue.pop() else {
-                break;
-            };
-            match Write::write(uart, byte) {
-                Ok(()) => {
-                    drained += 1;
-                    if Instant::now().as_micros().saturating_sub(start_us) >= max_us {
-                        break;
-                    }
-                }
-                Err(nb::Error::WouldBlock) => {
-                    queue.head = if queue.head == 0 {
-                        UART_TX_QUEUE_CAPACITY - 1
-                    } else {
-                        queue.head - 1
-                    };
-                    queue.len += 1;
-                    break;
-                }
-                Err(nb::Error::Other(_)) => {
-                    return Err(errors::TelemError::GenericTelemError("uart write error"));
-                }
-            }
-        }
-        Ok(drained)
-    }
-
-    fn uart_tx_enqueue(
-        queue: &mut UartTxQueue,
-        bytes: &[u8],
-        priority: SerialTxPriority,
-    ) -> Result<usize, errors::TelemError> {
-        if bytes.len() > queue.free() {
-            if priority >= SerialTxPriority::HIGH {
-                queue.clear();
-            } else {
-                return Ok(0);
-            }
-        }
-
-        if !queue.push_slice(bytes) {
-            return Ok(0);
-        }
-
-        Ok(bytes.len())
     }
 }
 
@@ -270,7 +130,7 @@ impl BoardIo for Board {
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         let result = match &mut self.mavlink {
             MavlinkTransport::WifiMailbox(mailbox) => Ok(mailbox.read_into(buf)),
-            MavlinkTransport::Uart(uart) => Self::uart_rx_read(uart, buf),
+            MavlinkTransport::UartMailbox(mailbox) => Ok(mailbox.read_into(buf)),
         };
         #[cfg(feature = "timing-diagnostics")]
         {
@@ -292,26 +152,95 @@ impl BoardIo for Board {
             MavlinkTransport::WifiMailbox(mailbox) => {
                 Ok(mailbox.write_from_priority(bytes, priority))
             }
-            MavlinkTransport::Uart(_) => {
-                Self::uart_tx_enqueue(&mut self.uart_tx_queue, bytes, priority)
+            MavlinkTransport::UartMailbox(mailbox) => {
+                Ok(mailbox.write_from_priority(bytes, priority))
             }
         })
-    }
-
-    fn serial_flush(&mut self) {
-        if let MavlinkTransport::Uart(uart) = &mut self.mavlink {
-            let _ = Self::uart_tx_drain(
-                uart,
-                &mut self.uart_tx_queue,
-                UART_TX_SERVICE_MAX_BYTES,
-                UART_TX_SERVICE_MAX_US,
-            );
-        }
     }
 
     #[cfg(feature = "timing-diagnostics")]
     fn serial_rx_last_count(&self) -> usize {
         self.last_serial_rx_count
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn board_diagnostic_text(&mut self) -> Option<[u8; 50]> {
+        let mailbox = self.mavlink_mailbox()?;
+        let stats = mailbox.stats();
+        let mut out = [0_u8; 50];
+        match self.diag_index {
+            0 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PUTX p");
+                write_diag_num(&mut out, &mut offset, stats.tx_pending);
+                write_diag_bytes(&mut out, &mut offset, b" b");
+                write_diag_num(&mut out, &mut offset, stats.uart_tx_batches);
+                write_diag_bytes(&mut out, &mut offset, b" x");
+                write_diag_num(&mut out, &mut offset, stats.uart_tx_bytes);
+                write_diag_bytes(&mut out, &mut offset, b" m");
+                write_diag_num(&mut out, &mut offset, stats.uart_tx_max_batch);
+                self.diag_index = 1;
+                Some(out)
+            }
+            1 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PURX c");
+                write_diag_num(&mut out, &mut offset, stats.uart_rx_chunks);
+                write_diag_bytes(&mut out, &mut offset, b" b");
+                write_diag_num(&mut out, &mut offset, stats.uart_rx_bytes);
+                write_diag_bytes(&mut out, &mut offset, b" te");
+                write_diag_num(&mut out, &mut offset, stats.uart_tx_errors);
+                write_diag_bytes(&mut out, &mut offset, b" re");
+                write_diag_num(&mut out, &mut offset, stats.uart_rx_errors);
+                self.diag_index = 2;
+                Some(out)
+            }
+            2 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PUQD h");
+                write_diag_num(&mut out, &mut offset, stats.tx_high_dropped);
+                write_diag_bytes(&mut out, &mut offset, b" n");
+                write_diag_num(&mut out, &mut offset, stats.tx_normal_dropped);
+                write_diag_bytes(&mut out, &mut offset, b" l");
+                write_diag_num(&mut out, &mut offset, stats.tx_low_dropped);
+                write_diag_bytes(&mut out, &mut offset, b" d");
+                write_diag_num(&mut out, &mut offset, stats.tx_dropped);
+                write_diag_bytes(&mut out, &mut offset, b" r");
+                write_diag_num(&mut out, &mut offset, stats.tx_low_replaced);
+                self.diag_index = 3;
+                Some(out)
+            }
+            3 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PUWF rx");
+                write_diag_num(&mut out, &mut offset, stats.wifi_rx_datagrams);
+                write_diag_bytes(&mut out, &mut offset, b" rb");
+                write_diag_num(&mut out, &mut offset, stats.wifi_rx_bytes);
+                write_diag_bytes(&mut out, &mut offset, b" st");
+                write_diag_num(&mut out, &mut offset, stats.wifi_state);
+                self.diag_index = 4;
+                Some(out)
+            }
+            4 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PUWT tx");
+                write_diag_num(&mut out, &mut offset, stats.wifi_tx_datagrams);
+                write_diag_bytes(&mut out, &mut offset, b" tb");
+                write_diag_num(&mut out, &mut offset, stats.wifi_tx_bytes);
+                write_diag_bytes(&mut out, &mut offset, b" max");
+                write_diag_num(&mut out, &mut offset, stats.wifi_tx_max_datagram);
+                write_diag_bytes(&mut out, &mut offset, b" e");
+                write_diag_num(&mut out, &mut offset, stats.wifi_tx_errors);
+                write_diag_bytes(&mut out, &mut offset, b" q");
+                write_diag_num(&mut out, &mut offset, stats.tx_low_pending_frames);
+                self.diag_index = 5;
+                Some(out)
+            }
+            _ => {
+                self.diag_index = 0;
+                None
+            }
+        }
     }
 
     fn clock_millis(&self) -> u32 {
@@ -339,5 +268,34 @@ impl BoardIo for Board {
     fn run_deferred_board_actions(&mut self) {
         let now_us = self.clock_micros();
         self.sensors.sample_due(now_us);
+    }
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn write_diag_bytes(out: &mut [u8; 50], offset: &mut usize, bytes: &[u8]) {
+    for byte in bytes {
+        if *offset >= out.len() {
+            return;
+        }
+        out[*offset] = *byte;
+        *offset += 1;
+    }
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn write_diag_num(out: &mut [u8; 50], offset: &mut usize, mut value: u32) {
+    let mut digits = [0_u8; 10];
+    let mut len = 0;
+    loop {
+        digits[len] = b'0' + (value % 10) as u8;
+        len += 1;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    while len > 0 {
+        len -= 1;
+        write_diag_bytes(out, offset, &digits[len..=len]);
     }
 }

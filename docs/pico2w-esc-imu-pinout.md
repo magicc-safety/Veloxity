@@ -1,7 +1,9 @@
-# Pico 2 W ESC and IMU Pinout
+# Pico 2 W ESC, IMU, and Barometer Pinout
 
-This is the first concrete wiring plan for the RP2350 / Pico 2 W board target. It keeps the first
-hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one SPI IMU/barometer module.
+This wiring plan keeps the high-rate flight IMU deterministic while preserving the slower GY-91/BMP280
+path as barometer-only. The new fast path is the Adafruit ISM330DHCX 6 DoF IMU on SPI with a
+data-ready interrupt. The current GY-91 board should no longer feed accel/gyro data into the flight
+loop.
 
 ## Electrical Assumptions
 
@@ -11,9 +13,13 @@ hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one SPI IMU
   flight hardware testing.
 - Power: the ESC has no BEC. Do not power the Pico 2 W from the ESC signal harness unless an
   external regulator is added. The Pico 2 W and ESC must share ground.
-- IMU/barometer module: GY-91-style breakout wired over SPI. The tested board reports MPU `WHO_AM_I`
-  `0x70` and BMP280 chip ID `0x58`. That behaves like an MPU6500-class accel/gyro plus BMP280.
-  Magnetometer support is not configured for this board target.
+- IMU: Adafruit ISM330DHCX breakout over SPI. The intended driver is ST's `ism330dhcx-rs`
+  embedded-hal async driver with Embassy/RP SPI and GPIO interrupt plumbing. The repository patches
+  version 2.0.0 locally under `third_party/ism330dhcx-rs` only to disable `half`'s default `std`
+  feature; the driver source is unchanged and remains `no_std` for the Pico target.
+- Barometer: the existing GY-91/BMP280 path is retained as a low-rate pressure/temperature source.
+  The board code treats it as barometer-only; MPU accel/gyro samples from that board are ignored by
+  the flight path.
 
 ## Proposed Header GPIO Allocation
 
@@ -24,17 +30,18 @@ hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one SPI IMU
 | ESC motor 3 signal | GP4 | DShot PIO output bit 2 |
 | ESC motor 4 signal | GP5 | DShot PIO output bit 3 |
 | ESC telemetry reserve | GP6 | Reserved for AM32 telemetry or bidirectional DShot later |
-| IMU SPI1 SCK | GP10 | Hardware SPI, DMA-backed |
-| IMU SPI1 MOSI | GP11 | Hardware SPI, DMA-backed |
-| IMU SPI1 MISO | GP12 | Hardware SPI, DMA-backed |
-| IMU chip select | GP13 | MPU accel/gyro chip select |
-| BMP280 chip select | GP14 | BMP280 chip select |
+| ISM330DHCX SPI1 SCK | GP10 | Hardware SPI fast IMU bus |
+| ISM330DHCX SPI1 MOSI | GP11 | Hardware SPI fast IMU bus |
+| ISM330DHCX SPI1 MISO | GP12 | Hardware SPI fast IMU bus |
+| ISM330DHCX chip select | GP13 | Reuses the old GY-91 MPU chip-select position |
+| ISM330DHCX INT1 / DRDY | GP14 | Reuses the old BMP280 SPI chip-select position |
+| ISM330DHCX INT2 reserve | GP15 | Optional FIFO/wakeup interrupt if needed |
 | Flight status LED | GP16 | Discrete LED |
 | Comms status LED | GP17 | Discrete LED |
 | Fault status LED | GP18 | Discrete LED |
 | Addressable LED reserve | GP19 | PIO-driven WS2812-style status strip if needed |
-| Future I2C SDA | GP20 | Reserved for later sensors |
-| Future I2C SCL | GP21 | Reserved for later sensors |
+| Barometer I2C SDA | GP20 | Slow sensor bus for GY-91/BMP280 pressure path |
+| Barometer I2C SCL | GP21 | Slow sensor bus for GY-91/BMP280 pressure path |
 | Future aux / capture | GP22 | Reserved |
 | Future ADC0 | GP26 | Battery voltage/current path later |
 | Future ADC1 | GP27 | Battery voltage/current path later |
@@ -43,6 +50,42 @@ hardware pass focused on four DShot motors, LEDs, Wi-Fi MAVLink, and one SPI IMU
 GP0/GP1 are the default UART MAVLink transport in UART-only firmware. In Wi-Fi MAVLink firmware they
 are available for debug UART output during bring-up. Keep the Pico 2 W wireless pins owned by the
 CYW43 driver.
+
+## ISM330DHCX SPI Wiring
+
+The Adafruit STEMMA QT/Qwiic connector exposes I2C, but the deterministic IMU path should use the
+breakout's SPI pads plus the data-ready interrupt pin.
+
+| Pico 2 W | Adafruit ISM330DHCX label | Function |
+| --- | --- | --- |
+| 3V3 | VIN | Breakout power from Pico 3.3 V |
+| GND | GND | Common ground |
+| GP10 | SCK | SPI SCK |
+| GP11 | SDI / MOSI | SPI MOSI |
+| GP12 | SDO / MISO | SPI MISO |
+| GP13 | CS | SPI chip select |
+| GP14 | INT1 | Data-ready interrupt |
+| GP15 | INT2 | Optional, leave disconnected initially |
+
+This keeps the high-rate sensor wiring short and grouped on GP10-GP15. GP14 is intentionally
+repurposed from the old BMP280 SPI chip select because the barometer no longer needs to live on the
+fast SPI bus.
+
+## GY-91/BMP280 Barometer Wiring
+
+Move the current GY-91-style board toward the slow I2C header and use it only as a barometer source.
+The firmware branch still has the legacy SPI BMP280 implementation for bring-up compatibility, but
+the intended wiring for the cleaned-up board is:
+
+| Pico 2 W | GY-91/BMP280 label | Function |
+| --- | --- | --- |
+| 3V3 | 3V3 | 3.3 V module power |
+| GND | GND | Common ground |
+| GP20 | SDA | I2C data |
+| GP21 | SCL | I2C clock |
+
+If the physical GY-91 board keeps the MPU and BMP280 on shared I2C lines, leave the MPU unused in
+firmware. The flight loop should receive IMU samples only from the ISM330DHCX queue.
 
 ## PIO and DMA Allocation
 
@@ -56,17 +99,15 @@ CYW43 driver.
 The DShot output should be a single PIO program that emits four motor lines in parallel from packed
 DMA words. That keeps all motors frame-synchronous and consumes one state machine instead of four.
 
-The IMU should start on hardware SPI1 with DMA. PIO SPI is only worth adding if the selected IMU
-driver or board routing forces timing that the hardware SPI peripheral cannot satisfy.
-
 ## Firmware Shape
 
 Core 0 remains the deterministic flight side:
 
-- owns IMU SPI sampling,
-- owns PIO DShot output frame preparation,
-- runs the Voloxide control loop,
-- publishes motor command frames into the PIO/DMA output queue.
+- receives ISM330DHCX data-ready interrupts,
+- samples the ISM330DHCX over SPI through the Embassy-supported `ism330dhcx-rs` driver,
+- pushes completed IMU packets into a board-local queue,
+- runs the Voloxide control loop from queued sensor samples,
+- polls slow barometer data separately.
 
 Core 1 remains the communications side:
 
@@ -77,47 +118,9 @@ Core 1 remains the communications side:
 The IMU path should not cross the core boundary. Sensor samples should enter `voloxide_core` on core
 0 so the control loop is not gated by Wi-Fi, UDP, or mailbox scheduling.
 
-The visible GY-91 header used for bring-up does not expose a data-ready interrupt pin. The current
-Pico board path uses the board clock as the sensor event source: board service performs rate-limited
-SPI samples and stores pending packets, while `BoardIo::update_sensor_bus()` only drains those
-pending packets into core. That is acceptable for first bring-up because MPU accel/gyro reads are
-direct SPI bursts, the MPU path is explicitly rate-limited to 500 Hz, and slower BMP280 reads are
-throttled to 50 Hz separately.
+## Branch Status
 
-## DShot Notes
-
-DShot600 has a bit time of about 1.67 us and a 16-bit frame time of about 26.7 us before inter-frame
-spacing. A 1 kHz control loop is well within that budget. The PIO program should be parameterized so
-DShot300 and DShot150 are clock-divider changes rather than separate implementations.
-
-Bidirectional DShot is a later feature. It requires line turnaround and input capture after the
-transmit frame. Keep GP6 reserved until we decide whether AM32 telemetry will use a separate TLM wire
-or true bidirectional DShot on each motor signal.
-
-## Tested GY-91 Wiring
-
-| Pico 2 W | GY-91 label | Function |
-| --- | --- | --- |
-| 3V3 | 3V3 | 3.3 V module power |
-| GND | GND | Common ground |
-| GP10 | SCL | SPI SCK |
-| GP11 | SDA | SPI MOSI |
-| GP12 | SDO/SA0 | SPI MISO |
-| GP13 | NCS | MPU SPI chip select |
-| GP14 | CSB | BMP280 SPI chip select |
-
-Leave `VIN` unconnected when powering the board from Pico 2 W `3V3`.
-
-## Tested Sensor Results
-
-The `imu_spi_probe` firmware verified:
-
-- MPU `WHO_AM_I`: `0x70`
-- BMP280 chip ID: `0x58`
-- live accelerometer samples
-- live gyroscope samples
-- live BMP280 pressure/temperature samples
-- no magnetometer support configured
-
-Voloxide publishes IMU and barometer data and leaves magnetometer absent for this board target. If a
-future external magnetometer is added, implement it as a separate sensor path.
+This branch prepares the architecture for the ISM330DHCX but does not yet complete the physical
+driver task. `BoardIo::update_sensor_bus()` drains IMU samples from the new ISM330DHCX queue and
+drains barometer samples from the GY-91/BMP280 path. The remaining hardware step is to add the
+Embassy SPI/interrupt task that configures the ISM330DHCX and pushes packets into that queue.

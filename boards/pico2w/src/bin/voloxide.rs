@@ -9,8 +9,9 @@ use cortex_m_rt::entry;
 use cyw43::{JoinOptions, aligned_bytes};
 #[cfg(feature = "wifi-mavlink")]
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
+use embassy_executor::Executor;
 #[cfg(feature = "wifi-mavlink")]
-use embassy_executor::{Executor, Spawner};
+use embassy_executor::Spawner;
 #[cfg(feature = "wifi-mavlink")]
 use embassy_futures::select::{Either, select};
 #[cfg(feature = "wifi-mavlink")]
@@ -19,9 +20,9 @@ use embassy_net::{
     udp::{PacketMetadata, UdpMetadata, UdpSocket},
 };
 #[cfg(feature = "wifi-mavlink")]
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::Instant;
+use embassy_time::{Duration, Timer};
 use panic_halt as _;
-#[cfg(feature = "wifi-mavlink")]
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
 use pico2w::{board, config::Pico2WConfig, gy91::Gy91, pwm::PioPwmDriver};
 use rp2350_platform::hal::clocks::ClockConfig;
@@ -34,12 +35,17 @@ use rp2350_platform::hal::{
 };
 #[cfg(feature = "wifi-mavlink")]
 use rp2350_platform::hal::{
-    Peri, bind_interrupts, dma,
+    Peri,
     multicore::{Stack, spawn_core1},
     peripherals::{CORE1, DMA_CH0, PIN_23, PIN_24, PIN_25, PIN_29, PIO0},
     pio::{InterruptHandler as PioInterruptHandler, Pio},
 };
-#[cfg(feature = "wifi-mavlink")]
+use rp2350_platform::hal::{bind_interrupts, dma};
+#[cfg(not(feature = "wifi-mavlink"))]
+use rp2350_platform::hal::{
+    peripherals::{DMA_CH0, DMA_CH1, UART0},
+    uart::{Async as UartAsync, InterruptHandler as UartInterruptHandler, UartRx, UartTx},
+};
 use static_cell::StaticCell;
 use voloxide_core::{
     board::BoardIo, comm::TelemetryRates, params::Params, state_machine::StateManager,
@@ -48,16 +54,6 @@ use voloxide_core::{
 use voloxide_mavlink::MavlinkInterface;
 
 type PicoReal = f32;
-
-#[cfg(any(
-    all(feature = "sysclk-200mhz", feature = "sysclk-225mhz"),
-    all(feature = "sysclk-200mhz", feature = "sysclk-250mhz"),
-    all(feature = "sysclk-200mhz", feature = "sysclk-300mhz"),
-    all(feature = "sysclk-225mhz", feature = "sysclk-250mhz"),
-    all(feature = "sysclk-225mhz", feature = "sysclk-300mhz"),
-    all(feature = "sysclk-250mhz", feature = "sysclk-300mhz"),
-))]
-compile_error!("select only one sysclk overclock feature");
 
 type Pico2WWorld = World<
     board::Board,
@@ -71,6 +67,9 @@ type Pico2WWorld = World<
 
 #[cfg(feature = "wifi-mavlink")]
 const WIFI_MAVLINK_TELEMETRY_RATES: TelemetryRates = TelemetryRates {
+    #[cfg(feature = "imu-400hz")]
+    imu_hz: 400,
+    #[cfg(not(feature = "imu-400hz"))]
     imu_hz: 500,
     attitude_hz: 50,
     output_raw_hz: 0,
@@ -86,6 +85,8 @@ const WIFI_MAVLINK_TELEMETRY_RATES: TelemetryRates = TelemetryRates {
 
 #[cfg(feature = "wifi-mavlink")]
 static mut CORE1_STACK: Stack<65536> = Stack::new();
+#[cfg(not(feature = "wifi-mavlink"))]
+static CORE0_EXECUTOR: StaticCell<Executor> = StaticCell::new();
 #[cfg(feature = "wifi-mavlink")]
 static CORE1_EXECUTOR: StaticCell<Executor> = StaticCell::new();
 #[cfg(feature = "wifi-mavlink")]
@@ -98,15 +99,73 @@ const WIFI_UDP_TX_MTU: usize = 1200;
 #[cfg(feature = "wifi-mavlink")]
 const WIFI_RX_POLL_US: u64 = 250;
 #[cfg(feature = "wifi-mavlink")]
-const WIFI_SERVICE_DELAY_US: u64 = 250;
+const WIFI_IDLE_SERVICE_DELAY_US: u64 = 250;
 #[cfg(feature = "wifi-mavlink")]
-const WIFI_TX_DATAGRAMS_PER_PASS: usize = 1;
+const WIFI_ACTIVE_SERVICE_DELAY_US: u64 = 50;
+#[cfg(feature = "wifi-mavlink")]
+const WIFI_TX_DATAGRAMS_PER_PASS: usize = 3;
+#[cfg(not(feature = "wifi-mavlink"))]
+const UART_TX_BATCH_BYTES: usize = 256;
+#[cfg(not(feature = "wifi-mavlink"))]
+const UART_RX_CHUNK_BYTES: usize = 16;
+#[cfg(not(feature = "wifi-mavlink"))]
+const UART_IDLE_DELAY_US: u64 = 50;
 
-#[cfg(feature = "wifi-mavlink")]
 bind_interrupts!(struct Irqs {
+    #[cfg(feature = "wifi-mavlink")]
     PIO0_IRQ_0 => PioInterruptHandler<PIO0>;
-    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
+    #[cfg(not(feature = "wifi-mavlink"))]
+    UART0_IRQ => UartInterruptHandler<UART0>;
+    DMA_IRQ_0 =>
+        #[cfg(feature = "wifi-mavlink")]
+        dma::InterruptHandler<DMA_CH0>,
+        #[cfg(not(feature = "wifi-mavlink"))]
+        dma::InterruptHandler<DMA_CH0>,
+        #[cfg(not(feature = "wifi-mavlink"))]
+        dma::InterruptHandler<DMA_CH1>;
 });
+
+#[cfg(not(feature = "wifi-mavlink"))]
+#[embassy_executor::task]
+async fn world_task(mut world: Pico2WWorld) -> ! {
+    loop {
+        world.run_once();
+        Timer::after(Duration::from_micros(1)).await;
+    }
+}
+
+#[cfg(not(feature = "wifi-mavlink"))]
+#[embassy_executor::task]
+async fn uart_tx_task(mut uart_tx: UartTx<'static, UartAsync>, mailbox: SharedMavlinkMailbox) -> ! {
+    let mut tx = [0_u8; UART_TX_BATCH_BYTES];
+    loop {
+        let n = mailbox.drain_tx_batch_into(&mut tx);
+        if n == 0 {
+            Timer::after(Duration::from_micros(UART_IDLE_DELAY_US)).await;
+            continue;
+        }
+        if uart_tx.write(&tx[..n]).await.is_ok() {
+            mailbox.record_uart_tx_batch(n);
+        } else {
+            mailbox.record_uart_tx_error();
+        }
+    }
+}
+
+#[cfg(not(feature = "wifi-mavlink"))]
+#[embassy_executor::task]
+async fn uart_rx_task(mut uart_rx: UartRx<'static, UartAsync>, mailbox: SharedMavlinkMailbox) -> ! {
+    let mut rx = [0_u8; UART_RX_CHUNK_BYTES];
+    loop {
+        if uart_rx.read(&mut rx).await.is_ok() {
+            let _ = mailbox.push_rx_priority(&rx, voloxide_core::board::SerialRxPriority::NORMAL);
+            mailbox.record_uart_rx_chunk(rx.len());
+        } else {
+            mailbox.record_uart_rx_error();
+            Timer::after(Duration::from_micros(UART_IDLE_DELAY_US)).await;
+        }
+    }
+}
 
 #[cfg(feature = "wifi-mavlink")]
 #[embassy_executor::task]
@@ -246,10 +305,12 @@ async fn wifi_mavlink_task(
         .await
         {
             Either::First(Ok((n, metadata))) => {
-                mailbox.record_wifi_rx_datagram();
+                mailbox.record_wifi_rx_datagram(n);
                 if udp_rx[..n].starts_with(UDP_LATENCY_MAGIC) {
                     if socket.send_to(&udp_rx[..n], metadata).await.is_ok() {
-                        mailbox.record_wifi_tx_datagram();
+                        mailbox.record_wifi_tx_datagram(n);
+                    } else {
+                        mailbox.record_wifi_tx_error();
                     }
                 } else {
                     peer = Some(metadata);
@@ -269,8 +330,9 @@ async fn wifi_mavlink_task(
                     break;
                 }
                 if socket.send_to(&udp_tx[..n], remote).await.is_ok() {
-                    mailbox.record_wifi_tx_datagram();
+                    mailbox.record_wifi_tx_datagram(n);
                 } else {
+                    mailbox.record_wifi_tx_error();
                     break;
                 }
                 if n < udp_tx.len() {
@@ -278,7 +340,13 @@ async fn wifi_mavlink_task(
                 }
             }
         } else if Instant::now() >= next_discovery {
-            let _ = socket.send_to(b"voloxide-pico2w-mavlink", discovery).await;
+            if socket
+                .send_to(b"voloxide-pico2w-mavlink", discovery)
+                .await
+                .is_err()
+            {
+                mailbox.record_wifi_tx_error();
+            }
             next_discovery += Duration::from_secs(1);
         }
 
@@ -286,7 +354,12 @@ async fn wifi_mavlink_task(
             mailbox.record_core1_heartbeat();
             next_heartbeat += Duration::from_millis(500);
         }
-        Timer::after(Duration::from_micros(WIFI_SERVICE_DELAY_US)).await;
+        let delay_us = if mailbox.has_pending_tx() {
+            WIFI_ACTIVE_SERVICE_DELAY_US
+        } else {
+            WIFI_IDLE_SERVICE_DELAY_US
+        };
+        Timer::after(Duration::from_micros(delay_us)).await;
     }
 }
 
@@ -326,13 +399,7 @@ fn trace(uart: &mut Uart<'_, rp::uart::Blocking>, message: &[u8]) {
     let _ = uart.blocking_flush();
 }
 
-#[cfg(not(feature = "wifi-mavlink"))]
-fn trace(uart: &mut Uart<'_, rp::uart::Blocking>, message: &[u8]) {
-    let _ = uart.blocking_write(message);
-    let _ = uart.blocking_flush();
-}
-
-#[cfg(any(feature = "wifi-mavlink", not(feature = "wifi-mavlink")))]
+#[cfg(feature = "wifi-mavlink")]
 fn trace_delay() {
     for _ in 0..100_000 {
         core::hint::spin_loop();
@@ -392,35 +459,10 @@ fn gy91_spi_config() -> SpiConfig {
 }
 
 fn hal_config() -> HalConfig {
-    #[cfg(feature = "sysclk-300mhz")]
-    {
-        return HalConfig::new(ClockConfig::system_freq(300_000_000).unwrap());
-    }
-
-    #[cfg(feature = "sysclk-225mhz")]
-    {
-        return HalConfig::new(ClockConfig::system_freq(225_000_000).unwrap());
-    }
-
-    #[cfg(all(
-        not(feature = "sysclk-300mhz"),
-        not(feature = "sysclk-225mhz"),
-        feature = "sysclk-200mhz"
-    ))]
-    {
-        return HalConfig::new(ClockConfig::system_freq(200_000_000).unwrap());
-    }
-
-    #[cfg(not(any(
-        feature = "sysclk-300mhz",
-        feature = "sysclk-225mhz",
-        feature = "sysclk-200mhz"
-    )))]
-    {
-        HalConfig::new(ClockConfig::system_freq(250_000_000).unwrap())
-    }
+    HalConfig::new(ClockConfig::system_freq(300_000_000).unwrap())
 }
 
+#[cfg(feature = "wifi-mavlink")]
 fn run_world_on_core0(mut world: Pico2WWorld) -> ! {
     loop {
         world.run_once();
@@ -494,20 +536,7 @@ fn main() -> ! {
 
     #[cfg(not(feature = "wifi-mavlink"))]
     {
-        let mut mavlink_uart = Uart::new_blocking(
-            peripherals.UART0,
-            peripherals.PIN_0,
-            peripherals.PIN_1,
-            mavlink_uart_config(),
-        );
-        for _ in 0..5 {
-            trace(&mut mavlink_uart, b"voloxide pico2w uart preflight\r\n");
-            trace_delay();
-        }
-
         let config = Pico2WConfig::default();
-        trace(&mut mavlink_uart, b"config ok\r\n");
-        trace(&mut mavlink_uart, b"mavlink uart ok\r\n");
         let gy91 = Gy91::new(
             Spi::new_blocking(
                 peripherals.SPI1,
@@ -519,7 +548,7 @@ fn main() -> ! {
             Output::new(peripherals.PIN_13, Level::High),
             Output::new(peripherals.PIN_14, Level::High),
         );
-        let (mut board, pwm_driver) = board::Board::new_uart(config, mavlink_uart, Some(gy91));
+        let (mut board, pwm_driver) = board::Board::new_uart(config, Some(gy91));
 
         let mut params = Params::default();
         if !board.read_params(&mut params) {
@@ -528,6 +557,29 @@ fn main() -> ! {
         }
 
         let world = init_world(board, params, pwm_driver);
-        run_world_on_core0(world);
+
+        let mavlink_uart = Uart::new(
+            peripherals.UART0,
+            peripherals.PIN_0,
+            peripherals.PIN_1,
+            Irqs,
+            peripherals.DMA_CH0,
+            peripherals.DMA_CH1,
+            mavlink_uart_config(),
+        );
+        let (uart_tx, uart_rx) = mavlink_uart.split();
+        let mailbox = SHARED_MAVLINK_MAILBOX;
+        let executor = CORE0_EXECUTOR.init(Executor::new());
+        executor.run(|spawner| {
+            if let Ok(token) = uart_tx_task(uart_tx, mailbox) {
+                spawner.spawn(token);
+            }
+            if let Ok(token) = uart_rx_task(uart_rx, mailbox) {
+                spawner.spawn(token);
+            }
+            if let Ok(token) = world_task(world) {
+                spawner.spawn(token);
+            }
+        });
     }
 }

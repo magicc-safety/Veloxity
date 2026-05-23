@@ -35,11 +35,12 @@ implementation owns one MAVLink endpoint internally: UART in the default build, 
 mailbox when `wifi`/`wifi-mavlink` is enabled. `voloxide_core` still sees only the `BoardIo` serial
 byte contract.
 
-UART transmit is opportunistic and bounded. MAVLink writes enqueue bytes into the board queue; the
-world loop services a small TX budget through `serial_flush()` after inbound communication, sensor
-ingestion, control, and telemetry enqueue work. The Wi-Fi build keeps CYW43, DHCP, UDP RX/TX, and
-the UDP MAVLink bridge on core1. Core1 pushes inbound UDP bytes into the same logical RX pipe used by
-the UART build and drains outbound bytes from the same logical TX pipe.
+UART transmit is DMA serviced outside the measured world pass. MAVLink writes enqueue bytes into the
+board priority queues; a board-local UART TX task drains those queues into fixed-size DMA batches.
+UART RX uses a small fixed DMA chunk and pushes bytes into the same logical RX pipe. For UART builds,
+`serial_flush()` is effectively no-op, so `tx_flush_us` should stay near zero. The Wi-Fi build keeps
+CYW43, DHCP, UDP RX/TX, and the UDP MAVLink bridge on core1. Core1 pushes inbound UDP bytes into the
+same logical RX pipe used by the UART build and drains outbound bytes from the same logical TX pipe.
 
 ## Current Sensor Rates
 
@@ -56,11 +57,8 @@ only drains pending samples into `SensorBus`.
 
 ## Timing Semantics
 
-Pico 2 W firmware initializes RP2350 `clk_sys` at 250 MHz using the HAL's RP235x default
-`CoreVoltage::V1_10` setting. The lower `sysclk-225mhz` and `sysclk-200mhz` build features are kept
-as diagnostic fallbacks; selecting no sysclk feature uses 250 MHz. A `sysclk-300mhz` diagnostic
-feature is available for experiments without changing the requested core voltage, but it is not the
-default because the current Wi-Fi throughput test regressed at 300 MHz.
+Pico 2 W firmware initializes RP2350 `clk_sys` at 300 MHz. There are no build-time sysclk selection
+features in the Pico board crate now; 300 MHz is the standard clock for both UART and Wi-Fi firmware.
 
 `World::run_once_measured()` reports board-local pass timing:
 
@@ -81,8 +79,8 @@ Existing ROSflight status `loop_time_us` is still the control pipeline time, pre
 compatibility. Idle and RX-only passes can therefore have measured pass time without changing
 `loop_time_us`; that status field only advances when the IMU-driven control pipeline runs.
 Board deferred producer service, including the current GY-91 SPI sampling hook, runs at the end of
-the pass after bounded telemetry flush so it cannot delay control for a sample already drained in
-that pass.
+the pass. UART physical TX/RX DMA service runs in separate board tasks and is reported through
+board-local diagnostics when `timing-diagnostics` is enabled.
 
 ## Release-Mode Measurements
 
@@ -99,27 +97,56 @@ VOLOXIDE_WIFI_SSID=MAGICC VOLOXIDE_WIFI_PASSWORD=magiccwifi \
   cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features wifi-mavlink
 ```
 
-### UART, 500 Hz IMU Gate
+### UART DMA, 500 Hz IMU Gate
 
 Command:
 
 ```bash
-python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 921600 --samples 10000 --duration-s 20 --warmup-s 1 --show 8 --diagnostics
+python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 921600 --samples 5000 --duration-s 15 --warmup-s 1 --show 8 --diagnostics
 ```
 
 Result:
 
-- IMU frames: 9460
-- host interval: average 2.008 ms, p99 2.266 ms, max 2.689 ms
-- board timestamp interval: average 2.008 ms, p99 2.017 ms, max 2.085 ms
-- IMU telemetry rate: 497.9 Hz
-- barometer telemetry rate: 24.9 Hz
-- status telemetry rate: 10.0 Hz
-- firmware loop time: min 168 us, average 222.7 us, p99 264 us, max 268 us
-- parser invalid CRC count: 1
+- IMU frames: 5000
+- host interval: average 2.046 ms, p99 2.461 ms, max 13.602 ms
+- board timestamp interval: average 2.046 ms, p99 2.071 ms, max 4.103 ms
+- IMU telemetry rate: 488.7 Hz
+- barometer telemetry rate: 24.0 Hz
+- status telemetry rate: 9.8 Hz
+- firmware loop time: min 130 us, average 137.6 us, p99 156 us, max 162 us
+- control-class pass average: 359.2 us
+- control-class `tx_flush_us`: 1.0 us
+- control-class telemetry enqueue: 97.5 us
+- parser invalid CRC count: 3
 
-Conclusion: the wired UART build can sustain the 500 Hz IMU stream in release mode with comfortable
-control-loop margin.
+Conclusion: the wired UART build still carries the high-rate IMU stream in release mode. Moving
+physical UART TX to DMA removed the previous synchronous flush cost from the world pass; the remaining
+telemetry cost is mostly MAVLink production/enqueue work.
+
+### UART DMA, 400 Hz IMU Gate
+
+Command:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features 'timing-diagnostics imu-400hz'
+python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 921600 --samples 5000 --duration-s 15 --warmup-s 1 --show 8 --diagnostics
+```
+
+Result:
+
+- IMU frames: 5000
+- host interval: average 2.540 ms, p99 2.909 ms, max 14.273 ms
+- board timestamp interval: average 2.540 ms, p99 2.578 ms, max 5.094 ms
+- IMU telemetry rate: 393.6 Hz
+- barometer telemetry rate: 24.6 Hz
+- status telemetry rate: 9.7 Hz
+- firmware loop time: min 139 us, average 146.1 us, p99 170 us, max 170 us
+- control-class pass average: 365.5 us
+- control-class `tx_flush_us`: 0.0 us
+- control-class telemetry enqueue: 97.0 us
+- parser invalid CRC count: 5
+
+Conclusion: the UART DMA path sustains the 400 Hz target with the fixed 300 MHz clock.
 
 ### Historical UART, 500 Hz IMU Gate, SysTick 4 kHz Service Scheduler
 
@@ -146,59 +173,61 @@ for the synchronous UART transmit path and reduced observed IMU telemetry to 375
 469.6 Hz respectively. The final 4 kHz service rate recovers the wired 500 Hz stream without changing
 the 500 Hz IMU/control gate.
 
-### Wi-Fi, 500 Hz IMU Gate, Batched UDP, 500 Hz Telemetry Target
-
-Command:
-
-```bash
-python3 tools/mavlink_tester.py --transport wifi --board 192.168.1.192 --samples 10000 --duration-s 20 --warmup-s 3 --show 12 --diagnostics
-```
-
-Result:
-
-- IMU frames: 5000
-- host interval: average 2.306 ms, p99 5.699 ms, max 32.803 ms
-- board timestamp interval: average 2.306 ms, p99 4.275 ms, max 4.469 ms
-- IMU telemetry rate: 433.7 Hz
-- barometer telemetry rate: 23.8 Hz
-- status telemetry rate: 10.0 Hz
-- firmware loop time: min 270 us, average 339.0 us, p99 532 us, max 582 us
-- parser invalid CRC count: 0
-- RX byte rate: 22.4 kB/s
-
-Conclusion: core1 UDP batching and a 500 Hz Wi-Fi telemetry profile can exceed the 400 Hz target in
-station-mode testing. The Wi-Fi path still has more jitter than UART and should not be used as the
-inner-loop control link, but it can now carry high-rate IMU telemetry while core0 owns stabilization.
-
-The earlier 400 Hz Wi-Fi target measured about 242 Hz because the GY-91 producer samples at a 2 ms
-cadence and the telemetry scheduler's 2.5 ms period skipped every other sample. Requesting 500 Hz
-aligns the telemetry period with the accepted IMU sample cadence.
-
-### Wi-Fi, 500 Hz IMU Gate, Batched UDP, 500 Hz Telemetry Target, 300 MHz Sysclk
+### Wi-Fi, 400 Hz IMU Gate, Batched UDP, 400 Hz Telemetry Target
 
 Command:
 
 ```bash
 VOLOXIDE_WIFI_SSID=MAGICC VOLOXIDE_WIFI_PASSWORD=magiccwifi \
-  cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features 'wifi timing-diagnostics sysclk-300mhz'
+  cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features 'wifi timing-diagnostics imu-400hz'
 python3 tools/mavlink_tester.py --transport wifi --board 192.168.1.192 --samples 5000 --duration-s 15 --warmup-s 3 --show 8 --diagnostics
 ```
 
 Result:
 
-- IMU frames: 4687
-- host interval: average 2.560 ms, p99 6.751 ms, max 88.363 ms
-- board timestamp interval: average 2.560 ms, p99 4.175 ms, max 8.316 ms
-- IMU telemetry rate: 390.6 Hz
-- barometer telemetry rate: 23.0 Hz
+- IMU frames: 4163
+- host interval: average 2.883 ms, p99 7.566 ms, max 114.933 ms
+- board timestamp interval: average 2.883 ms, p99 5.102 ms, max 5.221 ms
+- IMU telemetry rate: 346.9 Hz
+- barometer telemetry rate: 24.5 Hz
 - status telemetry rate: 10.0 Hz
-- firmware loop time: min 158 us, average 260.5 us, p99 345 us, max 380 us
+- firmware loop time: min 171 us, average 237.4 us, p99 293 us, max 361 us
 - parser invalid CRC count: 0
-- RX byte rate: 20.5 kB/s
+- RX byte rate: 18.9 kB/s
 
-Conclusion: 300 MHz improves the measured math/control times, but this test delivered fewer Wi-Fi
-IMU frames than the 250 MHz default. Keep 250 MHz as the standard clock until the CYW43/UDP path is
-measured stable at a higher clock.
+Conclusion: 300 MHz improves the measured control math, but the 400 Hz Wi-Fi target does not deliver
+400 Hz in this build. After the low-priority frame-ring queue and more aggressive TX service, the
+400 Hz run improved from about 325 Hz to about 347 Hz with zero CRC errors.
+
+The earlier 500 Hz Wi-Fi target exceeded 400 Hz because its 2.0 ms telemetry period aligned with the
+default 2.0 ms accepted IMU cadence. The 400 Hz target uses a 2.5 ms cadence and currently delivers
+roughly every other/third queued sample over UDP under load.
+
+### Wi-Fi, 500 Hz IMU Gate, Batched UDP, 500 Hz Telemetry Target
+
+Command:
+
+```bash
+VOLOXIDE_WIFI_SSID=MAGICC VOLOXIDE_WIFI_PASSWORD=magiccwifi \
+  cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features 'wifi timing-diagnostics'
+python3 tools/mavlink_tester.py --transport wifi --board 192.168.1.192 --samples 5000 --duration-s 15 --warmup-s 3 --show 8 --diagnostics
+```
+
+Result:
+
+- IMU frames: 4871
+- host interval: average 2.440 ms, p99 6.515 ms, max 140.519 ms
+- board timestamp interval: average 2.794 ms, p99 4.114 ms, max 1518.751 ms
+- IMU telemetry rate: 409.8 Hz
+- barometer telemetry rate: 24.6 Hz
+- status telemetry rate: 12.8 Hz
+- firmware loop time: min 106 us, average 217.6 us, p99 306 us, max 315 us
+- parser invalid CRC count: 0
+- RX byte rate: 22.1 kB/s
+
+Conclusion: the 500 Hz Wi-Fi telemetry cadence now exceeds 400 Hz in station-mode testing. The 400 Hz
+requested cadence still under-delivers, so the limiting factor appears to be cadence/transport
+interaction rather than control math time.
 
 ### Historical Wi-Fi, 500 Hz IMU Gate, 200 Hz Telemetry Target, SysTick 4 kHz Service Scheduler
 

@@ -40,6 +40,10 @@ pub trait BoardIo {
     fn serial_rx_last_count(&self) -> usize {
         0
     }
+    #[cfg(feature = "timing-diagnostics")]
+    fn board_diagnostic_text(&mut self) -> Option<[u8; 50]> {
+        None
+    }
 
     fn clock_millis(&self) -> u32;
     fn clock_micros(&self) -> u64;

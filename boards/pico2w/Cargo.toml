@@ -9,12 +9,8 @@ default = []
 wifi = ["wifi-mavlink"]
 wifi-mavlink = []
 timing-diagnostics = ["voloxide_core/timing-diagnostics"]
-# Pico 2 W defaults to 250 MHz at the HAL's RP235x default 1.10 V core voltage.
-# Lower sysclk features are retained as diagnostic fallbacks.
-sysclk-200mhz = []
-sysclk-225mhz = []
-sysclk-250mhz = []
-sysclk-300mhz = []
+imu-400hz = []
+ism330dhcx-driver = ["dep:ism330dhcx-rs"]
 
 [dependencies]
 rp2350_platform = { workspace = true }
@@ -40,6 +36,7 @@ embassy-net = { version = "0.9.1", features = [
 embassy-sync = "0.8.0"
 embassy-time = "0.5.1"
 embedded-hal-nb = "1.0.0"
+ism330dhcx-rs = { version = "2.0.0", default-features = false, features = ["async"], optional = true }
 nb = "1.1.0"
 panic-halt = "1.0.0"
 static_cell = "2.1"

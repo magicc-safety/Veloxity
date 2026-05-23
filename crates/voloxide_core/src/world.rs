@@ -860,6 +860,16 @@ where
             self.push_timing_diagnostic_text(format_timing_board_detail(label, bucket));
         }
 
+        while let Some(text) = self.board.board_diagnostic_text() {
+            self.comm_events.responses.push_or_log(
+                CommResponse::Statustext(StatustextMsg {
+                    severity: Severity::Debug,
+                    text,
+                }),
+                "board diagnostics",
+            );
+        }
+
         self.timing_diagnostics.reset(now_us);
     }
 

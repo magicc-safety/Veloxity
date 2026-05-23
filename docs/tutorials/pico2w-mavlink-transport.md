@@ -141,19 +141,21 @@ Release-mode results from the current RP2350 branch:
 
 | Build | IMU telemetry | Board timestamp p99 | Firmware loop p99 | Notes |
 | --- | ---: | ---: | ---: | --- |
-| UART, 500 Hz gate, historical SysTick 4 kHz service | 498.4 Hz | 2.249 ms | 298 us | Clean wired path. |
-| Wi-Fi, 500 Hz gate, batched UDP, 500 Hz telemetry target | 433.7 Hz | 4.275 ms | 532 us | Exceeds the 400 Hz Wi-Fi target; still more jitter than UART. |
-| Wi-Fi, same build at `sysclk-300mhz` | 390.6 Hz | 4.175 ms | 345 us | Faster math, lower Wi-Fi delivery in this test. |
+| UART DMA, 500 Hz gate, fixed 300 MHz | 488.7 Hz | 2.071 ms | 156 us | Physical UART TX/RX is outside the measured world pass. |
+| UART DMA, 400 Hz gate, fixed 300 MHz | 393.6 Hz | 2.578 ms | 170 us | Wired path sustains the 400 Hz target. |
+| Wi-Fi, 400 Hz gate, batched UDP, fixed 300 MHz | 346.9 Hz | 5.102 ms | 293 us | Improved queue policy, zero CRC errors, but still below target. |
+| Wi-Fi, 500 Hz gate, batched UDP, fixed 300 MHz | 409.8 Hz | 4.114 ms | 306 us | Clears 400 Hz by using the better-aligned 2 ms cadence. |
 
 The Wi-Fi number remains lower and more jittery than the wired path. ROSflight should not rely on the
 Wi-Fi path for deterministic sub-10 ms control. The RP2350 firmware must own stabilization, failsafe
 behavior, and command timeout handling.
 
 Current firmware no longer uses SysTick to grant world-loop passes. Core0 runs `World` continuously;
-MAVLink writes enqueue into board-local queues, bounded TX service happens from `serial_flush()`, and
-GY-91 SPI sampling is produced by board service before `update_sensor_bus()` drains pending samples.
-The Wi-Fi bridge on core1 batches multiple mailbox reads into one UDP datagram and yields between
-service passes so CYW43 work does not dominate core0 timing.
+MAVLink writes enqueue into board-local queues. In UART builds, separate Embassy tasks move physical
+bytes with UART DMA, and `serial_flush()` is no-op in the measured world pass. GY-91 SPI sampling is
+produced by board service before `update_sensor_bus()` drains pending samples. The Wi-Fi bridge on
+core1 batches multiple mailbox reads into one UDP datagram and yields between service passes so
+CYW43 work does not dominate core0 timing.
 
 ## 8. Sanity Checks Before Flight Testing
 

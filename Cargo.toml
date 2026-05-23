@@ -25,6 +25,9 @@ voloxide_mavlink = { path = "./comms/voloxide_mavlink" }
 rp2350_platform = { path = "./platforms/rp2350" }
 stm_32 = { path = "./platforms/stm_32" }
 
+[patch.crates-io]
+ism330dhcx-rs = { path = "third_party/ism330dhcx-rs" }
+
 [workspace.lints.rust]
 
 # cargo build/run

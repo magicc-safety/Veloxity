@@ -26,6 +26,9 @@ const BMP_CTRL_MEAS: u8 = 0xf4;
 const BMP_CONFIG: u8 = 0xf5;
 const BMP_PRESS_MSB: u8 = 0xf7;
 
+#[cfg(feature = "imu-400hz")]
+pub const GY91_IMU_SAMPLE_INTERVAL_US: u64 = 2_500;
+#[cfg(not(feature = "imu-400hz"))]
 pub const GY91_IMU_SAMPLE_INTERVAL_US: u64 = 2_000;
 pub const GY91_IMU_SAMPLE_RATE_HZ: u32 = 1_000_000 / GY91_IMU_SAMPLE_INTERVAL_US as u32;
 pub const GY91_BARO_SAMPLE_INTERVAL_US: u64 = 20_000;
@@ -76,6 +79,8 @@ pub struct Gy91 {
     bmp_cs: Output<'static>,
     bmp_calibration: Bmp280Calibration,
     initialized: bool,
+    bmp_initialized: bool,
+    bmp_id: Option<u8>,
     ids: Option<Gy91Ids>,
     imu_seq: u32,
     last_imu_sample_us: u64,
@@ -96,6 +101,8 @@ impl Gy91 {
             bmp_cs,
             bmp_calibration: Bmp280Calibration::default(),
             initialized: false,
+            bmp_initialized: false,
+            bmp_id: None,
             ids: None,
             imu_seq: 0,
             last_imu_sample_us: 0,
@@ -113,10 +120,7 @@ impl Gy91 {
             return Err(Gy91Error::InvalidMpuId(mpu));
         }
 
-        let bmp = self.bmp_read_reg(BMP_CHIP_ID)?;
-        if bmp != 0x58 {
-            return Err(Gy91Error::InvalidBmpId(bmp));
-        }
+        let bmp = self.init_bmp280()?;
 
         self.mpu_write_reg(MPU_PWR_MGMT_1, 0x01)?;
         self.mpu_write_reg(MPU_CONFIG, 0x03)?;
@@ -124,10 +128,6 @@ impl Gy91 {
         self.mpu_write_reg(MPU_GYRO_CONFIG, 0x08)?;
         self.mpu_write_reg(MPU_ACCEL_CONFIG, 0x08)?;
         self.mpu_write_reg(MPU_ACCEL_CONFIG2, 0x03)?;
-
-        self.bmp_calibration = self.read_bmp_calibration()?;
-        self.bmp_write_reg(BMP_CONFIG, 0xa0)?;
-        self.bmp_write_reg(BMP_CTRL_MEAS, 0x4f)?;
 
         let ids = Gy91Ids { mpu, bmp };
         self.initialized = true;
@@ -186,7 +186,7 @@ impl Gy91 {
     }
 
     pub fn sample_baro(&mut self, now_us: u64) -> Result<Option<BaroPacket>, Gy91Error> {
-        self.ensure_initialized()?;
+        self.ensure_baro_initialized()?;
         if now_us
             < self
                 .last_baro_sample_us
@@ -222,6 +222,32 @@ impl Gy91 {
         } else {
             self.init().map(|_| ())
         }
+    }
+
+    fn ensure_baro_initialized(&mut self) -> Result<(), Gy91Error> {
+        if self.bmp_initialized {
+            Ok(())
+        } else {
+            self.init_bmp280().map(|_| ())
+        }
+    }
+
+    fn init_bmp280(&mut self) -> Result<u8, Gy91Error> {
+        if self.bmp_initialized {
+            return self.bmp_id.ok_or(Gy91Error::Spi);
+        }
+
+        let bmp = self.bmp_read_reg(BMP_CHIP_ID)?;
+        if bmp != 0x58 {
+            return Err(Gy91Error::InvalidBmpId(bmp));
+        }
+
+        self.bmp_calibration = self.read_bmp_calibration()?;
+        self.bmp_write_reg(BMP_CONFIG, 0xa0)?;
+        self.bmp_write_reg(BMP_CTRL_MEAS, 0x4f)?;
+        self.bmp_initialized = true;
+        self.bmp_id = Some(bmp);
+        Ok(bmp)
     }
 
     fn mpu_read_reg(&mut self, reg: u8) -> Result<u8, Gy91Error> {
