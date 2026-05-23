@@ -14,6 +14,7 @@ timing-diagnostics = ["voloxide_core/timing-diagnostics"]
 sysclk-200mhz = []
 sysclk-225mhz = []
 sysclk-250mhz = []
+sysclk-300mhz = []
 
 [dependencies]
 rp2350_platform = { workspace = true }

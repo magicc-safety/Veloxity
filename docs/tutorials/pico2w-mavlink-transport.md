@@ -19,12 +19,12 @@ The Pico 2 W target selects the telemetry profile at build time:
 Current board-side rates:
 
 - UART `SMALL_IMU`: every accepted IMU sample, currently about 500 Hz in release firmware
-- Wi-Fi `SMALL_IMU`: requested at 200 Hz, measured about 162 Hz in the current station-mode test
-- `ATTITUDE_QUATERNION`: up to 100 Hz
-- `OUTPUT_RAW`, baro, mag, range, differential pressure: up to 50 Hz
-- battery: up to 25 Hz
+- Wi-Fi `SMALL_IMU`: requested at 500 Hz, measured about 434 Hz in the current station-mode test
+- Wi-Fi `ATTITUDE_QUATERNION` and RC raw: requested at 50 Hz
+- Wi-Fi baro, mag, range, differential pressure: requested at 25 Hz
+- Wi-Fi `OUTPUT_RAW`: disabled in the current board profile
+- battery: requested at 10 Hz
 - GNSS: up to 10 Hz
-- RC raw: up to 100 Hz
 
 Core defaults remain upstream-like for other boards. MAVLink command, parameter, heartbeat,
 status, timesync, statustext, version, and hard-error replies are tagged as high-priority TX.
@@ -142,15 +142,18 @@ Release-mode results from the current RP2350 branch:
 | Build | IMU telemetry | Board timestamp p99 | Firmware loop p99 | Notes |
 | --- | ---: | ---: | ---: | --- |
 | UART, 500 Hz gate, historical SysTick 4 kHz service | 498.4 Hz | 2.249 ms | 298 us | Clean wired path. |
-| Wi-Fi, 500 Hz gate, 200 Hz telemetry target, historical SysTick 4 kHz service | 157.0 Hz | 6.758 ms | 838 us | CYW43 work still adds jitter. |
+| Wi-Fi, 500 Hz gate, batched UDP, 500 Hz telemetry target | 433.7 Hz | 4.275 ms | 532 us | Exceeds the 400 Hz Wi-Fi target; still more jitter than UART. |
+| Wi-Fi, same build at `sysclk-300mhz` | 390.6 Hz | 4.175 ms | 345 us | Faster math, lower Wi-Fi delivery in this test. |
 
-The Wi-Fi number is intentionally lower than the internal sensor gate. ROSflight should not rely on
-the Wi-Fi path for deterministic sub-10 ms control. The RP2350 firmware must own stabilization,
-failsafe behavior, and command timeout handling.
+The Wi-Fi number remains lower and more jittery than the wired path. ROSflight should not rely on the
+Wi-Fi path for deterministic sub-10 ms control. The RP2350 firmware must own stabilization, failsafe
+behavior, and command timeout handling.
 
 Current firmware no longer uses SysTick to grant world-loop passes. Core0 runs `World` continuously;
 MAVLink writes enqueue into board-local queues, bounded TX service happens from `serial_flush()`, and
 GY-91 SPI sampling is produced by board service before `update_sensor_bus()` drains pending samples.
+The Wi-Fi bridge on core1 batches multiple mailbox reads into one UDP datagram and yields between
+service passes so CYW43 work does not dominate core0 timing.
 
 ## 8. Sanity Checks Before Flight Testing
 

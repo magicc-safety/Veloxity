@@ -96,6 +96,20 @@ impl SharedMavlinkMailbox {
         n
     }
 
+    pub fn drain_tx_batch_into(&self, out: &mut [u8]) -> usize {
+        let mut total = 0;
+        while total < out.len() {
+            let n = read_priority(&TX_HIGH, &TX_NORMAL, &TX_LOW, &mut out[total..]);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+
+        self.update_stats(|stats| stats.tx_drained = stats.tx_drained.wrapping_add(total as u32));
+        total
+    }
+
     pub fn record_core1_heartbeat(&self) {
         self.update_stats(|stats| stats.core1_heartbeats = stats.core1_heartbeats.wrapping_add(1));
     }

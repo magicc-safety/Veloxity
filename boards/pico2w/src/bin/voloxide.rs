@@ -52,7 +52,10 @@ type PicoReal = f32;
 #[cfg(any(
     all(feature = "sysclk-200mhz", feature = "sysclk-225mhz"),
     all(feature = "sysclk-200mhz", feature = "sysclk-250mhz"),
+    all(feature = "sysclk-200mhz", feature = "sysclk-300mhz"),
     all(feature = "sysclk-225mhz", feature = "sysclk-250mhz"),
+    all(feature = "sysclk-225mhz", feature = "sysclk-300mhz"),
+    all(feature = "sysclk-250mhz", feature = "sysclk-300mhz"),
 ))]
 compile_error!("select only one sysclk overclock feature");
 
@@ -68,7 +71,7 @@ type Pico2WWorld = World<
 
 #[cfg(feature = "wifi-mavlink")]
 const WIFI_MAVLINK_TELEMETRY_RATES: TelemetryRates = TelemetryRates {
-    imu_hz: 200,
+    imu_hz: 500,
     attitude_hz: 50,
     output_raw_hz: 0,
     diff_pressure_hz: 25,
@@ -90,6 +93,14 @@ static mut CYW43_STATE: cyw43::State = cyw43::State::new();
 
 #[cfg(feature = "wifi-mavlink")]
 const UDP_LATENCY_MAGIC: &[u8; 4] = b"VXL1";
+#[cfg(feature = "wifi-mavlink")]
+const WIFI_UDP_TX_MTU: usize = 1200;
+#[cfg(feature = "wifi-mavlink")]
+const WIFI_RX_POLL_US: u64 = 250;
+#[cfg(feature = "wifi-mavlink")]
+const WIFI_SERVICE_DELAY_US: u64 = 250;
+#[cfg(feature = "wifi-mavlink")]
+const WIFI_TX_DATAGRAMS_PER_PASS: usize = 1;
 
 #[cfg(feature = "wifi-mavlink")]
 bind_interrupts!(struct Irqs {
@@ -211,7 +222,7 @@ async fn wifi_mavlink_task(
     let mut rx_buffer = [0_u8; 4096];
     let mut tx_buffer = [0_u8; 4096];
     let mut udp_rx = [0_u8; 512];
-    let mut udp_tx = [0_u8; 512];
+    let mut udp_tx = [0_u8; WIFI_UDP_TX_MTU];
     let mut peer: Option<UdpMetadata> = None;
     let discovery = IpEndpoint::new(IpAddress::v4(255, 255, 255, 255), config.wifi.udp.peer_port);
 
@@ -230,7 +241,7 @@ async fn wifi_mavlink_task(
     loop {
         match select(
             socket.recv_from(&mut udp_rx),
-            Timer::after(Duration::from_millis(1)),
+            Timer::after(Duration::from_micros(WIFI_RX_POLL_US)),
         )
         .await
         {
@@ -252,9 +263,19 @@ async fn wifi_mavlink_task(
         }
 
         if let Some(remote) = peer {
-            let n = mailbox.drain_tx_into(&mut udp_tx);
-            if n > 0 && socket.send_to(&udp_tx[..n], remote).await.is_ok() {
-                mailbox.record_wifi_tx_datagram();
+            for _ in 0..WIFI_TX_DATAGRAMS_PER_PASS {
+                let n = mailbox.drain_tx_batch_into(&mut udp_tx);
+                if n == 0 {
+                    break;
+                }
+                if socket.send_to(&udp_tx[..n], remote).await.is_ok() {
+                    mailbox.record_wifi_tx_datagram();
+                } else {
+                    break;
+                }
+                if n < udp_tx.len() {
+                    break;
+                }
             }
         } else if Instant::now() >= next_discovery {
             let _ = socket.send_to(b"voloxide-pico2w-mavlink", discovery).await;
@@ -265,7 +286,7 @@ async fn wifi_mavlink_task(
             mailbox.record_core1_heartbeat();
             next_heartbeat += Duration::from_millis(500);
         }
-        Timer::after(Duration::from_millis(1)).await;
+        Timer::after(Duration::from_micros(WIFI_SERVICE_DELAY_US)).await;
     }
 }
 
@@ -371,17 +392,30 @@ fn gy91_spi_config() -> SpiConfig {
 }
 
 fn hal_config() -> HalConfig {
+    #[cfg(feature = "sysclk-300mhz")]
+    {
+        return HalConfig::new(ClockConfig::system_freq(300_000_000).unwrap());
+    }
+
     #[cfg(feature = "sysclk-225mhz")]
     {
         return HalConfig::new(ClockConfig::system_freq(225_000_000).unwrap());
     }
 
-    #[cfg(all(not(feature = "sysclk-225mhz"), feature = "sysclk-200mhz"))]
+    #[cfg(all(
+        not(feature = "sysclk-300mhz"),
+        not(feature = "sysclk-225mhz"),
+        feature = "sysclk-200mhz"
+    ))]
     {
         return HalConfig::new(ClockConfig::system_freq(200_000_000).unwrap());
     }
 
-    #[cfg(not(any(feature = "sysclk-225mhz", feature = "sysclk-200mhz")))]
+    #[cfg(not(any(
+        feature = "sysclk-300mhz",
+        feature = "sysclk-225mhz",
+        feature = "sysclk-200mhz"
+    )))]
     {
         HalConfig::new(ClockConfig::system_freq(250_000_000).unwrap())
     }
