@@ -10,9 +10,16 @@ ROSflight does not select between these modes over MAVLink; the selected firmwar
 `VOLOXIDE_WIFI_SSID` is the infrastructure Wi-Fi network that the Pico joins, such as a router or
 lab access point. It is not a Pico-hosted access point.
 
-The Pico 2 W target opts into the bounded high-rate telemetry profile in Voloxide core:
+The Pico 2 W target selects the telemetry profile at build time:
 
-- `SMALL_IMU`: up to 400 Hz
+- UART firmware uses the bounded high-rate profile and streams every accepted IMU sample.
+- Wi-Fi firmware uses a Pico-board throttled profile so the flight side can continue sampling faster
+  than the CYW43 UDP link publishes.
+
+Current board-side rates:
+
+- UART `SMALL_IMU`: every accepted IMU sample, currently about 500 Hz in release firmware
+- Wi-Fi `SMALL_IMU`: requested at 200 Hz, measured about 162 Hz in the current station-mode test
 - `ATTITUDE_QUATERNION`: up to 100 Hz
 - `OUTPUT_RAW`, baro, mag, range, differential pressure: up to 50 Hz
 - battery: up to 25 Hz
@@ -51,9 +58,9 @@ on UART0:
 - Baud: 921600
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide
-probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/debug/voloxide
-probe-rs verify --chip RP235x target/thumbv8m.main-none-eabihf/debug/voloxide
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
+probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/release/voloxide
+probe-rs verify --chip RP235x target/thumbv8m.main-none-eabihf/release/voloxide
 probe-rs reset --chip RP235x
 ```
 
@@ -72,9 +79,9 @@ export VOLOXIDE_WIFI_PASSWORD='YOUR_ROUTER_WIFI_PASSWORD'
 Build the Wi-Fi feature image:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --features wifi
-probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/debug/voloxide
-probe-rs verify --chip RP235x target/thumbv8m.main-none-eabihf/debug/voloxide
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features wifi
+probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/release/voloxide
+probe-rs verify --chip RP235x target/thumbv8m.main-none-eabihf/release/voloxide
 probe-rs reset --chip RP235x
 ```
 
@@ -118,17 +125,28 @@ python3 tools/udp_latency_test.py 192.168.1.192 --count 2000 --rate-hz 100 --tim
 Wi-Fi UDP:
 
 ```bash
-python3 tools/mavlink_tester.py --transport wifi --board 192.168.1.192 --samples 1000 --duration-s 8
+python3 tools/mavlink_tester.py --transport wifi --board 192.168.1.192 --samples 10000 --duration-s 20 --warmup-s 3 --show 12 --diagnostics
 ```
 
 Wired UART:
 
 ```bash
-python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 921600 --samples 1000 --duration-s 8
+python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 921600 --samples 10000 --duration-s 20 --warmup-s 1 --show 8 --diagnostics
 ```
 
 The tester validates MAVLink v1 checksums, decodes `SMALL_IMU` and `SMALL_BARO`, and reports host
 receive intervals plus board timestamp intervals where the message carries a board timestamp.
+
+Release-mode results from the current RP2350 branch:
+
+| Build | IMU telemetry | Board timestamp p99 | Firmware loop p99 | Notes |
+| --- | ---: | ---: | ---: | --- |
+| UART, 500 Hz gate | 497.9 Hz | 2.017 ms | 264 us | Clean wired path. |
+| Wi-Fi, 500 Hz gate, 200 Hz telemetry target | 162.6 Hz | 6.571 ms | 937 us | Throttling helps but CYW43 work still adds jitter. |
+
+The Wi-Fi number is intentionally lower than the internal sensor gate. ROSflight should not rely on
+the Wi-Fi path for deterministic sub-10 ms control. The RP2350 firmware must own stabilization,
+failsafe behavior, and command timeout handling.
 
 ## 8. Sanity Checks Before Flight Testing
 
