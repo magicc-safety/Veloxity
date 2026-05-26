@@ -100,8 +100,12 @@ fn stream_due(now_us: u64, last_us: &mut u64, rate_hz: u16) -> bool {
     }
 
     let interval_us = 1_000_000_u64 / rate_hz as u64;
-    if *last_us == 0 || now_us.saturating_sub(*last_us) >= interval_us {
+    if *last_us == 0 {
         *last_us = now_us;
+        true
+    } else if now_us.saturating_sub(*last_us) >= interval_us {
+        let elapsed_intervals = now_us.saturating_sub(*last_us) / interval_us;
+        *last_us = last_us.saturating_add(elapsed_intervals.saturating_mul(interval_us));
         true
     } else {
         false
@@ -829,6 +833,29 @@ mod tests {
 
     fn companion_events() -> CompanionEventQueues {
         CompanionEventQueues::default()
+    }
+
+    #[test]
+    fn stream_due_preserves_deadline_cadence_after_late_send() {
+        let mut last_us = 0;
+
+        assert!(stream_due(1_000, &mut last_us, 400));
+        assert_eq!(last_us, 1_000);
+
+        assert!(!stream_due(3_400, &mut last_us, 400));
+        assert_eq!(last_us, 1_000);
+
+        assert!(stream_due(3_700, &mut last_us, 400));
+        assert_eq!(last_us, 3_500);
+
+        assert!(!stream_due(5_900, &mut last_us, 400));
+        assert_eq!(last_us, 3_500);
+
+        assert!(stream_due(6_100, &mut last_us, 400));
+        assert_eq!(last_us, 6_000);
+
+        assert!(stream_due(13_900, &mut last_us, 400));
+        assert_eq!(last_us, 13_500);
     }
 
     #[test]
