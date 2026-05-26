@@ -72,6 +72,7 @@ static CORE1_EXECUTOR: StaticCell<Executor> = StaticCell::new();
 const UART_TX_BATCH_BYTES: usize = 256;
 const UART_RX_CHUNK_BYTES: usize = 16;
 const UART_IDLE_DELAY_US: u64 = 50;
+const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 8;
 #[cfg(feature = "synthetic-imu")]
 const SYNTHETIC_IMU_PERIOD_US: u64 = synthetic_imu_period_us();
@@ -153,7 +154,7 @@ bind_interrupts!(struct Irqs {
 
 fn mavlink_uart_config() -> UartConfig {
     let mut config = UartConfig::default();
-    config.baudrate = 921_600;
+    config.baudrate = MAVLINK_UART_BAUDRATE;
     config
 }
 

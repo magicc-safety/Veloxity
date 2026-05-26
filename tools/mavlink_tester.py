@@ -55,6 +55,8 @@ BAUD_RATES = {
     921600: termios.B921600,
     1000000: termios.B1000000,
     2000000: termios.B2000000,
+    3000000: termios.B3000000,
+    4000000: termios.B4000000,
 }
 
 
