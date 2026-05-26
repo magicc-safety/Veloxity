@@ -216,6 +216,13 @@ pub struct CommandEventQueues {
 }
 
 impl ParamEventQueues {
+    pub fn is_empty(&self) -> bool {
+        self.set_requests.is_empty()
+            && self.read_requests.is_empty()
+            && self.list_requests.is_empty()
+            && self.changes.is_empty()
+    }
+
     pub fn clear_loop_events(&mut self) {
         self.set_requests.clear();
         self.read_requests.clear();
@@ -225,16 +232,39 @@ impl ParamEventQueues {
 }
 
 impl CommEventQueues {
+    pub fn is_empty(&self) -> bool {
+        self.responses.is_empty()
+    }
+
     pub fn clear_loop_events(&mut self) {
         self.responses.clear();
     }
 }
 
 impl CompanionEventQueues {
+    pub fn is_empty(&self) -> bool {
+        self.heartbeats.is_empty()
+            && self.aux_commands.is_empty()
+            && self.external_attitudes.is_empty()
+    }
+
     pub fn clear_loop_events(&mut self) {
         self.heartbeats.clear();
         self.aux_commands.clear();
         self.external_attitudes.clear();
+    }
+}
+
+impl CommandEventQueues {
+    pub fn is_empty(&self) -> bool {
+        self.calibration_requests.is_empty()
+            && self.offboard_control_requests.is_empty()
+            && self.param_defaults_requests.is_empty()
+            && self.board_command_requests.is_empty()
+            && self.rc_trim_calibration_requests.is_empty()
+            && self.version_requests.is_empty()
+            && self.reset_origin_requests.is_empty()
+            && self.config_info_requests.is_empty()
     }
 }
 

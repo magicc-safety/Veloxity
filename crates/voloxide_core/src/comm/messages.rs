@@ -21,6 +21,21 @@ pub struct Messages {
     pub rc_raw: Option<RcChannelsMsg>,
 }
 
+impl Messages {
+    pub fn has_pending(&self) -> bool {
+        self.heartbeat.is_some()
+            || self.param_request_read.is_some()
+            || self.param_request_list.is_some()
+            || !self.param_set.is_empty()
+            || self.timesync.is_some()
+            || self.offboard_control.is_some()
+            || self.cmd.is_some()
+            || self.aux_cmd.is_some()
+            || self.external_attitude.is_some()
+            || self.rc_raw.is_some()
+    }
+}
+
 pub trait Store<T> {
     fn store(&mut self, msg: T);
     fn take(&mut self) -> Option<T>;

@@ -233,6 +233,7 @@ where
     pwm_output: PwmOutputState,
     pwm: PD,
     last_imu_seen: u64,
+    last_rc_command_state_ms: Option<u32>,
     #[cfg(feature = "timing-diagnostics")]
     timing_diagnostics: TimingDiagnostics,
 }
@@ -322,6 +323,7 @@ where
             pwm_output,
             pwm,
             last_imu_seen: now_us,
+            last_rc_command_state_ms: None,
             #[cfg(feature = "timing-diagnostics")]
             timing_diagnostics: TimingDiagnostics::new(now_us),
         };
@@ -427,10 +429,18 @@ where
 
     pub fn run_communication_and_parameter_service_stage(&mut self) {
         self.process_comm_stage();
-        self.apply_companion_events();
-        self.apply_command_events();
-        self.service_param_events();
-        self.apply_param_reactions();
+        if self.has_pending_companion_work() {
+            self.apply_companion_events();
+        }
+        if !self.command_events.is_empty() {
+            self.apply_command_events();
+        }
+        if self.has_pending_param_work() {
+            self.service_param_events();
+        }
+        if !self.param_events.changes.is_empty() {
+            self.apply_param_reactions();
+        }
         self.request_gyro_calibration_if_needed();
     }
 
@@ -477,6 +487,9 @@ where
 
     fn process_comm_stage(&mut self) {
         self.comm.process_incoming_messages(&mut self.board);
+        if !self.comm.has_pending_messages() {
+            return;
+        }
         self.comm.act_on_messages(
             &mut self.param_events,
             &mut self.comm_events,
@@ -484,6 +497,18 @@ where
             &mut self.companion_events,
             &mut self.board,
         );
+    }
+
+    fn has_pending_companion_work(&self) -> bool {
+        !self.companion_events.is_empty()
+            || (self.companion_link.connected && self.pending_hard_error.is_some())
+    }
+
+    fn has_pending_param_work(&self) -> bool {
+        !self.param_events.set_requests.is_empty()
+            || !self.param_events.read_requests.is_empty()
+            || !self.param_events.list_requests.is_empty()
+            || self.param_list_state.is_active()
     }
 
     fn apply_companion_events(&mut self) {
@@ -701,6 +726,9 @@ where
             responses: EventEmitPort::new(&mut self.comm_events.responses),
             connected: self.companion_link.connected,
         });
+        if self.comm_events.is_empty() {
+            return;
+        }
         self.comm
             .send_comm_responses(&mut self.board, &mut self.comm_events);
     }
@@ -730,6 +758,11 @@ where
 
     pub fn run_rc_command_state_stages(&mut self) {
         let now_ms = self.board.clock_millis();
+        let has_new_rc = self.processed_sensors.rc.is_some();
+        if !has_new_rc && self.last_rc_command_state_ms == Some(now_ms) {
+            return;
+        }
+        self.last_rc_command_state_ms = Some(now_ms);
 
         run_rc_command_state(RcCommandStateCtx {
             now_ms,
@@ -802,6 +835,13 @@ where
 
     pub fn run_telemetry_stage(&mut self) {
         let now_us = self.board.clock_micros();
+        if !self
+            .comm
+            .named_telemetry_due(now_us, &self.processed_sensors)
+        {
+            return;
+        }
+
         let sensor_error_count = self.board.sensors_errors_count();
         self.comm.send_named_telemetry_streams(
             &mut self.board,

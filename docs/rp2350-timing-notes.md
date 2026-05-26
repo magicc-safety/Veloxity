@@ -1,6 +1,7 @@
 # RP2350 Timing Notes
 
-This document records the current Pico 2 W timing state on the `Derekbenj/rp2350` branch.
+This document records the current Pico 2 W timing state on RP2350-focused Voloxide branches,
+including `Derekbenj/ism330dhcx-imu-prep`.
 
 ## Current Firmware Split
 
@@ -147,6 +148,83 @@ Result:
 - parser invalid CRC count: 5
 
 Conclusion: the UART DMA path sustains the 400 Hz target with the fixed 300 MHz clock.
+
+### UART DMA, 4 kHz Synthetic IMU Production, 400 Hz Telemetry Target
+
+This test uses the release-loop benchmark profile with synthetic core1 IMU production. It does not
+exercise the real ISM330DHCX SPI read path, data-ready behavior, or chip-select/DMA timing. It is a
+pre-real-IMU test of the Voloxide loop architecture, core0 work, and UART telemetry path.
+
+Command:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features 'release-loop-bench synthetic-imu-4khz'
+probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/release/voloxide
+probe-rs reset --chip RP235x
+python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 2000000 --samples 1000 --duration-s 15 --warmup-s 2 --show 20 --diagnostics
+```
+
+Earlier result before the core0 fast-path cleanup:
+
+- IMU telemetry rate: 400.0 Hz
+- IMU board timestamp interval: average 2.500 ms
+- status telemetry rate: 10.0 Hz
+- firmware `loop_time_us`: average 132.2 us, p99 178 us, max 181 us
+- release-loop aggregate: average 285.9 us, p99 window max 490 us, max 530 us
+- UART byte rate: 23.5 kB/s
+
+Result after core0 fast-path cleanup:
+
+- IMU telemetry rate: 400.0 Hz
+- IMU board timestamp interval: average 2.500 ms, p99 2.632 ms, max 2.865 ms
+- status telemetry rate: 10.0 Hz
+- firmware `loop_time_us`: min 83 us, average 103.9 us, p99 178 us, max 178 us
+- release-loop aggregate: 54,978 passes, average 230.4 us, p90 window max 290 us, p99 window max
+  390 us, max 481 us
+- passes over the 250 us 4 kHz frame budget: 12,506 in the reported window
+- UART byte rate: 23.5 kB/s
+
+The cleanup kept state-machine semantics intact and instead avoided cold-stage work:
+
+- sensor ingestion only invokes processors for raw packets that are present, while clearing stale
+  one-shot packets such as IMU and RC when no new raw packet arrived;
+- command, parameter, companion, and comm-response services are skipped when their queues are empty;
+- RC/command/state/PWM/LED housekeeping runs on new RC or once per millisecond instead of every
+  4 kHz pass;
+- telemetry generation has a non-mutating due check before entering the full stream builder.
+
+Conclusion: 4 kHz is now plausible for the synthetic profile. The control-path status metric has
+comfortable average margin and stayed below the 250 us frame budget at p99 in this run. The full
+`world.run_once()` aggregate average is also below 250 us after the cleanup. However, p90/p99/max
+full-pass windows still exceed 250 us, so this is not yet a strict hard-real-time proof that every
+complete world pass finishes before the next 4 kHz IMU tick.
+
+The practical interpretation is that UART telemetry is no longer the main blocker for 4 kHz. The
+remaining risk is core0 burstiness plus the untested real IMU SPI path. The next proof point is real
+ISM330DHCX production at 4 kHz with the same telemetry profile, measuring packet production on core1
+and control processing on core0 under actual SPI load.
+
+### Practical 4 kHz Context From Other Flight Stacks
+
+4 kHz is a realistic flight-controller target, but it sits in the high-rate FPV/control-loop class
+rather than the slower general-autopilot class.
+
+- Betaflight documents 4 kHz PID loop operation as a normal configuration, with combinations such as
+  4 kHz PID loop and DShot300 motor output. Betaflight tuning notes also treat 4 kHz as a practical
+  target for F405-class boards where 8 kHz can be less accurate or leave less margin.
+- PX4 documentation warns that 4 kHz or higher gyro publication rates are computationally intensive
+  and recommends that class of rate mainly for STM32H7-class or newer flight controllers.
+- ArduPilot Copter commonly runs a much lower main-loop rate, around 400 Hz, so 4 kHz is well above
+  the normal loop rate needed for many autopilot use cases.
+
+References:
+
+- Betaflight configuration tab documentation: <https://www.betaflight.com/docs/wiki/app/configuration-tab>
+- Betaflight 4.2 tuning notes: <https://www.betaflight.com/docs/wiki/tuning/4-2-Tuning-Notes>
+- PX4 multicopter filter tuning / gyro rate guidance:
+  <https://px4.gitbook.io/px4-user-guide/airframes/frames_multicopter/config_mc/filter_tuning>
+- MathWorks ArduPilot sample-time overview:
+  <https://www.mathworks.com/help/uav/ardupilot/ug/how-does-sample-time-work.html>
 
 ### Historical UART, 500 Hz IMU Gate, SysTick 4 kHz Service Scheduler
 

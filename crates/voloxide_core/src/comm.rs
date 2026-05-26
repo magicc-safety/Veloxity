@@ -112,6 +112,15 @@ fn stream_due(now_us: u64, last_us: &mut u64, rate_hz: u16) -> bool {
     }
 }
 
+fn stream_due_at(now_us: u64, last_us: u64, rate_hz: u16) -> bool {
+    if rate_hz == 0 || last_us == 0 {
+        return true;
+    }
+
+    let interval_us = 1_000_000_u64 / rate_hz as u64;
+    now_us.saturating_sub(last_us) >= interval_us
+}
+
 pub const fn str_to_fixed_bytes(input: &str) -> [u8; 16] {
     let mut buffer = [0u8; 16];
     let input_bytes = input.as_bytes();
@@ -191,10 +200,98 @@ where
             .handle_incoming_messages(board, &mut self.msgs);
     }
 
+    pub fn has_pending_messages(&self) -> bool {
+        self.msgs.has_pending()
+    }
+
     pub fn set_telemetry_rates(&mut self, telemetry_rates: TelemetryRates) {
         self.telemetry_rates = telemetry_rates;
         self.telemetry_rate_state = TelemetryRateState::default();
         self.output_raw_imu_count = 0;
+    }
+
+    pub fn named_telemetry_due<R>(
+        &self,
+        now_us: u64,
+        processed_sensors: &ProcessedSensors<R>,
+    ) -> bool
+    where
+        R: FlightFloat,
+    {
+        if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US
+            || now_us >= self.last_status_send_us + STATUS_INTERVAL_US
+        {
+            return true;
+        }
+
+        if processed_sensors.imu.is_some() {
+            if stream_due_at(
+                now_us,
+                self.telemetry_rate_state.imu_us,
+                self.telemetry_rates.imu_hz,
+            ) || stream_due_at(
+                now_us,
+                self.telemetry_rate_state.attitude_us,
+                self.telemetry_rates.attitude_hz,
+            ) {
+                return true;
+            }
+
+            if self.telemetry_rates.output_raw_hz == 0 {
+                if self.telemetry_rates.output_raw_imu_divisor != 0 {
+                    return true;
+                }
+            } else if stream_due_at(
+                now_us,
+                self.telemetry_rate_state.output_raw_us,
+                self.telemetry_rates.output_raw_hz,
+            ) {
+                return true;
+            }
+        }
+
+        processed_sensors.pitot.is_some()
+            && stream_due_at(
+                now_us,
+                self.telemetry_rate_state.diff_pressure_us,
+                self.telemetry_rates.diff_pressure_hz,
+            )
+            || processed_sensors.baro.is_some()
+                && stream_due_at(
+                    now_us,
+                    self.telemetry_rate_state.baro_us,
+                    self.telemetry_rates.baro_hz,
+                )
+            || processed_sensors.mag.is_some()
+                && stream_due_at(
+                    now_us,
+                    self.telemetry_rate_state.mag_us,
+                    self.telemetry_rates.mag_hz,
+                )
+            || processed_sensors.range.is_some()
+                && stream_due_at(
+                    now_us,
+                    self.telemetry_rate_state.range_us,
+                    self.telemetry_rates.range_hz,
+                )
+            || processed_sensors.battery.is_some()
+                && stream_due_at(
+                    now_us,
+                    self.telemetry_rate_state.battery_us,
+                    self.telemetry_rates.battery_hz,
+                )
+            || processed_sensors.gnss.is_some()
+                && stream_due_at(
+                    now_us,
+                    self.telemetry_rate_state.gnss_us,
+                    self.telemetry_rates.gnss_hz,
+                )
+            || processed_sensors.rc.is_some()
+                && stream_due_at(
+                    now_us,
+                    self.telemetry_rate_state.rc_us,
+                    self.telemetry_rates.rc_hz,
+                )
     }
 
     fn targets_this_system(&self, target_system: u8) -> bool {

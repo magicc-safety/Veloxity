@@ -126,17 +126,51 @@ pub fn process_sensor_bus<
     RcProc: SensorPacketProcessor<RcPacket>,
     AttitudeProc: SensorPacketProcessor<AttitudePacket>,
 {
-    processed.imu = processors.imu.process(&mut raw.imu, flags, params);
-    processed.mag = processors.mag.process(&mut raw.mag, flags, params);
-    processed.baro = processors.baro.process(&mut raw.baro, flags, params);
-    processed.pitot = processors.pitot.process(&mut raw.pitot, flags, params);
-    processed.range = processors.range.process(&mut raw.range, flags, params);
-    processed.gnss = processors.gnss.process(&mut raw.gnss, flags, params);
-    processed.battery = processors.battery.process(&mut raw.battery, flags, params);
-    processed.rc = processors.rc.process(&mut raw.rc, flags, params);
-    processed.attitude = processors
-        .attitude
-        .process(&mut raw.attitude, flags, params);
+    if raw.imu.is_some() {
+        processed.imu = processors.imu.process(&mut raw.imu, flags, params);
+    } else {
+        processed.imu = None;
+    }
+    if raw.mag.is_some() {
+        processed.mag = processors.mag.process(&mut raw.mag, flags, params);
+    } else {
+        processed.mag = None;
+    }
+    if raw.baro.is_some() {
+        processed.baro = processors.baro.process(&mut raw.baro, flags, params);
+    } else {
+        processed.baro = None;
+    }
+    if raw.pitot.is_some() {
+        processed.pitot = processors.pitot.process(&mut raw.pitot, flags, params);
+    } else {
+        processed.pitot = None;
+    }
+    if raw.range.is_some() {
+        processed.range = processors.range.process(&mut raw.range, flags, params);
+    } else {
+        processed.range = None;
+    }
+    if raw.gnss.is_some() {
+        processed.gnss = processors.gnss.process(&mut raw.gnss, flags, params);
+    } else {
+        processed.gnss = None;
+    }
+    if raw.battery.is_some() {
+        processed.battery = processors.battery.process(&mut raw.battery, flags, params);
+    }
+    if raw.rc.is_some() {
+        processed.rc = processors.rc.process(&mut raw.rc, flags, params);
+    } else {
+        processed.rc = None;
+    }
+    if raw.attitude.is_some() {
+        processed.attitude = processors
+            .attitude
+            .process(&mut raw.attitude, flags, params);
+    } else {
+        processed.attitude = None;
+    }
 }
 
 #[cfg(test)]
@@ -189,5 +223,54 @@ mod tests {
 
         assert!(raw.rc.is_none());
         assert_eq!(processed.rc.unwrap().header.timestamp, 123);
+    }
+
+    #[test]
+    fn process_sensor_bus_clears_stale_one_shot_packets_when_no_raw_packet_arrives() {
+        let mut raw = SensorBus::<f64>::default();
+        let mut processed = ProcessedSensors::<f64> {
+            imu: Some(ImuPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 100,
+                    status: 0,
+                },
+                ..Default::default()
+            }),
+            rc: Some(RcPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 100,
+                    status: 0,
+                },
+                n_chan: 1,
+                chan: [0.0; RC_PACKET_CHANNELS],
+                lol: false,
+            }),
+            ..Default::default()
+        };
+        let mut processors = SensorProcessorSet::<
+            f64,
+            PassthroughImuProcessor,
+            PassthroughMagProcessor,
+            PassthroughBaroProcessor,
+            PassthroughPitotProcessor,
+            PassthroughRangeProcessor,
+            PassthroughGNSSProcessor,
+            PassthroughBatteryProcessor,
+            PassthroughRcProcessor,
+            PassthroughAttitudeProcessor,
+        >::default();
+        let mut flags = CalibrationFlags::empty();
+        let mut params = Params::new();
+
+        process_sensor_bus(
+            &mut raw,
+            &mut processed,
+            &mut processors,
+            &mut flags,
+            &mut params,
+        );
+
+        assert!(processed.imu.is_none());
+        assert!(processed.rc.is_none());
     }
 }
