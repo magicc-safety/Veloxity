@@ -475,7 +475,7 @@ fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> 
     );
     #[cfg(all(feature = "synthetic-imu", feature = "release-loop-bench"))]
     world.set_telemetry_rates(TelemetryRates {
-        imu_hz: 0,
+        imu_hz: 400,
         attitude_hz: 50,
         output_raw_hz: 50,
         diff_pressure_hz: 50,
