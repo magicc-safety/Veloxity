@@ -47,6 +47,8 @@ rustflags = [
 runner = "probe-rs run --chip RP235x"
 rustflags = [
   "-C",
+  "target-cpu=cortex-m33",
+  "-C",
   "linker=rust-lld",
   "-C",
   "link-arg=--nmagic",

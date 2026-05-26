@@ -27,6 +27,8 @@ use rp2350_platform::hal::{
     },
 };
 use static_cell::StaticCell;
+#[cfg(feature = "release-loop-bench")]
+use voloxide_core::board::SerialTxPriority;
 #[cfg(feature = "synthetic-imu")]
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
 use voloxide_core::{
@@ -60,6 +62,26 @@ const UART_IDLE_DELAY_US: u64 = 50;
 const CRSF_RX_CHUNK_BYTES: usize = 8;
 #[cfg(feature = "synthetic-imu")]
 const SYNTHETIC_IMU_PERIOD_US: u64 = 125;
+#[cfg(feature = "release-loop-bench")]
+const LOOP_BENCH_REPORT_US: u64 = 1_000_000;
+#[cfg(feature = "release-loop-bench")]
+const LOOP_BENCH_BUDGET_US: u32 = 250;
+#[cfg(feature = "release-loop-bench")]
+const LOOP_BENCH_BUCKET_US: u32 = 10;
+#[cfg(feature = "release-loop-bench")]
+const LOOP_BENCH_BUCKETS: usize = 128;
+#[cfg(feature = "release-loop-bench")]
+const MAVLINK_V1_STX: u8 = 0xfe;
+#[cfg(feature = "release-loop-bench")]
+const MAVLINK_STATUSTEXT_ID: u8 = 253;
+#[cfg(feature = "release-loop-bench")]
+const MAVLINK_STATUSTEXT_LEN: usize = 51;
+#[cfg(feature = "release-loop-bench")]
+const MAVLINK_STATUSTEXT_CRC_EXTRA: u8 = 83;
+#[cfg(feature = "release-loop-bench")]
+const MAVLINK_SYSTEM_ID: u8 = 1;
+#[cfg(feature = "release-loop-bench")]
+const MAVLINK_COMPONENT_ID: u8 = 250;
 
 bind_interrupts!(struct Irqs {
     UART0_IRQ => UartInterruptHandler<UART0>;
@@ -274,6 +296,163 @@ fn hal_config() -> HalConfig {
     HalConfig::new(ClockConfig::system_freq(300_000_000).unwrap())
 }
 
+#[cfg(feature = "release-loop-bench")]
+struct LoopBench {
+    mailbox: SharedMavlinkMailbox,
+    next_report_us: u64,
+    sequence: u8,
+    count: u32,
+    sum_us: u64,
+    max_us: u32,
+    missed_250us: u32,
+    buckets: [u32; LOOP_BENCH_BUCKETS],
+}
+
+#[cfg(feature = "release-loop-bench")]
+impl LoopBench {
+    fn new(mailbox: SharedMavlinkMailbox) -> Self {
+        Self {
+            mailbox,
+            next_report_us: Instant::now()
+                .as_micros()
+                .saturating_add(LOOP_BENCH_REPORT_US),
+            sequence: 0,
+            count: 0,
+            sum_us: 0,
+            max_us: 0,
+            missed_250us: 0,
+            buckets: [0; LOOP_BENCH_BUCKETS],
+        }
+    }
+
+    fn record(&mut self, elapsed_us: u32, now_us: u64) {
+        self.count = self.count.wrapping_add(1);
+        self.sum_us = self.sum_us.saturating_add(elapsed_us as u64);
+        self.max_us = self.max_us.max(elapsed_us);
+        if elapsed_us > LOOP_BENCH_BUDGET_US {
+            self.missed_250us = self.missed_250us.wrapping_add(1);
+        }
+
+        let bucket =
+            (elapsed_us / LOOP_BENCH_BUCKET_US).min((LOOP_BENCH_BUCKETS - 1) as u32) as usize;
+        self.buckets[bucket] = self.buckets[bucket].wrapping_add(1);
+
+        if now_us >= self.next_report_us {
+            self.report();
+            self.reset(now_us);
+        }
+    }
+
+    fn report(&mut self) {
+        if self.count == 0 {
+            return;
+        }
+
+        let avg_us = (self.sum_us / self.count as u64).min(u32::MAX as u64) as u32;
+        let p90_us = self.percentile_us(90);
+        let p99_us = self.percentile_us(99);
+        let mut text = [0_u8; 50];
+        let mut pos = 0;
+        bench_write_bytes(&mut text, &mut pos, b"RLB n");
+        bench_write_num(&mut text, &mut pos, self.count);
+        bench_write_bytes(&mut text, &mut pos, b" a");
+        bench_write_num(&mut text, &mut pos, avg_us);
+        bench_write_bytes(&mut text, &mut pos, b" p90");
+        bench_write_num(&mut text, &mut pos, p90_us);
+        bench_write_bytes(&mut text, &mut pos, b" p99");
+        bench_write_num(&mut text, &mut pos, p99_us);
+        bench_write_bytes(&mut text, &mut pos, b" x");
+        bench_write_num(&mut text, &mut pos, self.max_us);
+        bench_write_bytes(&mut text, &mut pos, b" m");
+        bench_write_num(&mut text, &mut pos, self.missed_250us);
+
+        let frame = statustext_frame(self.sequence, &text);
+        self.sequence = self.sequence.wrapping_add(1);
+        let _ = self
+            .mailbox
+            .write_from_priority(&frame, SerialTxPriority::REPLACEABLE_TELEMETRY);
+    }
+
+    fn reset(&mut self, now_us: u64) {
+        self.next_report_us = now_us.saturating_add(LOOP_BENCH_REPORT_US);
+        self.count = 0;
+        self.sum_us = 0;
+        self.max_us = 0;
+        self.missed_250us = 0;
+        self.buckets = [0; LOOP_BENCH_BUCKETS];
+    }
+
+    fn percentile_us(&self, percentile: u32) -> u32 {
+        let target = self.count.saturating_mul(percentile).saturating_add(99) / 100;
+        let mut seen = 0_u32;
+        for (index, count) in self.buckets.iter().enumerate() {
+            seen = seen.saturating_add(*count);
+            if seen >= target {
+                return (index as u32).saturating_mul(LOOP_BENCH_BUCKET_US);
+            }
+        }
+        self.max_us
+    }
+}
+
+#[cfg(feature = "release-loop-bench")]
+fn bench_write_bytes(out: &mut [u8; 50], pos: &mut usize, bytes: &[u8]) {
+    for byte in bytes {
+        if *pos >= out.len() {
+            return;
+        }
+        out[*pos] = *byte;
+        *pos += 1;
+    }
+}
+
+#[cfg(feature = "release-loop-bench")]
+fn bench_write_num(out: &mut [u8; 50], pos: &mut usize, mut value: u32) {
+    let mut digits = [0_u8; 10];
+    let mut len = 0;
+    loop {
+        digits[len] = b'0' + (value % 10) as u8;
+        len += 1;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    while len > 0 {
+        len -= 1;
+        bench_write_bytes(out, pos, &digits[len..=len]);
+    }
+}
+
+#[cfg(feature = "release-loop-bench")]
+fn statustext_frame(sequence: u8, text: &[u8; 50]) -> [u8; MAVLINK_STATUSTEXT_LEN + 8] {
+    let mut frame = [0_u8; MAVLINK_STATUSTEXT_LEN + 8];
+    frame[0] = MAVLINK_V1_STX;
+    frame[1] = MAVLINK_STATUSTEXT_LEN as u8;
+    frame[2] = sequence;
+    frame[3] = MAVLINK_SYSTEM_ID;
+    frame[4] = MAVLINK_COMPONENT_ID;
+    frame[5] = MAVLINK_STATUSTEXT_ID;
+    frame[6] = 6;
+    frame[7..57].copy_from_slice(text);
+
+    let checksum = mavlink_x25(&frame[1..57], MAVLINK_STATUSTEXT_CRC_EXTRA);
+    frame[57] = checksum as u8;
+    frame[58] = (checksum >> 8) as u8;
+    frame
+}
+
+#[cfg(feature = "release-loop-bench")]
+fn mavlink_x25(bytes: &[u8], extra: u8) -> u16 {
+    let mut crc = 0xffff_u16;
+    for byte in bytes.iter().copied().chain(core::iter::once(extra)) {
+        let tmp = byte ^ (crc as u8);
+        let tmp = tmp ^ (tmp << 4);
+        crc = (crc >> 8) ^ ((tmp as u16) << 8) ^ ((tmp as u16) << 3) ^ ((tmp as u16) >> 4);
+    }
+    crc
+}
+
 #[entry]
 fn main() -> ! {
     let peripherals = rp::init(hal_config());
@@ -306,7 +485,20 @@ fn main() -> ! {
     }
 
     let mut world = init_world(board, params, pwm_driver);
+    #[cfg(feature = "release-loop-bench")]
+    let mut loop_bench = LoopBench::new(mailbox);
     loop {
+        #[cfg(feature = "release-loop-bench")]
+        {
+            let start_us = Instant::now().as_micros();
+            let _ = world.run_once();
+            let end_us = Instant::now().as_micros();
+            loop_bench.record(
+                end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
+                end_us,
+            );
+        }
+        #[cfg(not(feature = "release-loop-bench"))]
         let _ = world.run_once();
     }
 }

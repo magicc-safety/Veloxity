@@ -9,6 +9,7 @@ default = []
 timing-diagnostics = ["voloxide_core/timing-diagnostics"]
 imu-400hz = []
 ism330dhcx-driver = ["dep:ism330dhcx-rs"]
+release-loop-bench = []
 synthetic-imu = []
 
 [dependencies]
