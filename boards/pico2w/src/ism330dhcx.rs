@@ -42,6 +42,10 @@ impl SharedIsm330dhcxImuQueue {
     pub fn take_latest(&self) -> Option<ImuPacket<f32>> {
         critical_section::with(|cs| self.inner.borrow_ref_mut(cs).take_latest())
     }
+
+    pub fn has_pending(&self) -> bool {
+        critical_section::with(|cs| self.inner.borrow_ref(cs).has_pending())
+    }
 }
 
 pub const SHARED_ISM330DHCX_IMU_QUEUE: SharedIsm330dhcxImuQueue =
@@ -86,6 +90,10 @@ impl Ism330dhcxImuQueue {
         self.head = (latest + 1) % IMU_QUEUE_CAPACITY;
         self.len = 0;
         Some(packet)
+    }
+
+    fn has_pending(&self) -> bool {
+        self.len != 0
     }
 
     pub fn dropped_oldest(&self) -> u32 {

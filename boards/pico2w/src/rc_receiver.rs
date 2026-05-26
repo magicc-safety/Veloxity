@@ -43,6 +43,10 @@ impl SharedCrsfRcQueue {
     pub fn take_latest(&self) -> Option<RcPacket> {
         critical_section::with(|cs| self.inner.borrow_ref_mut(cs).take_latest())
     }
+
+    pub fn has_pending(&self) -> bool {
+        critical_section::with(|cs| self.inner.borrow_ref(cs).has_pending())
+    }
 }
 
 pub const SHARED_CRSF_RC_QUEUE: SharedCrsfRcQueue = SharedCrsfRcQueue::new(&CRSF_RC_QUEUE);
@@ -139,6 +143,10 @@ impl CrsfRcQueue {
         self.head = (latest + 1) % RC_QUEUE_CAPACITY;
         self.len = 0;
         Some(packet)
+    }
+
+    fn has_pending(&self) -> bool {
+        self.len != 0
     }
 
     pub fn dropped_oldest(&self) -> u32 {

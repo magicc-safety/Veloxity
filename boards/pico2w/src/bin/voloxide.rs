@@ -8,12 +8,17 @@ use embassy_executor::Executor;
 use embassy_time::{Duration, Instant, Timer};
 use panic_halt as _;
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
-#[cfg(feature = "synthetic-imu")]
+#[cfg(any(
+    feature = "synthetic-imu",
+    all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
+))]
 use pico2w::ism330dhcx::SHARED_ISM330DHCX_IMU_QUEUE;
 use pico2w::rc_receiver::{CRSF_BAUDRATE, CrsfRcParser, SHARED_CRSF_RC_QUEUE};
 use pico2w::{board, config::Pico2WConfig, pwm::PioPwmDriver};
 use rp2350_platform::hal::clocks::ClockConfig;
 use rp2350_platform::hal::dma;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, SPI1};
 use rp2350_platform::hal::{
     self as rp, Peri, bind_interrupts,
     config::Config as HalConfig,
@@ -26,10 +31,18 @@ use rp2350_platform::hal::{
         UartRx, UartTx,
     },
 };
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use rp2350_platform::hal::{
+    gpio::{Level, Output},
+    spi::{Blocking, Config as SpiConfig, Phase, Polarity, Spi},
+};
 use static_cell::StaticCell;
 #[cfg(feature = "release-loop-bench")]
 use voloxide_core::board::SerialTxPriority;
-#[cfg(feature = "synthetic-imu")]
+#[cfg(any(
+    feature = "synthetic-imu",
+    all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
+))]
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
 use voloxide_core::{
     board::{BoardIo, SerialRxPriority},
@@ -61,7 +74,52 @@ const UART_RX_CHUNK_BYTES: usize = 16;
 const UART_IDLE_DELAY_US: u64 = 50;
 const CRSF_RX_CHUNK_BYTES: usize = 8;
 #[cfg(feature = "synthetic-imu")]
-const SYNTHETIC_IMU_PERIOD_US: u64 = 125;
+const SYNTHETIC_IMU_PERIOD_US: u64 = synthetic_imu_period_us();
+#[cfg(all(
+    feature = "synthetic-imu-1khz",
+    not(feature = "synthetic-imu-2khz"),
+    not(feature = "synthetic-imu-4khz")
+))]
+const fn synthetic_imu_period_us() -> u64 {
+    1_000
+}
+#[cfg(all(
+    feature = "synthetic-imu-2khz",
+    not(feature = "synthetic-imu-1khz"),
+    not(feature = "synthetic-imu-4khz")
+))]
+const fn synthetic_imu_period_us() -> u64 {
+    500
+}
+#[cfg(all(
+    feature = "synthetic-imu-4khz",
+    not(feature = "synthetic-imu-1khz"),
+    not(feature = "synthetic-imu-2khz")
+))]
+const fn synthetic_imu_period_us() -> u64 {
+    250
+}
+#[cfg(all(
+    feature = "synthetic-imu",
+    not(feature = "synthetic-imu-1khz"),
+    not(feature = "synthetic-imu-2khz"),
+    not(feature = "synthetic-imu-4khz")
+))]
+const fn synthetic_imu_period_us() -> u64 {
+    125
+}
+#[cfg(any(
+    all(feature = "synthetic-imu-1khz", feature = "synthetic-imu-2khz"),
+    all(feature = "synthetic-imu-1khz", feature = "synthetic-imu-4khz"),
+    all(feature = "synthetic-imu-2khz", feature = "synthetic-imu-4khz")
+))]
+compile_error!("select only one synthetic IMU rate feature");
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+const ISM330DHCX_IMU_PERIOD_US: u64 = 250;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+const ISM330DHCX_SPI_HZ: u32 = 10_000_000;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+const ISM330DHCX_WHO_AM_I: u8 = 0x6b;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_REPORT_US: u64 = 1_000_000;
 #[cfg(feature = "release-loop-bench")]
@@ -134,6 +192,116 @@ async fn synthetic_imu_task() -> ! {
     }
 }
 
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[embassy_executor::task]
+async fn ism330dhcx_imu_task(mut spi: Spi<'static, SPI1, Blocking>, mut cs: Output<'static>) -> ! {
+    let mut seq = 0_u32;
+    loop {
+        if ism330dhcx_init(&mut spi, &mut cs).is_ok() {
+            loop {
+                let now_us = Instant::now().as_micros();
+                if let Ok(packet) = ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
+                    SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
+                    seq = seq.wrapping_add(1);
+                }
+                Timer::after(Duration::from_micros(ISM330DHCX_IMU_PERIOD_US)).await;
+            }
+        }
+        Timer::after_millis(1_000).await;
+    }
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn ism330dhcx_init(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+) -> Result<(), ()> {
+    if ism330dhcx_read_reg(spi, cs, 0x0f)? != ISM330DHCX_WHO_AM_I {
+        return Err(());
+    }
+    ism330dhcx_write_reg(spi, cs, 0x12, 0x44)?;
+    ism330dhcx_write_reg(spi, cs, 0x10, 0xa4)?;
+    ism330dhcx_write_reg(spi, cs, 0x11, 0xac)?;
+    Ok(())
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn ism330dhcx_read_packet(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    now_us: u64,
+    seq: u32,
+) -> Result<ImuPacket<f32>, ()> {
+    let mut bytes = [0_u8; 15];
+    bytes[0] = 0x20 | 0x80;
+    cs.set_low();
+    let result = spi.blocking_transfer_in_place(&mut bytes);
+    cs.set_high();
+    result.map_err(|_| ())?;
+
+    let temperature_raw = i16::from_le_bytes([bytes[1], bytes[2]]);
+    let gyro_raw = [
+        i16::from_le_bytes([bytes[3], bytes[4]]),
+        i16::from_le_bytes([bytes[5], bytes[6]]),
+        i16::from_le_bytes([bytes[7], bytes[8]]),
+    ];
+    let accel_raw = [
+        i16::from_le_bytes([bytes[9], bytes[10]]),
+        i16::from_le_bytes([bytes[11], bytes[12]]),
+        i16::from_le_bytes([bytes[13], bytes[14]]),
+    ];
+
+    const GYRO_2000DPS_TO_RAD_S: f32 = 0.07 * core::f32::consts::PI / 180.0;
+    const ACCEL_16G_TO_M_S2: f32 = 0.000_488 * 9.80665;
+
+    Ok(ImuPacket {
+        header: RosflightPacketHeader {
+            timestamp: now_us,
+            status: 0,
+        },
+        accel: [
+            accel_raw[0] as f32 * ACCEL_16G_TO_M_S2,
+            accel_raw[1] as f32 * ACCEL_16G_TO_M_S2,
+            accel_raw[2] as f32 * ACCEL_16G_TO_M_S2,
+        ],
+        gyro: [
+            gyro_raw[0] as f32 * GYRO_2000DPS_TO_RAD_S,
+            gyro_raw[1] as f32 * GYRO_2000DPS_TO_RAD_S,
+            gyro_raw[2] as f32 * GYRO_2000DPS_TO_RAD_S,
+        ],
+        temperature: 25.0 + temperature_raw as f32 / 256.0,
+        seq,
+    })
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn ism330dhcx_read_reg(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    reg: u8,
+) -> Result<u8, ()> {
+    let mut bytes = [reg | 0x80, 0];
+    cs.set_low();
+    let result = spi.blocking_transfer_in_place(&mut bytes);
+    cs.set_high();
+    result.map_err(|_| ())?;
+    Ok(bytes[1])
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn ism330dhcx_write_reg(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    reg: u8,
+    value: u8,
+) -> Result<(), ()> {
+    let mut bytes = [reg & 0x7f, value];
+    cs.set_low();
+    let result = spi.blocking_transfer_in_place(&mut bytes);
+    cs.set_high();
+    result.map_err(|_| ())
+}
+
 #[embassy_executor::task]
 async fn crsf_rx_task(mut uart_rx: UartRx<'static, UartAsync>) -> ! {
     let mut parser = CrsfRcParser::new();
@@ -198,6 +366,8 @@ struct Core1Resources {
     core1: Peri<'static, CORE1>,
     uart0: Peri<'static, UART0>,
     uart1: Peri<'static, UART1>,
+    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+    spi1: Peri<'static, SPI1>,
     dma_ch0: Peri<'static, DMA_CH0>,
     dma_ch1: Peri<'static, DMA_CH1>,
     dma_ch2: Peri<'static, DMA_CH2>,
@@ -206,6 +376,14 @@ struct Core1Resources {
     pin1: Peri<'static, PIN_1>,
     pin8: Peri<'static, PIN_8>,
     pin9: Peri<'static, PIN_9>,
+    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+    pin10: Peri<'static, PIN_10>,
+    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+    pin11: Peri<'static, PIN_11>,
+    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+    pin12: Peri<'static, PIN_12>,
+    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+    pin13: Peri<'static, PIN_13>,
 }
 
 fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox) {
@@ -236,6 +414,23 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
             );
             let (_crsf_tx, crsf_rx) = crsf_uart.split();
 
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            let imu_spi = {
+                let mut spi_config = SpiConfig::default();
+                spi_config.frequency = ISM330DHCX_SPI_HZ;
+                spi_config.polarity = Polarity::IdleLow;
+                spi_config.phase = Phase::CaptureOnFirstTransition;
+                Spi::new_blocking(
+                    resources.spi1,
+                    resources.pin10,
+                    resources.pin11,
+                    resources.pin12,
+                    spi_config,
+                )
+            };
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            let imu_cs = Output::new(resources.pin13, Level::High);
+
             let executor = CORE1_EXECUTOR.init(Executor::new());
             mailbox.set_comms_state(21);
             executor.run(|spawner| {
@@ -253,6 +448,10 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 }
                 #[cfg(feature = "synthetic-imu")]
                 if let Ok(token) = synthetic_imu_task() {
+                    spawner.spawn(token);
+                }
+                #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+                if let Ok(token) = ism330dhcx_imu_task(imu_spi, imu_cs) {
                     spawner.spawn(token);
                 }
                 mailbox.set_comms_state(22);
@@ -273,7 +472,21 @@ fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> 
         mixer,
         pwm_driver,
     );
-    #[cfg(feature = "synthetic-imu")]
+    #[cfg(all(feature = "synthetic-imu", feature = "release-loop-bench"))]
+    world.set_telemetry_rates(TelemetryRates {
+        imu_hz: 0,
+        attitude_hz: 50,
+        output_raw_hz: 50,
+        diff_pressure_hz: 50,
+        baro_hz: 25,
+        mag_hz: 25,
+        range_hz: 50,
+        battery_hz: 25,
+        gnss_hz: 10,
+        rc_hz: 100,
+        output_raw_imu_divisor: 0,
+    });
+    #[cfg(all(feature = "synthetic-imu", not(feature = "release-loop-bench")))]
     world.set_telemetry_rates(TelemetryRates {
         imu_hz: 1,
         attitude_hz: 1,
@@ -464,6 +677,8 @@ fn main() -> ! {
             core1: peripherals.CORE1,
             uart0: peripherals.UART0,
             uart1: peripherals.UART1,
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            spi1: peripherals.SPI1,
             dma_ch0: peripherals.DMA_CH0,
             dma_ch1: peripherals.DMA_CH1,
             dma_ch2: peripherals.DMA_CH2,
@@ -472,6 +687,14 @@ fn main() -> ! {
             pin1: peripherals.PIN_1,
             pin8: peripherals.PIN_8,
             pin9: peripherals.PIN_9,
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            pin10: peripherals.PIN_10,
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            pin11: peripherals.PIN_11,
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            pin12: peripherals.PIN_12,
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            pin13: peripherals.PIN_13,
         },
         mailbox,
     );

@@ -45,10 +45,14 @@ impl PicoSensorProducer {
     }
 
     fn drain_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
-        if let Some(imu) = self.ism330dhcx_imu.take_latest() {
+        if self.ism330dhcx_imu.has_pending()
+            && let Some(imu) = self.ism330dhcx_imu.take_latest()
+        {
             sensors.imu = Some(Ok(imu.cast()));
         }
-        if let Some(rc) = self.crsf_rc.take_latest() {
+        if self.crsf_rc.has_pending()
+            && let Some(rc) = self.crsf_rc.take_latest()
+        {
             sensors.rc = Some(Ok(rc));
         }
         if let Some(baro) = self.pending_baro.take() {
@@ -133,7 +137,7 @@ impl BoardIo for Board {
     }
 
     fn serial_rx_pending(&self) -> bool {
-        self.mavlink.stats().rx_pending_frames != 0
+        self.mavlink.has_pending_rx_frame()
     }
 
     #[cfg(feature = "timing-diagnostics")]

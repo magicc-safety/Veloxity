@@ -117,6 +117,10 @@ impl SharedMavlinkMailbox {
         critical_section::with(|cs| self.inner.borrow_ref_mut(cs).pop_rx_frame())
     }
 
+    pub fn has_pending_rx_frame(&self) -> bool {
+        critical_section::with(|cs| self.inner.borrow_ref(cs).rx_len != 0)
+    }
+
     pub fn drain_tx_into(&self, out: &mut [u8]) -> usize {
         let n = critical_section::with(|cs| self.inner.borrow_ref_mut(cs).pop_tx_frame(out));
         self.update_stats(|stats| stats.tx_drained = stats.tx_drained.wrapping_add(n as u32));

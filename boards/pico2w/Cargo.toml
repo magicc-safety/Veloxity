@@ -11,6 +11,9 @@ imu-400hz = []
 ism330dhcx-driver = ["dep:ism330dhcx-rs"]
 release-loop-bench = []
 synthetic-imu = []
+synthetic-imu-1khz = ["synthetic-imu"]
+synthetic-imu-2khz = ["synthetic-imu"]
+synthetic-imu-4khz = ["synthetic-imu"]
 
 [dependencies]
 rp2350_platform = { workspace = true }
