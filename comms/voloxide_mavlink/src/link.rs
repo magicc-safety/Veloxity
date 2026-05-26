@@ -145,7 +145,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightStatus::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
     }
     fn send_timesync(
@@ -158,7 +158,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::Timesync::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
         return true;
     }
@@ -172,7 +172,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::ParamValue::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
     }
     fn send_heartbeat(
@@ -185,7 +185,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::Heartbeat::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
         return true;
     }
@@ -199,7 +199,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightVersion::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
     }
     fn send_diff_pressure(
@@ -212,7 +212,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::DiffPressure::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_baro(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallBaroMsg) {
@@ -220,7 +220,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::SmallBaro::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_imu(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallImuMsg) {
@@ -228,7 +228,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::SmallImu::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_attitude(
@@ -241,7 +241,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::AttitudeQuaternion::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_output_raw(
@@ -254,7 +254,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightOutputRaw::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: core_messages::RcChannelsMsg) {
@@ -262,7 +262,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RcChannels::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_range(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallRangeMsg) {
@@ -270,7 +270,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::SmallRange::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_mag(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallMagMsg) {
@@ -278,7 +278,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::SmallMag::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: core_messages::RosflightGnssMsg) {
@@ -286,7 +286,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightGnss::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_cmd_ack(
@@ -299,7 +299,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightCmdAck::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
     }
     fn send_rc_channels(
@@ -312,7 +312,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RcChannels::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_battery_status(
@@ -325,7 +325,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightBatteryStatus::from(msg),
-            SerialTxPriority::LOW,
+            SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: core_messages::StatustextMsg) {
@@ -333,7 +333,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::Statustext::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
     }
     fn send_hard_error(
@@ -346,7 +346,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             board,
             system_id,
             mav_messages::RosflightHardError::from(msg),
-            SerialTxPriority::HIGH,
+            SerialTxPriority::CRITICAL,
         );
     }
 }

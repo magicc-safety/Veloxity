@@ -15,11 +15,6 @@ use voloxide_core::{
     sensors::SensorBus,
 };
 
-enum MavlinkTransport {
-    WifiMailbox(SharedMavlinkMailbox),
-    UartMailbox(SharedMavlinkMailbox),
-}
-
 struct PicoSensorProducer {
     ism330dhcx_imu: SharedIsm330dhcxImuQueue,
     crsf_rc: SharedCrsfRcQueue,
@@ -64,7 +59,7 @@ impl PicoSensorProducer {
 
 pub struct Board {
     config: Pico2WConfig,
-    mavlink: MavlinkTransport,
+    mavlink: SharedMavlinkMailbox,
     sensors: PicoSensorProducer,
     #[cfg(feature = "timing-diagnostics")]
     last_serial_rx_count: usize,
@@ -76,29 +71,11 @@ pub struct Board {
 }
 
 impl Board {
-    pub fn new_wifi(config: Pico2WConfig, gy91_baro: Option<Gy91>) -> (Self, PioPwmDriver) {
-        (
-            Self {
-                config,
-                mavlink: MavlinkTransport::WifiMailbox(SHARED_MAVLINK_MAILBOX),
-                sensors: PicoSensorProducer::new(gy91_baro),
-                #[cfg(feature = "timing-diagnostics")]
-                last_serial_rx_count: 0,
-                #[cfg(feature = "timing-diagnostics")]
-                diag_index: 0,
-                params: Params::default(),
-                params_valid: false,
-                boot_time: Instant::now(),
-            },
-            PioPwmDriver::new(),
-        )
-    }
-
     pub fn new_uart(config: Pico2WConfig, gy91_baro: Option<Gy91>) -> (Self, PioPwmDriver) {
         (
             Self {
                 config,
-                mavlink: MavlinkTransport::UartMailbox(SHARED_MAVLINK_MAILBOX),
+                mavlink: SHARED_MAVLINK_MAILBOX,
                 sensors: PicoSensorProducer::new(gy91_baro),
                 #[cfg(feature = "timing-diagnostics")]
                 last_serial_rx_count: 0,
@@ -116,11 +93,8 @@ impl Board {
         self.config
     }
 
-    pub fn mavlink_mailbox(&self) -> Option<SharedMavlinkMailbox> {
-        match self.mavlink {
-            MavlinkTransport::WifiMailbox(mailbox) => Some(mailbox),
-            MavlinkTransport::UartMailbox(mailbox) => Some(mailbox),
-        }
+    pub fn mavlink_mailbox(&self) -> SharedMavlinkMailbox {
+        self.mavlink
     }
 }
 
@@ -134,10 +108,7 @@ impl BoardIo for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        let result = match &mut self.mavlink {
-            MavlinkTransport::WifiMailbox(mailbox) => Ok(mailbox.read_into(buf)),
-            MavlinkTransport::UartMailbox(mailbox) => Ok(mailbox.read_into(buf)),
-        };
+        let result = Ok(self.mavlink.read_into(buf));
         #[cfg(feature = "timing-diagnostics")]
         {
             self.last_serial_rx_count = result.as_ref().ok().copied().unwrap_or(0);
@@ -146,7 +117,7 @@ impl BoardIo for Board {
     }
 
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        self.serial_tx_write_priority(bytes, SerialTxPriority::NORMAL)
+        self.serial_tx_write_priority(bytes, SerialTxPriority::DEFAULT)
     }
 
     fn serial_tx_write_priority(
@@ -154,14 +125,7 @@ impl BoardIo for Board {
         bytes: &[u8],
         priority: SerialTxPriority,
     ) -> Option<Result<usize, errors::TelemError>> {
-        Some(match &mut self.mavlink {
-            MavlinkTransport::WifiMailbox(mailbox) => {
-                Ok(mailbox.write_from_priority(bytes, priority))
-            }
-            MavlinkTransport::UartMailbox(mailbox) => {
-                Ok(mailbox.write_from_priority(bytes, priority))
-            }
-        })
+        Some(Ok(self.mavlink.write_from_priority(bytes, priority)))
     }
 
     #[cfg(feature = "timing-diagnostics")]
@@ -171,7 +135,7 @@ impl BoardIo for Board {
 
     #[cfg(feature = "timing-diagnostics")]
     fn board_diagnostic_text(&mut self) -> Option<[u8; 50]> {
-        let mailbox = self.mavlink_mailbox()?;
+        let mailbox = self.mavlink_mailbox();
         let stats = mailbox.stats();
         let mut out = [0_u8; 50];
         match self.diag_index {
@@ -203,42 +167,38 @@ impl BoardIo for Board {
             }
             2 => {
                 let mut offset = 0;
-                write_diag_bytes(&mut out, &mut offset, b"PUQD h");
-                write_diag_num(&mut out, &mut offset, stats.tx_high_dropped);
-                write_diag_bytes(&mut out, &mut offset, b" n");
-                write_diag_num(&mut out, &mut offset, stats.tx_normal_dropped);
-                write_diag_bytes(&mut out, &mut offset, b" l");
-                write_diag_num(&mut out, &mut offset, stats.tx_low_dropped);
+                write_diag_bytes(&mut out, &mut offset, b"PUQD p");
+                write_diag_num(&mut out, &mut offset, stats.tx_pending);
                 write_diag_bytes(&mut out, &mut offset, b" d");
                 write_diag_num(&mut out, &mut offset, stats.tx_dropped);
                 write_diag_bytes(&mut out, &mut offset, b" r");
-                write_diag_num(&mut out, &mut offset, stats.tx_low_replaced);
+                write_diag_num(&mut out, &mut offset, stats.tx_replaced);
+                write_diag_bytes(&mut out, &mut offset, b" f");
+                write_diag_num(&mut out, &mut offset, stats.tx_pending_frames);
                 self.diag_index = 3;
                 Some(out)
             }
             3 => {
                 let mut offset = 0;
-                write_diag_bytes(&mut out, &mut offset, b"PUWF rx");
-                write_diag_num(&mut out, &mut offset, stats.wifi_rx_datagrams);
-                write_diag_bytes(&mut out, &mut offset, b" rb");
-                write_diag_num(&mut out, &mut offset, stats.wifi_rx_bytes);
-                write_diag_bytes(&mut out, &mut offset, b" st");
-                write_diag_num(&mut out, &mut offset, stats.wifi_state);
+                write_diag_bytes(&mut out, &mut offset, b"PUPR w");
+                write_diag_num(&mut out, &mut offset, stats.tx_priority_min as u32);
+                write_diag_bytes(&mut out, &mut offset, b" x");
+                write_diag_num(&mut out, &mut offset, stats.tx_priority_max as u32);
+                write_diag_bytes(&mut out, &mut offset, b" dw");
+                write_diag_num(&mut out, &mut offset, stats.tx_drop_priority_min as u32);
+                write_diag_bytes(&mut out, &mut offset, b" dx");
+                write_diag_num(&mut out, &mut offset, stats.tx_drop_priority_max as u32);
                 self.diag_index = 4;
                 Some(out)
             }
             4 => {
                 let mut offset = 0;
-                write_diag_bytes(&mut out, &mut offset, b"PUWT tx");
-                write_diag_num(&mut out, &mut offset, stats.wifi_tx_datagrams);
-                write_diag_bytes(&mut out, &mut offset, b" tb");
-                write_diag_num(&mut out, &mut offset, stats.wifi_tx_bytes);
-                write_diag_bytes(&mut out, &mut offset, b" max");
-                write_diag_num(&mut out, &mut offset, stats.wifi_tx_max_datagram);
-                write_diag_bytes(&mut out, &mut offset, b" e");
-                write_diag_num(&mut out, &mut offset, stats.wifi_tx_errors);
-                write_diag_bytes(&mut out, &mut offset, b" q");
-                write_diag_num(&mut out, &mut offset, stats.tx_low_pending_frames);
+                write_diag_bytes(&mut out, &mut offset, b"PUC1 h");
+                write_diag_num(&mut out, &mut offset, stats.core1_heartbeats);
+                write_diag_bytes(&mut out, &mut offset, b" st");
+                write_diag_num(&mut out, &mut offset, stats.comms_state);
+                write_diag_bytes(&mut out, &mut offset, b" rq");
+                write_diag_num(&mut out, &mut offset, stats.rx_dropped);
                 self.diag_index = 5;
                 Some(out)
             }

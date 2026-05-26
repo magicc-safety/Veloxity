@@ -1,7 +1,6 @@
 use rp2350_platform::{
     multicore::{CoreAssignment, MulticoreMailboxConfig},
     pio::{PioAllocation, PioBlock, PioPurpose, StateMachine},
-    wifi::WifiCommsConfig,
 };
 
 pub const MAX_PWM_OUTPUTS: usize = 12;
@@ -10,7 +9,6 @@ pub const MAX_PWM_OUTPUTS: usize = 12;
 pub struct Pico2WConfig {
     pub cores: CoreAssignment,
     pub mailbox: MulticoreMailboxConfig,
-    pub wifi: WifiCommsConfig,
     pub pio_allocations: &'static [PioAllocation],
     pub pinout: Pico2WPinout,
 }
@@ -20,7 +18,6 @@ impl Default for Pico2WConfig {
         Self {
             cores: CoreAssignment::default(),
             mailbox: MulticoreMailboxConfig::default(),
-            wifi: WifiCommsConfig::default(),
             pio_allocations: DEFAULT_PIO_ALLOCATIONS,
             pinout: Pico2WPinout::default(),
         }
@@ -154,7 +151,7 @@ impl Default for StatusLedPinout {
 }
 
 pub const DEFAULT_PIO_ALLOCATIONS: &[PioAllocation] = &[
-    PioAllocation::new(PioBlock::Pio0, StateMachine::Sm0, PioPurpose::Cyw43Wifi),
+    PioAllocation::new(PioBlock::Pio0, StateMachine::Sm0, PioPurpose::Reserved),
     PioAllocation::new(PioBlock::Pio1, StateMachine::Sm0, PioPurpose::MotorOutput),
     PioAllocation::new(
         PioBlock::Pio1,

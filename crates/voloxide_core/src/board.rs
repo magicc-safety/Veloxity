@@ -13,9 +13,9 @@ pub struct BackupData {
 pub struct SerialTxPriority(pub u8);
 
 impl SerialTxPriority {
-    pub const LOW: Self = Self(32);
-    pub const NORMAL: Self = Self(128);
-    pub const HIGH: Self = Self(224);
+    pub const REPLACEABLE_TELEMETRY: Self = Self(32);
+    pub const DEFAULT: Self = Self(128);
+    pub const CRITICAL: Self = Self(224);
 }
 
 pub type SerialRxPriority = SerialTxPriority;

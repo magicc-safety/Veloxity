@@ -22,7 +22,7 @@ pub enum PioPurpose {
     I2cSensor,
     SpiSensor,
     StatusLed,
-    Cyw43Wifi,
+    Reserved,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

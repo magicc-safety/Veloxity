@@ -5,21 +5,16 @@ use core::{
 
 use critical_section::Mutex;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pipe::Pipe};
-use rp2350_platform::wifi::WifiCommsConfig;
 use voloxide_core::board::{SerialRxPriority, SerialTxPriority};
 
 const MAVLINK_V1_MAX_FRAME_BYTES: usize = 263;
-const TX_LOW_FRAME_CAPACITY: usize = 48;
+const TX_FRAME_CAPACITY: usize = 64;
 
 pub static MAVLINK_MAILBOX: Mutex<RefCell<MavlinkMailbox>> =
     Mutex::new(RefCell::new(MavlinkMailbox::new()));
-static WIFI_STATE: AtomicU32 = AtomicU32::new(0);
+static COMMS_STATE: AtomicU32 = AtomicU32::new(0);
 
-static RX_HIGH: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
-static RX_NORMAL: Pipe<CriticalSectionRawMutex, 4096> = Pipe::new();
-static RX_LOW: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
-static TX_HIGH: Pipe<CriticalSectionRawMutex, 2048> = Pipe::new();
-static TX_NORMAL: Pipe<CriticalSectionRawMutex, 1024> = Pipe::new();
+static RX_BYTES: Pipe<CriticalSectionRawMutex, 4096> = Pipe::new();
 
 #[derive(Clone, Copy)]
 pub struct SharedMavlinkMailbox {
@@ -35,69 +30,51 @@ impl SharedMavlinkMailbox {
     }
 
     pub fn read_into(&self, out: &mut [u8]) -> usize {
-        let n = read_priority(&RX_HIGH, &RX_NORMAL, &RX_LOW, out);
+        let n = RX_BYTES.try_read(out).unwrap_or(0);
         self.update_stats(|stats| stats.rx_read = stats.rx_read.wrapping_add(n as u32));
         n
     }
 
     pub fn write_from(&self, bytes: &[u8]) -> usize {
-        self.write_from_priority(bytes, SerialTxPriority::NORMAL)
+        self.write_from_priority(bytes, SerialTxPriority::DEFAULT)
     }
 
     pub fn write_from_priority(&self, bytes: &[u8], priority: SerialTxPriority) -> usize {
-        let sent = if priority >= SerialTxPriority::HIGH {
-            write_all_if_fits(&TX_HIGH, bytes)
-        } else if priority >= SerialTxPriority::NORMAL {
-            write_all_if_fits(&TX_NORMAL, bytes)
-        } else {
-            self.push_low_frame(bytes)
-        };
+        let sent = critical_section::with(|cs| {
+            self.inner
+                .borrow_ref_mut(cs)
+                .push_tx_frame(bytes, priority.0)
+        });
 
         if sent {
             self.update_stats(|stats| {
                 stats.tx_written = stats.tx_written.wrapping_add(bytes.len() as u32);
-                if priority >= SerialTxPriority::HIGH {
-                    stats.tx_high_written = stats.tx_high_written.wrapping_add(bytes.len() as u32);
-                } else if priority >= SerialTxPriority::NORMAL {
-                    stats.tx_normal_written =
-                        stats.tx_normal_written.wrapping_add(bytes.len() as u32);
-                } else {
-                    stats.tx_low_written = stats.tx_low_written.wrapping_add(bytes.len() as u32);
-                }
+                stats.tx_priority_min = priority_min(stats.tx_priority_min, priority.0);
+                stats.tx_priority_max = stats.tx_priority_max.max(priority.0);
             });
             bytes.len()
         } else {
             self.update_stats(|stats| {
                 stats.tx_dropped = stats.tx_dropped.wrapping_add(bytes.len() as u32);
-                if priority >= SerialTxPriority::HIGH {
-                    stats.tx_high_dropped = stats.tx_high_dropped.wrapping_add(bytes.len() as u32);
-                } else if priority >= SerialTxPriority::NORMAL {
-                    stats.tx_normal_dropped =
-                        stats.tx_normal_dropped.wrapping_add(bytes.len() as u32);
-                } else {
-                    stats.tx_low_dropped = stats.tx_low_dropped.wrapping_add(bytes.len() as u32);
-                }
+                stats.tx_drop_priority_min = priority_min(stats.tx_drop_priority_min, priority.0);
+                stats.tx_drop_priority_max = stats.tx_drop_priority_max.max(priority.0);
             });
             0
         }
     }
 
     pub fn push_rx(&self, bytes: &[u8]) -> usize {
-        self.push_rx_priority(bytes, SerialRxPriority::NORMAL)
+        self.push_rx_priority(bytes, SerialRxPriority::DEFAULT)
     }
 
     pub fn push_rx_priority(&self, bytes: &[u8], priority: SerialRxPriority) -> usize {
-        let sent = if priority >= SerialRxPriority::HIGH {
-            write_all_if_fits(&RX_HIGH, bytes)
-        } else if priority >= SerialRxPriority::NORMAL {
-            write_all_if_fits(&RX_NORMAL, bytes)
-        } else {
-            write_all_if_fits(&RX_LOW, bytes)
-        };
+        let sent = write_all_if_fits(&RX_BYTES, bytes);
 
         if sent {
             self.update_stats(|stats| {
-                stats.rx_pushed = stats.rx_pushed.wrapping_add(bytes.len() as u32)
+                stats.rx_pushed = stats.rx_pushed.wrapping_add(bytes.len() as u32);
+                stats.rx_priority_min = priority_min(stats.rx_priority_min, priority.0);
+                stats.rx_priority_max = stats.rx_priority_max.max(priority.0);
             });
             bytes.len()
         } else {
@@ -109,7 +86,7 @@ impl SharedMavlinkMailbox {
     }
 
     pub fn drain_tx_into(&self, out: &mut [u8]) -> usize {
-        let n = self.read_tx_priority(out);
+        let n = critical_section::with(|cs| self.inner.borrow_ref_mut(cs).pop_tx_frame(out));
         self.update_stats(|stats| stats.tx_drained = stats.tx_drained.wrapping_add(n as u32));
         n
     }
@@ -117,7 +94,11 @@ impl SharedMavlinkMailbox {
     pub fn drain_tx_batch_into(&self, out: &mut [u8]) -> usize {
         let mut total = 0;
         while total < out.len() {
-            let n = self.read_tx_priority(&mut out[total..]);
+            let n = critical_section::with(|cs| {
+                self.inner
+                    .borrow_ref_mut(cs)
+                    .pop_tx_frame(&mut out[total..])
+            });
             if n == 0 {
                 break;
             }
@@ -130,25 +111,6 @@ impl SharedMavlinkMailbox {
 
     pub fn record_core1_heartbeat(&self) {
         self.update_stats(|stats| stats.core1_heartbeats = stats.core1_heartbeats.wrapping_add(1));
-    }
-
-    pub fn record_wifi_rx_datagram(&self, bytes: usize) {
-        self.update_stats(|stats| {
-            stats.wifi_rx_datagrams = stats.wifi_rx_datagrams.wrapping_add(1);
-            stats.wifi_rx_bytes = stats.wifi_rx_bytes.wrapping_add(bytes as u32);
-        });
-    }
-
-    pub fn record_wifi_tx_datagram(&self, bytes: usize) {
-        self.update_stats(|stats| {
-            stats.wifi_tx_datagrams = stats.wifi_tx_datagrams.wrapping_add(1);
-            stats.wifi_tx_bytes = stats.wifi_tx_bytes.wrapping_add(bytes as u32);
-            stats.wifi_tx_max_datagram = stats.wifi_tx_max_datagram.max(bytes as u32);
-        });
-    }
-
-    pub fn record_wifi_tx_error(&self) {
-        self.update_stats(|stats| stats.wifi_tx_errors = stats.wifi_tx_errors.wrapping_add(1));
     }
 
     pub fn record_uart_tx_batch(&self, bytes: usize) {
@@ -174,24 +136,19 @@ impl SharedMavlinkMailbox {
         self.update_stats(|stats| stats.uart_rx_errors = stats.uart_rx_errors.wrapping_add(1));
     }
 
-    pub fn set_wifi_state(&self, state: u32) {
-        WIFI_STATE.store(state, Ordering::Release);
+    pub fn set_comms_state(&self, state: u32) {
+        COMMS_STATE.store(state, Ordering::Release);
     }
 
     pub fn stats(&self) -> MavlinkMailboxStats {
         let mut stats = critical_section::with(|cs| {
             let mailbox = self.inner.borrow_ref(cs);
             let mut stats = mailbox.stats;
-            stats.tx_low_pending_frames = mailbox.tx_low_len as u32;
-            stats.tx_pending = tx_pending_bytes()
-                + low_frame_pending_bytes(
-                    &mailbox.tx_low_frame_lens,
-                    mailbox.tx_low_head,
-                    mailbox.tx_low_len,
-                );
+            stats.tx_pending = mailbox.pending_bytes();
+            stats.tx_pending_frames = mailbox.tx_len as u32;
             stats
         });
-        stats.wifi_state = WIFI_STATE.load(Ordering::Acquire);
+        stats.comms_state = COMMS_STATE.load(Ordering::Acquire);
         stats
     }
 
@@ -201,24 +158,6 @@ impl SharedMavlinkMailbox {
 
     fn update_stats(&self, update: impl FnOnce(&mut MavlinkMailboxStats)) {
         critical_section::with(|cs| update(&mut self.inner.borrow_ref_mut(cs).stats));
-    }
-
-    fn push_low_frame(&self, bytes: &[u8]) -> bool {
-        critical_section::with(|cs| {
-            let mut mailbox = self.inner.borrow_ref_mut(cs);
-            mailbox.push_low_frame(bytes)
-        })
-    }
-
-    fn read_tx_priority(&self, out: &mut [u8]) -> usize {
-        if let Ok(n) = TX_HIGH.try_read(out) {
-            return n;
-        }
-        if let Ok(n) = TX_NORMAL.try_read(out) {
-            return n;
-        }
-
-        critical_section::with(|cs| self.inner.borrow_ref_mut(cs).pop_low_frame(out))
     }
 }
 
@@ -230,25 +169,19 @@ pub struct MavlinkMailboxStats {
     pub rx_pushed: u32,
     pub rx_read: u32,
     pub rx_dropped: u32,
+    pub rx_priority_min: u8,
+    pub rx_priority_max: u8,
     pub tx_written: u32,
-    pub tx_high_written: u32,
-    pub tx_normal_written: u32,
-    pub tx_low_written: u32,
     pub tx_drained: u32,
     pub tx_dropped: u32,
-    pub tx_high_dropped: u32,
-    pub tx_normal_dropped: u32,
-    pub tx_low_dropped: u32,
-    pub tx_low_replaced: u32,
+    pub tx_replaced: u32,
     pub tx_pending: u32,
-    pub tx_low_pending_frames: u32,
-    pub wifi_rx_datagrams: u32,
-    pub wifi_rx_bytes: u32,
-    pub wifi_tx_datagrams: u32,
-    pub wifi_tx_bytes: u32,
-    pub wifi_tx_max_datagram: u32,
-    pub wifi_tx_errors: u32,
-    pub wifi_state: u32,
+    pub tx_pending_frames: u32,
+    pub tx_priority_min: u8,
+    pub tx_priority_max: u8,
+    pub tx_drop_priority_min: u8,
+    pub tx_drop_priority_max: u8,
+    pub comms_state: u32,
     pub core1_heartbeats: u32,
     pub uart_tx_batches: u32,
     pub uart_tx_bytes: u32,
@@ -261,10 +194,10 @@ pub struct MavlinkMailboxStats {
 
 pub struct MavlinkMailbox {
     stats: MavlinkMailboxStats,
-    tx_low_frames: [[u8; MAVLINK_V1_MAX_FRAME_BYTES]; TX_LOW_FRAME_CAPACITY],
-    tx_low_frame_lens: [u16; TX_LOW_FRAME_CAPACITY],
-    tx_low_head: usize,
-    tx_low_len: usize,
+    tx_frames: [[u8; MAVLINK_V1_MAX_FRAME_BYTES]; TX_FRAME_CAPACITY],
+    tx_frame_lens: [u16; TX_FRAME_CAPACITY],
+    tx_frame_priorities: [u8; TX_FRAME_CAPACITY],
+    tx_len: usize,
 }
 
 impl MavlinkMailbox {
@@ -274,25 +207,19 @@ impl MavlinkMailbox {
                 rx_pushed: 0,
                 rx_read: 0,
                 rx_dropped: 0,
+                rx_priority_min: 0,
+                rx_priority_max: 0,
                 tx_written: 0,
-                tx_high_written: 0,
-                tx_normal_written: 0,
-                tx_low_written: 0,
                 tx_drained: 0,
                 tx_dropped: 0,
-                tx_high_dropped: 0,
-                tx_normal_dropped: 0,
-                tx_low_dropped: 0,
-                tx_low_replaced: 0,
+                tx_replaced: 0,
                 tx_pending: 0,
-                tx_low_pending_frames: 0,
-                wifi_rx_datagrams: 0,
-                wifi_rx_bytes: 0,
-                wifi_tx_datagrams: 0,
-                wifi_tx_bytes: 0,
-                wifi_tx_max_datagram: 0,
-                wifi_tx_errors: 0,
-                wifi_state: 0,
+                tx_pending_frames: 0,
+                tx_priority_min: 0,
+                tx_priority_max: 0,
+                tx_drop_priority_min: 0,
+                tx_drop_priority_max: 0,
+                comms_state: 0,
                 core1_heartbeats: 0,
                 uart_tx_batches: 0,
                 uart_tx_bytes: 0,
@@ -302,45 +229,100 @@ impl MavlinkMailbox {
                 uart_tx_errors: 0,
                 uart_rx_errors: 0,
             },
-            tx_low_frames: [[0; MAVLINK_V1_MAX_FRAME_BYTES]; TX_LOW_FRAME_CAPACITY],
-            tx_low_frame_lens: [0; TX_LOW_FRAME_CAPACITY],
-            tx_low_head: 0,
-            tx_low_len: 0,
+            tx_frames: [[0; MAVLINK_V1_MAX_FRAME_BYTES]; TX_FRAME_CAPACITY],
+            tx_frame_lens: [0; TX_FRAME_CAPACITY],
+            tx_frame_priorities: [0; TX_FRAME_CAPACITY],
+            tx_len: 0,
         }
     }
 
-    fn push_low_frame(&mut self, bytes: &[u8]) -> bool {
+    fn push_tx_frame(&mut self, bytes: &[u8], priority: u8) -> bool {
         if bytes.len() > MAVLINK_V1_MAX_FRAME_BYTES {
             return false;
         }
 
-        if self.tx_low_len == TX_LOW_FRAME_CAPACITY {
-            self.tx_low_head = (self.tx_low_head + 1) % TX_LOW_FRAME_CAPACITY;
-            self.tx_low_len -= 1;
-            self.stats.tx_low_replaced = self.stats.tx_low_replaced.wrapping_add(1);
-        }
+        let slot = if self.tx_len < TX_FRAME_CAPACITY {
+            let slot = self.tx_len;
+            self.tx_len += 1;
+            slot
+        } else {
+            let Some(slot) = self.lowest_priority_slot() else {
+                return false;
+            };
+            if priority <= self.tx_frame_priorities[slot] {
+                return false;
+            }
+            self.stats.tx_replaced = self.stats.tx_replaced.wrapping_add(1);
+            slot
+        };
 
-        let tail = (self.tx_low_head + self.tx_low_len) % TX_LOW_FRAME_CAPACITY;
-        self.tx_low_frames[tail][..bytes.len()].copy_from_slice(bytes);
-        self.tx_low_frame_lens[tail] = bytes.len() as u16;
-        self.tx_low_len += 1;
+        self.tx_frames[slot][..bytes.len()].copy_from_slice(bytes);
+        self.tx_frame_lens[slot] = bytes.len() as u16;
+        self.tx_frame_priorities[slot] = priority;
         true
     }
 
-    fn pop_low_frame(&mut self, out: &mut [u8]) -> usize {
-        if self.tx_low_len == 0 {
+    fn pop_tx_frame(&mut self, out: &mut [u8]) -> usize {
+        if self.tx_len == 0 {
             return 0;
         }
 
-        let len = self.tx_low_frame_lens[self.tx_low_head] as usize;
+        let slot = self.highest_priority_slot();
+        let len = self.tx_frame_lens[slot] as usize;
         if len > out.len() {
             return 0;
         }
 
-        out[..len].copy_from_slice(&self.tx_low_frames[self.tx_low_head][..len]);
-        self.tx_low_head = (self.tx_low_head + 1) % TX_LOW_FRAME_CAPACITY;
-        self.tx_low_len -= 1;
+        out[..len].copy_from_slice(&self.tx_frames[slot][..len]);
+        self.remove_tx_slot(slot);
         len
+    }
+
+    fn highest_priority_slot(&self) -> usize {
+        let mut best = 0;
+        let mut index = 1;
+        while index < self.tx_len {
+            if self.tx_frame_priorities[index] > self.tx_frame_priorities[best] {
+                best = index;
+            }
+            index += 1;
+        }
+        best
+    }
+
+    fn lowest_priority_slot(&self) -> Option<usize> {
+        if self.tx_len == 0 {
+            return None;
+        }
+        let mut lowest = 0;
+        let mut index = 1;
+        while index < self.tx_len {
+            if self.tx_frame_priorities[index] < self.tx_frame_priorities[lowest] {
+                lowest = index;
+            }
+            index += 1;
+        }
+        Some(lowest)
+    }
+
+    fn remove_tx_slot(&mut self, slot: usize) {
+        let last = self.tx_len - 1;
+        if slot != last {
+            self.tx_frames[slot] = self.tx_frames[last];
+            self.tx_frame_lens[slot] = self.tx_frame_lens[last];
+            self.tx_frame_priorities[slot] = self.tx_frame_priorities[last];
+        }
+        self.tx_len -= 1;
+    }
+
+    fn pending_bytes(&self) -> u32 {
+        let mut total = 0_u32;
+        let mut i = 0;
+        while i < self.tx_len {
+            total = total.wrapping_add(self.tx_frame_lens[i] as u32);
+            i += 1;
+        }
+        total
     }
 }
 
@@ -348,18 +330,6 @@ impl Default for MavlinkMailbox {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn read_priority<const H: usize, const N: usize, const L: usize>(
-    high: &Pipe<CriticalSectionRawMutex, H>,
-    normal: &Pipe<CriticalSectionRawMutex, N>,
-    low: &Pipe<CriticalSectionRawMutex, L>,
-    out: &mut [u8],
-) -> usize {
-    high.try_read(out)
-        .or_else(|_| normal.try_read(out))
-        .or_else(|_| low.try_read(out))
-        .unwrap_or(0)
 }
 
 fn write_all_if_fits<const N: usize>(
@@ -380,41 +350,10 @@ fn write_all_if_fits<const N: usize>(
     true
 }
 
-fn tx_pending_bytes() -> u32 {
-    (TX_HIGH.capacity() - TX_HIGH.free_capacity()) as u32
-        + (TX_NORMAL.capacity() - TX_NORMAL.free_capacity()) as u32
-}
-
-fn low_frame_pending_bytes(lens: &[u16; TX_LOW_FRAME_CAPACITY], head: usize, len: usize) -> u32 {
-    let mut total = 0_u32;
-    let mut i = 0;
-    while i < len {
-        total = total.wrapping_add(lens[(head + i) % TX_LOW_FRAME_CAPACITY] as u32);
-        i += 1;
-    }
-    total
-}
-
-pub struct WifiMavlinkCore {
-    pub config: WifiCommsConfig,
-}
-
-impl WifiMavlinkCore {
-    pub fn new(config: WifiCommsConfig) -> Self {
-        Self { config }
-    }
-
-    pub fn run_forever(&mut self, mailbox: SharedMavlinkMailbox) -> ! {
-        let mut tx_bytes = [0_u8; 256];
-        let mut heartbeat_divider = 0_u32;
-        loop {
-            let _ = mailbox.drain_tx_into(&mut tx_bytes);
-            heartbeat_divider = heartbeat_divider.wrapping_add(1);
-            if heartbeat_divider == 50_000 {
-                mailbox.record_core1_heartbeat();
-                heartbeat_divider = 0;
-            }
-            core::hint::spin_loop();
-        }
+fn priority_min(current: u8, value: u8) -> u8 {
+    if current == 0 {
+        value
+    } else {
+        current.min(value)
     }
 }

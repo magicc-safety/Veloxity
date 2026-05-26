@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreRole {
     FlightControl,
-    WifiMavlink,
+    PeripheralService,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,7 +14,7 @@ impl Default for CoreAssignment {
     fn default() -> Self {
         Self {
             core0: CoreRole::FlightControl,
-            core1: CoreRole::WifiMavlink,
+            core1: CoreRole::PeripheralService,
         }
     }
 }
