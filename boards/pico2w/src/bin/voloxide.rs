@@ -60,9 +60,6 @@ const UART_IDLE_DELAY_US: u64 = 50;
 const CRSF_RX_CHUNK_BYTES: usize = 8;
 #[cfg(feature = "synthetic-imu")]
 const SYNTHETIC_IMU_PERIOD_US: u64 = 125;
-const FAST_TICK_PERIOD_US: u64 = 125;
-const MEDIUM_TICK_PERIOD_US: u64 = 1_000;
-const SLOW_TICK_PERIOD_US: u64 = 10_000;
 
 bind_interrupts!(struct Irqs {
     UART0_IRQ => UartInterruptHandler<UART0>;
@@ -309,36 +306,7 @@ fn main() -> ! {
     }
 
     let mut world = init_world(board, params, pwm_driver);
-    let now_us = Instant::now().as_micros();
-    let mut next_fast_tick_us = now_us;
-    let mut next_medium_tick_us = now_us;
-    let mut next_slow_tick_us = now_us;
-
     loop {
-        let now_us = Instant::now().as_micros();
-
-        if now_us >= next_fast_tick_us {
-            let _ = world.run_fast_control_tick();
-            next_fast_tick_us = next_fast_tick_us.saturating_add(FAST_TICK_PERIOD_US);
-            if now_us.saturating_sub(next_fast_tick_us) > FAST_TICK_PERIOD_US {
-                next_fast_tick_us = now_us.saturating_add(FAST_TICK_PERIOD_US);
-            }
-        }
-
-        if now_us >= next_medium_tick_us {
-            world.run_medium_service_tick();
-            next_medium_tick_us = next_medium_tick_us.saturating_add(MEDIUM_TICK_PERIOD_US);
-            if now_us.saturating_sub(next_medium_tick_us) > MEDIUM_TICK_PERIOD_US {
-                next_medium_tick_us = now_us.saturating_add(MEDIUM_TICK_PERIOD_US);
-            }
-        }
-
-        if now_us >= next_slow_tick_us {
-            world.run_slow_telemetry_tick();
-            next_slow_tick_us = next_slow_tick_us.saturating_add(SLOW_TICK_PERIOD_US);
-            if now_us.saturating_sub(next_slow_tick_us) > SLOW_TICK_PERIOD_US {
-                next_slow_tick_us = now_us.saturating_add(SLOW_TICK_PERIOD_US);
-            }
-        }
+        let _ = world.run_once();
     }
 }
