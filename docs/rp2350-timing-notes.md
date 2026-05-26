@@ -149,6 +149,50 @@ Result:
 
 Conclusion: the UART DMA path sustains the 400 Hz target with the fixed 300 MHz clock.
 
+### UART DMA, 3.33 kHz Synthetic IMU Production, 400 Hz Telemetry Target
+
+This test uses the native high-rate class available on the ISM330DHCX: a 300 us synthetic IMU period,
+or about 3.33 kHz. It is still synthetic and does not exercise the real SPI/data-ready path, but it
+is the current best pre-IMU estimate for the target rate we expect to use first when the hardware
+sensor arrives.
+
+Command:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release --features 'release-loop-bench synthetic-imu-3333hz'
+probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/release/voloxide
+probe-rs reset --chip RP235x
+python3 tools/mavlink_tester.py --transport uart --device /dev/ttyACM0 --baud 2000000 --samples 1000 --duration-s 15 --warmup-s 2 --show 20 --diagnostics
+```
+
+Result:
+
+- IMU telemetry rate: 400.0 Hz
+- IMU board timestamp interval: average 2.500 ms, p99 2.796 ms, max 2.816 ms
+- status telemetry rate: 10.0 Hz
+- firmware `loop_time_us`: min 86 us, average 103.0 us, p99 131 us, max 136 us
+- release-loop aggregate: 102,136 passes, average 122.5 us, p90 window max 240 us, p99 window max
+  290 us, max 485 us
+- passes over the 300 us 3.33 kHz frame budget: 822 in the reported window
+- UART byte rate: 23.5 kB/s
+
+Conclusion: 3.33 kHz is the most reasonable current target for the first real ISM330DHCX test. The
+control-path timing has wide margin against a 300 us frame, the full `world.run_once()` p99 window is
+below the frame budget, and normal benchmark telemetry remains stable at 400 Hz. The rare full-pass
+spikes are still worth tracking, but they do not currently look like a control-path blocker.
+
+The expected operating model remains one complete ordered `World::run_once()` pass, not a split
+foreground/background scheduler. Communication, parameter service, sensor ingestion, RC/command
+state, control, telemetry, serial flush, and deferred board actions all keep their ROSflight-style
+ordering and each gets a bounded service opportunity. High-rate sensors use latest-sample-wins
+queues, and high-volume work such as telemetry, parameter listing, and logs must remain rate-limited
+or chunked. With those assumptions, 3.33 kHz looks practical even with heartbeat, status, RC,
+offboard-control events, and capped telemetry streams.
+
+The remaining proof point is real hardware: configure the ISM330DHCX for the 3.33 kHz ODR, measure
+core1 packet production, core0 packet consumption, IMU sample age at control start, dropped/stale
+packet counts, control update rate, and motor-output interval jitter under normal telemetry load.
+
 ### UART DMA, 4 kHz Synthetic IMU Production, 400 Hz Telemetry Target
 
 This test uses the release-loop benchmark profile with synthetic core1 IMU production. It does not

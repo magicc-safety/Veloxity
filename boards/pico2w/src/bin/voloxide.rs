@@ -79,6 +79,7 @@ const SYNTHETIC_IMU_PERIOD_US: u64 = synthetic_imu_period_us();
 #[cfg(all(
     feature = "synthetic-imu-1khz",
     not(feature = "synthetic-imu-2khz"),
+    not(feature = "synthetic-imu-3333hz"),
     not(feature = "synthetic-imu-4khz")
 ))]
 const fn synthetic_imu_period_us() -> u64 {
@@ -87,15 +88,26 @@ const fn synthetic_imu_period_us() -> u64 {
 #[cfg(all(
     feature = "synthetic-imu-2khz",
     not(feature = "synthetic-imu-1khz"),
+    not(feature = "synthetic-imu-3333hz"),
     not(feature = "synthetic-imu-4khz")
 ))]
 const fn synthetic_imu_period_us() -> u64 {
     500
 }
 #[cfg(all(
+    feature = "synthetic-imu-3333hz",
+    not(feature = "synthetic-imu-1khz"),
+    not(feature = "synthetic-imu-2khz"),
+    not(feature = "synthetic-imu-4khz")
+))]
+const fn synthetic_imu_period_us() -> u64 {
+    300
+}
+#[cfg(all(
     feature = "synthetic-imu-4khz",
     not(feature = "synthetic-imu-1khz"),
-    not(feature = "synthetic-imu-2khz")
+    not(feature = "synthetic-imu-2khz"),
+    not(feature = "synthetic-imu-3333hz")
 ))]
 const fn synthetic_imu_period_us() -> u64 {
     250
@@ -104,6 +116,7 @@ const fn synthetic_imu_period_us() -> u64 {
     feature = "synthetic-imu",
     not(feature = "synthetic-imu-1khz"),
     not(feature = "synthetic-imu-2khz"),
+    not(feature = "synthetic-imu-3333hz"),
     not(feature = "synthetic-imu-4khz")
 ))]
 const fn synthetic_imu_period_us() -> u64 {
@@ -111,8 +124,11 @@ const fn synthetic_imu_period_us() -> u64 {
 }
 #[cfg(any(
     all(feature = "synthetic-imu-1khz", feature = "synthetic-imu-2khz"),
+    all(feature = "synthetic-imu-1khz", feature = "synthetic-imu-3333hz"),
     all(feature = "synthetic-imu-1khz", feature = "synthetic-imu-4khz"),
-    all(feature = "synthetic-imu-2khz", feature = "synthetic-imu-4khz")
+    all(feature = "synthetic-imu-2khz", feature = "synthetic-imu-3333hz"),
+    all(feature = "synthetic-imu-2khz", feature = "synthetic-imu-4khz"),
+    all(feature = "synthetic-imu-3333hz", feature = "synthetic-imu-4khz")
 ))]
 compile_error!("select only one synthetic IMU rate feature");
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
@@ -123,7 +139,9 @@ const ISM330DHCX_SPI_HZ: u32 = 10_000_000;
 const ISM330DHCX_WHO_AM_I: u8 = 0x6b;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_REPORT_US: u64 = 1_000_000;
-#[cfg(feature = "release-loop-bench")]
+#[cfg(all(feature = "release-loop-bench", feature = "synthetic-imu-3333hz"))]
+const LOOP_BENCH_BUDGET_US: u32 = 300;
+#[cfg(all(feature = "release-loop-bench", not(feature = "synthetic-imu-3333hz")))]
 const LOOP_BENCH_BUDGET_US: u32 = 250;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_BUCKET_US: u32 = 10;

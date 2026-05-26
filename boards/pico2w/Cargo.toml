@@ -13,6 +13,7 @@ release-loop-bench = []
 synthetic-imu = []
 synthetic-imu-1khz = ["synthetic-imu"]
 synthetic-imu-2khz = ["synthetic-imu"]
+synthetic-imu-3333hz = ["synthetic-imu"]
 synthetic-imu-4khz = ["synthetic-imu"]
 
 [dependencies]
