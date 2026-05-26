@@ -119,6 +119,23 @@ impl MavlinkInterface {
 
 impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
     fn handle_incoming_messages(&mut self, board: &mut B, msgs: &mut Messages) {
+        while let Some(frame) = board.serial_rx_frame_read() {
+            match frame {
+                Ok(frame) => {
+                    let mut mavlink_frame = parser::CompleteFrame {
+                        data: [0; 280],
+                        len: frame.len.min(280),
+                    };
+                    mavlink_frame.data[..mavlink_frame.len]
+                        .copy_from_slice(&frame.data[..mavlink_frame.len]);
+                    if let Some(message) = parser::process_mavlink_frame(mavlink_frame) {
+                        self.process_rosflight_message(message, msgs);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
         let mut buf = [0u8; RX_BUFF_SIZE];
         match board.serial_rx_read(&mut buf) {
             Some(Ok(n)) => {
@@ -349,4 +366,136 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
             SerialTxPriority::CRITICAL,
         );
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generated::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
+    use voloxide_core::{
+        board::{BoardIo, SerialRxFrame},
+        comm::interface::CommInterface,
+        errors,
+        params::Params,
+        sensors::SensorBus,
+    };
+
+    #[derive(Default)]
+    struct FramedBoard {
+        frame: Option<SerialRxFrame>,
+        byte_reads: usize,
+    }
+
+    impl BoardIo for FramedBoard {
+        fn update_sensor_bus<R: voloxide_core::math::FlightFloat>(
+            &mut self,
+            sensors: &mut SensorBus<R>,
+        ) {
+            sensors.clear();
+        }
+
+        fn serial_rx_read(
+            &mut self,
+            _buf: &mut [u8],
+        ) -> Option<core::result::Result<usize, errors::TelemError>> {
+            self.byte_reads += 1;
+            Some(Ok(0))
+        }
+
+        fn serial_rx_frame_read(
+            &mut self,
+        ) -> Option<core::result::Result<SerialRxFrame, errors::TelemError>> {
+            self.frame.take().map(Ok)
+        }
+
+        fn serial_tx_write(
+            &mut self,
+            bytes: &[u8],
+        ) -> Option<core::result::Result<usize, errors::TelemError>> {
+            Some(Ok(bytes.len()))
+        }
+
+        fn clock_millis(&self) -> u32 {
+            0
+        }
+
+        fn clock_micros(&self) -> u64 {
+            0
+        }
+    }
+
+    fn offboard_control_serial_frame() -> SerialRxFrame {
+        let frame = Frame::builder()
+            .version(V1)
+            .sequence(7)
+            .system_id(1)
+            .component_id(1)
+            .message(&mav_messages::OffboardControl {
+                mode: mav_enums::OffboardControlMode::ModeRollPitchYawrateThrottle,
+                ignore: mav_enums::OffboardControlIgnore::IgnoreNone,
+                u: [0.0, 0.0, 0.85, 0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.0],
+            })
+            .unwrap()
+            .build();
+
+        let mut out = SerialRxFrame::default();
+        let mut pos = 0;
+        let header = frame.header();
+        let payload = frame.payload().bytes();
+        let crc = frame.checksum();
+
+        out.data[pos] = 0xFE;
+        pos += 1;
+        out.data[pos] = payload.len() as u8;
+        pos += 1;
+        out.data[pos] = header.sequence();
+        pos += 1;
+        out.data[pos] = header.system_id();
+        pos += 1;
+        out.data[pos] = header.component_id();
+        pos += 1;
+        out.data[pos] = header.message_id() as u8;
+        pos += 1;
+        out.data[pos..pos + payload.len()].copy_from_slice(payload);
+        pos += payload.len();
+        out.data[pos..pos + 2].copy_from_slice(&crc.to_le_bytes());
+        pos += 2;
+        out.len = pos;
+        out
+    }
+
+    #[test]
+    fn framed_rx_path_stores_rosflight_message() {
+        let mut board = FramedBoard {
+            frame: Some(offboard_control_serial_frame()),
+            byte_reads: 0,
+        };
+        let mut link = MavlinkInterface::new();
+        let mut messages = Messages::default();
+
+        link.handle_incoming_messages(&mut board, &mut messages);
+
+        let msg = messages.offboard_control.expect("offboard message");
+        assert_eq!(msg.fz, 0.85);
+        assert_eq!(board.byte_reads, 1);
+    }
+
+    #[test]
+    fn invalid_framed_rx_does_not_store_message() {
+        let mut frame = offboard_control_serial_frame();
+        frame.data[frame.len - 1] ^= 0x55;
+        let mut board = FramedBoard {
+            frame: Some(frame),
+            byte_reads: 0,
+        };
+        let mut link = MavlinkInterface::new();
+        let mut messages = Messages::default();
+
+        link.handle_incoming_messages(&mut board, &mut messages);
+
+        assert!(messages.offboard_control.is_none());
+    }
+
+    #[allow(dead_code)]
+    fn _params_type_is_available(_: Params) {}
 }

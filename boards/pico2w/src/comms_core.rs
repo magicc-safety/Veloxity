@@ -5,10 +5,13 @@ use core::{
 
 use critical_section::Mutex;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pipe::Pipe};
-use voloxide_core::board::{SerialRxPriority, SerialTxPriority};
+use voloxide_core::board::{
+    SERIAL_RX_FRAME_MAX_BYTES, SerialRxFrame, SerialRxPriority, SerialTxPriority,
+};
 
 const MAVLINK_V1_MAX_FRAME_BYTES: usize = 263;
 const TX_FRAME_CAPACITY: usize = 64;
+const RX_FRAME_CAPACITY: usize = 32;
 
 pub static MAVLINK_MAILBOX: Mutex<RefCell<MavlinkMailbox>> =
     Mutex::new(RefCell::new(MavlinkMailbox::new()));
@@ -85,6 +88,35 @@ impl SharedMavlinkMailbox {
         }
     }
 
+    pub fn push_rx_frame_priority(&self, bytes: &[u8], priority: SerialRxPriority) -> usize {
+        let sent = critical_section::with(|cs| {
+            self.inner
+                .borrow_ref_mut(cs)
+                .push_rx_frame(bytes, priority.0)
+        });
+
+        if sent {
+            self.update_stats(|stats| {
+                stats.rx_frames_pushed = stats.rx_frames_pushed.wrapping_add(1);
+                stats.rx_frame_bytes = stats.rx_frame_bytes.wrapping_add(bytes.len() as u32);
+                stats.rx_priority_min = priority_min(stats.rx_priority_min, priority.0);
+                stats.rx_priority_max = stats.rx_priority_max.max(priority.0);
+            });
+            bytes.len()
+        } else {
+            self.update_stats(|stats| {
+                stats.rx_frames_dropped = stats.rx_frames_dropped.wrapping_add(1);
+                stats.rx_drop_priority_min = priority_min(stats.rx_drop_priority_min, priority.0);
+                stats.rx_drop_priority_max = stats.rx_drop_priority_max.max(priority.0);
+            });
+            0
+        }
+    }
+
+    pub fn pop_rx_frame(&self) -> Option<SerialRxFrame> {
+        critical_section::with(|cs| self.inner.borrow_ref_mut(cs).pop_rx_frame())
+    }
+
     pub fn drain_tx_into(&self, out: &mut [u8]) -> usize {
         let n = critical_section::with(|cs| self.inner.borrow_ref_mut(cs).pop_tx_frame(out));
         self.update_stats(|stats| stats.tx_drained = stats.tx_drained.wrapping_add(n as u32));
@@ -136,6 +168,12 @@ impl SharedMavlinkMailbox {
         self.update_stats(|stats| stats.uart_rx_errors = stats.uart_rx_errors.wrapping_add(1));
     }
 
+    pub fn record_uart_rx_parse_error(&self) {
+        self.update_stats(|stats| {
+            stats.uart_rx_parse_errors = stats.uart_rx_parse_errors.wrapping_add(1)
+        });
+    }
+
     pub fn set_comms_state(&self, state: u32) {
         COMMS_STATE.store(state, Ordering::Release);
     }
@@ -146,6 +184,7 @@ impl SharedMavlinkMailbox {
             let mut stats = mailbox.stats;
             stats.tx_pending = mailbox.pending_bytes();
             stats.tx_pending_frames = mailbox.tx_len as u32;
+            stats.rx_pending_frames = mailbox.rx_len as u32;
             stats
         });
         stats.comms_state = COMMS_STATE.load(Ordering::Acquire);
@@ -171,6 +210,13 @@ pub struct MavlinkMailboxStats {
     pub rx_dropped: u32,
     pub rx_priority_min: u8,
     pub rx_priority_max: u8,
+    pub rx_drop_priority_min: u8,
+    pub rx_drop_priority_max: u8,
+    pub rx_frames_pushed: u32,
+    pub rx_frames_dropped: u32,
+    pub rx_frames_replaced: u32,
+    pub rx_frame_bytes: u32,
+    pub rx_pending_frames: u32,
     pub tx_written: u32,
     pub tx_drained: u32,
     pub tx_dropped: u32,
@@ -190,6 +236,7 @@ pub struct MavlinkMailboxStats {
     pub uart_rx_bytes: u32,
     pub uart_tx_errors: u32,
     pub uart_rx_errors: u32,
+    pub uart_rx_parse_errors: u32,
 }
 
 pub struct MavlinkMailbox {
@@ -198,6 +245,10 @@ pub struct MavlinkMailbox {
     tx_frame_lens: [u16; TX_FRAME_CAPACITY],
     tx_frame_priorities: [u8; TX_FRAME_CAPACITY],
     tx_len: usize,
+    rx_frames: [[u8; SERIAL_RX_FRAME_MAX_BYTES]; RX_FRAME_CAPACITY],
+    rx_frame_lens: [u16; RX_FRAME_CAPACITY],
+    rx_frame_priorities: [u8; RX_FRAME_CAPACITY],
+    rx_len: usize,
 }
 
 impl MavlinkMailbox {
@@ -209,6 +260,13 @@ impl MavlinkMailbox {
                 rx_dropped: 0,
                 rx_priority_min: 0,
                 rx_priority_max: 0,
+                rx_drop_priority_min: 0,
+                rx_drop_priority_max: 0,
+                rx_frames_pushed: 0,
+                rx_frames_dropped: 0,
+                rx_frames_replaced: 0,
+                rx_frame_bytes: 0,
+                rx_pending_frames: 0,
                 tx_written: 0,
                 tx_drained: 0,
                 tx_dropped: 0,
@@ -228,11 +286,16 @@ impl MavlinkMailbox {
                 uart_rx_bytes: 0,
                 uart_tx_errors: 0,
                 uart_rx_errors: 0,
+                uart_rx_parse_errors: 0,
             },
             tx_frames: [[0; MAVLINK_V1_MAX_FRAME_BYTES]; TX_FRAME_CAPACITY],
             tx_frame_lens: [0; TX_FRAME_CAPACITY],
             tx_frame_priorities: [0; TX_FRAME_CAPACITY],
             tx_len: 0,
+            rx_frames: [[0; SERIAL_RX_FRAME_MAX_BYTES]; RX_FRAME_CAPACITY],
+            rx_frame_lens: [0; RX_FRAME_CAPACITY],
+            rx_frame_priorities: [0; RX_FRAME_CAPACITY],
+            rx_len: 0,
         }
     }
 
@@ -323,6 +386,83 @@ impl MavlinkMailbox {
             i += 1;
         }
         total
+    }
+
+    fn push_rx_frame(&mut self, bytes: &[u8], priority: u8) -> bool {
+        if bytes.len() > SERIAL_RX_FRAME_MAX_BYTES {
+            return false;
+        }
+
+        let slot = if self.rx_len < RX_FRAME_CAPACITY {
+            let slot = self.rx_len;
+            self.rx_len += 1;
+            slot
+        } else {
+            let Some(slot) = self.lowest_rx_priority_slot() else {
+                return false;
+            };
+            if priority <= self.rx_frame_priorities[slot] {
+                return false;
+            }
+            self.stats.rx_frames_replaced = self.stats.rx_frames_replaced.wrapping_add(1);
+            slot
+        };
+
+        self.rx_frames[slot][..bytes.len()].copy_from_slice(bytes);
+        self.rx_frame_lens[slot] = bytes.len() as u16;
+        self.rx_frame_priorities[slot] = priority;
+        true
+    }
+
+    fn pop_rx_frame(&mut self) -> Option<SerialRxFrame> {
+        if self.rx_len == 0 {
+            return None;
+        }
+
+        let slot = self.highest_rx_priority_slot();
+        let len = self.rx_frame_lens[slot] as usize;
+        let mut frame = SerialRxFrame::default();
+        frame.data[..len].copy_from_slice(&self.rx_frames[slot][..len]);
+        frame.len = len;
+        self.remove_rx_slot(slot);
+        Some(frame)
+    }
+
+    fn highest_rx_priority_slot(&self) -> usize {
+        let mut best = 0;
+        let mut index = 1;
+        while index < self.rx_len {
+            if self.rx_frame_priorities[index] > self.rx_frame_priorities[best] {
+                best = index;
+            }
+            index += 1;
+        }
+        best
+    }
+
+    fn lowest_rx_priority_slot(&self) -> Option<usize> {
+        if self.rx_len == 0 {
+            return None;
+        }
+        let mut lowest = 0;
+        let mut index = 1;
+        while index < self.rx_len {
+            if self.rx_frame_priorities[index] < self.rx_frame_priorities[lowest] {
+                lowest = index;
+            }
+            index += 1;
+        }
+        Some(lowest)
+    }
+
+    fn remove_rx_slot(&mut self, slot: usize) {
+        let last = self.rx_len - 1;
+        if slot != last {
+            self.rx_frames[slot] = self.rx_frames[last];
+            self.rx_frame_lens[slot] = self.rx_frame_lens[last];
+            self.rx_frame_priorities[slot] = self.rx_frame_priorities[last];
+        }
+        self.rx_len -= 1;
     }
 }
 

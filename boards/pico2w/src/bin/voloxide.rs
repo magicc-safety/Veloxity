@@ -30,10 +30,14 @@ use static_cell::StaticCell;
 #[cfg(feature = "synthetic-imu")]
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
 use voloxide_core::{
-    board::BoardIo, comm::TelemetryRates, params::Params, state_machine::StateManager,
-    vehicle::quadrotor, world::World,
+    board::{BoardIo, SerialRxPriority},
+    comm::TelemetryRates,
+    params::Params,
+    state_machine::StateManager,
+    vehicle::quadrotor,
+    world::World,
 };
-use voloxide_mavlink::MavlinkInterface;
+use voloxide_mavlink::{MavlinkInterface, parser::MavlinkParser};
 
 type PicoReal = f32;
 
@@ -56,6 +60,9 @@ const UART_IDLE_DELAY_US: u64 = 50;
 const CRSF_RX_CHUNK_BYTES: usize = 8;
 #[cfg(feature = "synthetic-imu")]
 const SYNTHETIC_IMU_PERIOD_US: u64 = 125;
+const FAST_TICK_PERIOD_US: u64 = 125;
+const MEDIUM_TICK_PERIOD_US: u64 = 1_000;
+const SLOW_TICK_PERIOD_US: u64 = 10_000;
 
 bind_interrupts!(struct Irqs {
     UART0_IRQ => UartInterruptHandler<UART0>;
@@ -142,15 +149,29 @@ async fn uart_tx_task(mut uart_tx: UartTx<'static, UartAsync>, mailbox: SharedMa
 
 #[embassy_executor::task]
 async fn uart_rx_task(mut uart_rx: UartRx<'static, UartAsync>, mailbox: SharedMavlinkMailbox) -> ! {
+    let mut parser = MavlinkParser::new();
     let mut rx = [0_u8; UART_RX_CHUNK_BYTES];
     loop {
         if uart_rx.read(&mut rx).await.is_ok() {
-            let _ = mailbox.push_rx_priority(&rx, voloxide_core::board::SerialRxPriority::DEFAULT);
             mailbox.record_uart_rx_chunk(rx.len());
+            for byte in rx {
+                if let Some(frame) = parser.feed_byte(byte) {
+                    let priority = mavlink_rx_priority(frame.data[5]);
+                    let _ = mailbox.push_rx_frame_priority(&frame.data[..frame.len], priority);
+                }
+            }
         } else {
             mailbox.record_uart_rx_error();
             Timer::after(Duration::from_micros(UART_IDLE_DELAY_US)).await;
         }
+    }
+}
+
+fn mavlink_rx_priority(message_id: u8) -> SerialRxPriority {
+    match message_id {
+        0 | 23 | 111 | 188 => SerialRxPriority::CRITICAL,
+        20 | 21 | 180 | 193 | 195 => SerialRxPriority::DEFAULT,
+        _ => SerialRxPriority::REPLACEABLE_TELEMETRY,
     }
 }
 
@@ -288,7 +309,36 @@ fn main() -> ! {
     }
 
     let mut world = init_world(board, params, pwm_driver);
+    let now_us = Instant::now().as_micros();
+    let mut next_fast_tick_us = now_us;
+    let mut next_medium_tick_us = now_us;
+    let mut next_slow_tick_us = now_us;
+
     loop {
-        world.run_once();
+        let now_us = Instant::now().as_micros();
+
+        if now_us >= next_fast_tick_us {
+            let _ = world.run_fast_control_tick();
+            next_fast_tick_us = next_fast_tick_us.saturating_add(FAST_TICK_PERIOD_US);
+            if now_us.saturating_sub(next_fast_tick_us) > FAST_TICK_PERIOD_US {
+                next_fast_tick_us = now_us.saturating_add(FAST_TICK_PERIOD_US);
+            }
+        }
+
+        if now_us >= next_medium_tick_us {
+            world.run_medium_service_tick();
+            next_medium_tick_us = next_medium_tick_us.saturating_add(MEDIUM_TICK_PERIOD_US);
+            if now_us.saturating_sub(next_medium_tick_us) > MEDIUM_TICK_PERIOD_US {
+                next_medium_tick_us = now_us.saturating_add(MEDIUM_TICK_PERIOD_US);
+            }
+        }
+
+        if now_us >= next_slow_tick_us {
+            world.run_slow_telemetry_tick();
+            next_slow_tick_us = next_slow_tick_us.saturating_add(SLOW_TICK_PERIOD_US);
+            if now_us.saturating_sub(next_slow_tick_us) > SLOW_TICK_PERIOD_US {
+                next_slow_tick_us = now_us.saturating_add(SLOW_TICK_PERIOD_US);
+            }
+        }
     }
 }

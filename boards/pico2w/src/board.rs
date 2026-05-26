@@ -8,7 +8,7 @@ use crate::{
 };
 use embassy_time::Instant;
 use voloxide_core::{
-    board::{BoardIo, SerialTxPriority},
+    board::{BoardIo, SerialRxFrame, SerialTxPriority},
     errors,
     packets::BaroPacket,
     params::Params,
@@ -116,6 +116,10 @@ impl BoardIo for Board {
         Some(result)
     }
 
+    fn serial_rx_frame_read(&mut self) -> Option<Result<SerialRxFrame, errors::TelemError>> {
+        self.mavlink.pop_rx_frame().map(Ok)
+    }
+
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         self.serial_tx_write_priority(bytes, SerialTxPriority::DEFAULT)
     }
@@ -126,6 +130,10 @@ impl BoardIo for Board {
         priority: SerialTxPriority,
     ) -> Option<Result<usize, errors::TelemError>> {
         Some(Ok(self.mavlink.write_from_priority(bytes, priority)))
+    }
+
+    fn serial_rx_pending(&self) -> bool {
+        self.mavlink.stats().rx_pending_frames != 0
     }
 
     #[cfg(feature = "timing-diagnostics")]
@@ -197,9 +205,22 @@ impl BoardIo for Board {
                 write_diag_num(&mut out, &mut offset, stats.core1_heartbeats);
                 write_diag_bytes(&mut out, &mut offset, b" st");
                 write_diag_num(&mut out, &mut offset, stats.comms_state);
-                write_diag_bytes(&mut out, &mut offset, b" rq");
-                write_diag_num(&mut out, &mut offset, stats.rx_dropped);
+                write_diag_bytes(&mut out, &mut offset, b" rf");
+                write_diag_num(&mut out, &mut offset, stats.rx_pending_frames);
                 self.diag_index = 5;
+                Some(out)
+            }
+            5 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PURF p");
+                write_diag_num(&mut out, &mut offset, stats.rx_frames_pushed);
+                write_diag_bytes(&mut out, &mut offset, b" d");
+                write_diag_num(&mut out, &mut offset, stats.rx_frames_dropped);
+                write_diag_bytes(&mut out, &mut offset, b" r");
+                write_diag_num(&mut out, &mut offset, stats.rx_frames_replaced);
+                write_diag_bytes(&mut out, &mut offset, b" e");
+                write_diag_num(&mut out, &mut offset, stats.uart_rx_parse_errors);
+                self.diag_index = 6;
                 Some(out)
             }
             _ => {

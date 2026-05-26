@@ -425,6 +425,71 @@ where
         self.run_sensor_ingestion_and_health_stage();
     }
 
+    #[cfg(not(feature = "timing-diagnostics"))]
+    pub fn run_fast_control_tick(&mut self) -> bool {
+        self.run_sensor_ingestion_stage();
+        self.run_rc_command_state_stages();
+        self.run_control_and_mixing_stage_if_new_imu()
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    pub fn run_fast_control_tick(&mut self) -> WorldRunStats {
+        let pass_start_us = self.board.clock_micros();
+
+        let sensor_start_us = self.board.clock_micros();
+        let sensor_presence = self.run_sensor_ingestion_stage();
+        let sensor_us = elapsed_u16(sensor_start_us, self.board.clock_micros());
+
+        let rc_start_us = self.board.clock_micros();
+        self.run_rc_command_state_stages();
+        let rc_us = elapsed_u16(rc_start_us, self.board.clock_micros());
+
+        let mut control_timing = ControlPipelineTiming::default();
+        let control_start_us = self.board.clock_micros();
+        let ran_control =
+            self.run_control_and_mixing_stage_if_new_imu_measured(&mut control_timing);
+        let control_us = elapsed_u16(control_start_us, self.board.clock_micros());
+
+        let stats = WorldRunStats {
+            total_us: elapsed_u16(pass_start_us, self.board.clock_micros()),
+            comm_us: 0,
+            sensor_us,
+            control_us,
+            telemetry_us: 0,
+            sensor_update_us: 0,
+            sensor_process_us: sensor_us,
+            sensor_health_us: 0,
+            log_response_us: 0,
+            rc_us,
+            estimator_us: control_timing.estimator_us,
+            controller_us: control_timing.controller_us,
+            mixer_us: control_timing.mixer_us,
+            pwm_us: control_timing.pwm_us,
+            telemetry_enqueue_us: 0,
+            tx_flush_us: 0,
+            board_service_us: 0,
+            had_rx: false,
+            had_sensor: sensor_presence.had_sensor,
+            had_imu: sensor_presence.had_imu,
+            ran_control,
+        };
+        self.record_timing_diagnostics(stats);
+        stats
+    }
+
+    pub fn run_medium_service_tick(&mut self) {
+        self.run_communication_and_parameter_service_stage();
+        let now_us = self.board.clock_micros();
+        self.update_sensor_health_and_calibration(now_us);
+        self.drain_logs_and_send_responses();
+    }
+
+    pub fn run_slow_telemetry_tick(&mut self) {
+        self.run_telemetry_stage();
+        self.board.serial_flush();
+        self.board.run_deferred_board_actions();
+    }
+
     pub fn run_communication_and_parameter_service_stage(&mut self) {
         self.process_comm_stage();
         self.apply_companion_events();

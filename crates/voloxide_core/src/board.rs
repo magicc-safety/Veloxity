@@ -20,6 +20,29 @@ impl SerialTxPriority {
 
 pub type SerialRxPriority = SerialTxPriority;
 
+pub const SERIAL_RX_FRAME_MAX_BYTES: usize = 280;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SerialRxFrame {
+    pub data: [u8; SERIAL_RX_FRAME_MAX_BYTES],
+    pub len: usize,
+}
+
+impl SerialRxFrame {
+    pub const fn empty() -> Self {
+        Self {
+            data: [0; SERIAL_RX_FRAME_MAX_BYTES],
+            len: 0,
+        }
+    }
+}
+
+impl Default for SerialRxFrame {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 pub trait BoardIo {
     fn update_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         sensors.clear();
@@ -32,6 +55,9 @@ pub trait BoardIo {
         _priority: SerialTxPriority,
     ) -> Option<Result<usize, errors::TelemError>> {
         self.serial_tx_write(bytes)
+    }
+    fn serial_rx_frame_read(&mut self) -> Option<Result<SerialRxFrame, errors::TelemError>> {
+        None
     }
     fn serial_rx_pending(&self) -> bool {
         false
