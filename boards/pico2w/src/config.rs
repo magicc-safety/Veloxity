@@ -26,21 +26,72 @@ impl Default for Pico2WConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pico2WPinout {
+    pub companion: CompanionUartPinout,
+    pub gps: GpsPinout,
     pub esc: DshotEscPinout,
     pub imu: ImuSpiPinout,
     pub rc: RcReceiverPinout,
+    pub slow_i2c: SlowI2cPinout,
     pub leds: StatusLedPinout,
 }
 
 impl Default for Pico2WPinout {
     fn default() -> Self {
         Self {
+            companion: CompanionUartPinout::default(),
+            gps: GpsPinout::default(),
             esc: DshotEscPinout::default(),
             imu: ImuSpiPinout::default(),
             rc: RcReceiverPinout::default(),
+            slow_i2c: SlowI2cPinout::default(),
             leds: StatusLedPinout::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompanionUartPinout {
+    pub uart_bus: HardwareUartBus,
+    pub tx_gpio: u8,
+    pub rx_gpio: u8,
+    pub baudrate: u32,
+}
+
+impl Default for CompanionUartPinout {
+    fn default() -> Self {
+        Self {
+            uart_bus: HardwareUartBus::Uart0,
+            tx_gpio: 0,
+            rx_gpio: 1,
+            baudrate: 2_000_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GpsPinout {
+    pub serial_bus: GpsSerialBus,
+    pub tx_gpio: u8,
+    pub rx_gpio: u8,
+    pub pps_gpio: Option<u8>,
+    pub magnetometer_data_ready_gpio: Option<u8>,
+}
+
+impl Default for GpsPinout {
+    fn default() -> Self {
+        Self {
+            serial_bus: GpsSerialBus::PioUart,
+            tx_gpio: 7,
+            rx_gpio: 6,
+            pps_gpio: Some(16),
+            magnetometer_data_ready_gpio: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpsSerialBus {
+    PioUart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +104,7 @@ impl Default for DshotEscPinout {
     fn default() -> Self {
         Self {
             motor_signal_gpios: [2, 3, 4, 5],
-            telemetry_gpio: Some(6),
+            telemetry_gpio: Some(17),
         }
     }
 }
@@ -65,8 +116,9 @@ pub struct ImuSpiPinout {
     pub mosi_gpio: u8,
     pub miso_gpio: u8,
     pub cs_gpio: u8,
-    pub bmp_cs_gpio: u8,
+    pub bmp_cs_gpio: Option<u8>,
     pub data_ready_gpio: Option<u8>,
+    pub aux_interrupt_gpio: Option<u8>,
     pub sensor: ImuSensorKind,
 }
 
@@ -78,9 +130,10 @@ impl Default for ImuSpiPinout {
             mosi_gpio: 11,
             miso_gpio: 12,
             cs_gpio: 13,
-            bmp_cs_gpio: 14,
-            data_ready_gpio: None,
-            sensor: ImuSensorKind::Mpu6500Bmp280,
+            bmp_cs_gpio: None,
+            data_ready_gpio: Some(14),
+            aux_interrupt_gpio: Some(15),
+            sensor: ImuSensorKind::Ism330dhcx,
         }
     }
 }
@@ -132,19 +185,42 @@ pub enum RcReceiverProtocol {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlowI2cPinout {
+    pub bus: HardwareI2cBus,
+    pub sda_gpio: u8,
+    pub scl_gpio: u8,
+}
+
+impl Default for SlowI2cPinout {
+    fn default() -> Self {
+        Self {
+            bus: HardwareI2cBus::I2c0,
+            sda_gpio: 20,
+            scl_gpio: 21,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardwareI2cBus {
+    I2c0,
+    I2c1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatusLedPinout {
-    pub flight_status_gpio: u8,
-    pub comms_status_gpio: u8,
-    pub fault_status_gpio: u8,
+    pub flight_status_gpio: Option<u8>,
+    pub comms_status_gpio: Option<u8>,
+    pub fault_status_gpio: Option<u8>,
     pub addressable_gpio: Option<u8>,
 }
 
 impl Default for StatusLedPinout {
     fn default() -> Self {
         Self {
-            flight_status_gpio: 16,
-            comms_status_gpio: 17,
-            fault_status_gpio: 18,
+            flight_status_gpio: Some(18),
+            comms_status_gpio: None,
+            fault_status_gpio: None,
             addressable_gpio: Some(19),
         }
     }
