@@ -8,6 +8,10 @@ use embassy_executor::Executor;
 use embassy_time::{Duration, Instant, Timer};
 use panic_halt as _;
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
+use pico2w::gps::{
+    SHARED_GNSS_QUEUE, UbxNavPvtParser, make_ubx_packet, record_gps_byte, record_nav_pvt,
+};
+use pico2w::pio_uart_dma::{PioUartDmaRx, PioUartDmaRxProgram};
 #[cfg(any(
     feature = "synthetic-imu",
     all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
@@ -18,14 +22,17 @@ use pico2w::{board, config::Pico2WConfig, pwm::PioPwmDriver};
 use rp2350_platform::hal::clocks::ClockConfig;
 use rp2350_platform::hal::dma;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, SPI1};
+use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, SPI1};
 use rp2350_platform::hal::{
     self as rp, Peri, bind_interrupts,
     config::Config as HalConfig,
     multicore::{Stack, spawn_core1},
     peripherals::{
-        CORE1, DMA_CH0, DMA_CH1, DMA_CH2, DMA_CH3, PIN_0, PIN_1, PIN_8, PIN_9, UART0, UART1,
+        CORE1, DMA_CH0, DMA_CH1, DMA_CH2, DMA_CH3, DMA_CH4, PIN_0, PIN_1, PIN_6, PIN_7, PIN_8,
+        PIN_9, PIO0, UART0, UART1,
     },
+    pio::{InterruptHandler as PioInterruptHandler, Pio},
+    pio_programs::uart::{PioUartTx, PioUartTxProgram},
     uart::{
         Async as UartAsync, Config as UartConfig, InterruptHandler as UartInterruptHandler, Uart,
         UartRx, UartTx,
@@ -33,7 +40,7 @@ use rp2350_platform::hal::{
 };
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 use rp2350_platform::hal::{
-    gpio::{Level, Output},
+    gpio::{Input, Level, Output, Pull},
     spi::{Blocking, Config as SpiConfig, Phase, Polarity, Spi},
 };
 use static_cell::StaticCell;
@@ -74,6 +81,7 @@ const UART_RX_CHUNK_BYTES: usize = 16;
 const UART_IDLE_DELAY_US: u64 = 50;
 const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 8;
+const GPS_UART_BAUDRATE: u32 = 115_200;
 #[cfg(feature = "synthetic-imu")]
 const SYNTHETIC_IMU_PERIOD_US: u64 = synthetic_imu_period_us();
 #[cfg(all(
@@ -163,11 +171,13 @@ const MAVLINK_COMPONENT_ID: u8 = 250;
 bind_interrupts!(struct Irqs {
     UART0_IRQ => UartInterruptHandler<UART0>;
     UART1_IRQ => UartInterruptHandler<UART1>;
+    PIO0_IRQ_0 => PioInterruptHandler<PIO0>;
     DMA_IRQ_0 =>
         dma::InterruptHandler<DMA_CH0>,
         dma::InterruptHandler<DMA_CH1>,
         dma::InterruptHandler<DMA_CH2>,
-        dma::InterruptHandler<DMA_CH3>;
+        dma::InterruptHandler<DMA_CH3>,
+        dma::InterruptHandler<DMA_CH4>;
 });
 
 fn mavlink_uart_config() -> UartConfig {
@@ -213,11 +223,16 @@ async fn synthetic_imu_task() -> ! {
 
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 #[embassy_executor::task]
-async fn ism330dhcx_imu_task(mut spi: Spi<'static, SPI1, Blocking>, mut cs: Output<'static>) -> ! {
+async fn ism330dhcx_imu_task(
+    mut spi: Spi<'static, SPI1, Blocking>,
+    mut cs: Output<'static>,
+    mut drdy: Input<'static>,
+) -> ! {
     let mut seq = 0_u32;
     loop {
         if ism330dhcx_init(&mut spi, &mut cs).is_ok() {
             loop {
+                drdy.wait_for_rising_edge().await;
                 let now_us = Instant::now().as_micros();
                 if let Ok(packet) = ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
                     SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
@@ -241,6 +256,8 @@ fn ism330dhcx_init(
     ism330dhcx_write_reg(spi, cs, 0x12, 0x44)?;
     ism330dhcx_write_reg(spi, cs, 0x10, 0xa4)?;
     ism330dhcx_write_reg(spi, cs, 0x11, 0xac)?;
+    ism330dhcx_write_reg(spi, cs, 0x0b, 0x80)?;
+    ism330dhcx_write_reg(spi, cs, 0x0d, 0x03)?;
     Ok(())
 }
 
@@ -337,6 +354,70 @@ async fn crsf_rx_task(mut uart_rx: UartRx<'static, UartAsync>) -> ! {
 }
 
 #[embassy_executor::task]
+async fn gps_pio_task(
+    mut gps_rx: PioUartDmaRx<'static, PIO0, 0>,
+    mut gps_tx: PioUartTx<'static, PIO0, 1>,
+    mut gps_dma: dma::Channel<'static>,
+) -> ! {
+    gps_configure_nav_pvt(&mut gps_tx).await;
+
+    let mut parser = UbxNavPvtParser::new();
+    let mut next_poll_us = Instant::now().as_micros().saturating_add(250_000);
+    let mut rx_words = [0_u32; 128];
+    loop {
+        gps_rx.read_words_dma(&mut gps_dma, &mut rx_words).await;
+        let mut now_us = Instant::now().as_micros();
+        for word in rx_words {
+            let byte = word as u8;
+            record_gps_byte(byte);
+            if let Some(packet) = parser.feed_byte(byte, now_us) {
+                record_nav_pvt();
+                SHARED_GNSS_QUEUE.push_from_receiver_task(Ok(packet));
+            }
+            now_us = Instant::now().as_micros();
+        }
+        if gps_rx.stalled() {
+            next_poll_us = now_us.saturating_add(1_000_000);
+        } else if now_us >= next_poll_us {
+            gps_poll_nav_pvt(&mut gps_tx).await;
+            next_poll_us = now_us.saturating_add(1_000_000);
+        }
+    }
+}
+
+async fn gps_configure_nav_pvt(gps_tx: &mut PioUartTx<'static, PIO0, 1>) {
+    let mut packet = [0_u8; 40];
+
+    if let Some(len) = make_ubx_packet(0x06, 0x01, &[0x01, 0x07, 1], &mut packet) {
+        gps_write_packet(gps_tx, &packet[..len]).await;
+    }
+    Timer::after_millis(50).await;
+
+    if let Some(len) = make_ubx_packet(0x06, 0x01, &[0x01, 0x07, 0, 1, 0, 0, 0, 0], &mut packet) {
+        gps_write_packet(gps_tx, &packet[..len]).await;
+    }
+    Timer::after_millis(50).await;
+
+    let rate_payload = [100_u16.to_le_bytes()[0], 100_u16.to_le_bytes()[1], 1, 0, 0, 0];
+    if let Some(len) = make_ubx_packet(0x06, 0x08, &rate_payload, &mut packet) {
+        gps_write_packet(gps_tx, &packet[..len]).await;
+    }
+}
+
+async fn gps_poll_nav_pvt(gps_tx: &mut PioUartTx<'static, PIO0, 1>) {
+    let mut packet = [0_u8; 8];
+    if let Some(len) = make_ubx_packet(0x01, 0x07, &[], &mut packet) {
+        gps_write_packet(gps_tx, &packet[..len]).await;
+    }
+}
+
+async fn gps_write_packet(gps_tx: &mut PioUartTx<'static, PIO0, 1>, bytes: &[u8]) {
+    for byte in bytes {
+        gps_tx.write_u8(*byte).await;
+    }
+}
+
+#[embassy_executor::task]
 async fn uart_tx_task(mut uart_tx: UartTx<'static, UartAsync>, mailbox: SharedMavlinkMailbox) -> ! {
     let mut tx = [0_u8; UART_TX_BATCH_BYTES];
     loop {
@@ -385,14 +466,18 @@ struct Core1Resources {
     core1: Peri<'static, CORE1>,
     uart0: Peri<'static, UART0>,
     uart1: Peri<'static, UART1>,
+    pio0: Peri<'static, PIO0>,
     #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
     spi1: Peri<'static, SPI1>,
     dma_ch0: Peri<'static, DMA_CH0>,
     dma_ch1: Peri<'static, DMA_CH1>,
     dma_ch2: Peri<'static, DMA_CH2>,
     dma_ch3: Peri<'static, DMA_CH3>,
+    dma_ch4: Peri<'static, DMA_CH4>,
     pin0: Peri<'static, PIN_0>,
     pin1: Peri<'static, PIN_1>,
+    pin6: Peri<'static, PIN_6>,
+    pin7: Peri<'static, PIN_7>,
     pin8: Peri<'static, PIN_8>,
     pin9: Peri<'static, PIN_9>,
     #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
@@ -403,6 +488,8 @@ struct Core1Resources {
     pin12: Peri<'static, PIN_12>,
     #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
     pin13: Peri<'static, PIN_13>,
+    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+    pin14: Peri<'static, PIN_14>,
 }
 
 fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox) {
@@ -433,6 +520,25 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
             );
             let (_crsf_tx, crsf_rx) = crsf_uart.split();
 
+            let mut pio = Pio::new(resources.pio0, Irqs);
+            let gps_rx_program = PioUartDmaRxProgram::new(&mut pio.common);
+            let gps_tx_program = PioUartTxProgram::new(&mut pio.common);
+            let gps_rx = PioUartDmaRx::new(
+                GPS_UART_BAUDRATE,
+                &mut pio.common,
+                pio.sm0,
+                resources.pin7,
+                &gps_rx_program,
+            );
+            let gps_tx = PioUartTx::new(
+                GPS_UART_BAUDRATE,
+                &mut pio.common,
+                pio.sm1,
+                resources.pin6,
+                &gps_tx_program,
+            );
+            let gps_dma = dma::Channel::new(resources.dma_ch4, Irqs);
+
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             let imu_spi = {
                 let mut spi_config = SpiConfig::default();
@@ -449,6 +555,8 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
             };
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             let imu_cs = Output::new(resources.pin13, Level::High);
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            let imu_drdy = Input::new(resources.pin14, Pull::Down);
 
             let executor = CORE1_EXECUTOR.init(Executor::new());
             mailbox.set_comms_state(21);
@@ -465,12 +573,15 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 if let Ok(token) = crsf_rx_task(crsf_rx) {
                     spawner.spawn(token);
                 }
+                if let Ok(token) = gps_pio_task(gps_rx, gps_tx, gps_dma) {
+                    spawner.spawn(token);
+                }
                 #[cfg(feature = "synthetic-imu")]
                 if let Ok(token) = synthetic_imu_task() {
                     spawner.spawn(token);
                 }
                 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-                if let Ok(token) = ism330dhcx_imu_task(imu_spi, imu_cs) {
+                if let Ok(token) = ism330dhcx_imu_task(imu_spi, imu_cs, imu_drdy) {
                     spawner.spawn(token);
                 }
                 mailbox.set_comms_state(22);
@@ -696,14 +807,18 @@ fn main() -> ! {
             core1: peripherals.CORE1,
             uart0: peripherals.UART0,
             uart1: peripherals.UART1,
+            pio0: peripherals.PIO0,
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             spi1: peripherals.SPI1,
             dma_ch0: peripherals.DMA_CH0,
             dma_ch1: peripherals.DMA_CH1,
             dma_ch2: peripherals.DMA_CH2,
             dma_ch3: peripherals.DMA_CH3,
+            dma_ch4: peripherals.DMA_CH4,
             pin0: peripherals.PIN_0,
             pin1: peripherals.PIN_1,
+            pin6: peripherals.PIN_6,
+            pin7: peripherals.PIN_7,
             pin8: peripherals.PIN_8,
             pin9: peripherals.PIN_9,
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
@@ -714,6 +829,8 @@ fn main() -> ! {
             pin12: peripherals.PIN_12,
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             pin13: peripherals.PIN_13,
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            pin14: peripherals.PIN_14,
         },
         mailbox,
     );

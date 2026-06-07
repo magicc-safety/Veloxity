@@ -546,7 +546,7 @@ where
                     board,
                     RcChannelsMsg {
                         time_boot_ms: board.clock_millis(),
-                        chancount: 0,
+                        chancount: count as u8,
                         channels,
                         rssi: 0,
                     },

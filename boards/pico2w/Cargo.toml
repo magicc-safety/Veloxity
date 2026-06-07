@@ -32,9 +32,11 @@ embassy-executor = { version = "0.10.0", features = [
 embassy-sync = "0.8.0"
 embassy-time = "0.5.1"
 embedded-hal-nb = "1.0.0"
+fixed = "1.31.0"
 ism330dhcx-rs = { version = "2.0.0", default-features = false, features = ["async"], optional = true }
 nb = "1.1.0"
 panic-halt = "1.0.0"
+pio = "0.3.0"
 static_cell = "2.1"
 
 [lints]

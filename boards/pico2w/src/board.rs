@@ -1,6 +1,7 @@
 use crate::{
     comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
     config::Pico2WConfig,
+    gps::{SHARED_GNSS_QUEUE, SharedGnssQueue, gps_stats},
     gy91::Gy91,
     ism330dhcx::{SHARED_ISM330DHCX_IMU_QUEUE, SharedIsm330dhcxImuQueue},
     pwm::PioPwmDriver,
@@ -18,6 +19,7 @@ use voloxide_core::{
 struct PicoSensorProducer {
     ism330dhcx_imu: SharedIsm330dhcxImuQueue,
     crsf_rc: SharedCrsfRcQueue,
+    gnss: SharedGnssQueue,
     gy91_baro: Option<Gy91>,
     pending_baro: Option<Result<BaroPacket, errors::SensorError>>,
 }
@@ -27,6 +29,7 @@ impl PicoSensorProducer {
         Self {
             ism330dhcx_imu: SHARED_ISM330DHCX_IMU_QUEUE,
             crsf_rc: SHARED_CRSF_RC_QUEUE,
+            gnss: SHARED_GNSS_QUEUE,
             gy91_baro,
             pending_baro: None,
         }
@@ -54,6 +57,11 @@ impl PicoSensorProducer {
             && let Some(rc) = self.crsf_rc.take_latest()
         {
             sensors.rc = Some(Ok(rc));
+        }
+        if self.gnss.has_pending()
+            && let Some(gnss) = self.gnss.take_latest()
+        {
+            sensors.gnss = Some(gnss);
         }
         if let Some(baro) = self.pending_baro.take() {
             sensors.baro = Some(baro);
@@ -225,6 +233,22 @@ impl BoardIo for Board {
                 write_diag_bytes(&mut out, &mut offset, b" e");
                 write_diag_num(&mut out, &mut offset, stats.uart_rx_parse_errors);
                 self.diag_index = 6;
+                Some(out)
+            }
+            6 => {
+                let stats = gps_stats();
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"GPS b");
+                write_diag_num(&mut out, &mut offset, stats.total_bytes);
+                write_diag_bytes(&mut out, &mut offset, b" s");
+                write_diag_num(&mut out, &mut offset, stats.ubx_sync);
+                write_diag_bytes(&mut out, &mut offset, b" f");
+                write_diag_num(&mut out, &mut offset, stats.ubx_frames);
+                write_diag_bytes(&mut out, &mut offset, b" l");
+                write_diag_num(&mut out, &mut offset, stats.last_frame);
+                write_diag_bytes(&mut out, &mut offset, b" p");
+                write_diag_num(&mut out, &mut offset, stats.nav_pvt);
+                self.diag_index = 7;
                 Some(out)
             }
             _ => {

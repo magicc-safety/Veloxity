@@ -10,9 +10,11 @@ import time
 
 
 MAVLINK_V1_STX = 0xFE
+RC_CHANNELS = 65
 SMALL_IMU = 181
 SMALL_BARO = 183
 ROSFLIGHT_STATUS = 191
+ROSFLIGHT_GNSS = 197
 STATUSTEXT = 253
 CRC_EXTRA = {
     0: 50,
@@ -218,6 +220,17 @@ def decode_sensor_frame(frame):
             "board_us": None,
             "values": (altitude, pressure, temperature),
         }
+    if frame["msgid"] == RC_CHANNELS and len(payload) == 42:
+        values = struct.unpack("<I18HBB", payload)
+        return {
+            "name": "rc",
+            "board_us": values[0] * 1000,
+            "values": {
+                "count": values[19],
+                "channels": values[1:19],
+                "rssi": values[20],
+            },
+        }
     if frame["msgid"] == ROSFLIGHT_STATUS and len(payload) == 11:
         rc_override, num_errors, loop_time_us, armed, failsafe, offboard, error_code, control_mode = (
             struct.unpack("<HhhBBBBB", payload)
@@ -237,6 +250,26 @@ def decode_sensor_frame(frame):
             ),
             "loop_time_us": loop_time_us,
         }
+    if frame["msgid"] == ROSFLIGHT_GNSS and len(payload) == 66:
+        seconds, lat, lon, rosflight_timestamp, nanos, *rest = struct.unpack(
+            "<qddQi7fBB", payload
+        )
+        height, vel_n, vel_e, vel_d, h_acc, v_acc, s_acc, fix_type, num_sat = rest
+        return {
+            "name": "gnss",
+            "board_us": rosflight_timestamp,
+            "values": {
+                "seconds": seconds,
+                "nanos": nanos,
+                "fix_type": fix_type,
+                "num_sat": num_sat,
+                "lat": lat,
+                "lon": lon,
+                "height": height,
+                "vel": (vel_n, vel_e, vel_d),
+                "acc": (h_acc, v_acc, s_acc),
+            },
+        }
     if frame["msgid"] == STATUSTEXT and len(payload) == 51:
         text = payload[1:].split(b"\0", 1)[0].decode("ascii", errors="replace")
         perf = parse_perf_text(text)
@@ -248,7 +281,33 @@ def decode_sensor_frame(frame):
                 "text": text,
                 "perf": perf,
             }
+        return {
+            "name": "text",
+            "board_us": None,
+            "values": (),
+            "text": text,
+        }
     return None
+
+
+def format_decoded_values(values):
+    if isinstance(values, dict):
+        parts = []
+        for key, value in values.items():
+            if isinstance(value, tuple):
+                parts.append(
+                    f"{key}=({', '.join(format_decoded_scalar(v) for v in value)})"
+                )
+            else:
+                parts.append(f"{key}={format_decoded_scalar(value)}")
+        return "{" + ", ".join(parts) + "}"
+    return str(tuple(format_decoded_scalar(v) for v in values))
+
+
+def format_decoded_scalar(value):
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
 
 
 def parse_perf_text(text):
@@ -366,6 +425,21 @@ def summarize(name, records):
         )
 
 
+def summarize_text(records):
+    if not records:
+        print("text: no frames")
+        return
+
+    print(f"text: frames={len(records)}")
+    seen = set()
+    for record in records:
+        text = record.get("text", "")
+        if text in seen:
+            continue
+        seen.add(text)
+        print(f"  {text}")
+
+
 def summarize_perf(records):
     if not records:
         print("perf: no timing diagnostic frames")
@@ -476,7 +550,15 @@ def summarize_perf(records):
 def main():
     args = parse_args()
     parser = MavlinkV1Parser(validate_crc=not args.no_crc)
-    records = {"imu": [], "baro": [], "status": [], "perf": []}
+    records = {
+        "imu": [],
+        "baro": [],
+        "status": [],
+        "perf": [],
+        "text": [],
+        "rc": [],
+        "gnss": [],
+    }
     shown = 0
     deadline = time.monotonic() + args.duration_s if args.duration_s > 0 else None
     rx_bytes = 0
@@ -530,7 +612,7 @@ def main():
                     continue
                 name = decoded["name"]
                 if shown < args.show:
-                    if name == "perf":
+                    if name == "perf" or name == "text":
                         print(
                             f"{name} seq={frame['seq']} sys={frame['sysid']} "
                             f"comp={frame['compid']} text={decoded['text']}"
@@ -539,7 +621,7 @@ def main():
                         print(
                             f"{name} seq={frame['seq']} sys={frame['sysid']} "
                             f"comp={frame['compid']} board_us={decoded['board_us']} "
-                            f"values={tuple(round(v, 4) for v in decoded['values'])}"
+                            f"values={format_decoded_values(decoded['values'])}"
                         )
                     shown += 1
                 if host_ns < record_after_ns:
@@ -554,7 +636,12 @@ def main():
                             if "loop_time_us" in decoded
                             else {}
                         ),
-                        **({"text": decoded["text"], "perf": decoded["perf"]} if name == "perf" else {}),
+                        **(
+                            {"text": decoded["text"], "perf": decoded["perf"]}
+                            if name == "perf"
+                            else {}
+                        ),
+                        **({"text": decoded["text"]} if name == "text" else {}),
                     }
                 )
     finally:
@@ -565,7 +652,10 @@ def main():
 
     summarize("imu", records["imu"])
     summarize("baro", records["baro"])
+    summarize("rc", records["rc"])
+    summarize("gnss", records["gnss"])
     summarize("status", records["status"])
+    summarize_text(records["text"])
     summarize_perf(records["perf"])
     if first_rx_ns is not None and last_rx_ns is not None and last_rx_ns > first_rx_ns:
         duration_s = (last_rx_ns - first_rx_ns) / 1_000_000_000.0
