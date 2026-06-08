@@ -13,7 +13,7 @@ Air-side XIAO to Pico:
 | XIAO ESP32-C5 | Pico 2 W |
 | --- | --- |
 | D6 / TX / GPIO11 | GP1 / UART0 RX |
-| D7 / RX / GPIO12 | GP0 / UART0 TX |
+| D5 / SCL / GPIO24 | GP0 / UART0 TX |
 | GND | GND |
 
 Power the air-side XIAO from USB-C for bench testing. Do not connect XIAO `5V` to the Pico/BEC rail while USB-C is also connected unless we deliberately verify that power path first.

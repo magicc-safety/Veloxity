@@ -4,8 +4,8 @@ config BRIDGE_ROLE_AIR
     bool "Build air-side bridge"
     default n
     help
-        Air side connects the XIAO D6/D7 UART pins to Pico UART0.
-        Ground side bridges USB serial to ESP-NOW.
+        Air side connects the XIAO external UART pins to Pico UART0.
+        Ground side receives ESP-NOW packets and writes them to USB serial.
 
 config BRIDGE_UART_BAUD
     int "External UART baud"
@@ -30,5 +30,13 @@ config BRIDGE_ENABLE_STATS
     help
         Print periodic counters to stderr. Leave this disabled when the ground
         side USB serial is carrying a binary protocol such as MAVLink.
+
+config BRIDGE_TEST_PATTERN
+    bool "Send periodic test packets from the air bridge"
+    default n
+    help
+        In air builds, send a small ESP-NOW test packet once per second. This
+        verifies the ESP-NOW path without requiring the Pico UART to produce
+        data. Leave this disabled for binary protocol bridging.
 
 endmenu

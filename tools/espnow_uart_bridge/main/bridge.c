@@ -1,17 +1,15 @@
-#include <errno.h>
-#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "driver/uart.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
+#include "esp_err.h"
 #include "esp_event.h"
-#include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_now.h"
-#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -55,14 +53,27 @@ static volatile uint32_t s_send_ok;
 static volatile uint32_t s_send_fail;
 static volatile uint32_t s_rx_packets;
 static volatile uint32_t s_rx_drops;
+#if CONFIG_BRIDGE_ROLE_AIR
 static uint16_t s_tx_seq;
+#endif
 
 #if CONFIG_BRIDGE_ROLE_AIR
 static const bridge_role_t LOCAL_ROLE = ROLE_AIR;
 static const bridge_role_t PEER_ROLE = ROLE_GROUND;
 #else
-static const bridge_role_t LOCAL_ROLE = ROLE_GROUND;
 static const bridge_role_t PEER_ROLE = ROLE_AIR;
+#endif
+
+#if CONFIG_BRIDGE_ENABLE_STATS || !CONFIG_BRIDGE_ROLE_AIR
+static void usb_output_init(void)
+{
+    if (usb_serial_jtag_is_driver_installed()) {
+        return;
+    }
+
+    usb_serial_jtag_driver_config_t config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&config));
+}
 #endif
 
 static void send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
@@ -127,29 +138,56 @@ static esp_err_t wifi_espnow_init(void)
     return ESP_OK;
 }
 
+#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
 static int source_read(uint8_t *buf, size_t max_len)
 {
-#if CONFIG_BRIDGE_ROLE_AIR
     return uart_read_bytes(EXTERNAL_UART, buf, max_len, pdMS_TO_TICKS(1));
-#else
-    const int n = read(STDIN_FILENO, buf, max_len);
-    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        return 0;
-    }
-    return n;
-#endif
 }
+#endif
+
+#if CONFIG_BRIDGE_ROLE_AIR
+static void send_payload(const uint8_t *buf, size_t len)
+{
+    bridge_packet_t packet = {
+        .magic = BRIDGE_MAGIC,
+        .version = BRIDGE_VERSION,
+        .role = LOCAL_ROLE,
+    };
+
+    if (len > ESPNOW_PAYLOAD_MAX) {
+        len = ESPNOW_PAYLOAD_MAX;
+    }
+
+    packet.seq = s_tx_seq++;
+    packet.len = (uint16_t)len;
+    memcpy(packet.payload, buf, len);
+    const size_t header_len = sizeof(packet) - ESPNOW_PAYLOAD_MAX;
+    if (esp_now_send(BROADCAST_MAC, (const uint8_t *)&packet, header_len + len) != ESP_OK) {
+        s_send_fail++;
+    }
+}
+#endif
 
 static void sink_write(const uint8_t *buf, size_t len)
 {
 #if CONFIG_BRIDGE_ROLE_AIR
     uart_write_bytes(EXTERNAL_UART, (const char *)buf, len);
 #else
-    write(STDOUT_FILENO, buf, len);
+    usb_serial_jtag_write_bytes(buf, len, pdMS_TO_TICKS(100));
+    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(100));
 #endif
 }
 
-#if CONFIG_BRIDGE_ROLE_AIR
+#if CONFIG_BRIDGE_ENABLE_STATS
+static void diagnostic_write(const uint8_t *buf, size_t len)
+{
+    usb_serial_jtag_write_bytes(buf, len, pdMS_TO_TICKS(100));
+    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(100));
+    write(STDOUT_FILENO, buf, len);
+}
+#endif
+
+#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
 static esp_err_t external_uart_init(void)
 {
     const uart_config_t config = {
@@ -174,15 +212,10 @@ static esp_err_t external_uart_init(void)
 }
 #endif
 
+#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
 static void tx_task(void *arg)
 {
     (void)arg;
-    bridge_packet_t packet = {
-        .magic = BRIDGE_MAGIC,
-        .version = BRIDGE_VERSION,
-        .role = LOCAL_ROLE,
-    };
-
     uint8_t buf[UART_CHUNK_MAX];
     while (true) {
         int n = source_read(buf, sizeof(buf));
@@ -195,15 +228,26 @@ static void tx_task(void *arg)
             continue;
         }
 
-        packet.seq = s_tx_seq++;
-        packet.len = (uint16_t)n;
-        memcpy(packet.payload, buf, n);
-        const size_t header_len = sizeof(packet) - ESPNOW_PAYLOAD_MAX;
-        if (esp_now_send(BROADCAST_MAC, (const uint8_t *)&packet, header_len + n) != ESP_OK) {
-            s_send_fail++;
+        send_payload(buf, (size_t)n);
+    }
+}
+#endif
+
+#if CONFIG_BRIDGE_ROLE_AIR && CONFIG_BRIDGE_TEST_PATTERN
+static void test_pattern_task(void *arg)
+{
+    (void)arg;
+    uint32_t count = 0;
+    char line[80];
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        int n = snprintf(line, sizeof(line), "[espnow-uart test] air_count=%lu\n", (unsigned long)count++);
+        if (n > 0) {
+            send_payload((const uint8_t *)line, (size_t)n);
         }
     }
 }
+#endif
 
 static void rx_task(void *arg)
 {
@@ -220,6 +264,7 @@ static void rx_task(void *arg)
 static void stats_task(void *arg)
 {
     (void)arg;
+    char line[160];
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(2000));
 #if CONFIG_BRIDGE_ROLE_AIR
@@ -227,13 +272,17 @@ static void stats_task(void *arg)
 #else
         const char *role = "ground";
 #endif
-        fprintf(stderr,
-                "\n[espnow-uart %s] send_ok=%lu send_fail=%lu rx=%lu rx_drops=%lu\n",
-                role,
-                (unsigned long)s_send_ok,
-                (unsigned long)s_send_fail,
-                (unsigned long)s_rx_packets,
-                (unsigned long)s_rx_drops);
+        int n = snprintf(line,
+                         sizeof(line),
+                         "\n[espnow-uart %s] send_ok=%lu send_fail=%lu rx=%lu rx_drops=%lu\n",
+                         role,
+                         (unsigned long)s_send_ok,
+                         (unsigned long)s_send_fail,
+                         (unsigned long)s_rx_packets,
+                         (unsigned long)s_rx_drops);
+        if (n > 0) {
+            diagnostic_write((const uint8_t *)line, (size_t)n);
+        }
     }
 }
 #endif
@@ -243,33 +292,63 @@ void app_main(void)
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
 
-#if !CONFIG_BRIDGE_ROLE_AIR
-    fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL, 0) | O_NONBLOCK);
+#if CONFIG_BRIDGE_ENABLE_STATS || !CONFIG_BRIDGE_ROLE_AIR
+    usb_output_init();
+#endif
+
+#if CONFIG_BRIDGE_ENABLE_STATS
+    diagnostic_write((const uint8_t *)"\nESP-NOW UART bridge boot\n", 26);
 #endif
 
     s_rx_queue = xQueueCreate(QUEUE_DEPTH, sizeof(rx_item_t));
+#if CONFIG_BRIDGE_ENABLE_STATS
+    esp_err_t init_err = wifi_espnow_init();
+    if (init_err != ESP_OK) {
+        char err_line[96];
+        int err_len = snprintf(err_line,
+                               sizeof(err_line),
+                               "ESP-NOW UART bridge init failed: %s\n",
+                               esp_err_to_name(init_err));
+        if (err_len > 0) {
+            diagnostic_write((const uint8_t *)err_line, (size_t)err_len);
+        }
+        xTaskCreate(stats_task, "bridge_stats", 4096, NULL, 1, NULL);
+        return;
+    }
+#else
     ESP_ERROR_CHECK(wifi_espnow_init());
-#if CONFIG_BRIDGE_ROLE_AIR
+#endif
+#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
     ESP_ERROR_CHECK(external_uart_init());
 #endif
 
 #if CONFIG_BRIDGE_ENABLE_STATS
-    fprintf(stderr,
-            "\nESP-NOW UART bridge role=%s mac=%02x:%02x:%02x:%02x:%02x:%02x channel=%d baud=%d\n",
+    char line[192];
+    int n = snprintf(line,
+                     sizeof(line),
+                     "\nESP-NOW UART bridge role=%s mac=%02x:%02x:%02x:%02x:%02x:%02x channel=%d baud=%d\n",
 #if CONFIG_BRIDGE_ROLE_AIR
             "air",
 #else
             "ground",
 #endif
-            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-            CONFIG_BRIDGE_WIFI_CHANNEL,
-            CONFIG_BRIDGE_UART_BAUD);
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                     CONFIG_BRIDGE_WIFI_CHANNEL,
+                     CONFIG_BRIDGE_UART_BAUD);
+    if (n > 0) {
+        diagnostic_write((const uint8_t *)line, (size_t)n);
+    }
 #else
     (void)mac;
 #endif
 
+#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
     xTaskCreatePinnedToCore(tx_task, "bridge_tx", 4096, NULL, 10, NULL, 0);
+#endif
     xTaskCreatePinnedToCore(rx_task, "bridge_rx", 4096, NULL, 11, NULL, 0);
+#if CONFIG_BRIDGE_ROLE_AIR && CONFIG_BRIDGE_TEST_PATTERN
+    xTaskCreate(test_pattern_task, "bridge_test", 4096, NULL, 1, NULL);
+#endif
 #if CONFIG_BRIDGE_ENABLE_STATS
     xTaskCreate(stats_task, "bridge_stats", 4096, NULL, 1, NULL);
 #endif

@@ -1,12 +1,14 @@
 use crate::{
     comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
     config::Pico2WConfig,
-    gps::{SHARED_GNSS_QUEUE, SharedGnssQueue, gps_stats},
+    gps::{SHARED_GNSS_QUEUE, SharedGnssQueue},
     gy91::Gy91,
     ism330dhcx::{SHARED_ISM330DHCX_IMU_QUEUE, SharedIsm330dhcxImuQueue},
     pwm::PioPwmDriver,
     rc_receiver::{SHARED_CRSF_RC_QUEUE, SharedCrsfRcQueue},
 };
+#[cfg(feature = "timing-diagnostics")]
+use crate::gps::gps_stats;
 use embassy_time::Instant;
 use voloxide_core::{
     board::{BoardIo, SerialRxFrame, SerialTxPriority},
