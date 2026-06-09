@@ -16,6 +16,53 @@ config BRIDGE_WIFI_CHANNEL
     range 1 13
     default 1
 
+config BRIDGE_PEER_MAC
+    string "ESP-NOW peer station MAC address"
+    default "38:44:be:a4:15:b8" if BRIDGE_ROLE_AIR
+    default "38:44:be:a4:06:bc"
+    help
+        Unicast ESP-NOW peer MAC. The air image points at the ground XIAO,
+        and the ground image points at the air XIAO.
+
+config BRIDGE_PACKET_PAYLOAD_MAX
+    int "Maximum ESP-NOW bridge payload bytes per packet"
+    range 1 240
+    default 200
+    help
+        Keep this conservative for bring-up. ESP-NOW v2 can carry larger
+        packets, but small chunks reduce loss and make UART bridging easier
+        to validate.
+
+config BRIDGE_QUEUE_DEPTH
+    int "Bridge queue depth"
+    range 4 128
+    default 32
+
+config BRIDGE_SEND_TIMEOUT_MS
+    int "ESP-NOW send callback timeout in milliseconds"
+    range 10 1000
+    default 100
+
+config BRIDGE_TASK_STACK
+    int "Bridge task stack size"
+    range 2048 16384
+    default 8192
+
+config BRIDGE_CONFIGURE_ESPNOW_RATE
+    bool "Configure ESP-NOW peer PHY rate"
+    default n
+    help
+        Leave disabled for first bring-up. Once the unicast bridge is stable,
+        enable this to experiment with a fixed ESP-NOW PHY rate.
+
+config BRIDGE_ESPNOW_PHY_RATE
+    int "ESP-NOW peer PHY rate enum value"
+    default 10
+    depends on BRIDGE_CONFIGURE_ESPNOW_RATE
+    help
+        Numeric wifi_phy_rate_t value. Default 10 is WIFI_PHY_RATE_12M in
+        current ESP-IDF headers.
+
 config BRIDGE_UART_TX_GPIO
     int "External UART TX GPIO"
     default 11

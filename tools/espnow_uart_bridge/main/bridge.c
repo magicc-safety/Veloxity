@@ -1,11 +1,14 @@
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
+#include "esp_crc.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_mac.h"
@@ -13,15 +16,19 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 
-#define BRIDGE_MAGIC 0x56555831u
-#define BRIDGE_VERSION 1u
-#define ESPNOW_PAYLOAD_MAX 1400
-#define UART_CHUNK_MAX 512
-#define QUEUE_DEPTH 32
+#define BRIDGE_MAGIC 0x56555832u
+#define BRIDGE_VERSION 2u
+#define BRIDGE_FLAG_NONE 0u
 #define EXTERNAL_UART UART_NUM_1
+#define LOCAL_IO_BUFFER_SIZE CONFIG_BRIDGE_PACKET_PAYLOAD_MAX
+
+#if CONFIG_BRIDGE_PACKET_PAYLOAD_MAX > ESP_NOW_MAX_DATA_LEN
+#error "CONFIG_BRIDGE_PACKET_PAYLOAD_MAX exceeds ESP-NOW maximum packet length"
+#endif
 
 typedef enum {
     ROLE_GROUND = 1,
@@ -32,80 +39,188 @@ typedef struct __attribute__((packed)) {
     uint32_t magic;
     uint16_t seq;
     uint16_t len;
+    uint16_t crc;
     uint8_t version;
     uint8_t role;
     uint8_t flags;
     uint8_t reserved;
-    uint8_t payload[ESPNOW_PAYLOAD_MAX];
+    uint8_t payload[CONFIG_BRIDGE_PACKET_PAYLOAD_MAX];
 } bridge_packet_t;
 
 typedef struct {
     uint16_t len;
-    uint8_t bytes[ESPNOW_PAYLOAD_MAX];
-} rx_item_t;
+    uint8_t bytes[CONFIG_BRIDGE_PACKET_PAYLOAD_MAX];
+} bridge_item_t;
 
-static const uint8_t BROADCAST_MAC[ESP_NOW_ETH_ALEN] = {
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-};
+static QueueHandle_t s_outbound_queue;
+static QueueHandle_t s_inbound_queue;
+static SemaphoreHandle_t s_send_done_sem;
+static volatile esp_now_send_status_t s_last_send_status = ESP_NOW_SEND_FAIL;
 
-static QueueHandle_t s_rx_queue;
 static volatile uint32_t s_send_ok;
 static volatile uint32_t s_send_fail;
+static volatile uint32_t s_send_timeout;
 static volatile uint32_t s_rx_packets;
 static volatile uint32_t s_rx_drops;
-#if CONFIG_BRIDGE_ROLE_AIR
+static volatile uint32_t s_rx_bad_crc;
+static volatile uint32_t s_rx_bad_peer;
+static volatile uint32_t s_rx_seq_gaps;
+static volatile uint32_t s_local_rx_bytes;
+static volatile uint32_t s_local_tx_bytes;
+static volatile uint32_t s_espnow_tx_bytes;
+static volatile uint32_t s_espnow_rx_bytes;
 static uint16_t s_tx_seq;
-#endif
+static uint16_t s_last_rx_seq;
+static bool s_have_last_rx_seq;
+static uint8_t s_peer_mac[ESP_NOW_ETH_ALEN];
+static uint8_t s_local_sta_mac[ESP_NOW_ETH_ALEN];
 
 #if CONFIG_BRIDGE_ROLE_AIR
 static const bridge_role_t LOCAL_ROLE = ROLE_AIR;
 static const bridge_role_t PEER_ROLE = ROLE_GROUND;
 #else
+static const bridge_role_t LOCAL_ROLE = ROLE_GROUND;
 static const bridge_role_t PEER_ROLE = ROLE_AIR;
 #endif
 
-#if CONFIG_BRIDGE_ENABLE_STATS || !CONFIG_BRIDGE_ROLE_AIR
-static void usb_output_init(void)
+static int hex_digit(char c)
 {
-    if (usb_serial_jtag_is_driver_installed()) {
-        return;
+    if (c >= '0' && c <= '9') {
+        return c - '0';
     }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
 
-    usb_serial_jtag_driver_config_t config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&config));
+static esp_err_t parse_mac(const char *text, uint8_t out[ESP_NOW_ETH_ALEN])
+{
+    for (size_t i = 0; i < ESP_NOW_ETH_ALEN; i++) {
+        int hi = hex_digit(text[i * 3]);
+        int lo = hex_digit(text[i * 3 + 1]);
+        if (hi < 0 || lo < 0) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        out[i] = (uint8_t)((hi << 4) | lo);
+        if (i < ESP_NOW_ETH_ALEN - 1 && text[i * 3 + 2] != ':') {
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+    return text[17] == '\0' ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+
+#if CONFIG_BRIDGE_ENABLE_STATS
+static void diag_write(const char *text)
+{
+    usb_serial_jtag_write_bytes(text, strlen(text), pdMS_TO_TICKS(50));
+    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(50));
+}
+
+static void diag_printf(const char *fmt, ...)
+{
+    char line[256];
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(line, sizeof(line), fmt, args);
+    va_end(args);
+    if (n > 0) {
+        diag_write(line);
+    }
+}
+
+static esp_err_t diag_init(void)
+{
+    if (!usb_serial_jtag_is_driver_installed()) {
+        usb_serial_jtag_driver_config_t config = {
+            .tx_buffer_size = 4096,
+            .rx_buffer_size = 4096,
+        };
+        return usb_serial_jtag_driver_install(&config);
+    }
+    return ESP_OK;
+}
+#else
+static void diag_printf(const char *fmt, ...)
+{
+    (void)fmt;
+}
+
+static esp_err_t diag_init(void)
+{
+    return ESP_OK;
 }
 #endif
 
+static uint16_t packet_crc(const bridge_packet_t *packet, size_t packet_len)
+{
+    bridge_packet_t tmp;
+    memcpy(&tmp, packet, packet_len);
+    tmp.crc = 0;
+    return esp_crc16_le(UINT16_MAX, (const uint8_t *)&tmp, (uint32_t)packet_len);
+}
+
+static size_t packet_len_for_payload(size_t payload_len)
+{
+    return offsetof(bridge_packet_t, payload) + payload_len;
+}
+
 static void send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
 {
-    (void)tx_info;
-    if (status == ESP_NOW_SEND_SUCCESS) {
-        s_send_ok++;
-    } else {
-        s_send_fail++;
+    if (tx_info != NULL && memcmp(tx_info->des_addr, s_peer_mac, ESP_NOW_ETH_ALEN) == 0) {
+        s_last_send_status = status;
+        xSemaphoreGive(s_send_done_sem);
     }
 }
 
 static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
 {
-    (void)info;
-
-    if (len < (int)(sizeof(bridge_packet_t) - ESPNOW_PAYLOAD_MAX)) {
+    if (info == NULL || data == NULL || len < (int)offsetof(bridge_packet_t, payload)) {
         return;
     }
 
-    const bridge_packet_t *packet = (const bridge_packet_t *)data;
-    const int header_len = sizeof(bridge_packet_t) - ESPNOW_PAYLOAD_MAX;
-    if (packet->magic != BRIDGE_MAGIC || packet->version != BRIDGE_VERSION ||
-        packet->role != PEER_ROLE || packet->len > ESPNOW_PAYLOAD_MAX ||
-        len != header_len + packet->len) {
+    if (memcmp(info->src_addr, s_peer_mac, ESP_NOW_ETH_ALEN) != 0) {
+        s_rx_bad_peer++;
         return;
     }
 
-    rx_item_t item = { .len = packet->len };
-    memcpy(item.bytes, packet->payload, packet->len);
-    if (xQueueSend(s_rx_queue, &item, 0) == pdTRUE) {
+    bridge_packet_t packet = { 0 };
+    if ((size_t)len > sizeof(packet)) {
+        s_rx_drops++;
+        return;
+    }
+    memcpy(&packet, data, (size_t)len);
+
+    const size_t expected_len = packet_len_for_payload(packet.len);
+    if (packet.magic != BRIDGE_MAGIC || packet.version != BRIDGE_VERSION ||
+        packet.role != PEER_ROLE || packet.flags != BRIDGE_FLAG_NONE ||
+        packet.len > CONFIG_BRIDGE_PACKET_PAYLOAD_MAX || (size_t)len != expected_len) {
+        s_rx_drops++;
+        return;
+    }
+
+    if (packet_crc(&packet, expected_len) != packet.crc) {
+        s_rx_bad_crc++;
+        return;
+    }
+
+    if (s_have_last_rx_seq) {
+        const uint16_t expected_seq = (uint16_t)(s_last_rx_seq + 1);
+        if (packet.seq != expected_seq) {
+            s_rx_seq_gaps++;
+        }
+    }
+    s_last_rx_seq = packet.seq;
+    s_have_last_rx_seq = true;
+
+    bridge_item_t item = { .len = packet.len };
+    memcpy(item.bytes, packet.payload, packet.len);
+    if (xQueueSend(s_inbound_queue, &item, 0) == pdTRUE) {
         s_rx_packets++;
+        s_espnow_rx_bytes += packet.len;
     } else {
         s_rx_drops++;
     }
@@ -113,82 +228,54 @@ static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int le
 
 static esp_err_t wifi_espnow_init(void)
 {
-    ESP_RETURN_ON_ERROR(nvs_flash_init(), "bridge", "nvs");
+    ESP_RETURN_ON_ERROR(parse_mac(CONFIG_BRIDGE_PEER_MAC, s_peer_mac), "bridge", "peer mac");
+
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_RETURN_ON_ERROR(nvs_flash_erase(), "bridge", "nvs erase");
+        nvs_err = nvs_flash_init();
+    }
+    ESP_RETURN_ON_ERROR(nvs_err, "bridge", "nvs");
     ESP_RETURN_ON_ERROR(esp_netif_init(), "bridge", "netif");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), "bridge", "event loop");
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), "bridge", "wifi init");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), "bridge", "wifi mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_RAM), "bridge", "wifi storage");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), "bridge", "wifi mode");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_NONE), "bridge", "wifi ps");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), "bridge", "wifi start");
     ESP_RETURN_ON_ERROR(esp_wifi_set_channel(CONFIG_BRIDGE_WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE),
                         "bridge", "wifi channel");
+    ESP_RETURN_ON_ERROR(esp_wifi_get_mac(WIFI_IF_STA, s_local_sta_mac), "bridge", "wifi mac");
 
     ESP_RETURN_ON_ERROR(esp_now_init(), "bridge", "esp-now init");
     ESP_RETURN_ON_ERROR(esp_now_register_send_cb(send_cb), "bridge", "send cb");
     ESP_RETURN_ON_ERROR(esp_now_register_recv_cb(recv_cb), "bridge", "recv cb");
 
     esp_now_peer_info_t peer = { 0 };
-    memcpy(peer.peer_addr, BROADCAST_MAC, ESP_NOW_ETH_ALEN);
+    memcpy(peer.peer_addr, s_peer_mac, ESP_NOW_ETH_ALEN);
     peer.channel = CONFIG_BRIDGE_WIFI_CHANNEL;
     peer.ifidx = WIFI_IF_STA;
     peer.encrypt = false;
-    ESP_RETURN_ON_ERROR(esp_now_add_peer(&peer), "bridge", "broadcast peer");
+    ESP_RETURN_ON_ERROR(esp_now_add_peer(&peer), "bridge", "peer");
+
+#if CONFIG_BRIDGE_CONFIGURE_ESPNOW_RATE
+    esp_now_rate_config_t rate_config = {
+        .phymode = WIFI_PHY_MODE_11G,
+        .rate = CONFIG_BRIDGE_ESPNOW_PHY_RATE,
+        .ersu = false,
+        .dcm = false,
+    };
+    ESP_RETURN_ON_ERROR(esp_now_set_peer_rate_config(s_peer_mac, &rate_config),
+                        "bridge", "peer rate");
+#endif
+
     return ESP_OK;
 }
 
-#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
-static int source_read(uint8_t *buf, size_t max_len)
-{
-    return uart_read_bytes(EXTERNAL_UART, buf, max_len, pdMS_TO_TICKS(1));
-}
-#endif
-
 #if CONFIG_BRIDGE_ROLE_AIR
-static void send_payload(const uint8_t *buf, size_t len)
-{
-    bridge_packet_t packet = {
-        .magic = BRIDGE_MAGIC,
-        .version = BRIDGE_VERSION,
-        .role = LOCAL_ROLE,
-    };
-
-    if (len > ESPNOW_PAYLOAD_MAX) {
-        len = ESPNOW_PAYLOAD_MAX;
-    }
-
-    packet.seq = s_tx_seq++;
-    packet.len = (uint16_t)len;
-    memcpy(packet.payload, buf, len);
-    const size_t header_len = sizeof(packet) - ESPNOW_PAYLOAD_MAX;
-    if (esp_now_send(BROADCAST_MAC, (const uint8_t *)&packet, header_len + len) != ESP_OK) {
-        s_send_fail++;
-    }
-}
-#endif
-
-static void sink_write(const uint8_t *buf, size_t len)
-{
-#if CONFIG_BRIDGE_ROLE_AIR
-    uart_write_bytes(EXTERNAL_UART, (const char *)buf, len);
-#else
-    usb_serial_jtag_write_bytes(buf, len, pdMS_TO_TICKS(100));
-    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(100));
-#endif
-}
-
-#if CONFIG_BRIDGE_ENABLE_STATS
-static void diagnostic_write(const uint8_t *buf, size_t len)
-{
-    usb_serial_jtag_write_bytes(buf, len, pdMS_TO_TICKS(100));
-    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(100));
-    write(STDOUT_FILENO, buf, len);
-}
-#endif
-
-#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
-static esp_err_t external_uart_init(void)
+static esp_err_t local_io_init(void)
 {
     const uart_config_t config = {
         .baud_rate = CONFIG_BRIDGE_UART_BAUD,
@@ -208,54 +295,128 @@ static esp_err_t external_uart_init(void)
                                      UART_PIN_NO_CHANGE,
                                      UART_PIN_NO_CHANGE),
                         "bridge", "uart pins");
+    ESP_RETURN_ON_ERROR(uart_flush(EXTERNAL_UART), "bridge", "uart flush");
     return ESP_OK;
 }
-#endif
 
-#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
-static void tx_task(void *arg)
+static int local_read(uint8_t *buf, size_t max_len)
 {
-    (void)arg;
-    uint8_t buf[UART_CHUNK_MAX];
-    while (true) {
-        int n = source_read(buf, sizeof(buf));
-        if (n < 0) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-            continue;
-        }
-        if (n == 0) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-            continue;
-        }
+    return uart_read_bytes(EXTERNAL_UART, buf, max_len, pdMS_TO_TICKS(2));
+}
 
-        send_payload(buf, (size_t)n);
+static void local_write(const uint8_t *buf, size_t len)
+{
+    uart_write_bytes(EXTERNAL_UART, (const char *)buf, len);
+}
+#else
+static esp_err_t local_io_init(void)
+{
+    if (!usb_serial_jtag_is_driver_installed()) {
+        usb_serial_jtag_driver_config_t config = {
+            .tx_buffer_size = 4096,
+            .rx_buffer_size = 4096,
+        };
+        ESP_RETURN_ON_ERROR(usb_serial_jtag_driver_install(&config), "bridge", "usb jtag");
     }
+    return ESP_OK;
+}
+
+static int local_read(uint8_t *buf, size_t max_len)
+{
+    return usb_serial_jtag_read_bytes(buf, max_len, pdMS_TO_TICKS(2));
+}
+
+static void local_write(const uint8_t *buf, size_t len)
+{
+    size_t written_total = 0;
+    while (written_total < len) {
+        int written = usb_serial_jtag_write_bytes(buf + written_total,
+                                                  len - written_total,
+                                                  pdMS_TO_TICKS(20));
+        if (written <= 0) {
+            break;
+        }
+        written_total += (size_t)written;
+    }
+    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(20));
 }
 #endif
 
-#if CONFIG_BRIDGE_ROLE_AIR && CONFIG_BRIDGE_TEST_PATTERN
-static void test_pattern_task(void *arg)
+static esp_err_t send_payload(const uint8_t *buf, size_t len)
+{
+    bridge_packet_t packet = {
+        .magic = BRIDGE_MAGIC,
+        .seq = s_tx_seq++,
+        .len = (uint16_t)len,
+        .version = BRIDGE_VERSION,
+        .role = LOCAL_ROLE,
+        .flags = BRIDGE_FLAG_NONE,
+    };
+    memcpy(packet.payload, buf, len);
+
+    const size_t packet_len = packet_len_for_payload(len);
+    packet.crc = packet_crc(&packet, packet_len);
+
+    xSemaphoreTake(s_send_done_sem, 0);
+    esp_err_t err = esp_now_send(s_peer_mac, (const uint8_t *)&packet, packet_len);
+    if (err != ESP_OK) {
+        s_send_fail++;
+        return err;
+    }
+
+    if (xSemaphoreTake(s_send_done_sem, pdMS_TO_TICKS(CONFIG_BRIDGE_SEND_TIMEOUT_MS)) != pdTRUE) {
+        s_send_timeout++;
+        return ESP_ERR_TIMEOUT;
+    }
+    if (s_last_send_status != ESP_NOW_SEND_SUCCESS) {
+        s_send_fail++;
+        return ESP_FAIL;
+    }
+
+    s_send_ok++;
+    s_espnow_tx_bytes += (uint32_t)len;
+    return ESP_OK;
+}
+
+static void local_rx_task(void *arg)
 {
     (void)arg;
-    uint32_t count = 0;
-    char line[80];
+    uint8_t buf[LOCAL_IO_BUFFER_SIZE];
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        int n = snprintf(line, sizeof(line), "[espnow-uart test] air_count=%lu\n", (unsigned long)count++);
-        if (n > 0) {
-            send_payload((const uint8_t *)line, (size_t)n);
+        int n = local_read(buf, sizeof(buf));
+        if (n <= 0) {
+            vTaskDelay(1);
+            continue;
+        }
+
+        bridge_item_t item = { .len = (uint16_t)n };
+        memcpy(item.bytes, buf, (size_t)n);
+        s_local_rx_bytes += (uint32_t)n;
+        if (xQueueSend(s_outbound_queue, &item, pdMS_TO_TICKS(10)) != pdTRUE) {
+            s_rx_drops++;
         }
     }
 }
-#endif
 
-static void rx_task(void *arg)
+static void espnow_tx_task(void *arg)
 {
     (void)arg;
-    rx_item_t item;
+    bridge_item_t item;
     while (true) {
-        if (xQueueReceive(s_rx_queue, &item, portMAX_DELAY) == pdTRUE) {
-            sink_write(item.bytes, item.len);
+        if (xQueueReceive(s_outbound_queue, &item, portMAX_DELAY) == pdTRUE) {
+            (void)send_payload(item.bytes, item.len);
+        }
+    }
+}
+
+static void local_tx_task(void *arg)
+{
+    (void)arg;
+    bridge_item_t item;
+    while (true) {
+        if (xQueueReceive(s_inbound_queue, &item, portMAX_DELAY) == pdTRUE) {
+            local_write(item.bytes, item.len);
+            s_local_tx_bytes += item.len;
         }
     }
 }
@@ -264,24 +425,46 @@ static void rx_task(void *arg)
 static void stats_task(void *arg)
 {
     (void)arg;
-    char line[160];
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(2000));
-#if CONFIG_BRIDGE_ROLE_AIR
-        const char *role = "air";
-#else
-        const char *role = "ground";
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        diag_printf("bridge role=%u sta=%02x:%02x:%02x:%02x:%02x:%02x peer=%02x:%02x:%02x:%02x:%02x:%02x "
+                    "local_rx=%lu local_tx=%lu esp_tx=%lu esp_rx=%lu send_ok=%lu send_fail=%lu "
+                    "send_timeout=%lu rx_packets=%lu rx_drops=%lu rx_bad_crc=%lu rx_bad_peer=%lu rx_seq_gaps=%lu\n",
+                    (unsigned)LOCAL_ROLE,
+                    s_local_sta_mac[0], s_local_sta_mac[1], s_local_sta_mac[2],
+                    s_local_sta_mac[3], s_local_sta_mac[4], s_local_sta_mac[5],
+                    s_peer_mac[0], s_peer_mac[1], s_peer_mac[2],
+                    s_peer_mac[3], s_peer_mac[4], s_peer_mac[5],
+                    (unsigned long)s_local_rx_bytes,
+                    (unsigned long)s_local_tx_bytes,
+                    (unsigned long)s_espnow_tx_bytes,
+                    (unsigned long)s_espnow_rx_bytes,
+                    (unsigned long)s_send_ok,
+                    (unsigned long)s_send_fail,
+                    (unsigned long)s_send_timeout,
+                    (unsigned long)s_rx_packets,
+                    (unsigned long)s_rx_drops,
+                    (unsigned long)s_rx_bad_crc,
+                    (unsigned long)s_rx_bad_peer,
+                    (unsigned long)s_rx_seq_gaps);
+    }
+}
 #endif
-        int n = snprintf(line,
-                         sizeof(line),
-                         "\n[espnow-uart %s] send_ok=%lu send_fail=%lu rx=%lu rx_drops=%lu\n",
-                         role,
-                         (unsigned long)s_send_ok,
-                         (unsigned long)s_send_fail,
-                         (unsigned long)s_rx_packets,
-                         (unsigned long)s_rx_drops);
+
+#if CONFIG_BRIDGE_TEST_PATTERN
+static void test_pattern_task(void *arg)
+{
+    (void)arg;
+    uint32_t count = 0;
+    char line[96];
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        int n = snprintf(line, sizeof(line), "[espnow-uart test] role=%u count=%lu\n",
+                         (unsigned)LOCAL_ROLE, (unsigned long)count++);
         if (n > 0) {
-            diagnostic_write((const uint8_t *)line, (size_t)n);
+            bridge_item_t item = { .len = (uint16_t)n };
+            memcpy(item.bytes, line, (size_t)n);
+            xQueueSend(s_outbound_queue, &item, 0);
         }
     }
 }
@@ -289,67 +472,44 @@ static void stats_task(void *arg)
 
 void app_main(void)
 {
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    ESP_ERROR_CHECK(diag_init());
+    diag_printf("bridge boot role=%u channel=%u peer=%s\n",
+                (unsigned)LOCAL_ROLE, (unsigned)CONFIG_BRIDGE_WIFI_CHANNEL,
+                CONFIG_BRIDGE_PEER_MAC);
 
-#if CONFIG_BRIDGE_ENABLE_STATS || !CONFIG_BRIDGE_ROLE_AIR
-    usb_output_init();
-#endif
+    s_outbound_queue = xQueueCreate(CONFIG_BRIDGE_QUEUE_DEPTH, sizeof(bridge_item_t));
+    s_inbound_queue = xQueueCreate(CONFIG_BRIDGE_QUEUE_DEPTH, sizeof(bridge_item_t));
+    s_send_done_sem = xSemaphoreCreateBinary();
+    ESP_ERROR_CHECK(s_outbound_queue == NULL ? ESP_ERR_NO_MEM : ESP_OK);
+    ESP_ERROR_CHECK(s_inbound_queue == NULL ? ESP_ERR_NO_MEM : ESP_OK);
+    ESP_ERROR_CHECK(s_send_done_sem == NULL ? ESP_ERR_NO_MEM : ESP_OK);
 
-#if CONFIG_BRIDGE_ENABLE_STATS
-    diagnostic_write((const uint8_t *)"\nESP-NOW UART bridge boot\n", 26);
-#endif
-
-    s_rx_queue = xQueueCreate(QUEUE_DEPTH, sizeof(rx_item_t));
-#if CONFIG_BRIDGE_ENABLE_STATS
-    esp_err_t init_err = wifi_espnow_init();
-    if (init_err != ESP_OK) {
-        char err_line[96];
-        int err_len = snprintf(err_line,
-                               sizeof(err_line),
-                               "ESP-NOW UART bridge init failed: %s\n",
-                               esp_err_to_name(init_err));
-        if (err_len > 0) {
-            diagnostic_write((const uint8_t *)err_line, (size_t)err_len);
-        }
-        xTaskCreate(stats_task, "bridge_stats", 4096, NULL, 1, NULL);
-        return;
+    esp_err_t err = local_io_init();
+    if (err != ESP_OK) {
+        diag_printf("bridge local_io_init failed: %s\n", esp_err_to_name(err));
+        ESP_ERROR_CHECK(err);
     }
-#else
-    ESP_ERROR_CHECK(wifi_espnow_init());
-#endif
-#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
-    ESP_ERROR_CHECK(external_uart_init());
-#endif
-
-#if CONFIG_BRIDGE_ENABLE_STATS
-    char line[192];
-    int n = snprintf(line,
-                     sizeof(line),
-                     "\nESP-NOW UART bridge role=%s mac=%02x:%02x:%02x:%02x:%02x:%02x channel=%d baud=%d\n",
-#if CONFIG_BRIDGE_ROLE_AIR
-            "air",
-#else
-            "ground",
-#endif
-                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-                     CONFIG_BRIDGE_WIFI_CHANNEL,
-                     CONFIG_BRIDGE_UART_BAUD);
-    if (n > 0) {
-        diagnostic_write((const uint8_t *)line, (size_t)n);
+    err = wifi_espnow_init();
+    if (err != ESP_OK) {
+        diag_printf("bridge wifi_espnow_init failed: %s\n", esp_err_to_name(err));
+        ESP_ERROR_CHECK(err);
     }
-#else
-    (void)mac;
-#endif
+    diag_printf("bridge ready role=%u sta=%02x:%02x:%02x:%02x:%02x:%02x peer=%02x:%02x:%02x:%02x:%02x:%02x\n",
+                (unsigned)LOCAL_ROLE,
+                s_local_sta_mac[0], s_local_sta_mac[1], s_local_sta_mac[2],
+                s_local_sta_mac[3], s_local_sta_mac[4], s_local_sta_mac[5],
+                s_peer_mac[0], s_peer_mac[1], s_peer_mac[2],
+                s_peer_mac[3], s_peer_mac[4], s_peer_mac[5]);
 
-#if CONFIG_BRIDGE_ROLE_AIR && !CONFIG_BRIDGE_TEST_PATTERN
-    xTaskCreatePinnedToCore(tx_task, "bridge_tx", 4096, NULL, 10, NULL, 0);
+#if !CONFIG_BRIDGE_TEST_PATTERN && !CONFIG_BRIDGE_ENABLE_STATS
+    xTaskCreate(local_rx_task, "bridge_local_rx", CONFIG_BRIDGE_TASK_STACK, NULL, 10, NULL);
 #endif
-    xTaskCreatePinnedToCore(rx_task, "bridge_rx", 4096, NULL, 11, NULL, 0);
-#if CONFIG_BRIDGE_ROLE_AIR && CONFIG_BRIDGE_TEST_PATTERN
-    xTaskCreate(test_pattern_task, "bridge_test", 4096, NULL, 1, NULL);
-#endif
+    xTaskCreate(espnow_tx_task, "bridge_esp_tx", CONFIG_BRIDGE_TASK_STACK, NULL, 9, NULL);
+    xTaskCreate(local_tx_task, "bridge_local_tx", CONFIG_BRIDGE_TASK_STACK, NULL, 9, NULL);
 #if CONFIG_BRIDGE_ENABLE_STATS
-    xTaskCreate(stats_task, "bridge_stats", 4096, NULL, 1, NULL);
+    xTaskCreate(stats_task, "bridge_stats", CONFIG_BRIDGE_TASK_STACK, NULL, 4, NULL);
+#endif
+#if CONFIG_BRIDGE_TEST_PATTERN
+    xTaskCreate(test_pattern_task, "bridge_test", CONFIG_BRIDGE_TASK_STACK, NULL, 5, NULL);
 #endif
 }
