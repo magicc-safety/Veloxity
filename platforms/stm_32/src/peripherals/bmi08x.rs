@@ -15,8 +15,8 @@ use embedded_hal_async::spi::SpiDevice as _;
 
 pub static IMU_SIGNAL: Signal<
     CriticalSectionRawMutex,
-    Result<packets::ImuPacket, errors::SensorError>,
-> = Signal::<CriticalSectionRawMutex, Result<packets::ImuPacket, errors::SensorError>>::new();
+    Result<packets::ImuPacket<f64>, errors::SensorError>,
+> = Signal::<CriticalSectionRawMutex, Result<packets::ImuPacket<f64>, errors::SensorError>>::new();
 
 // 3 blocks of 2048 bytes
 // 192 blocks of 32 bytes

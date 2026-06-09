@@ -273,11 +273,13 @@ Core 1 remains the communications side:
 The IMU path should not cross the core boundary. Sensor samples should enter `voloxide_core` on core
 0 so the control loop is not gated by Wi-Fi, UDP, or mailbox scheduling.
 
-## Branch Status
+## Current Firmware Status
 
-This branch prepares the architecture for the ISM330DHCX and RP4TD-M but does not yet complete the
-physical driver tasks. `BoardIo::update_sensor_bus()` drains IMU samples from the new ISM330DHCX
-queue, RC samples from the CRSF receiver queue, and barometer samples from the GY-91/BMP280 path. The
-remaining hardware step is to add the Embassy SPI/interrupt task that configures the ISM330DHCX.
-The RP4TD-M path already uses the `crsf` parser crate and has a UART1 receiver task shape; hardware
-validation still needs the receiver wired and bound.
+The current RP2350 firmware path is designed around the ISM330DHCX as the flight IMU. The board
+code drains IMU samples from the ISM330DHCX queue, RC samples from the CRSF receiver queue, and
+barometer samples from the GY-91/BMP280 pressure path. The IMU path is intended to be
+interrupt-driven and to run at the closest natural ISM330DHCX ODR to 1.66 kHz.
+
+Treat wiring changes as hardware changes that need fresh probe validation. Use
+`docs/tutorials/pico2w-sensor-bringup.md` to validate individual buses before debugging the full
+firmware image.

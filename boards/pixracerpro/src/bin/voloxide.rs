@@ -10,13 +10,16 @@ use voloxide_core::{
 };
 use voloxide_mavlink::MavlinkInterface;
 
+type PixracerReal = f64;
+
 type PixracerWorld<'a> = World<
     board::Board,
-    quadrotor::Estimator,
-    quadrotor::Controller,
-    quadrotor::Mixer,
+    quadrotor::Estimator<PixracerReal>,
+    quadrotor::Controller<PixracerReal>,
+    quadrotor::Mixer<PixracerReal>,
     MavlinkInterface,
     BoardPwmDriver<'a>,
+    PixracerReal,
 >;
 
 fn init_world<'a>(

@@ -1,5 +1,6 @@
 use voloxide_core::board::BoardIo;
 use voloxide_core::errors;
+use voloxide_core::math::FlightFloat;
 use voloxide_core::params::Params;
 use voloxide_core::sensors::SensorBus;
 
@@ -39,9 +40,11 @@ impl BoardIo for Board {
         }
     }
 
-    fn update_sensor_bus(&mut self, sensors: &mut SensorBus) {
+    fn update_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         sensors.clear();
-        sensors.imu = peripherals::bmi08x::IMU_SIGNAL.try_take();
+        sensors.imu = peripherals::bmi08x::IMU_SIGNAL
+            .try_take()
+            .map(|result| result.map(|packet| packet.cast()));
         sensors.mag = peripherals::ist8308::MAG_SIGNAL.try_take();
         sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.pitot = peripherals::ms4525::PITOT_SIGNAL.try_take();

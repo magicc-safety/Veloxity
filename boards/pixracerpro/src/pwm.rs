@@ -32,7 +32,7 @@ impl<'a> BoardPwmDriver<'a> {
     }
 }
 
-impl<'a> PwmDriver for BoardPwmDriver<'a> {
+impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
     fn len(&self) -> usize {
         NUM_HW_CHANNELS
     }

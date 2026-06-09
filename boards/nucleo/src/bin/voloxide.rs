@@ -9,13 +9,16 @@ use voloxide_core::{
 };
 use voloxide_mavlink::MavlinkInterface;
 
+type NucleoReal = f64;
+
 type NucleoWorld = World<
     board::Board,
-    quadrotor::Estimator,
-    quadrotor::Controller,
-    quadrotor::Mixer,
+    quadrotor::Estimator<NucleoReal>,
+    quadrotor::Controller<NucleoReal>,
+    quadrotor::Mixer<NucleoReal>,
     MavlinkInterface,
     board::BoardPwmDriver,
+    NucleoReal,
 >;
 
 fn init_world(

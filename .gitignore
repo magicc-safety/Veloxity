@@ -1,6 +1,5 @@
 /target/
 /workspace/
-Cargo.lock
 
 # Local editor and OS metadata
 .DS_Store

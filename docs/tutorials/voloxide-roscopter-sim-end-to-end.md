@@ -162,12 +162,6 @@ ros2 launch voloxide_sil_board_shim voloxide_multirotor_init_firmware.launch.py 
   write_delay_s:=10
 ```
 
-For fixed-wing:
-
-```bash
-ros2 launch voloxide_sil_board_shim voloxide_fixedwing_init_firmware.launch.py
-```
-
 ### Manual Init Equivalent
 
 Use this when debugging individual service calls.

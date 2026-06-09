@@ -19,8 +19,10 @@ const SPI_WRITE: u8 = 0x80;
 
 // Chip ID
 
-pub static IMU_SIGNAL: Signal<CriticalSectionRawMutex, Result<ImuPacket, errors::SensorError>> =
-    Signal::<CriticalSectionRawMutex, Result<ImuPacket, errors::SensorError>>::new();
+pub static IMU_SIGNAL: Signal<
+    CriticalSectionRawMutex,
+    Result<ImuPacket<f64>, errors::SensorError>,
+> = Signal::<CriticalSectionRawMutex, Result<ImuPacket<f64>, errors::SensorError>>::new();
 
 #[repr(u16)]
 #[derive(Clone, Copy)]
@@ -230,7 +232,7 @@ impl Adis16500Sensor {
         &self,
         data: &[i16; ADIS_BUFFBYTES16 / 2],
         timestamp: embassy_time::Instant,
-    ) -> ImuPacket {
+    ) -> ImuPacket<f64> {
         let gyro = [
             -f64::from(data[2]) * 0.001745329251994,
             -f64::from(data[3]) * 0.001745329251994,
@@ -261,7 +263,7 @@ impl Adis16500Sensor {
         &self,
         data: &[u16; ADIS_BUFFBYTES32 / 2],
         timestamp: embassy_time::Instant,
-    ) -> ImuPacket {
+    ) -> ImuPacket<f64> {
         let gyros_sf: f64 = 0.001745329251994f64 / f64::from(1u32 << 16);
         let gyro = [
             -f64::from(((data[2] as u32) | ((data[3] as u32) << 16)) as i32) * gyros_sf,

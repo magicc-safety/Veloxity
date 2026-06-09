@@ -1,97 +1,122 @@
 # Pico 2 W Sensor Bring-Up
 
-This guide documents the original Pico 2 W GY-91-style SPI sensor bring-up used on the RP2350
-branch. On the ISM330DHCX prep branch, this GY-91 path is no longer the flight IMU path: the
-high-rate accel/gyro source is moving to the Adafruit ISM330DHCX over SPI with data-ready
-interrupts, and the GY-91/BMP280 path is retained as barometer-only.
+This tutorial is for validating sensors on the active RP2350/Pico 2 W hardware path. It is not a
+record of old GY-91-only experiments.
 
-## Hardware
+For full wiring, read [Pico 2 W flight hardware pinout](../pico2w-esc-imu-pinout.md). For board
+build and flashing context, read [RP2350 / Pico 2 W](../boards/rp2350-pico2w.md).
 
-Tested wiring:
+## Sensor Roles
 
-| Pico 2 W | GY-91 label | Function |
-| --- | --- | --- |
-| 3V3 | 3V3 | 3.3 V power |
-| GND | GND | Ground |
-| GP10 | SCL | SPI1 SCK |
-| GP11 | SDA | SPI1 MOSI |
-| GP12 | SDO/SA0 | SPI1 MISO |
-| GP13 | NCS | MPU chip select |
-| GP14 | CSB | BMP280 chip select |
+| Sensor path | Role in current branch |
+| --- | --- |
+| ISM330DHCX over SPI + data-ready interrupt | Primary flight IMU. This is the source that should drive the control loop. |
+| BMP280/GY-91 pressure path | Low-rate barometer. Poll in quiet moments; do not use it as the flight IMU. |
+| GPS PIO UART | GNSS input path. |
+| QMC5883L/I2C magnetometer | Slow magnetometer path when wired. |
+| CRSF UART receiver | RC input path. |
 
-Leave `VIN` unconnected when using Pico 2 W `3V3`.
-
-The tested board did not expose an MPU data-ready interrupt pin on the visible header. That is the
-reason it is being retired as the flight IMU. BMP280 reads remain useful and are throttled
-separately to 50 Hz.
-
-## Build The Probe
+## Install
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin imu_spi_probe
+rustup target add thumbv8m.main-none-eabihf
+cargo install probe-rs-tools
 ```
 
-## Flash And Verify The Probe
+## Check The Board Crate
 
 ```bash
-probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/debug/imu_spi_probe
-probe-rs verify --chip RP235x target/thumbv8m.main-none-eabihf/debug/imu_spi_probe
+cargo xtask check-board pico2w
+```
+
+## Validate The IMU Path
+
+Build and flash the IMU probe:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin imu_spi_probe --release
+probe-rs download --chip RP235x --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/imu_spi_probe
 probe-rs reset --chip RP235x
 ```
 
-`probe-rs reset` may warn that the core is already running while clearing breakpoints. If the UART
-probe output continues, that warning is not a sensor failure.
-
-## Read UART Output
-
-With the debug probe UART connected to Pico GP0/GP1 and ground:
+Run the IMU timing bench:
 
 ```bash
-cat /dev/ttyACM0
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin imu_spi_bench --release
+probe-rs download --chip RP235x --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/imu_spi_bench
+probe-rs reset --chip RP235x
 ```
 
-Expected output on the tested module:
+The flight target for this branch is the closest natural ISM330DHCX ODR to 1.66 kHz. Timing results
+should be collected from release builds, not debug builds.
 
-```text
-mpu whoami 0x70
-bmp280 chipid 0x58
-imu seq=4 accel=(0.169,-0.129,10.185) gyro=(0.002,0.026,0.003) temp=28.66
-baro pressure=85626.7 temp=26.52
-```
-
-The `0x70` MPU identity behaves like an MPU6500-class accel/gyro. The BMP280 ID `0x58` confirms the
-barometer. Magnetometer support is not configured for this tested board target.
-
-## Build Voloxide Firmware
-
-UART MAVLink firmware:
+## Validate The Full Sensor Stack
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin sensor_stack_probe --release
+probe-rs download --chip RP235x --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/sensor_stack_probe
+probe-rs reset --chip RP235x
 ```
 
-Wi-Fi MAVLink firmware:
+Use this after the individual IMU, barometer, GPS/mag, and RC paths have been isolated. If the full
+stack fails, return to the individual probe matching the failing bus.
+
+## Validate RC Input
 
 ```bash
-VOLOXIDE_WIFI_SSID=MAGICC VOLOXIDE_WIFI_PASSWORD=magiccwifi \
-  cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --features wifi
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin crsf_probe --release
+probe-rs download --chip RP235x --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/crsf_probe
+probe-rs reset --chip RP235x
 ```
 
-The board code now drains IMU samples from the ISM330DHCX queue and drains BMP280 samples from the
-GY-91 barometer path. GY-91 accel/gyro samples do not populate `sensors.imu` in the flight firmware
-on the ISM330DHCX prep branch.
+The RP4TD-M receiver uses UART1 on the current pinout. Confirm power and logic levels before
+connecting it to RP2350 GPIO.
 
-The intended board rates are:
+## Validate GPS And Magnetometer
 
-| Sensor | Rate | Notes |
-| --- | ---: | --- |
-| ISM330DHCX accel/gyro | 400-500 Hz target | Data-ready interrupt should push completed IMU packets into the board queue. |
-| BMP280 barometer | 50 Hz | Driver returns no baro sample until 20 ms have elapsed. |
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin gps_pio_probe --release
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin gps_mag_probe --release
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin qmc5883l_probe --release
+```
 
-## Current Limitations
+Flash the probe matching the bus you are testing:
 
-- Magnetometer is not configured for this tested module.
-- The visible GY-91 module header did not expose data-ready interrupt, so it is no longer used as the flight IMU.
-- The ISM330DHCX Embassy SPI/interrupt task still needs to be completed before this branch produces new IMU samples.
-- Sensor calibration is not complete. Use the current output for bring-up, not final flight tuning.
-- BMP280 altitude is currently left as `0.0`; pressure and temperature are populated.
+```bash
+probe-rs download --chip RP235x --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/<probe-name>
+probe-rs reset --chip RP235x
+```
+
+## Validate Full Firmware Sensor Flow
+
+Build a release firmware image with the current IMU feature set:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
+```
+
+Flash:
+
+```bash
+probe-rs download --chip RP235x --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/voloxide
+probe-rs reset --chip RP235x
+```
+
+For timing diagnostics:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'timing-diagnostics ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
+```
+
+## Debugging Rule
+
+Do not debug the full firmware first when a bus is unknown. Prove the individual sensor with its
+probe binary, then prove the combined sensor stack, then prove the full firmware loop.

@@ -5,7 +5,9 @@ use core::ptr::addr_of_mut;
 
 use cortex_m_rt::entry;
 use embassy_executor::Executor;
-use embassy_time::{Duration, Instant, Timer, with_timeout};
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use embassy_time::with_timeout;
+use embassy_time::{Duration, Instant, Timer};
 use panic_halt as _;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 use pico2w::barometer::SHARED_BARO_QUEUE;
@@ -209,6 +211,7 @@ const LOOP_BENCH_BUDGET_US: u32 = 300;
     not(feature = "synthetic-imu-3333hz")
 ))]
 const LOOP_BENCH_BUDGET_US: u32 = 250;
+#[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_BUCKET_US: u32 = 10;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_BUCKETS: usize = 128;
