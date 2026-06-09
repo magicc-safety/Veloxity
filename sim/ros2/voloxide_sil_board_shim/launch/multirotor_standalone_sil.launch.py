@@ -2,10 +2,10 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -21,6 +21,7 @@ def generate_launch_description():
     use_vimfly = LaunchConfiguration("use_vimfly")
     use_builtin_rc = LaunchConfiguration("use_builtin_rc")
     use_rviz = LaunchConfiguration("use_rviz")
+    voloxide_param_dir = LaunchConfiguration("voloxide_param_dir")
 
     is_c = PythonExpression(["'", firmware, "' == 'c'"])
     is_voloxide = PythonExpression(["'", firmware, "' == 'voloxide'"])
@@ -28,7 +29,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "firmware",
-            default_value="c",
+            default_value="voloxide",
             choices=["c", "voloxide"],
             description="Firmware endpoint to run: upstream ROSflight C++ or Voloxide FFI.",
         ),
@@ -43,6 +44,19 @@ def generate_launch_description():
             "use_rviz",
             default_value="true",
             description="Open the standalone RViz visualizer.",
+        ),
+        DeclareLaunchArgument(
+            "voloxide_param_dir",
+            default_value=EnvironmentVariable(
+                "VOLOXIDE_SIM_PARAM_DIR",
+                default_value="/tmp/voloxide-sim-params/multirotor",
+            ),
+            description="Writable runtime parameter directory for the Voloxide FFI firmware.",
+        ),
+        SetEnvironmentVariable(
+            "VOLOXIDE_SIM_PARAM_DIR",
+            voloxide_param_dir,
+            condition=IfCondition(is_voloxide),
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -61,7 +75,8 @@ def generate_launch_description():
             parameters=[{
                 "use_sim_time": use_sim_time,
                 "use_timer": True,
-                "service_result_timeout_ms": 100,
+                "service_exists_timeout_ms": 1000,
+                "service_result_timeout_ms": 1000,
             }],
         ),
         Node(

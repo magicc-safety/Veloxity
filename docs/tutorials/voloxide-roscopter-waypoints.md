@@ -68,8 +68,7 @@ ros2 launch voloxide_sil_board_shim multirotor_standalone_sil.launch.py \
 Run firmware initialization and calibration:
 
 ```bash
-ros2 launch rosflight_sim multirotor_init_firmware.launch.py
-ros2 service call /calibrate_imu std_srvs/srv/Trigger
+ros2 launch voloxide_sil_board_shim voloxide_multirotor_init_firmware.launch.py
 ros2 service call /param_set rosflight_msgs/srv/ParamSet "{name: FILT_USE_ACC, value: 0.0}"
 ```
 

@@ -857,6 +857,39 @@ mod tests {
     }
 
     #[test]
+    fn offboard_passthrough_keeps_ned_thrust_sign_for_mixer_commands() {
+        let params = Params::new();
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModePassThrough,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.01,
+                qy: -0.02,
+                qz: 0.03,
+                fx: 0.0,
+                fy: 0.0,
+                fz: -25.0,
+                passthrough: [0.0; 4],
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(combined.fz.control_type, ControlType::Passthrough);
+        assert_eq!(combined.fz.value, -25.0);
+        assert_eq!(combined.qx.control_type, ControlType::Passthrough);
+        assert_eq!(combined.qx.value, 0.01);
+    }
+
+    #[test]
     fn failsafe_commands_match_rosflight_channel_types() {
         let command = CommandManager::new();
 

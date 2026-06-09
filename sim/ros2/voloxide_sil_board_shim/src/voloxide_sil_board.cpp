@@ -28,11 +28,6 @@ constexpr uint16_t kDisabledPwmMicros = 1000;
 constexpr uint16_t kRcLowMicros = 1000;
 constexpr uint16_t kRcCenterMicros = 1500;
 
-uint64_t stamp_to_micros(const builtin_interfaces::msg::Time & stamp)
-{
-  return static_cast<uint64_t>(stamp.sec) * 1000000 + stamp.nanosec / 1000;
-}
-
 VoloxideFfiVector3 vector_to_ffi(const geometry_msgs::msg::Vector3 & vector)
 {
   return VoloxideFfiVector3{vector.x, vector.y, vector.z};
@@ -56,7 +51,7 @@ public:
     if (!firmware_) {
       RCLCPP_ERROR(
         get_logger(),
-        "failed to initialize Voloxide FFI; check MAVLink UDP port availability");
+        "failed to initialize Voloxide FFI; check VOLOXIDE_SIM_PARAM_DIR and MAVLink UDP port availability");
     }
 
     initialize_default_rc();
@@ -187,7 +182,7 @@ private:
 
     snapshot.has_imu = imu_available_;
     if (snapshot.has_imu) {
-      snapshot.imu.timestamp_us = stamp_to_micros(latest_imu_.header.stamp);
+      snapshot.imu.timestamp_us = timestamp_us;
       snapshot.imu.angular_velocity = vector_to_ffi(latest_imu_.angular_velocity);
       snapshot.imu.linear_acceleration = vector_to_ffi(latest_imu_.linear_acceleration);
       snapshot.imu.temperature_kelvin = imu_temperature_available_ ?
@@ -198,14 +193,14 @@ private:
 
     snapshot.has_mag = mag_available_;
     if (snapshot.has_mag) {
-      snapshot.mag.timestamp_us = stamp_to_micros(latest_mag_.header.stamp);
+      snapshot.mag.timestamp_us = timestamp_us;
       snapshot.mag.magnetic_field = vector_to_ffi(latest_mag_.magnetic_field);
       mag_available_ = false;
     }
 
     snapshot.has_baro = baro_available_;
     if (snapshot.has_baro) {
-      snapshot.baro.timestamp_us = stamp_to_micros(latest_baro_.header.stamp);
+      snapshot.baro.timestamp_us = timestamp_us;
       snapshot.baro.altitude = latest_baro_.altitude;
       snapshot.baro.pressure = latest_baro_.pressure;
       snapshot.baro.temperature_kelvin = latest_baro_.temperature;
@@ -214,7 +209,7 @@ private:
 
     snapshot.has_gnss = gnss_available_;
     if (snapshot.has_gnss) {
-      snapshot.gnss.timestamp_us = stamp_to_micros(latest_gnss_.header.stamp);
+      snapshot.gnss.timestamp_us = timestamp_us;
       snapshot.gnss.fix_type = latest_gnss_.fix_type;
       snapshot.gnss.num_sat = latest_gnss_.num_sat;
       snapshot.gnss.lat_degrees = latest_gnss_.lat;
@@ -233,7 +228,7 @@ private:
 
     snapshot.has_airspeed = diff_pressure_available_;
     if (snapshot.has_airspeed) {
-      snapshot.airspeed.timestamp_us = stamp_to_micros(latest_diff_pressure_.header.stamp);
+      snapshot.airspeed.timestamp_us = timestamp_us;
       snapshot.airspeed.differential_pressure = latest_diff_pressure_.differential_pressure;
       snapshot.airspeed.temperature_kelvin = latest_diff_pressure_.temperature;
       snapshot.airspeed.indicated_airspeed = latest_diff_pressure_.velocity;
@@ -242,7 +237,7 @@ private:
 
     snapshot.has_range = range_available_;
     if (snapshot.has_range) {
-      snapshot.range.timestamp_us = stamp_to_micros(latest_range_.header.stamp);
+      snapshot.range.timestamp_us = timestamp_us;
       snapshot.range.range = latest_range_.range;
       snapshot.range.min_range = latest_range_.min_range;
       snapshot.range.max_range = latest_range_.max_range;
@@ -251,19 +246,24 @@ private:
 
     snapshot.has_battery = battery_available_;
     if (snapshot.has_battery) {
-      snapshot.battery.timestamp_us = stamp_to_micros(latest_battery_.header.stamp);
+      snapshot.battery.timestamp_us = timestamp_us;
       snapshot.battery.voltage = latest_battery_.voltage;
       snapshot.battery.current = latest_battery_.current;
       battery_available_ = false;
     }
 
-    snapshot.has_rc = rc_available_ ||
-      (rc_subscription_ && rc_subscription_->get_publisher_count() > 0);
-    if (snapshot.has_rc) {
+    snapshot.has_rc = true;
+    if (rc_available_ || (rc_subscription_ && rc_subscription_->get_publisher_count() > 0)) {
       snapshot.rc.timestamp_us = timestamp_us;
       for (std::size_t i = 0; i < latest_rc_.values.size(); ++i) {
         snapshot.rc.values[i] = latest_rc_.values[i];
       }
+    } else {
+      snapshot.rc.timestamp_us = timestamp_us;
+      for (auto & value : snapshot.rc.values) {
+        value = kRcCenterMicros;
+      }
+      snapshot.rc.values[2] = kRcLowMicros;  // throttle/F
     }
 
     return snapshot;
@@ -273,8 +273,8 @@ private:
   {
     latest_rc_.values.fill(kRcCenterMicros);
     latest_rc_.values[2] = kRcLowMicros;  // throttle/F
-    latest_rc_.values[4] = kRcLowMicros;  // attitude override
-    latest_rc_.values[5] = kRcLowMicros;  // arm
+    latest_rc_.values[4] = kRcLowMicros;  // C SIL cached default before first RC message
+    latest_rc_.values[5] = kRcLowMicros;  // C SIL cached default before first RC message
   }
 
   uint64_t fcu_clock_micros() const

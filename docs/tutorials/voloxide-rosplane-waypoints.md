@@ -65,10 +65,10 @@ ros2 launch voloxide_sil_board_shim fixedwing_standalone_sil.launch.py \
   use_vimfly:=true
 ```
 
-Initialize fixed-wing firmware parameters and IMU calibration:
+Initialize fixed-wing firmware parameters, IMU calibration, barometer calibration, and saved params:
 
 ```bash
-ros2 launch rosflight_sim fixedwing_init_firmware.launch.py
+ros2 launch voloxide_sil_board_shim voloxide_fixedwing_init_firmware.launch.py
 ```
 
 After firmware initialization, use VimFly to take off manually before starting

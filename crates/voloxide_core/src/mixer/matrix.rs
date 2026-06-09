@@ -224,7 +224,6 @@ const X8_MATRIX: [[f64; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS] = [
 pub struct MixerParams<R: FlightFloat> {
     // Safety / limits
     pub idle_throttle: R,
-    pub spin_when_armed: bool,
     pub num_motors: usize,
     pub fixed_wing: bool,
     pub use_motor_parameters: bool,
@@ -257,13 +256,6 @@ impl<R: FlightFloat> MatrixMixer<R> {
                 <R as FlightFloat>::from_f32(v)
             } else {
                 <R as FlightFloat>::from_f32(0.1)
-            },
-            spin_when_armed: if let ParamValue::Int(v) =
-                params.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED)
-            {
-                v != 0
-            } else {
-                true
             },
             fixed_wing: false,
             use_motor_parameters: false,
@@ -349,13 +341,6 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
             }
 
             *value *= scale_factor;
-            if *value > <R as FlightFloat>::from_f32(1.0) {
-                *value = <R as FlightFloat>::from_f32(1.0);
-            } else if *value < self.params.idle_throttle && self.params.spin_when_armed {
-                *value = self.params.idle_throttle;
-            } else if *value < <R as FlightFloat>::from_f32(0.0) {
-                *value = <R as FlightFloat>::from_f32(0.0);
-            }
         }
 
         MixerRun {
@@ -389,7 +374,6 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
 impl<R: FlightFloat> MatrixMixer<R> {
     fn refresh_runtime_params(&mut self, params: &Params) {
         self.params.idle_throttle = param_float(params, ParamId::PARAM_MOTOR_IDLE_THROTTLE);
-        self.params.spin_when_armed = param_int(params, ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) != 0;
         self.params.num_motors = param_int(params, ParamId::PARAM_NUM_MOTORS).max(0) as usize;
         let primary_choice = param_int(params, ParamId::PARAM_PRIMARY_MIXER);
         self.params.fixed_wing = param_int(params, ParamId::PARAM_FIXED_WING) != 0
@@ -576,7 +560,6 @@ fn is_mixer_runtime_param(id: ParamId) -> bool {
     matches!(
         id,
         ParamId::PARAM_MOTOR_IDLE_THROTTLE
-            | ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED
             | ParamId::PARAM_NUM_MOTORS
             | ParamId::PARAM_FIXED_WING
             | ParamId::PARAM_USE_MOTOR_PARAMETERS
@@ -1113,5 +1096,61 @@ mod tests {
             params.get_by_id(ParamId::PARAM_PRIMARY_MIXER_5_1),
             params.get_by_id(ParamId::PARAM_SECONDARY_MIXER_5_1)
         );
+    }
+
+    #[test]
+    fn custom_motor_mixer_treats_negative_ned_fz_as_positive_thrust() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_PRIMARY_MIXER, ParamValue::Int(CUSTOM_MIXER));
+        params.set_by_id(ParamId::PARAM_SECONDARY_MIXER, ParamValue::Int(-1));
+        params.set_by_id(ParamId::PARAM_USE_MOTOR_PARAMETERS, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_NUM_MOTORS, ParamValue::Int(4));
+        params.set_by_id(ParamId::PARAM_MOTOR_RESISTANCE, ParamValue::Float(0.085));
+        params.set_by_id(ParamId::PARAM_MOTOR_KV, ParamValue::Float(0.02894));
+        params.set_by_id(ParamId::PARAM_NO_LOAD_CURRENT, ParamValue::Float(1.01));
+        params.set_by_id(ParamId::PARAM_PROP_DIAMETER, ParamValue::Float(0.381));
+        params.set_by_id(ParamId::PARAM_PROP_CQ, ParamValue::Float(0.0045));
+
+        for output in 0..4 {
+            params.set_by_id(
+                ParamId::from_index(ParamId::PARAM_PRIMARY_MIXER_OUTPUT_0 as usize + output)
+                    .unwrap(),
+                ParamValue::Int(2),
+            );
+            params.set_by_id(
+                ParamId::from_index(ParamId::PARAM_PRIMARY_MIXER_PWM_RATE_0 as usize + output)
+                    .unwrap(),
+                ParamValue::Float(490.0),
+            );
+            params.set_by_id(
+                ParamId::from_index(
+                    ParamId::PARAM_PRIMARY_MIXER_0_0 as usize + output * NUM_MIXER_OUTPUTS + 2,
+                )
+                .unwrap(),
+                ParamValue::Float(-5814.7935),
+            );
+        }
+
+        let state = StateManager::new();
+        let mut mixer = MatrixMixer::<f64>::new(&params);
+        let mut controls = ControllerOutput::<f64>::default();
+        controls.u[2] = -25.0;
+
+        let run = mixer.mix(
+            &controls,
+            MixerCtx {
+                battery_voltage: Some(23.5),
+                ..mixer_ctx(&state, &params, OVERRIDE_NO_OVERRIDE)
+            },
+        );
+
+        assert_eq!(run.status, MixerStatus::Healthy);
+        for output in 0..4 {
+            assert!(
+                run.commands[output] > 0.4 && run.commands[output] < 0.6,
+                "motor {output} output was {}",
+                run.commands[output]
+            );
+        }
     }
 }
