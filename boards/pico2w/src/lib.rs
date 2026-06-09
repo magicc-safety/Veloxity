@@ -1,5 +1,6 @@
 #![no_std]
 
+pub mod barometer;
 pub mod board;
 pub mod comms_core;
 pub mod config;

@@ -3,7 +3,7 @@
 
 use core::{
     fmt::{self, Write},
-    sync::atomic::{AtomicU32, AtomicU8, Ordering},
+    sync::atomic::{AtomicU8, AtomicU32, Ordering},
 };
 
 use embassy_executor::Spawner;
@@ -198,9 +198,7 @@ fn read_baro(
 
 fn compensate_bmp280(cal: &Calibration, adc_p: i32, adc_t: i32) -> (f32, f32) {
     let var1 = (((adc_t >> 3) - ((cal.dig_t1 as i32) << 1)) * cal.dig_t2 as i32) >> 11;
-    let var2 = (((((adc_t >> 4) - cal.dig_t1 as i32)
-        * ((adc_t >> 4) - cal.dig_t1 as i32))
-        >> 12)
+    let var2 = (((((adc_t >> 4) - cal.dig_t1 as i32) * ((adc_t >> 4) - cal.dig_t1 as i32)) >> 12)
         * cal.dig_t3 as i32)
         >> 14;
     let t_fine = var1 + var2;
@@ -210,8 +208,7 @@ fn compensate_bmp280(cal: &Calibration, adc_p: i32, adc_t: i32) -> (f32, f32) {
     let mut p_var2 = p_var1 * p_var1 * cal.dig_p6 as i64;
     p_var2 += (p_var1 * cal.dig_p5 as i64) << 17;
     p_var2 += (cal.dig_p4 as i64) << 35;
-    p_var1 =
-        ((p_var1 * p_var1 * cal.dig_p3 as i64) >> 8) + ((p_var1 * cal.dig_p2 as i64) << 12);
+    p_var1 = ((p_var1 * p_var1 * cal.dig_p3 as i64) >> 8) + ((p_var1 * cal.dig_p2 as i64) << 12);
     p_var1 = (((1_i64 << 47) + p_var1) * cal.dig_p1 as i64) >> 33;
     if p_var1 == 0 {
         return (0.0, temperature);

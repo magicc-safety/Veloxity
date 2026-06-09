@@ -58,7 +58,10 @@ async fn main(_spawner: Spawner) -> ! {
     );
 
     let _ = writeln!(writer, "voloxide pico2w gps pio rx probe");
-    let _ = writeln!(writer, "pio0 sm0 gps_rx=gp7 baud=115200 expect m100 tx -> gp7");
+    let _ = writeln!(
+        writer,
+        "pio0 sm0 gps_rx=gp7 baud=115200 expect m100 tx -> gp7"
+    );
 
     let mut last = 0_u8;
     let mut total = 0_u32;
@@ -75,7 +78,11 @@ async fn main(_spawner: Spawner) -> ! {
             last = byte;
         }
 
-        let _ = writeln!(writer, "gps pio bytes={} total={} ubx_sync={}", bytes, total, ubx_sync);
+        let _ = writeln!(
+            writer,
+            "gps pio bytes={} total={} ubx_sync={}",
+            bytes, total, ubx_sync
+        );
         delay();
     }
 }

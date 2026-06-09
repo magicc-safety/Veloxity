@@ -1592,7 +1592,7 @@ mod tests {
         let msg = manager.comm_link().last_rc_channels.unwrap();
         assert_eq!(manager.comm_link().rc_channels_count, 1);
         assert_eq!(msg.time_boot_ms, 1234);
-        assert_eq!(msg.chancount, 0);
+        assert_eq!(msg.chancount, 8);
         assert_eq!(msg.rssi, 0);
         assert_eq!(
             &msg.channels[..8],

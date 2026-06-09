@@ -45,7 +45,10 @@ fn main() -> ! {
     let gp5 = Input::new(peripherals.PIN_5, Pull::Down);
 
     let _ = writeln!(writer, "voloxide pico2w gps uart line probe");
-    let _ = writeln!(writer, "gp4=m100 rx candidate, gp5=m100 tx candidate, pulldown=internal");
+    let _ = writeln!(
+        writer,
+        "gp4=m100 rx candidate, gp5=m100 tx candidate, pulldown=internal"
+    );
 
     loop {
         let _ = writeln!(

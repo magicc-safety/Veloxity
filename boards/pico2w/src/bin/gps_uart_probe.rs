@@ -72,7 +72,9 @@ fn main() -> ! {
     let _ = writeln!(writer, "expect m100 tx -> gp9, m100 rx -> gp8");
 
     loop {
-        for baudrate in [4_800_u32, 9_600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800] {
+        for baudrate in [
+            4_800_u32, 9_600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800,
+        ] {
             gps_uart.set_baudrate(baudrate);
             let _ = writeln!(writer, "gps baud {}:", baudrate);
 

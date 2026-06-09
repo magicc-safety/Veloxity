@@ -46,7 +46,10 @@ fn main() -> ! {
     let _imu_cs = Output::new(peripherals.PIN_13, Level::High);
 
     let _ = writeln!(writer, "voloxide pico2w bmp280 spi line probe");
-    let _ = writeln!(writer, "gp12=miso input pullup gp15=bmp_cs output gp13=imu_cs high");
+    let _ = writeln!(
+        writer,
+        "gp12=miso input pullup gp15=bmp_cs output gp13=imu_cs high"
+    );
 
     loop {
         bmp_cs.set_high();

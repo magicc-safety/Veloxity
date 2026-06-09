@@ -135,7 +135,11 @@ fn main() -> ! {
                 id15
             );
         }
-        let _ = writeln!(writer, "miso_idle={}", if miso.is_high() { "high" } else { "low" });
+        let _ = writeln!(
+            writer,
+            "miso_idle={}",
+            if miso.is_high() { "high" } else { "low" }
+        );
         delay_long();
     }
 }

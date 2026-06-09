@@ -1,4 +1,5 @@
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use critical_section::Mutex;
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
@@ -46,10 +47,69 @@ impl SharedIsm330dhcxImuQueue {
     pub fn has_pending(&self) -> bool {
         critical_section::with(|cs| self.inner.borrow_ref(cs).has_pending())
     }
+
+    pub fn dropped_oldest(&self) -> u32 {
+        critical_section::with(|cs| self.inner.borrow_ref(cs).dropped_oldest())
+    }
 }
 
 pub const SHARED_ISM330DHCX_IMU_QUEUE: SharedIsm330dhcxImuQueue =
     SharedIsm330dhcxImuQueue::new(&ISM330DHCX_IMU_QUEUE);
+
+static IMU_INIT_ATTEMPTS: AtomicU32 = AtomicU32::new(0);
+static IMU_INIT_OK: AtomicU32 = AtomicU32::new(0);
+static IMU_LAST_WHO_AM_I: AtomicU8 = AtomicU8::new(0);
+static IMU_DRDY_EDGES: AtomicU32 = AtomicU32::new(0);
+static IMU_READ_OK: AtomicU32 = AtomicU32::new(0);
+static IMU_READ_ERRORS: AtomicU32 = AtomicU32::new(0);
+
+#[derive(Clone, Copy, Default)]
+pub struct Ism330dhcxStats {
+    pub init_attempts: u32,
+    pub init_ok: u32,
+    pub last_who_am_i: u8,
+    pub drdy_edges: u32,
+    pub read_ok: u32,
+    pub read_errors: u32,
+}
+
+pub fn record_ism330dhcx_init_attempt() {
+    IMU_INIT_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_ism330dhcx_init_ok(who_am_i: u8) {
+    IMU_LAST_WHO_AM_I.store(who_am_i, Ordering::Relaxed);
+    IMU_INIT_OK.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_ism330dhcx_init_failure(who_am_i: Option<u8>) {
+    if let Some(who_am_i) = who_am_i {
+        IMU_LAST_WHO_AM_I.store(who_am_i, Ordering::Relaxed);
+    }
+}
+
+pub fn record_ism330dhcx_drdy_edge() {
+    IMU_DRDY_EDGES.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_ism330dhcx_read_ok() {
+    IMU_READ_OK.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_ism330dhcx_read_error() {
+    IMU_READ_ERRORS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn ism330dhcx_stats() -> Ism330dhcxStats {
+    Ism330dhcxStats {
+        init_attempts: IMU_INIT_ATTEMPTS.load(Ordering::Relaxed),
+        init_ok: IMU_INIT_OK.load(Ordering::Relaxed),
+        last_who_am_i: IMU_LAST_WHO_AM_I.load(Ordering::Relaxed),
+        drdy_edges: IMU_DRDY_EDGES.load(Ordering::Relaxed),
+        read_ok: IMU_READ_OK.load(Ordering::Relaxed),
+        read_errors: IMU_READ_ERRORS.load(Ordering::Relaxed),
+    }
+}
 
 pub struct Ism330dhcxImuQueue {
     packets: [ImuPacket<f32>; IMU_QUEUE_CAPACITY],

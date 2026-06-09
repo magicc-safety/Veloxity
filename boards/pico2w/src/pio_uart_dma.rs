@@ -5,8 +5,8 @@ use rp2350_platform::hal::{
     dma,
     gpio::Level,
     pio::{
-        Config, Direction as PioDirection, FifoJoin, Instance, LoadedProgram, PioPin, ShiftDirection,
-        StateMachine,
+        Config, Direction as PioDirection, FifoJoin, Instance, LoadedProgram, PioPin,
+        ShiftDirection, StateMachine,
     },
 };
 

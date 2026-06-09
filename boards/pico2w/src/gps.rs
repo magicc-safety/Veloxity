@@ -1,6 +1,6 @@
 use core::{
     cell::RefCell,
-    sync::atomic::{AtomicU32, AtomicU8, Ordering},
+    sync::atomic::{AtomicU8, AtomicU32, Ordering},
 };
 
 use critical_section::Mutex;

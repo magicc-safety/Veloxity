@@ -1,4 +1,11 @@
+#[cfg(feature = "timing-diagnostics")]
+use crate::gps::gps_stats;
+#[cfg(all(feature = "timing-diagnostics", feature = "ism330dhcx-driver"))]
+use crate::ism330dhcx::ism330dhcx_stats;
+#[cfg(feature = "timing-diagnostics")]
+use crate::rc_receiver::crsf_stats;
 use crate::{
+    barometer::{SHARED_BARO_QUEUE, SharedBaroQueue},
     comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
     config::Pico2WConfig,
     gps::{SHARED_GNSS_QUEUE, SharedGnssQueue},
@@ -7,8 +14,6 @@ use crate::{
     pwm::PioPwmDriver,
     rc_receiver::{SHARED_CRSF_RC_QUEUE, SharedCrsfRcQueue},
 };
-#[cfg(feature = "timing-diagnostics")]
-use crate::gps::gps_stats;
 use embassy_time::Instant;
 use voloxide_core::{
     board::{BoardIo, SerialRxFrame, SerialTxPriority},
@@ -22,8 +27,11 @@ struct PicoSensorProducer {
     ism330dhcx_imu: SharedIsm330dhcxImuQueue,
     crsf_rc: SharedCrsfRcQueue,
     gnss: SharedGnssQueue,
+    baro: SharedBaroQueue,
     gy91_baro: Option<Gy91>,
     pending_baro: Option<Result<BaroPacket, errors::SensorError>>,
+    last_imu_seq: Option<u32>,
+    imu_seq_gaps: u32,
 }
 
 impl PicoSensorProducer {
@@ -32,8 +40,11 @@ impl PicoSensorProducer {
             ism330dhcx_imu: SHARED_ISM330DHCX_IMU_QUEUE,
             crsf_rc: SHARED_CRSF_RC_QUEUE,
             gnss: SHARED_GNSS_QUEUE,
+            baro: SHARED_BARO_QUEUE,
             gy91_baro,
             pending_baro: None,
+            last_imu_seq: None,
+            imu_seq_gaps: 0,
         }
     }
 
@@ -53,6 +64,15 @@ impl PicoSensorProducer {
         if self.ism330dhcx_imu.has_pending()
             && let Some(imu) = self.ism330dhcx_imu.take_latest()
         {
+            if let Some(last_seq) = self.last_imu_seq {
+                let expected = last_seq.wrapping_add(1);
+                if imu.seq != expected {
+                    self.imu_seq_gaps = self
+                        .imu_seq_gaps
+                        .wrapping_add(imu.seq.wrapping_sub(expected).max(1));
+                }
+            }
+            self.last_imu_seq = Some(imu.seq);
             sensors.imu = Some(Ok(imu.cast()));
         }
         if self.crsf_rc.has_pending()
@@ -65,9 +85,29 @@ impl PicoSensorProducer {
         {
             sensors.gnss = Some(gnss);
         }
+        if self.baro.has_pending()
+            && let Some(baro) = self.baro.take_latest()
+        {
+            sensors.baro = Some(baro);
+        }
         if let Some(baro) = self.pending_baro.take() {
             sensors.baro = Some(baro);
         }
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn imu_queue_drops(&self) -> u32 {
+        self.ism330dhcx_imu.dropped_oldest()
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn imu_sequence_gaps(&self) -> u32 {
+        self.imu_seq_gaps
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn baro_queue_drops(&self) -> u32 {
+        self.baro.dropped_oldest()
     }
 }
 
@@ -251,6 +291,75 @@ impl BoardIo for Board {
                 write_diag_bytes(&mut out, &mut offset, b" p");
                 write_diag_num(&mut out, &mut offset, stats.nav_pvt);
                 self.diag_index = 7;
+                Some(out)
+            }
+            7 => {
+                let stats = crsf_stats();
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"CRSF b");
+                write_diag_num(&mut out, &mut offset, stats.bytes);
+                write_diag_bytes(&mut out, &mut offset, b" f");
+                write_diag_num(&mut out, &mut offset, stats.frames);
+                write_diag_bytes(&mut out, &mut offset, b" e");
+                write_diag_num(&mut out, &mut offset, stats.read_errors);
+                write_diag_bytes(&mut out, &mut offset, b" d");
+                write_diag_num(&mut out, &mut offset, stats.queue_drops);
+                self.diag_index = 8;
+                Some(out)
+            }
+            8 => {
+                #[cfg(feature = "ism330dhcx-driver")]
+                let stats = ism330dhcx_stats();
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"IMU0 a");
+                #[cfg(feature = "ism330dhcx-driver")]
+                write_diag_num(&mut out, &mut offset, stats.init_attempts);
+                #[cfg(not(feature = "ism330dhcx-driver"))]
+                write_diag_num(&mut out, &mut offset, 0);
+                write_diag_bytes(&mut out, &mut offset, b" o");
+                #[cfg(feature = "ism330dhcx-driver")]
+                write_diag_num(&mut out, &mut offset, stats.init_ok);
+                #[cfg(not(feature = "ism330dhcx-driver"))]
+                write_diag_num(&mut out, &mut offset, 0);
+                write_diag_bytes(&mut out, &mut offset, b" w");
+                #[cfg(feature = "ism330dhcx-driver")]
+                write_diag_num(&mut out, &mut offset, stats.last_who_am_i as u32);
+                #[cfg(not(feature = "ism330dhcx-driver"))]
+                write_diag_num(&mut out, &mut offset, 0);
+                write_diag_bytes(&mut out, &mut offset, b" e");
+                #[cfg(feature = "ism330dhcx-driver")]
+                write_diag_num(&mut out, &mut offset, stats.drdy_edges);
+                #[cfg(not(feature = "ism330dhcx-driver"))]
+                write_diag_num(&mut out, &mut offset, 0);
+                self.diag_index = 9;
+                Some(out)
+            }
+            9 => {
+                #[cfg(feature = "ism330dhcx-driver")]
+                let stats = ism330dhcx_stats();
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"IMU1 r");
+                #[cfg(feature = "ism330dhcx-driver")]
+                write_diag_num(&mut out, &mut offset, stats.read_ok);
+                #[cfg(not(feature = "ism330dhcx-driver"))]
+                write_diag_num(&mut out, &mut offset, 0);
+                write_diag_bytes(&mut out, &mut offset, b" x");
+                #[cfg(feature = "ism330dhcx-driver")]
+                write_diag_num(&mut out, &mut offset, stats.read_errors);
+                #[cfg(not(feature = "ism330dhcx-driver"))]
+                write_diag_num(&mut out, &mut offset, 0);
+                write_diag_bytes(&mut out, &mut offset, b" q");
+                write_diag_num(&mut out, &mut offset, self.sensors.imu_queue_drops());
+                write_diag_bytes(&mut out, &mut offset, b" g");
+                write_diag_num(&mut out, &mut offset, self.sensors.imu_sequence_gaps());
+                self.diag_index = 10;
+                Some(out)
+            }
+            10 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"BRDQ d");
+                write_diag_num(&mut out, &mut offset, self.sensors.baro_queue_drops());
+                self.diag_index = 11;
                 Some(out)
             }
             _ => {

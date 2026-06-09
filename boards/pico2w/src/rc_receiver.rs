@@ -22,6 +22,51 @@ const EMPTY_RC_PACKET: RcPacket = RcPacket {
 
 pub static CRSF_RC_QUEUE: Mutex<RefCell<CrsfRcQueue>> =
     Mutex::new(RefCell::new(CrsfRcQueue::new()));
+static CRSF_STATS: Mutex<RefCell<CrsfStats>> = Mutex::new(RefCell::new(CrsfStats::new()));
+
+#[derive(Clone, Copy, Default)]
+pub struct CrsfStats {
+    pub bytes: u32,
+    pub frames: u32,
+    pub read_errors: u32,
+    pub queue_drops: u32,
+}
+
+impl CrsfStats {
+    pub const fn new() -> Self {
+        Self {
+            bytes: 0,
+            frames: 0,
+            read_errors: 0,
+            queue_drops: 0,
+        }
+    }
+}
+
+pub fn record_crsf_bytes(bytes: usize) {
+    critical_section::with(|cs| {
+        let mut stats = CRSF_STATS.borrow_ref_mut(cs);
+        stats.bytes = stats.bytes.wrapping_add(bytes as u32);
+    });
+}
+
+pub fn record_crsf_frame() {
+    critical_section::with(|cs| {
+        let mut stats = CRSF_STATS.borrow_ref_mut(cs);
+        stats.frames = stats.frames.wrapping_add(1);
+    });
+}
+
+pub fn record_crsf_read_error() {
+    critical_section::with(|cs| {
+        let mut stats = CRSF_STATS.borrow_ref_mut(cs);
+        stats.read_errors = stats.read_errors.wrapping_add(1);
+    });
+}
+
+pub fn crsf_stats() -> CrsfStats {
+    critical_section::with(|cs| *CRSF_STATS.borrow_ref(cs))
+}
 
 #[derive(Clone, Copy)]
 pub struct SharedCrsfRcQueue {

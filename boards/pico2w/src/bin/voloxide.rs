@@ -5,24 +5,33 @@ use core::ptr::addr_of_mut;
 
 use cortex_m_rt::entry;
 use embassy_executor::Executor;
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use panic_halt as _;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use pico2w::barometer::SHARED_BARO_QUEUE;
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
 use pico2w::gps::{
     SHARED_GNSS_QUEUE, UbxNavPvtParser, make_ubx_packet, record_gps_byte, record_nav_pvt,
 };
-use pico2w::pio_uart_dma::{PioUartDmaRx, PioUartDmaRxProgram};
 #[cfg(any(
     feature = "synthetic-imu",
     all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
 ))]
-use pico2w::ism330dhcx::SHARED_ISM330DHCX_IMU_QUEUE;
-use pico2w::rc_receiver::{CRSF_BAUDRATE, CrsfRcParser, SHARED_CRSF_RC_QUEUE};
+use pico2w::ism330dhcx::{
+    SHARED_ISM330DHCX_IMU_QUEUE, record_ism330dhcx_drdy_edge, record_ism330dhcx_init_attempt,
+    record_ism330dhcx_init_failure, record_ism330dhcx_init_ok, record_ism330dhcx_read_error,
+    record_ism330dhcx_read_ok,
+};
+use pico2w::pio_uart_dma::{PioUartDmaRx, PioUartDmaRxProgram};
+use pico2w::rc_receiver::{
+    CRSF_BAUDRATE, CrsfRcParser, SHARED_CRSF_RC_QUEUE, record_crsf_bytes, record_crsf_frame,
+    record_crsf_read_error,
+};
 use pico2w::{board, config::Pico2WConfig, pwm::PioPwmDriver};
 use rp2350_platform::hal::clocks::ClockConfig;
 use rp2350_platform::hal::dma;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, SPI1};
+use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, PIN_15, SPI1};
 use rp2350_platform::hal::{
     self as rp, Peri, bind_interrupts,
     config::Config as HalConfig,
@@ -46,11 +55,20 @@ use rp2350_platform::hal::{
 use static_cell::StaticCell;
 #[cfg(feature = "release-loop-bench")]
 use voloxide_core::board::SerialTxPriority;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use voloxide_core::errors::SensorError;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use voloxide_core::packets::BaroPacket;
 #[cfg(any(
     feature = "synthetic-imu",
     all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
 ))]
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
+#[cfg(any(
+    feature = "release-loop-classifier",
+    feature = "release-loop-spike-counter"
+))]
+use voloxide_core::world::WorldRunClass;
 use voloxide_core::{
     board::{BoardIo, SerialRxPriority},
     comm::TelemetryRates,
@@ -140,18 +158,57 @@ const fn synthetic_imu_period_us() -> u64 {
 ))]
 compile_error!("select only one synthetic IMU rate feature");
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(feature = "ism330dhcx-1k666")]
+const ISM330DHCX_IMU_PERIOD_US: u64 = 0;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(not(feature = "ism330dhcx-1k666"))]
 const ISM330DHCX_IMU_PERIOD_US: u64 = 250;
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    feature = "ism330dhcx-1k666",
+    not(feature = "synthetic-imu")
+))]
+const ISM330DHCX_CTRL1_XL: u8 = 0x84;
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "ism330dhcx-1k666"),
+    not(feature = "synthetic-imu")
+))]
+const ISM330DHCX_CTRL1_XL: u8 = 0xa4;
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    feature = "ism330dhcx-1k666",
+    not(feature = "synthetic-imu")
+))]
+const ISM330DHCX_CTRL2_G: u8 = 0x8c;
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "ism330dhcx-1k666"),
+    not(feature = "synthetic-imu")
+))]
+const ISM330DHCX_CTRL2_G: u8 = 0xac;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+const BMP280_SAMPLE_INTERVAL_US: u64 = 20_000;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 const ISM330DHCX_SPI_HZ: u32 = 10_000_000;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 const ISM330DHCX_WHO_AM_I: u8 = 0x6b;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_REPORT_US: u64 = 1_000_000;
+#[cfg(all(
+    feature = "release-loop-bench",
+    feature = "ism330dhcx-1k666",
+    not(feature = "synthetic-imu")
+))]
+const LOOP_BENCH_BUDGET_US: u32 = 600;
 #[cfg(all(feature = "release-loop-bench", feature = "synthetic-imu-3333hz"))]
 const LOOP_BENCH_BUDGET_US: u32 = 300;
-#[cfg(all(feature = "release-loop-bench", not(feature = "synthetic-imu-3333hz")))]
+#[cfg(all(
+    feature = "release-loop-bench",
+    not(feature = "ism330dhcx-1k666"),
+    not(feature = "synthetic-imu-3333hz")
+))]
 const LOOP_BENCH_BUDGET_US: u32 = 250;
-#[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_BUCKET_US: u32 = 10;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_BUCKETS: usize = 128;
@@ -227,21 +284,72 @@ async fn ism330dhcx_imu_task(
     mut spi: Spi<'static, SPI1, Blocking>,
     mut cs: Output<'static>,
     mut drdy: Input<'static>,
+    mut baro_cs: Output<'static>,
 ) -> ! {
     let mut seq = 0_u32;
     loop {
-        if ism330dhcx_init(&mut spi, &mut cs).is_ok() {
-            loop {
-                drdy.wait_for_rising_edge().await;
-                let now_us = Instant::now().as_micros();
-                if let Ok(packet) = ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
-                    SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
-                    seq = seq.wrapping_add(1);
-                }
-                Timer::after(Duration::from_micros(ISM330DHCX_IMU_PERIOD_US)).await;
+        record_ism330dhcx_init_attempt();
+        match ism330dhcx_init(&mut spi, &mut cs) {
+            Ok(who_am_i) => {
+                record_ism330dhcx_init_ok(who_am_i);
+            }
+            Err(who_am_i) => {
+                record_ism330dhcx_init_failure(who_am_i);
+                Timer::after_millis(1_000).await;
+                continue;
             }
         }
-        Timer::after_millis(1_000).await;
+
+        {
+            let mut baro = Bmp280State::new();
+            let mut next_baro_us = Instant::now().as_micros();
+            loop {
+                let now_us = if ISM330DHCX_IMU_PERIOD_US == 0 {
+                    let now_us = Instant::now().as_micros();
+                    let baro_wait_us = next_baro_us.saturating_sub(now_us).max(1);
+                    match with_timeout(
+                        Duration::from_micros(baro_wait_us),
+                        drdy.wait_for_rising_edge(),
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            record_ism330dhcx_drdy_edge();
+                            let now_us = Instant::now().as_micros();
+                            match ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
+                                Ok(packet) => {
+                                    record_ism330dhcx_read_ok();
+                                    SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
+                                    seq = seq.wrapping_add(1);
+                                }
+                                Err(()) => record_ism330dhcx_read_error(),
+                            }
+                            now_us
+                        }
+                        Err(_) => Instant::now().as_micros(),
+                    }
+                } else {
+                    Timer::after(Duration::from_micros(ISM330DHCX_IMU_PERIOD_US)).await;
+                    let now_us = Instant::now().as_micros();
+                    match ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
+                        Ok(packet) => {
+                            record_ism330dhcx_read_ok();
+                            SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
+                            seq = seq.wrapping_add(1);
+                        }
+                        Err(()) => record_ism330dhcx_read_error(),
+                    }
+                    now_us
+                };
+
+                if now_us >= next_baro_us {
+                    let sample = bmp280_sample(&mut spi, &mut baro_cs, &mut baro, now_us)
+                        .map_err(|_| SensorError::GenericSensorError("bmp280 spi error"));
+                    SHARED_BARO_QUEUE.push_from_sensor_task(sample);
+                    next_baro_us = now_us.saturating_add(BMP280_SAMPLE_INTERVAL_US);
+                }
+            }
+        }
     }
 }
 
@@ -249,16 +357,17 @@ async fn ism330dhcx_imu_task(
 fn ism330dhcx_init(
     spi: &mut Spi<'static, SPI1, Blocking>,
     cs: &mut Output<'static>,
-) -> Result<(), ()> {
-    if ism330dhcx_read_reg(spi, cs, 0x0f)? != ISM330DHCX_WHO_AM_I {
-        return Err(());
+) -> Result<u8, Option<u8>> {
+    let who_am_i = ism330dhcx_read_reg(spi, cs, 0x0f).map_err(|_| None)?;
+    if who_am_i != ISM330DHCX_WHO_AM_I {
+        return Err(Some(who_am_i));
     }
-    ism330dhcx_write_reg(spi, cs, 0x12, 0x44)?;
-    ism330dhcx_write_reg(spi, cs, 0x10, 0xa4)?;
-    ism330dhcx_write_reg(spi, cs, 0x11, 0xac)?;
-    ism330dhcx_write_reg(spi, cs, 0x0b, 0x80)?;
-    ism330dhcx_write_reg(spi, cs, 0x0d, 0x03)?;
-    Ok(())
+    ism330dhcx_write_reg(spi, cs, 0x12, 0x44).map_err(|_| Some(who_am_i))?;
+    ism330dhcx_write_reg(spi, cs, 0x10, ISM330DHCX_CTRL1_XL).map_err(|_| Some(who_am_i))?;
+    ism330dhcx_write_reg(spi, cs, 0x11, ISM330DHCX_CTRL2_G).map_err(|_| Some(who_am_i))?;
+    ism330dhcx_write_reg(spi, cs, 0x0b, 0x80).map_err(|_| Some(who_am_i))?;
+    ism330dhcx_write_reg(spi, cs, 0x0d, 0x03).map_err(|_| Some(who_am_i))?;
+    Ok(who_am_i)
 }
 
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
@@ -338,16 +447,193 @@ fn ism330dhcx_write_reg(
     result.map_err(|_| ())
 }
 
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[derive(Default)]
+struct Bmp280Calibration {
+    dig_t1: u16,
+    dig_t2: i16,
+    dig_t3: i16,
+    dig_p1: u16,
+    dig_p2: i16,
+    dig_p3: i16,
+    dig_p4: i16,
+    dig_p5: i16,
+    dig_p6: i16,
+    dig_p7: i16,
+    dig_p8: i16,
+    dig_p9: i16,
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[derive(Default)]
+struct Bmp280State {
+    initialized: bool,
+    calibration: Bmp280Calibration,
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+impl Bmp280State {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn bmp280_sample(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    state: &mut Bmp280State,
+    now_us: u64,
+) -> Result<BaroPacket, ()> {
+    if !state.initialized {
+        bmp280_init(spi, cs, state)?;
+    }
+
+    let mut raw = [0_u8; 6];
+    bmp280_read_regs(spi, cs, 0xf7, &mut raw)?;
+    let adc_p = (((raw[0] as i32) << 12) | ((raw[1] as i32) << 4) | ((raw[2] as i32) >> 4)) as i32;
+    let adc_t = (((raw[3] as i32) << 12) | ((raw[4] as i32) << 4) | ((raw[5] as i32) >> 4)) as i32;
+    let (pressure, temperature) = compensate_bmp280(&state.calibration, adc_p, adc_t);
+
+    Ok(BaroPacket {
+        header: RosflightPacketHeader {
+            timestamp: now_us,
+            status: 0,
+        },
+        altitude: 0.0,
+        pressure,
+        temperature,
+    })
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn bmp280_init(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    state: &mut Bmp280State,
+) -> Result<(), ()> {
+    if bmp280_read_reg(spi, cs, 0xd0)? != 0x58 {
+        return Err(());
+    }
+
+    let mut raw = [0_u8; 24];
+    bmp280_read_regs(spi, cs, 0x88, &mut raw)?;
+    state.calibration = Bmp280Calibration {
+        dig_t1: u16_le(raw[0], raw[1]),
+        dig_t2: i16_le(raw[2], raw[3]),
+        dig_t3: i16_le(raw[4], raw[5]),
+        dig_p1: u16_le(raw[6], raw[7]),
+        dig_p2: i16_le(raw[8], raw[9]),
+        dig_p3: i16_le(raw[10], raw[11]),
+        dig_p4: i16_le(raw[12], raw[13]),
+        dig_p5: i16_le(raw[14], raw[15]),
+        dig_p6: i16_le(raw[16], raw[17]),
+        dig_p7: i16_le(raw[18], raw[19]),
+        dig_p8: i16_le(raw[20], raw[21]),
+        dig_p9: i16_le(raw[22], raw[23]),
+    };
+    bmp280_write_reg(spi, cs, 0xf5, 0xa0)?;
+    bmp280_write_reg(spi, cs, 0xf4, 0x4f)?;
+    state.initialized = true;
+    Ok(())
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn bmp280_read_reg(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    reg: u8,
+) -> Result<u8, ()> {
+    let mut out = [0_u8; 1];
+    bmp280_read_regs(spi, cs, reg, &mut out)?;
+    Ok(out[0])
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn bmp280_read_regs(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    reg: u8,
+    out: &mut [u8],
+) -> Result<(), ()> {
+    let mut txrx = [0_u8; 32];
+    if out.len() + 1 > txrx.len() {
+        return Err(());
+    }
+    txrx[0] = reg | 0x80;
+    cs.set_low();
+    let result = spi.blocking_transfer_in_place(&mut txrx[..out.len() + 1]);
+    cs.set_high();
+    result.map_err(|_| ())?;
+    out.copy_from_slice(&txrx[1..out.len() + 1]);
+    Ok(())
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn bmp280_write_reg(
+    spi: &mut Spi<'static, SPI1, Blocking>,
+    cs: &mut Output<'static>,
+    reg: u8,
+    value: u8,
+) -> Result<(), ()> {
+    let mut bytes = [reg & 0x7f, value];
+    cs.set_low();
+    let result = spi.blocking_transfer_in_place(&mut bytes);
+    cs.set_high();
+    result.map_err(|_| ())
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn u16_le(lsb: u8, msb: u8) -> u16 {
+    u16::from_le_bytes([lsb, msb])
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn i16_le(lsb: u8, msb: u8) -> i16 {
+    i16::from_le_bytes([lsb, msb])
+}
+
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+fn compensate_bmp280(cal: &Bmp280Calibration, adc_p: i32, adc_t: i32) -> (f32, f32) {
+    let var1 = (((adc_t >> 3) - ((cal.dig_t1 as i32) << 1)) * cal.dig_t2 as i32) >> 11;
+    let var2 = (((((adc_t >> 4) - cal.dig_t1 as i32) * ((adc_t >> 4) - cal.dig_t1 as i32)) >> 12)
+        * cal.dig_t3 as i32)
+        >> 14;
+    let t_fine = var1 + var2;
+    let temperature = ((t_fine * 5 + 128) >> 8) as f32 / 100.0;
+
+    let mut var1 = t_fine as i64 - 128_000;
+    let mut var2 = var1 * var1 * cal.dig_p6 as i64;
+    var2 += (var1 * cal.dig_p5 as i64) << 17;
+    var2 += (cal.dig_p4 as i64) << 35;
+    var1 = ((var1 * var1 * cal.dig_p3 as i64) >> 8) + ((var1 * cal.dig_p2 as i64) << 12);
+    var1 = (((1_i64 << 47) + var1) * cal.dig_p1 as i64) >> 33;
+    if var1 == 0 {
+        return (0.0, temperature);
+    }
+
+    let mut p = 1_048_576_i64 - adc_p as i64;
+    p = (((p << 31) - var2) * 3125) / var1;
+    var1 = (cal.dig_p9 as i64 * (p >> 13) * (p >> 13)) >> 25;
+    var2 = (cal.dig_p8 as i64 * p) >> 19;
+    p = ((p + var1 + var2) >> 8) + ((cal.dig_p7 as i64) << 4);
+
+    (p as f32 / 256.0, temperature)
+}
+
 #[embassy_executor::task]
 async fn crsf_rx_task(mut uart_rx: UartRx<'static, UartAsync>) -> ! {
     let mut parser = CrsfRcParser::new();
     let mut rx = [0_u8; CRSF_RX_CHUNK_BYTES];
     loop {
         if uart_rx.read(&mut rx).await.is_ok() {
+            record_crsf_bytes(rx.len());
             if let Some(packet) = parser.push_bytes(&rx, Instant::now().as_micros()) {
+                record_crsf_frame();
                 SHARED_CRSF_RC_QUEUE.push_from_receiver_task(packet);
             }
         } else {
+            record_crsf_read_error();
             Timer::after(Duration::from_micros(UART_IDLE_DELAY_US)).await;
         }
     }
@@ -398,7 +684,14 @@ async fn gps_configure_nav_pvt(gps_tx: &mut PioUartTx<'static, PIO0, 1>) {
     }
     Timer::after_millis(50).await;
 
-    let rate_payload = [100_u16.to_le_bytes()[0], 100_u16.to_le_bytes()[1], 1, 0, 0, 0];
+    let rate_payload = [
+        100_u16.to_le_bytes()[0],
+        100_u16.to_le_bytes()[1],
+        1,
+        0,
+        0,
+        0,
+    ];
     if let Some(len) = make_ubx_packet(0x06, 0x08, &rate_payload, &mut packet) {
         gps_write_packet(gps_tx, &packet[..len]).await;
     }
@@ -490,6 +783,8 @@ struct Core1Resources {
     pin13: Peri<'static, PIN_13>,
     #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
     pin14: Peri<'static, PIN_14>,
+    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+    pin15: Peri<'static, PIN_15>,
 }
 
 fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox) {
@@ -557,6 +852,8 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
             let imu_cs = Output::new(resources.pin13, Level::High);
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             let imu_drdy = Input::new(resources.pin14, Pull::Down);
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            let baro_cs = Output::new(resources.pin15, Level::High);
 
             let executor = CORE1_EXECUTOR.init(Executor::new());
             mailbox.set_comms_state(21);
@@ -581,7 +878,7 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                     spawner.spawn(token);
                 }
                 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-                if let Ok(token) = ism330dhcx_imu_task(imu_spi, imu_cs, imu_drdy) {
+                if let Ok(token) = ism330dhcx_imu_task(imu_spi, imu_cs, imu_drdy, baro_cs) {
                     spawner.spawn(token);
                 }
                 mailbox.set_comms_state(22);
@@ -630,7 +927,25 @@ fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> 
         rc_hz: 1,
         output_raw_imu_divisor: 0,
     });
-    #[cfg(not(feature = "synthetic-imu"))]
+    #[cfg(all(
+        feature = "release-loop-bench",
+        feature = "ism330dhcx-driver",
+        not(feature = "synthetic-imu")
+    ))]
+    world.set_telemetry_rates(TelemetryRates {
+        imu_hz: 50,
+        attitude_hz: 1,
+        output_raw_hz: 1,
+        diff_pressure_hz: 1,
+        baro_hz: 5,
+        mag_hz: 1,
+        range_hz: 1,
+        battery_hz: 1,
+        gnss_hz: 1,
+        rc_hz: 50,
+        output_raw_imu_divisor: 0,
+    });
+    #[cfg(all(not(feature = "synthetic-imu"), not(feature = "release-loop-bench")))]
     world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
     world
 }
@@ -648,6 +963,62 @@ struct LoopBench {
     sum_us: u64,
     max_us: u32,
     missed_250us: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_rx: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_raw_imu: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_raw_baro: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_raw_rc: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_telemetry_due: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_telemetry_deferred: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_after_control_over_budget: u32,
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    slow_control: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    sum_estimator_us: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    sum_controller_us: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    sum_mixer_us: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    sum_pwm_us: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    max_estimator_us: u16,
+    #[cfg(feature = "release-loop-classifier")]
+    max_controller_us: u16,
+    #[cfg(feature = "release-loop-classifier")]
+    max_mixer_us: u16,
+    #[cfg(feature = "release-loop-classifier")]
+    max_pwm_us: u16,
     buckets: [u32; LOOP_BENCH_BUCKETS],
 }
 
@@ -664,16 +1035,127 @@ impl LoopBench {
             sum_us: 0,
             max_us: 0,
             missed_250us: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_rx: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_raw_imu: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_raw_baro: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_raw_rc: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_telemetry_due: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_telemetry_deferred: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_after_control_over_budget: 0,
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            slow_control: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            sum_estimator_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            sum_controller_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            sum_mixer_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            sum_pwm_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            max_estimator_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            max_controller_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            max_mixer_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            max_pwm_us: 0,
             buckets: [0; LOOP_BENCH_BUCKETS],
         }
     }
 
+    #[cfg(not(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    )))]
     fn record(&mut self, elapsed_us: u32, now_us: u64) {
         self.count = self.count.wrapping_add(1);
         self.sum_us = self.sum_us.saturating_add(elapsed_us as u64);
         self.max_us = self.max_us.max(elapsed_us);
         if elapsed_us > LOOP_BENCH_BUDGET_US {
             self.missed_250us = self.missed_250us.wrapping_add(1);
+        }
+
+        let bucket =
+            (elapsed_us / LOOP_BENCH_BUCKET_US).min((LOOP_BENCH_BUCKETS - 1) as u32) as usize;
+        self.buckets[bucket] = self.buckets[bucket].wrapping_add(1);
+
+        if now_us >= self.next_report_us {
+            self.report();
+            self.reset(now_us);
+        }
+    }
+
+    #[cfg(any(
+        feature = "release-loop-classifier",
+        feature = "release-loop-spike-counter"
+    ))]
+    fn record(&mut self, elapsed_us: u32, now_us: u64, class: WorldRunClass) {
+        self.count = self.count.wrapping_add(1);
+        self.sum_us = self.sum_us.saturating_add(elapsed_us as u64);
+        self.max_us = self.max_us.max(elapsed_us);
+        if elapsed_us > LOOP_BENCH_BUDGET_US {
+            self.missed_250us = self.missed_250us.wrapping_add(1);
+            self.slow_rx = self.slow_rx.wrapping_add(class.had_rx as u32);
+            self.slow_raw_imu = self.slow_raw_imu.wrapping_add(class.had_raw_imu as u32);
+            self.slow_raw_baro = self.slow_raw_baro.wrapping_add(class.had_raw_baro as u32);
+            self.slow_raw_rc = self.slow_raw_rc.wrapping_add(class.had_raw_rc as u32);
+            self.slow_telemetry_due = self
+                .slow_telemetry_due
+                .wrapping_add(class.telemetry_due as u32);
+            self.slow_telemetry_deferred = self
+                .slow_telemetry_deferred
+                .wrapping_add(class.telemetry_deferred as u32);
+            self.slow_after_control_over_budget = self
+                .slow_after_control_over_budget
+                .wrapping_add((class.elapsed_after_control_us > LOOP_BENCH_BUDGET_US) as u32);
+            self.slow_control = self.slow_control.wrapping_add(class.ran_control as u32);
+            #[cfg(feature = "release-loop-classifier")]
+            {
+                self.sum_estimator_us = self
+                    .sum_estimator_us
+                    .wrapping_add(class.estimator_us as u32);
+                self.sum_controller_us = self
+                    .sum_controller_us
+                    .wrapping_add(class.controller_us as u32);
+                self.sum_mixer_us = self.sum_mixer_us.wrapping_add(class.mixer_us as u32);
+                self.sum_pwm_us = self.sum_pwm_us.wrapping_add(class.pwm_us as u32);
+                self.max_estimator_us = self.max_estimator_us.max(class.estimator_us);
+                self.max_controller_us = self.max_controller_us.max(class.controller_us);
+                self.max_mixer_us = self.max_mixer_us.max(class.mixer_us);
+                self.max_pwm_us = self.max_pwm_us.max(class.pwm_us);
+            }
         }
 
         let bucket =
@@ -714,6 +1196,78 @@ impl LoopBench {
         let _ = self
             .mailbox
             .write_from_priority(&frame, SerialTxPriority::REPLACEABLE_TELEMETRY);
+
+        #[cfg(any(
+            feature = "release-loop-classifier",
+            feature = "release-loop-spike-counter"
+        ))]
+        {
+            let mut text = [0_u8; 50];
+            let mut pos = 0;
+            bench_write_bytes(&mut text, &mut pos, b"SLC m");
+            bench_write_num(&mut text, &mut pos, self.missed_250us);
+            bench_write_bytes(&mut text, &mut pos, b" rx");
+            bench_write_num(&mut text, &mut pos, self.slow_rx);
+            bench_write_bytes(&mut text, &mut pos, b" im");
+            bench_write_num(&mut text, &mut pos, self.slow_raw_imu);
+            bench_write_bytes(&mut text, &mut pos, b" br");
+            bench_write_num(&mut text, &mut pos, self.slow_raw_baro);
+            bench_write_bytes(&mut text, &mut pos, b" rc");
+            bench_write_num(&mut text, &mut pos, self.slow_raw_rc);
+            bench_write_bytes(&mut text, &mut pos, b" te");
+            bench_write_num(&mut text, &mut pos, self.slow_telemetry_due);
+            bench_write_bytes(&mut text, &mut pos, b" df");
+            bench_write_num(&mut text, &mut pos, self.slow_telemetry_deferred);
+            bench_write_bytes(&mut text, &mut pos, b" ac");
+            bench_write_num(&mut text, &mut pos, self.slow_after_control_over_budget);
+
+            let frame = statustext_frame(self.sequence, &text);
+            self.sequence = self.sequence.wrapping_add(1);
+            let _ = self
+                .mailbox
+                .write_from_priority(&frame, SerialTxPriority::REPLACEABLE_TELEMETRY);
+        }
+
+        #[cfg(feature = "release-loop-classifier")]
+        {
+            let mut text = [0_u8; 50];
+            let mut pos = 0;
+            let slow_control = self.slow_control.max(1);
+            bench_write_bytes(&mut text, &mut pos, b"CLC e");
+            bench_write_count_max(
+                &mut text,
+                &mut pos,
+                self.sum_estimator_us / slow_control,
+                self.max_estimator_us as u32,
+            );
+            bench_write_bytes(&mut text, &mut pos, b" c");
+            bench_write_count_max(
+                &mut text,
+                &mut pos,
+                self.sum_controller_us / slow_control,
+                self.max_controller_us as u32,
+            );
+            bench_write_bytes(&mut text, &mut pos, b" m");
+            bench_write_count_max(
+                &mut text,
+                &mut pos,
+                self.sum_mixer_us / slow_control,
+                self.max_mixer_us as u32,
+            );
+            bench_write_bytes(&mut text, &mut pos, b" p");
+            bench_write_count_max(
+                &mut text,
+                &mut pos,
+                self.sum_pwm_us / slow_control,
+                self.max_pwm_us as u32,
+            );
+
+            let frame = statustext_frame(self.sequence, &text);
+            self.sequence = self.sequence.wrapping_add(1);
+            let _ = self
+                .mailbox
+                .write_from_priority(&frame, SerialTxPriority::REPLACEABLE_TELEMETRY);
+        }
     }
 
     fn reset(&mut self, now_us: u64) {
@@ -722,6 +1276,31 @@ impl LoopBench {
         self.sum_us = 0;
         self.max_us = 0;
         self.missed_250us = 0;
+        #[cfg(any(
+            feature = "release-loop-classifier",
+            feature = "release-loop-spike-counter"
+        ))]
+        {
+            self.slow_rx = 0;
+            self.slow_raw_imu = 0;
+            self.slow_raw_baro = 0;
+            self.slow_raw_rc = 0;
+            self.slow_telemetry_due = 0;
+            self.slow_telemetry_deferred = 0;
+            self.slow_after_control_over_budget = 0;
+            self.slow_control = 0;
+        }
+        #[cfg(feature = "release-loop-classifier")]
+        {
+            self.sum_estimator_us = 0;
+            self.sum_controller_us = 0;
+            self.sum_mixer_us = 0;
+            self.sum_pwm_us = 0;
+            self.max_estimator_us = 0;
+            self.max_controller_us = 0;
+            self.max_mixer_us = 0;
+            self.max_pwm_us = 0;
+        }
         self.buckets = [0; LOOP_BENCH_BUCKETS];
     }
 
@@ -765,6 +1344,13 @@ fn bench_write_num(out: &mut [u8; 50], pos: &mut usize, mut value: u32) {
         len -= 1;
         bench_write_bytes(out, pos, &digits[len..=len]);
     }
+}
+
+#[cfg(feature = "release-loop-classifier")]
+fn bench_write_count_max(out: &mut [u8; 50], pos: &mut usize, count: u32, max_us: u32) {
+    bench_write_num(out, pos, count);
+    bench_write_bytes(out, pos, b"/");
+    bench_write_num(out, pos, max_us);
 }
 
 #[cfg(feature = "release-loop-bench")]
@@ -831,6 +1417,8 @@ fn main() -> ! {
             pin13: peripherals.PIN_13,
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             pin14: peripherals.PIN_14,
+            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+            pin15: peripherals.PIN_15,
         },
         mailbox,
     );
@@ -850,8 +1438,29 @@ fn main() -> ! {
         #[cfg(feature = "release-loop-bench")]
         {
             let start_us = Instant::now().as_micros();
+            #[cfg(feature = "release-loop-classifier")]
+            let class = world.run_once_budgeted_classified();
+            #[cfg(feature = "release-loop-spike-counter")]
+            let class = world.run_once_spike_counted();
+            #[cfg(not(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            )))]
             let _ = world.run_once();
             let end_us = Instant::now().as_micros();
+            #[cfg(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            ))]
+            loop_bench.record(
+                end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
+                end_us,
+                class,
+            );
+            #[cfg(not(any(
+                feature = "release-loop-classifier",
+                feature = "release-loop-spike-counter"
+            )))]
             loop_bench.record(
                 end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
                 end_us,

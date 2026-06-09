@@ -6,9 +6,7 @@ use core::fmt::{self, Write};
 use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
 use panic_halt as _;
-use pico2w::gps::{
-    UbxNavPvtParser, gps_stats, make_ubx_packet, record_gps_byte, record_nav_pvt,
-};
+use pico2w::gps::{UbxNavPvtParser, gps_stats, make_ubx_packet, record_gps_byte, record_nav_pvt};
 use rp2350_platform::hal::{
     self as rp, bind_interrupts,
     clocks::ClockConfig,
@@ -37,7 +35,9 @@ impl Write for UartWriter<'_> {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
-    let peripherals = rp::init(HalConfig::new(ClockConfig::system_freq(300_000_000).unwrap()));
+    let peripherals = rp::init(HalConfig::new(
+        ClockConfig::system_freq(300_000_000).unwrap(),
+    ));
     let mut debug_uart = Uart::new_blocking(
         peripherals.UART0,
         peripherals.PIN_0,
@@ -93,7 +93,11 @@ async fn main(_spawner: Spawner) -> ! {
             let _ = writeln!(
                 writer,
                 "gps bytes={} sync={} frames={} last=0x{:08x} navpvt={}",
-                stats.total_bytes, stats.ubx_sync, stats.ubx_frames, stats.last_frame, stats.nav_pvt
+                stats.total_bytes,
+                stats.ubx_sync,
+                stats.ubx_frames,
+                stats.last_frame,
+                stats.nav_pvt
             );
             next_report_us = now_us.saturating_add(1_000_000);
         }
@@ -110,7 +114,14 @@ async fn configure_nav_pvt(gps_tx: &mut PioUartTx<'static, PIO0, 1>) {
         write_packet(gps_tx, &packet[..len]).await;
     }
     Timer::after_millis(50).await;
-    let rate_payload = [100_u16.to_le_bytes()[0], 100_u16.to_le_bytes()[1], 1, 0, 0, 0];
+    let rate_payload = [
+        100_u16.to_le_bytes()[0],
+        100_u16.to_le_bytes()[1],
+        1,
+        0,
+        0,
+        0,
+    ];
     if let Some(len) = make_ubx_packet(0x06, 0x08, &rate_payload, &mut packet) {
         write_packet(gps_tx, &packet[..len]).await;
     }

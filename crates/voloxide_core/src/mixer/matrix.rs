@@ -226,6 +226,9 @@ pub struct MixerParams<R: FlightFloat> {
     pub idle_throttle: R,
     pub spin_when_armed: bool,
     pub num_motors: usize,
+    pub fixed_wing: bool,
+    pub use_motor_parameters: bool,
+    pub throttle_axis: usize,
 }
 
 pub struct MatrixMixer<R: FlightFloat> {
@@ -262,6 +265,9 @@ impl<R: FlightFloat> MatrixMixer<R> {
             } else {
                 true
             },
+            fixed_wing: false,
+            use_motor_parameters: false,
+            throttle_axis: 2,
         };
 
         let mut mixer = Self {
@@ -273,6 +279,7 @@ impl<R: FlightFloat> MatrixMixer<R> {
             secondary_mixer: matrix_from_default(QUAD_X_MIXER),
         };
         mixer.status = mixer.refresh_mixer_config(params);
+        mixer.refresh_runtime_params(params);
         mixer
     }
 }
@@ -296,26 +303,14 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
         }
 
         let mut commands = *controls;
-        self.params.idle_throttle = param_float(ctx.params, ParamId::PARAM_MOTOR_IDLE_THROTTLE);
-        self.params.spin_when_armed =
-            param_int(ctx.params, ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) != 0;
-        self.params.num_motors = param_int(ctx.params, ParamId::PARAM_NUM_MOTORS).max(0) as usize;
-
-        let fixed_wing = param_int(ctx.params, ParamId::PARAM_FIXED_WING) != 0
-            || matches!(
-                param_int(ctx.params, ParamId::PARAM_PRIMARY_MIXER),
-                FIXEDWING_MIXER | INVERTED_VTAIL_MIXER
-            );
-
-        if fixed_wing {
+        if self.params.fixed_wing {
             apply_fixedwing_reversals(&mut commands, ctx.params);
-        } else if throttle_command(&commands, ctx.params).abs() < self.params.idle_throttle {
+        } else if throttle_command(&commands, self.params.throttle_axis).abs()
+            < self.params.idle_throttle
+        {
             commands.u[5] = <R as FlightFloat>::from_f32(0.0);
         }
 
-        let mixer_to_use = self.select_primary_or_secondary(ctx.rc_override);
-        let use_motor_parameters =
-            !fixed_wing && param_int(ctx.params, ParamId::PARAM_USE_MOTOR_PARAMETERS) != 0;
         let mut outputs = [<R as FlightFloat>::from_f32(0.0); NUM_MIXER_OUTPUTS];
         let mut max_output = <R as FlightFloat>::from_f32(1.0);
 
@@ -324,12 +319,13 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
                 continue;
             }
 
-            let value =
-                if use_motor_parameters && self.output_types[output] == MixerOutputType::Motor {
-                    self.mix_motor_parameter_output(output, &commands, mixer_to_use, &ctx)
-                } else {
-                    matrix_output(output, &commands, mixer_to_use)
-                };
+            let value = if self.params.use_motor_parameters
+                && self.output_types[output] == MixerOutputType::Motor
+            {
+                self.mix_motor_parameter_output(output, &commands, ctx.rc_override, &ctx)
+            } else {
+                self.matrix_output_selected(output, &commands, ctx.rc_override)
+            };
             outputs[output] = value;
 
             if self.output_types[output] == MixerOutputType::Motor && value.abs() > max_output {
@@ -377,8 +373,12 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
     }
 
     fn on_param_changed(&mut self, params: &Params, id: ParamId) -> Option<MixerStatus> {
+        if is_mixer_runtime_param(id) {
+            self.refresh_runtime_params(params);
+        }
         if is_mixer_config_param(id) {
             self.status = self.refresh_mixer_config(params);
+            self.refresh_runtime_params(params);
             Some(self.status)
         } else {
             None
@@ -387,6 +387,19 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
 }
 
 impl<R: FlightFloat> MatrixMixer<R> {
+    fn refresh_runtime_params(&mut self, params: &Params) {
+        self.params.idle_throttle = param_float(params, ParamId::PARAM_MOTOR_IDLE_THROTTLE);
+        self.params.spin_when_armed = param_int(params, ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED) != 0;
+        self.params.num_motors = param_int(params, ParamId::PARAM_NUM_MOTORS).max(0) as usize;
+        let primary_choice = param_int(params, ParamId::PARAM_PRIMARY_MIXER);
+        self.params.fixed_wing = param_int(params, ParamId::PARAM_FIXED_WING) != 0
+            || matches!(primary_choice, FIXEDWING_MIXER | INVERTED_VTAIL_MIXER);
+        self.params.use_motor_parameters =
+            !self.params.fixed_wing && param_int(params, ParamId::PARAM_USE_MOTOR_PARAMETERS) != 0;
+        self.params.throttle_axis =
+            param_int(params, ParamId::PARAM_RC_F_AXIS).clamp(0, 2) as usize;
+    }
+
     fn refresh_mixer_config(&mut self, params: &Params) -> MixerStatus {
         let primary_choice = param_int(params, ParamId::PARAM_PRIMARY_MIXER);
         if primary_choice >= NUM_MIXERS {
@@ -425,6 +438,7 @@ impl<R: FlightFloat> MatrixMixer<R> {
         MixerStatus::Healthy
     }
 
+    #[cfg(test)]
     fn select_primary_or_secondary(
         &self,
         rc_override: u16,
@@ -450,11 +464,12 @@ impl<R: FlightFloat> MatrixMixer<R> {
         &self,
         output: usize,
         commands: &ControllerOutput<R>,
-        mixer: [[R; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
+        rc_override: u16,
         ctx: &MixerCtx<'_, R>,
     ) -> R {
-        let omega_squared =
-            matrix_output(output, commands, mixer).max(<R as FlightFloat>::from_f32(0.0));
+        let omega_squared = self
+            .matrix_output_selected(output, commands, rc_override)
+            .max(<R as FlightFloat>::from_f32(0.0));
         let k_q = param_float(ctx.params, ParamId::PARAM_MOTOR_KV);
         if k_q < <R as FlightFloat>::from_f32(0.0000001) {
             return <R as FlightFloat>::from_f32(0.0);
@@ -486,26 +501,33 @@ impl<R: FlightFloat> MatrixMixer<R> {
 
         voltage / battery_voltage
     }
+
+    fn matrix_output_selected(
+        &self,
+        output: usize,
+        commands: &ControllerOutput<R>,
+        rc_override: u16,
+    ) -> R {
+        let mut value = <R as FlightFloat>::from_f32(0.0);
+        for input in 0..NUM_MIXER_OUTPUTS {
+            let row = if self.use_primary_row_for_override(input, rc_override) {
+                &self.primary_mixer[input]
+            } else {
+                &self.secondary_mixer[input]
+            };
+            value += commands.u[input] * row[output];
+        }
+        value
+    }
+
+    fn use_primary_row_for_override(&self, input: usize, rc_override: u16) -> bool {
+        ((3..=5).contains(&input) && rc_override & ATTITUDE_OVERRIDDEN != 0)
+            || (input <= 2 && rc_override & T_OVERRIDDEN != 0)
+    }
 }
 
-fn matrix_output<R: FlightFloat>(
-    output: usize,
-    commands: &ControllerOutput<R>,
-    mixer: [[R; NUM_MIXER_OUTPUTS]; NUM_MIXER_OUTPUTS],
-) -> R {
-    let mut value = <R as FlightFloat>::from_f32(0.0);
-    for input in 0..NUM_MIXER_OUTPUTS {
-        value += commands.u[input] * mixer[input][output];
-    }
-    value
-}
-
-fn throttle_command<R: FlightFloat>(commands: &ControllerOutput<R>, params: &Params) -> R {
-    match param_int(params, ParamId::PARAM_RC_F_AXIS) {
-        0 => commands.u[0],
-        1 => commands.u[1],
-        _ => commands.u[2],
-    }
+fn throttle_command<R: FlightFloat>(commands: &ControllerOutput<R>, throttle_axis: usize) -> R {
+    commands.u[throttle_axis.min(2)]
 }
 
 fn param_float<R: FlightFloat>(params: &Params, id: ParamId) -> R {
@@ -547,6 +569,18 @@ fn is_mixer_config_param(id: ParamId) -> bool {
         id,
         ParamId::PARAM_SECONDARY_MIXER_0_0,
         ParamId::PARAM_SECONDARY_MIXER_9_9,
+    )
+}
+
+fn is_mixer_runtime_param(id: ParamId) -> bool {
+    matches!(
+        id,
+        ParamId::PARAM_MOTOR_IDLE_THROTTLE
+            | ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED
+            | ParamId::PARAM_NUM_MOTORS
+            | ParamId::PARAM_FIXED_WING
+            | ParamId::PARAM_USE_MOTOR_PARAMETERS
+            | ParamId::PARAM_RC_F_AXIS
     )
 }
 

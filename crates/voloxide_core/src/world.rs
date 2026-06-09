@@ -11,7 +11,10 @@ use crate::{
         self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
         ExternalAttitudeCtx, ExternalAttitudeState,
     },
-    control::{ControlPipelineCtx, ControlPipelineResource, run_control_pipeline_if_new_imu},
+    control::{
+        ControlPipelineCtx, ControlPipelineResource, ControlPipelineTiming,
+        run_control_pipeline_if_new_imu,
+    },
     controller::{Controller, RcTrimCalibrator},
     estimator::Estimator,
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
@@ -36,7 +39,6 @@ use crate::{
 #[cfg(feature = "timing-diagnostics")]
 use crate::{
     comm::messages::{enums::Severity, messages::StatustextMsg},
-    control::ControlPipelineTiming,
     events::CommResponse,
 };
 #[cfg(feature = "timing-diagnostics")]
@@ -74,6 +76,26 @@ pub struct WorldRunStats {
     pub had_sensor: bool,
     pub had_imu: bool,
     pub ran_control: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WorldRunClass {
+    pub had_rx: bool,
+    pub had_raw_sensor: bool,
+    pub had_raw_imu: bool,
+    pub had_raw_baro: bool,
+    pub had_raw_rc: bool,
+    pub had_processed_imu: bool,
+    pub had_processed_baro: bool,
+    pub had_processed_rc: bool,
+    pub telemetry_due: bool,
+    pub telemetry_deferred: bool,
+    pub ran_control: bool,
+    pub elapsed_after_control_us: u32,
+    pub estimator_us: u16,
+    pub controller_us: u16,
+    pub mixer_us: u16,
+    pub pwm_us: u16,
 }
 
 #[cfg(feature = "timing-diagnostics")]
@@ -332,6 +354,8 @@ where
                 .state
                 .update(Event::HARDFAULT_REARM_REQUESTED, &world.params);
         }
+        world.estimator.update_params(&world.params);
+        world.controller.update_gains(&world.params);
         world
     }
 
@@ -352,6 +376,135 @@ where
             self.board.serial_flush();
             self.board.run_deferred_board_actions();
             true
+        }
+    }
+
+    #[cfg(not(feature = "timing-diagnostics"))]
+    pub fn run_once_classified(&mut self) -> WorldRunClass {
+        self.run_once_budgeted_classified()
+    }
+
+    #[cfg(not(feature = "timing-diagnostics"))]
+    pub fn run_once_spike_counted(&mut self) -> WorldRunClass {
+        let pass_start_us = self.board.clock_micros();
+        let had_rx = self.board.serial_rx_pending();
+        self.run_communication_and_parameter_service_stage();
+
+        self.board.update_sensor_bus(&mut self.raw_sensors);
+        let had_raw_imu = self.raw_sensors.imu.is_some();
+        let had_raw_baro = self.raw_sensors.baro.is_some();
+        let had_raw_rc = self.raw_sensors.rc.is_some();
+        let had_raw_sensor = raw_sensor_present(&self.raw_sensors);
+        self.process_sensor_bus_after_update();
+        self.update_sensor_health_and_calibration(self.board.clock_micros());
+
+        self.run_rc_command_state_stages();
+        let had_processed_imu = self.processed_sensors.imu.is_some();
+        let had_processed_baro = self.processed_sensors.baro.is_some();
+        let had_processed_rc = self.processed_sensors.rc.is_some();
+        let ran_control = self.run_control_and_mixing_stage_if_new_imu();
+        let telemetry_due = self
+            .comm
+            .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
+            || !self.comm_events.is_empty();
+        let elapsed_after_control_us = self.board.clock_micros().saturating_sub(pass_start_us);
+
+        self.drain_logs_and_send_responses();
+        self.run_telemetry_stage();
+        self.board.serial_flush();
+        self.board.run_deferred_board_actions();
+
+        WorldRunClass {
+            had_rx,
+            had_raw_sensor,
+            had_raw_imu,
+            had_raw_baro,
+            had_raw_rc,
+            had_processed_imu,
+            had_processed_baro,
+            had_processed_rc,
+            telemetry_due,
+            telemetry_deferred: false,
+            ran_control,
+            elapsed_after_control_us: elapsed_after_control_us.min(u32::MAX as u64) as u32,
+            estimator_us: 0,
+            controller_us: 0,
+            mixer_us: 0,
+            pwm_us: 0,
+        }
+    }
+
+    #[cfg(not(feature = "timing-diagnostics"))]
+    pub fn run_once_budgeted_classified(&mut self) -> WorldRunClass {
+        let pass_start_us = self.board.clock_micros();
+        let had_rx = self.board.serial_rx_pending();
+        self.run_communication_and_parameter_service_stage();
+
+        self.board.update_sensor_bus(&mut self.raw_sensors);
+        let had_raw_imu = self.raw_sensors.imu.is_some();
+        let had_raw_baro = self.raw_sensors.baro.is_some();
+        let had_raw_rc = self.raw_sensors.rc.is_some();
+        let had_raw_sensor = raw_sensor_present(&self.raw_sensors);
+        self.process_sensor_bus_after_update();
+        self.update_sensor_health_and_calibration(self.board.clock_micros());
+
+        self.run_rc_command_state_stages();
+        let had_processed_imu = self.processed_sensors.imu.is_some();
+        let had_processed_baro = self.processed_sensors.baro.is_some();
+        let had_processed_rc = self.processed_sensors.rc.is_some();
+        let mut control_timing = ControlPipelineTiming::default();
+        let ran_control =
+            self.run_control_and_mixing_stage_if_new_imu_measured(&mut control_timing);
+        let telemetry_due = self
+            .comm
+            .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
+            || !self.comm_events.is_empty();
+        let elapsed_after_control_us = self.board.clock_micros().saturating_sub(pass_start_us);
+        self.drain_logs_and_send_responses();
+        self.run_telemetry_stage();
+        self.board.serial_flush();
+        self.board.run_deferred_board_actions();
+
+        WorldRunClass {
+            had_rx,
+            had_raw_sensor,
+            had_raw_imu,
+            had_raw_baro,
+            had_raw_rc,
+            had_processed_imu,
+            had_processed_baro,
+            had_processed_rc,
+            telemetry_due,
+            telemetry_deferred: false,
+            ran_control,
+            elapsed_after_control_us: elapsed_after_control_us.min(u32::MAX as u64) as u32,
+            estimator_us: control_timing.estimator_us,
+            controller_us: control_timing.controller_us,
+            mixer_us: control_timing.mixer_us,
+            pwm_us: control_timing.pwm_us,
+        }
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    pub fn run_once_classified(&mut self) -> WorldRunClass {
+        let stats = self.run_once_measured();
+        WorldRunClass {
+            had_rx: stats.had_rx,
+            had_raw_sensor: stats.had_sensor,
+            had_raw_imu: stats.had_imu,
+            had_raw_baro: false,
+            had_raw_rc: false,
+            had_processed_imu: stats.had_imu,
+            had_processed_baro: false,
+            had_processed_rc: false,
+            telemetry_due: stats.telemetry_us != 0,
+            telemetry_deferred: false,
+            ran_control: stats.ran_control,
+            elapsed_after_control_us: stats.total_us,
+            estimator_us: stats.estimator_us,
+            controller_us: stats.controller_us,
+            mixer_us: stats.mixer_us,
+            pwm_us: stats.pwm_us,
         }
     }
 
@@ -614,6 +767,7 @@ where
     }
 
     fn apply_param_reactions(&mut self) {
+        let has_param_changes = self.param_events.changes.iter().next().is_some();
         for change in self.param_events.changes.iter() {
             let Some(status) = self.mixer.on_param_changed(&self.params, change.id) else {
                 continue;
@@ -643,6 +797,11 @@ where
             changes: EventReadPort::new(&self.param_events.changes),
         });
 
+        if has_param_changes {
+            self.estimator.update_params(&self.params);
+            self.controller.update_gains(&self.params);
+        }
+
         self.param_events.changes.clear();
     }
 
@@ -670,7 +829,6 @@ where
         sensor_presence
     }
 
-    #[cfg(feature = "timing-diagnostics")]
     fn process_sensor_bus_after_update(&mut self) {
         let calibration_flags_before = self.cal_flags;
         process_sensor_bus(
@@ -698,27 +856,7 @@ where
     #[cfg(not(feature = "timing-diagnostics"))]
     fn run_sensor_ingestion_stage(&mut self) {
         self.board.update_sensor_bus(&mut self.raw_sensors);
-        let calibration_flags_before = self.cal_flags;
-        process_sensor_bus(
-            &mut self.raw_sensors,
-            &mut self.processed_sensors,
-            &mut self.sensor_processors,
-            &mut self.cal_flags,
-            &mut self.params,
-        );
-        if calibration_flags_before.contains(CalibrationFlags::GYRO)
-            && !self.cal_flags.contains(CalibrationFlags::GYRO)
-            && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)
-        {
-            self.estimator.reset_adaptive_bias();
-        }
-        if calibration_flags_before.contains(CalibrationFlags::ACCEL)
-            && !self.cal_flags.contains(CalibrationFlags::ACCEL)
-            && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
-        {
-            self.estimator.reset();
-            self.control_pipeline = ControlPipelineResource::default();
-        }
+        self.process_sensor_bus_after_update();
     }
 
     fn drain_logs_and_send_responses(&mut self) {
@@ -805,12 +943,10 @@ where
             control_pipeline: &mut self.control_pipeline,
             pwm_output: &self.pwm_output,
             pwm: &mut self.pwm,
-            #[cfg(feature = "timing-diagnostics")]
             timing: None,
         })
     }
 
-    #[cfg(feature = "timing-diagnostics")]
     fn run_control_and_mixing_stage_if_new_imu_measured(
         &mut self,
         timing: &mut ControlPipelineTiming,
@@ -1007,7 +1143,6 @@ fn format_timing_board_detail(label: u8, bucket: TimingBucket) -> String<50> {
     text
 }
 
-#[cfg(feature = "timing-diagnostics")]
 fn raw_sensor_present<R: FlightFloat>(sensors: &SensorBus<R>) -> bool {
     sensors.imu.is_some()
         || sensors.mag.is_some()

@@ -10,12 +10,21 @@ import time
 
 
 MAVLINK_V1_STX = 0xFE
+HEARTBEAT = 0
+PARAM_REQUEST_READ = 20
+PARAM_REQUEST_LIST = 21
+PARAM_VALUE = 22
 RC_CHANNELS = 65
+TIMESYNC = 111
 SMALL_IMU = 181
 SMALL_BARO = 183
+ROSFLIGHT_CMD = 188
+ROSFLIGHT_CMD_ACK = 189
 ROSFLIGHT_STATUS = 191
+ROSFLIGHT_VERSION = 192
 ROSFLIGHT_GNSS = 197
 STATUSTEXT = 253
+ROSFLIGHT_CMD_SEND_VERSION = 10
 CRC_EXTRA = {
     0: 50,
     20: 214,
@@ -34,12 +43,12 @@ CRC_EXTRA = {
     188: 249,
     189: 113,
     190: 181,
-    191: 12,
+    191: 183,
     192: 134,
     193: 1,
     195: 65,
     196: 10,
-    197: 221,
+    197: 192,
     199: 48,
     253: 83,
 }
@@ -168,6 +177,35 @@ def parse_args():
         action="store_true",
         help="Print parser candidate and invalid CRC counters.",
     )
+    parser.add_argument(
+        "--timesync-probe",
+        action="store_true",
+        help="Send MAVLink TIMESYNC requests and report responses. UART transport opens read/write.",
+    )
+    parser.add_argument(
+        "--timesync-period-s",
+        type=float,
+        default=1.0,
+        help="Seconds between TIMESYNC probes when --timesync-probe is set.",
+    )
+    parser.add_argument(
+        "--bidirectional",
+        action="store_true",
+        help="Inject ground-station MAVLink frames while receiving telemetry.",
+    )
+    parser.add_argument(
+        "--acceptance",
+        action="store_true",
+        help="Enable bidirectional traffic and fail if required telemetry/replies are missing.",
+    )
+    parser.add_argument("--gcs-sysid", type=int, default=255)
+    parser.add_argument("--gcs-compid", type=int, default=190)
+    parser.add_argument("--target-system", type=int, default=1)
+    parser.add_argument("--target-component", type=int, default=250)
+    parser.add_argument("--heartbeat-hz", type=float, default=1.0)
+    parser.add_argument("--timesync-hz", type=float, default=5.0)
+    parser.add_argument("--request-version-s", type=float, default=1.0)
+    parser.add_argument("--request-params-s", type=float, default=2.0)
     return parser.parse_args()
 
 
@@ -187,10 +225,118 @@ def configure_uart(fd, baud):
 
 
 def open_uart(args):
-    fd = os.open(args.device, os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
+    mode = os.O_RDWR if args.timesync_probe or args.bidirectional or args.acceptance else os.O_RDONLY
+    fd = os.open(args.device, mode | os.O_NOCTTY | os.O_NONBLOCK)
     configure_uart(fd, args.baud)
-    termios.tcflush(fd, termios.TCIFLUSH)
+    termios.tcflush(fd, termios.TCIOFLUSH)
     return fd
+
+
+def mavlink_v1_frame(seq, sysid, compid, msgid, payload):
+    frame = bytearray([MAVLINK_V1_STX, len(payload), seq & 0xFF, sysid, compid, msgid])
+    frame.extend(payload)
+    crc = 0xFFFF
+    for byte in frame[1:]:
+        crc = crc_accumulate(byte, crc)
+    crc = crc_accumulate(CRC_EXTRA[msgid], crc)
+    frame.append(crc & 0xFF)
+    frame.append((crc >> 8) & 0xFF)
+    return bytes(frame)
+
+
+def timesync_request(seq):
+    payload = struct.pack("<qq", 0, time.monotonic_ns())
+    return mavlink_v1_frame(seq, 255, 190, TIMESYNC, payload)
+
+
+def write_transport(args, source, payload):
+    if args.transport == "uart":
+        os.write(source, payload)
+    else:
+        source.sendto(payload, (args.board, args.board_port))
+
+
+def heartbeat_payload():
+    return struct.pack("<IBBBBB", 0, 6, 8, 0, 4, 3)
+
+
+def timesync_payload():
+    return struct.pack("<qq", 0, time.monotonic_ns())
+
+
+def param_request_list_payload(args):
+    return struct.pack("<BB", args.target_system, args.target_component)
+
+
+def param_request_read_payload(args, param_name="", param_index=0):
+    param_id = param_name.encode("ascii", errors="ignore")[:16].ljust(16, b"\0")
+    return struct.pack("<hBB16s", param_index, args.target_system, args.target_component, param_id)
+
+
+def rosflight_cmd_payload(command):
+    return struct.pack("<B", command)
+
+
+class MavlinkInjector:
+    def __init__(self, args):
+        self.args = args
+        self.seq = 0
+        now = time.monotonic()
+        self.next_heartbeat = now
+        self.next_timesync = now
+        self.next_version = now + args.request_version_s
+        self.next_params = now + args.request_params_s
+        self.sent = {
+            "heartbeat": 0,
+            "timesync": 0,
+            "version_cmd": 0,
+            "param_request_list": 0,
+            "param_request_read": 0,
+        }
+
+    def frame(self, msgid, payload):
+        frame = mavlink_v1_frame(
+            self.seq,
+            self.args.gcs_sysid,
+            self.args.gcs_compid,
+            msgid,
+            payload,
+        )
+        self.seq = (self.seq + 1) & 0xFF
+        return frame
+
+    def service(self, source):
+        now = time.monotonic()
+        if self.args.heartbeat_hz > 0 and now >= self.next_heartbeat:
+            write_transport(self.args, source, self.frame(HEARTBEAT, heartbeat_payload()))
+            self.sent["heartbeat"] += 1
+            self.next_heartbeat = now + 1.0 / self.args.heartbeat_hz
+        if self.args.timesync_hz > 0 and now >= self.next_timesync:
+            write_transport(self.args, source, self.frame(TIMESYNC, timesync_payload()))
+            self.sent["timesync"] += 1
+            self.next_timesync = now + 1.0 / self.args.timesync_hz
+        if self.args.request_version_s > 0 and now >= self.next_version:
+            write_transport(
+                self.args,
+                source,
+                self.frame(ROSFLIGHT_CMD, rosflight_cmd_payload(ROSFLIGHT_CMD_SEND_VERSION)),
+            )
+            self.sent["version_cmd"] += 1
+            self.next_version = float("inf")
+        if self.args.request_params_s > 0 and now >= self.next_params:
+            write_transport(
+                self.args,
+                source,
+                self.frame(PARAM_REQUEST_LIST, param_request_list_payload(self.args)),
+            )
+            write_transport(
+                self.args,
+                source,
+                self.frame(PARAM_REQUEST_READ, param_request_read_payload(self.args, param_index=0)),
+            )
+            self.sent["param_request_list"] += 1
+            self.sent["param_request_read"] += 1
+            self.next_params = float("inf")
 
 
 def open_udp(args):
@@ -206,6 +352,64 @@ def open_udp(args):
 
 def decode_sensor_frame(frame):
     payload = frame["payload"]
+    if frame["msgid"] == HEARTBEAT and len(payload) == 9:
+        custom_mode, type_, autopilot, base_mode, system_status, mavlink_version = struct.unpack(
+            "<IBBBBB", payload
+        )
+        return {
+            "name": "heartbeat",
+            "board_us": None,
+            "values": {
+                "type": type_,
+                "autopilot": autopilot,
+                "base_mode": base_mode,
+                "custom_mode": custom_mode,
+                "system_status": system_status,
+                "mavlink_version": mavlink_version,
+            },
+        }
+    if frame["msgid"] == PARAM_VALUE and len(payload) == 25:
+        value, count, index, param_id, param_type = struct.unpack("<fHH16sB", payload)
+        return {
+            "name": "param",
+            "board_us": None,
+            "values": {
+                "id": param_id.split(b"\0", 1)[0].decode("ascii", errors="replace"),
+                "value": value,
+                "count": count,
+                "index": index,
+                "type": param_type,
+            },
+        }
+    if frame["msgid"] == TIMESYNC and len(payload) == 16:
+        tc1, ts1 = struct.unpack("<qq", payload)
+        return {
+            "name": "timesync",
+            "board_us": tc1 // 1000 if tc1 > 0 else None,
+            "values": {
+                "tc1": tc1,
+                "ts1": ts1,
+            },
+        }
+    if frame["msgid"] == ROSFLIGHT_CMD_ACK and len(payload) == 2:
+        command, success = struct.unpack("<BB", payload)
+        return {
+            "name": "cmd_ack",
+            "board_us": None,
+            "values": {
+                "command": command,
+                "success": success,
+            },
+        }
+    if frame["msgid"] == ROSFLIGHT_VERSION and len(payload) == 50:
+        version = payload.split(b"\0", 1)[0].decode("ascii", errors="replace")
+        return {
+            "name": "version",
+            "board_us": None,
+            "values": {
+                "version": version,
+            },
+        }
     if frame["msgid"] == SMALL_IMU and len(payload) == 36:
         values = struct.unpack("<Qfffffff", payload)
         return {
@@ -363,7 +567,7 @@ def parse_perf_text(text):
                 "p90_us": int(parts[3][3:]),
                 "p99_us": int(parts[4][3:]),
                 "max_us": int(parts[5][1:]),
-                "missed_250us": int(parts[6][1:]),
+                "missed_budget": int(parts[6][1:]),
             }
     except (ValueError, IndexError):
         return None
@@ -462,12 +666,12 @@ def summarize_perf(records):
             max_us = max(row["max_us"] for row in bench_rows)
             p90_us = max(row["p90_us"] for row in bench_rows)
             p99_us = max(row["p99_us"] for row in bench_rows)
-            missed = sum(row["missed_250us"] for row in bench_rows)
+            missed = sum(row["missed_budget"] for row in bench_rows)
             print(
                 "  release loop bench: "
                 f"n={total_count} avg={avg_us:.1f}us "
                 f"p90_max={p90_us}us p99_max={p99_us}us "
-                f"max={max_us}us missed_250us={missed}"
+                f"max={max_us}us missed_budget={missed}"
             )
     for cls in ["I", "R", "S", "U", "C"]:
         rows = [
@@ -547,6 +751,61 @@ def summarize_perf(records):
             print(f"    {title}: {details}")
 
 
+def acceptance_failures(args, parser, records):
+    failures = []
+    if not args.no_crc and parser.invalid_crc != 0:
+        failures.append(f"MAVLink CRC failures: {parser.invalid_crc} {parser.invalid_by_msgid}")
+    required = {
+        "imu": 100,
+        "baro": 1,
+        "rc": 1,
+        "status": 1,
+        "heartbeat": 1,
+        "timesync": 1,
+        "cmd_ack": 1,
+        "version": 1,
+        "param": 1,
+    }
+    for name, minimum in required.items():
+        if len(records[name]) < minimum:
+            failures.append(f"{name} frames below minimum: {len(records[name])} < {minimum}")
+
+    if records["cmd_ack"]:
+        matching = [
+            record
+            for record in records["cmd_ack"]
+            if record["values"].get("command") == ROSFLIGHT_CMD_SEND_VERSION
+            and record["values"].get("success") == 1
+        ]
+        if not matching:
+            failures.append("missing successful ROSFLIGHT_CMD_SEND_VERSION ack")
+
+    bench_rows = [
+        record["perf"]
+        for record in records["perf"]
+        if record["perf"]["kind"] == "release_loop_bench"
+    ]
+    if bench_rows:
+        missed = sum(row["missed_budget"] for row in bench_rows)
+        if missed != 0:
+            failures.append(f"release-loop budget misses: {missed}")
+
+    text_values = [record.get("text", "") for record in records["text"] + records["perf"]]
+    for prefix in ("IMDQ", "BRDQ"):
+        for text in text_values:
+            if text.startswith(prefix):
+                parts = text.split()
+                for part in parts:
+                    if (
+                        (part.startswith("d") or part.startswith("g"))
+                        and part[1:].isdigit()
+                        and int(part[1:]) != 0
+                    ):
+                        failures.append(f"{prefix} reported drops: {text}")
+
+    return failures
+
+
 def main():
     args = parse_args()
     parser = MavlinkV1Parser(validate_crc=not args.no_crc)
@@ -558,12 +817,21 @@ def main():
         "text": [],
         "rc": [],
         "gnss": [],
+        "timesync": [],
+        "heartbeat": [],
+        "param": [],
+        "cmd_ack": [],
+        "version": [],
     }
     shown = 0
     deadline = time.monotonic() + args.duration_s if args.duration_s > 0 else None
     rx_bytes = 0
     first_rx_ns = None
     last_rx_ns = None
+    timesync_seq = 0
+    timesync_sent = 0
+    next_timesync_ns = 0
+    injector = MavlinkInjector(args) if args.bidirectional or args.acceptance else None
 
     if args.transport == "uart":
         source = open_uart(args)
@@ -581,13 +849,30 @@ def main():
             if deadline is not None and time.monotonic() >= deadline:
                 break
             if (
+                not args.acceptance
+                and
                 len(records["imu"]) >= args.samples
                 and len(records["baro"]) >= min(args.samples, 50)
                 and len(records["status"]) >= min(args.samples, 50)
             ):
                 break
 
-            readable, _, _ = select.select([source], [], [], 0.25)
+            now_ns = time.monotonic_ns()
+            if args.timesync_probe and args.transport == "uart" and now_ns >= next_timesync_ns:
+                try:
+                    os.write(source, timesync_request(timesync_seq))
+                    timesync_seq = (timesync_seq + 1) & 0xFF
+                    timesync_sent += 1
+                    next_timesync_ns = now_ns + int(args.timesync_period_s * 1_000_000_000)
+                except BlockingIOError:
+                    next_timesync_ns = now_ns + 100_000_000
+            if injector is not None:
+                try:
+                    injector.service(source)
+                except BlockingIOError:
+                    pass
+
+            readable, _, _ = select.select([source], [], [], 0.05 if injector is not None else 0.25)
             if not readable:
                 if args.transport == "wifi":
                     source.sendto(args.hello.encode("ascii"), (args.board, args.board_port))
@@ -654,6 +939,11 @@ def main():
     summarize("baro", records["baro"])
     summarize("rc", records["rc"])
     summarize("gnss", records["gnss"])
+    summarize("timesync", records["timesync"])
+    summarize("heartbeat", records["heartbeat"])
+    summarize("param", records["param"])
+    summarize("cmd_ack", records["cmd_ack"])
+    summarize("version", records["version"])
     summarize("status", records["status"])
     summarize_text(records["text"])
     summarize_perf(records["perf"])
@@ -668,6 +958,21 @@ def main():
             f"parser: candidates={parser.candidates} invalid_crc={parser.invalid_crc} "
             f"invalid_by_msgid={parser.invalid_by_msgid}"
         )
+    if args.timesync_probe:
+        print(f"timesync probe: sent={timesync_sent} responses={len(records['timesync'])}")
+    if injector is not None:
+        print(
+            "injected: "
+            + " ".join(f"{key}={value}" for key, value in injector.sent.items())
+        )
+    if args.acceptance:
+        failures = acceptance_failures(args, parser, records)
+        if failures:
+            print("acceptance: FAIL")
+            for failure in failures:
+                print(f"  {failure}")
+            raise SystemExit(1)
+        print("acceptance: PASS")
 
 
 if __name__ == "__main__":

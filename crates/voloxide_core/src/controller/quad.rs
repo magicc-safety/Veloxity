@@ -178,13 +178,33 @@ impl<R: FlightFloat> Default for ControllerOutput<R> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct QuadController<R: FlightFloat> {
     pub roll_rate_pid: Pid<R>,
     pub pitch_rate_pid: Pid<R>,
     pub yaw_rate_pid: Pid<R>,
     pub roll_angle_pid: Pid<R>,
     pub pitch_angle_pid: Pid<R>,
+    equilibrium_torques: [R; 3],
+    rc_max_throttle: R,
+    use_motor_parameters: bool,
+    gains_current: bool,
+}
+
+impl<R: FlightFloat> Default for QuadController<R> {
+    fn default() -> Self {
+        Self {
+            roll_rate_pid: Pid::default(),
+            pitch_rate_pid: Pid::default(),
+            yaw_rate_pid: Pid::default(),
+            roll_angle_pid: Pid::default(),
+            pitch_angle_pid: Pid::default(),
+            equilibrium_torques: [r::<R>(0.0); 3],
+            rc_max_throttle: r::<R>(1.0),
+            use_motor_parameters: false,
+            gains_current: false,
+        }
+    }
 }
 
 impl<R: FlightFloat> QuadController<R> {
@@ -201,6 +221,10 @@ impl<R: FlightFloat> QuadController<R> {
             yaw_rate_pid,
             roll_angle_pid,
             pitch_angle_pid,
+            equilibrium_torques: [r::<R>(0.0); 3],
+            rc_max_throttle: r::<R>(1.0),
+            use_motor_parameters: false,
+            gains_current: true,
         }
     }
 
@@ -223,7 +247,13 @@ impl<R: FlightFloat> QuadController<R> {
         air_density: R,
     ) -> ControllerOutput<R> {
         let current_rates = state.body_rate;
-        let euler: Vector<R, 3> = state.into();
+        let needs_euler = command.qx.control_type == ControlType::Angle
+            || command.qy.control_type == ControlType::Angle;
+        let euler = if needs_euler {
+            Some(Vector::<R, 3>::from(state))
+        } else {
+            None
+        };
 
         let mut torque_x = match command.qx.control_type {
             ControlType::Rate => self.roll_rate_pid.run(
@@ -233,7 +263,7 @@ impl<R: FlightFloat> QuadController<R> {
                 update_integrators,
             ),
             ControlType::Angle => self.roll_angle_pid.run_with_derivative(
-                euler[0],
+                euler.unwrap()[0],
                 <R as FlightFloat>::from_f32(command.qx.value),
                 current_rates[0],
                 dt,
@@ -250,7 +280,7 @@ impl<R: FlightFloat> QuadController<R> {
                 update_integrators,
             ),
             ControlType::Angle => self.pitch_angle_pid.run_with_derivative(
-                euler[1],
+                euler.unwrap()[1],
                 <R as FlightFloat>::from_f32(command.qy.value),
                 current_rates[1],
                 dt,
@@ -270,12 +300,9 @@ impl<R: FlightFloat> QuadController<R> {
         };
 
         if add_equilibrium_torques {
-            torque_x +=
-                <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_X_EQ_TORQUE));
-            torque_y +=
-                <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_Y_EQ_TORQUE));
-            torque_z +=
-                <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_Z_EQ_TORQUE));
+            torque_x += self.equilibrium_torques[0];
+            torque_y += self.equilibrium_torques[1];
+            torque_z += self.equilibrium_torques[2];
         }
 
         let forces = Vector::from([
@@ -285,6 +312,8 @@ impl<R: FlightFloat> QuadController<R> {
                 params,
                 false,
                 air_density,
+                self.rc_max_throttle,
+                self.use_motor_parameters,
             ),
             force_output(
                 <R as FlightFloat>::from_f32(command.fy.value),
@@ -292,6 +321,8 @@ impl<R: FlightFloat> QuadController<R> {
                 params,
                 false,
                 air_density,
+                self.rc_max_throttle,
+                self.use_motor_parameters,
             ),
             force_output(
                 <R as FlightFloat>::from_f32(command.fz.value),
@@ -299,6 +330,8 @@ impl<R: FlightFloat> QuadController<R> {
                 params,
                 true,
                 air_density,
+                self.rc_max_throttle,
+                self.use_motor_parameters,
             ),
         ]);
 
@@ -409,10 +442,21 @@ impl<R: FlightFloat> Controller<R> for QuadController<R> {
             ParamValue::Float(val) => <R as FlightFloat>::from_f32(val),
             _ => r::<R>(0.0),
         };
+        self.equilibrium_torques = [
+            <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_X_EQ_TORQUE)),
+            <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_Y_EQ_TORQUE)),
+            <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_Z_EQ_TORQUE)),
+        ];
+        self.rc_max_throttle =
+            <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_RC_MAX_THROTTLE));
+        self.use_motor_parameters = param_int(params, ParamId::PARAM_USE_MOTOR_PARAMETERS) != 0;
+        self.gains_current = true;
     }
 
     fn control(&mut self, state: &Self::State, ctx: ControllerCtx<'_, R>) -> Self::ControlOutput {
-        self.update_gains(ctx.params);
+        if !self.gains_current {
+            self.update_gains(ctx.params);
+        }
 
         let update_integrators = ctx.state_manager.is_armed()
             && controller_should_update_integrators(ctx.command, ctx.dt);
@@ -475,17 +519,17 @@ fn force_output<R: FlightFloat>(
     params: &Params,
     is_fz: bool,
     air_density: R,
+    rc_max_throttle: R,
+    use_motor_parameters: bool,
 ) -> R {
     if control_type != ControlType::Throttle {
         return value;
     }
 
     let sign = if is_fz { r::<R>(-1.0) } else { r::<R>(1.0) };
-    let mut output = sign
-        * value
-        * <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_RC_MAX_THROTTLE));
+    let mut output = sign * value * rc_max_throttle;
 
-    if param_int(params, ParamId::PARAM_USE_MOTOR_PARAMETERS) != 0 {
+    if use_motor_parameters {
         output *= calculate_max_thrust(params, air_density);
     }
 

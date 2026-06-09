@@ -77,6 +77,7 @@ impl<'a, R: FlightFloat> From<&'a AttitudeState<R>> for Vector<R, 3> {
 pub struct QuadEstimator<R: FlightFloat> {
     k_p: R,
     k_i: R,
+    k_p_ext: R,
     q_hat: Quaternion<R>,
     q_dot: Quaternion<R>,
     body_rate: Vector<R, 3>,
@@ -103,6 +104,10 @@ pub struct QuadEstimator<R: FlightFloat> {
     // Adaptive gains during initialization
     init_time_us: u64,   // PARAM_INIT_TIME = 3000ms = 3,000,000 μs in C
     first_imu_time: u64, // Track when first IMU arrived
+    use_acc: bool,
+    use_quad_int: bool,
+    use_mat_exp: bool,
+    fixed_wing: bool,
 }
 
 impl<R: FlightFloat> QuadEstimator<R> {
@@ -110,6 +115,7 @@ impl<R: FlightFloat> QuadEstimator<R> {
         Self {
             k_p,
             k_i,
+            k_p_ext: <R as FlightFloat>::from_f32(1.5),
             q_hat: Quaternion::new(
                 <R as FlightFloat>::from_f32(1.0),
                 <R as FlightFloat>::from_f32(0.0),
@@ -145,6 +151,10 @@ impl<R: FlightFloat> QuadEstimator<R> {
             // Adaptive gains - 3 second initialization period
             init_time_us: 3_000_000,
             first_imu_time: 0,
+            use_acc: true,
+            use_quad_int: true,
+            use_mat_exp: true,
+            fixed_wing: false,
         }
     }
 
@@ -178,6 +188,21 @@ impl<R: FlightFloat> QuadEstimator<R> {
         // Read initialization time (convert milliseconds to microseconds)
         if let ParamValue::Int(v) = params.get_by_id(ParamId::PARAM_INIT_TIME) {
             self.init_time_us = (v as u64) * 1000;
+        }
+        if let ParamValue::Float(v) = params.get_by_id(ParamId::PARAM_FILTER_KP_EXT) {
+            self.k_p_ext = <R as FlightFloat>::from_f32(v);
+        }
+        if let ParamValue::Int(v) = params.get_by_id(ParamId::PARAM_FILTER_USE_ACC) {
+            self.use_acc = v != 0;
+        }
+        if let ParamValue::Int(v) = params.get_by_id(ParamId::PARAM_FILTER_USE_QUAD_INT) {
+            self.use_quad_int = v != 0;
+        }
+        if let ParamValue::Int(v) = params.get_by_id(ParamId::PARAM_FILTER_USE_MAT_EXP) {
+            self.use_mat_exp = v != 0;
+        }
+        if let ParamValue::Int(v) = params.get_by_id(ParamId::PARAM_FIXED_WING) {
+            self.fixed_wing = v != 0;
         }
     }
 }
@@ -235,12 +260,9 @@ impl<R: FlightFloat> QuadEstimator<R> {
         &mut self,
         imu: Option<packets::ImuPacket<R>>,
         _mag: Option<packets::MagPacket>,
-        params: &Params,
+        _params: &Params,
         dt: R,
     ) -> AttitudeState<R> {
-        // Update parameters from parameter server (matches C behavior)
-        self.update_params(params);
-
         if dt < <R as FlightFloat>::from_f32(0.0) {
             return AttitudeState {
                 q_hat: self.q_hat,
@@ -288,11 +310,6 @@ impl<R: FlightFloat> QuadEstimator<R> {
             self.gyro_lpf[2] =
                 (one - self.alpha_gyro_z) * raw_gyro[2] + self.alpha_gyro_z * self.gyro_lpf[2];
 
-            let use_acc = param_int(params, ParamId::PARAM_FILTER_USE_ACC) != 0;
-            let use_quad_int = param_int(params, ParamId::PARAM_FILTER_USE_QUAD_INT) != 0;
-            let use_mat_exp = param_int(params, ParamId::PARAM_FILTER_USE_MAT_EXP) != 0;
-            let fixed_wing = param_int(params, ParamId::PARAM_FIXED_WING) != 0;
-
             // Check if accelerometer magnitude is near 1g (gating)
             let accel_sqrd_norm = self.accel_lpf[0] * self.accel_lpf[0]
                 + self.accel_lpf[1] * self.accel_lpf[1]
@@ -303,7 +320,7 @@ impl<R: FlightFloat> QuadEstimator<R> {
             let lowerbound = (one - margin) * (one - margin) * g * g;
             let upperbound = (one + margin) * (one + margin) * g * g;
             let can_use_accel =
-                use_acc && accel_sqrd_norm > lowerbound && accel_sqrd_norm < upperbound;
+                self.use_acc && accel_sqrd_norm > lowerbound && accel_sqrd_norm < upperbound;
 
             let mut kp = <R as FlightFloat>::from_f32(0.0);
             let mut ki = self.k_i;
@@ -317,7 +334,7 @@ impl<R: FlightFloat> QuadEstimator<R> {
 
             if let Some(q_extatt) = self.q_extatt.take() {
                 w_err = extatt_correction(self.q_hat, q_extatt);
-                kp = param_float(params, ParamId::PARAM_FILTER_KP_EXT);
+                kp = self.k_p_ext;
                 let extatt_dt = <R as FlightFloat>::from_u64(
                     current_time.saturating_sub(self.last_extatt_update_us),
                 ) * <R as FlightFloat>::from_f32(1e-6);
@@ -330,21 +347,22 @@ impl<R: FlightFloat> QuadEstimator<R> {
                 self.last_extatt_update_us = current_time;
             }
 
-            if current_time < (param_int(params, ParamId::PARAM_INIT_TIME).max(0) as u64) * 1000 {
+            if current_time < self.init_time_us {
                 kp = self.k_p * <R as FlightFloat>::from_f32(10.0);
                 ki = self.k_i * <R as FlightFloat>::from_f32(10.0);
             }
 
             self.b_hat -= w_err * (ki * dt);
 
-            let wbar = self.smoothed_gyro_measurement(use_quad_int);
+            let wbar = self.smoothed_gyro_measurement(self.use_quad_int);
             let wfinal = wbar - self.b_hat + w_err * kp;
-            self.integrate_angular_rate(wfinal, dt, use_mat_exp);
+            self.integrate_angular_rate(wfinal, dt, self.use_mat_exp);
 
             self.body_rate = self.gyro_lpf - self.b_hat;
 
-            let unhealthy_due_to_accel =
-                use_acc && current_time > self.last_acc_update_us + 500_000 && !fixed_wing;
+            let unhealthy_due_to_accel = self.use_acc
+                && current_time > self.last_acc_update_us + 500_000
+                && !self.fixed_wing;
             if unhealthy_due_to_accel {
                 return AttitudeState {
                     q_hat: self.q_hat,
@@ -425,6 +443,20 @@ impl<R: FlightFloat> Estimator<R> for QuadEstimator<R> {
     type State = AttitudeState<R>;
 
     fn estimate(&mut self, sensors: &ProcessedSensors<R>, params: &Params, dt: R) -> Self::State {
+        self.update_params(params);
+        self.estimate_packets(sensors.imu, sensors.mag, params, dt)
+    }
+
+    fn update_params(&mut self, params: &Params) {
+        QuadEstimator::update_params(self, params);
+    }
+
+    fn estimate_with_cached_params(
+        &mut self,
+        sensors: &ProcessedSensors<R>,
+        params: &Params,
+        dt: R,
+    ) -> Self::State {
         self.estimate_packets(sensors.imu, sensors.mag, params, dt)
     }
 
@@ -443,24 +475,21 @@ impl<R: FlightFloat> Estimator<R> for QuadEstimator<R> {
         dt: R,
         external_attitude: Option<ExternalAttitudeMsg>,
     ) -> Self::State {
+        self.update_params(params);
+        self.estimate_with_external_attitude_cached_params(sensors, params, dt, external_attitude)
+    }
+
+    fn estimate_with_external_attitude_cached_params(
+        &mut self,
+        sensors: &ProcessedSensors<R>,
+        params: &Params,
+        dt: R,
+        external_attitude: Option<ExternalAttitudeMsg>,
+    ) -> Self::State {
         if let Some(external_attitude) = external_attitude {
             self.set_external_attitude_update(external_attitude);
         }
         self.estimate_packets(sensors.imu, sensors.mag, params, dt)
-    }
-}
-
-fn param_float<R: FlightFloat>(params: &Params, param_id: ParamId) -> R {
-    match params.get_by_id(param_id) {
-        ParamValue::Float(value) => <R as FlightFloat>::from_f32(value),
-        _ => <R as FlightFloat>::from_f32(0.0),
-    }
-}
-
-fn param_int(params: &Params, param_id: ParamId) -> i32 {
-    match params.get_by_id(param_id) {
-        ParamValue::Int(value) => value,
-        _ => 0,
     }
 }
 

@@ -40,7 +40,6 @@ where
     }
 }
 
-#[cfg(feature = "timing-diagnostics")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ControlPipelineTiming {
     pub estimator_us: u16,
@@ -107,20 +106,11 @@ where
     pub control_pipeline: &'a mut ControlPipelineResource<E::State, M::ActuatorCommands, R>,
     pub pwm_output: &'a PwmOutputState,
     pub pwm: &'a mut PD,
-    #[cfg(feature = "timing-diagnostics")]
     pub timing: Option<&'a mut ControlPipelineTiming>,
 }
 
 pub fn run_control_pipeline_if_new_imu<B, E, C, M, PD, R>(
-    #[cfg_attr(not(feature = "timing-diagnostics"), allow(unused_mut))] mut ctx: ControlPipelineCtx<
-        '_,
-        B,
-        E,
-        C,
-        M,
-        PD,
-        R,
-    >,
+    mut ctx: ControlPipelineCtx<'_, B, E, C, M, PD, R>,
 ) -> bool
 where
     B: BoardIo,
@@ -160,16 +150,14 @@ where
 
     let loop_start_us = ctx.board.clock_micros();
     let external_attitude = ctx.external_attitude.latest.take();
-    #[cfg(feature = "timing-diagnostics")]
-    let estimator_start_us = ctx.board.clock_micros();
-    let state = ctx.estimator.estimate_with_external_attitude(
+    let estimator_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
+    let state = ctx.estimator.estimate_with_external_attitude_cached_params(
         ctx.sensors,
         ctx.params,
         dt,
         external_attitude,
     );
-    #[cfg(feature = "timing-diagnostics")]
-    {
+    if let Some(estimator_start_us) = estimator_start_us {
         let elapsed_us = elapsed_u16(estimator_start_us, ctx.board.clock_micros());
         if let Some(timing) = &mut ctx.timing {
             timing.estimator_us = elapsed_us;
@@ -188,8 +176,7 @@ where
         );
     }
 
-    #[cfg(feature = "timing-diagnostics")]
-    let controller_start_us = ctx.board.clock_micros();
+    let controller_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
     let controls = ctx.controller.control(
         &state,
         ControllerCtx {
@@ -200,16 +187,14 @@ where
             dt,
         },
     );
-    #[cfg(feature = "timing-diagnostics")]
-    {
+    if let Some(controller_start_us) = controller_start_us {
         let elapsed_us = elapsed_u16(controller_start_us, ctx.board.clock_micros());
         if let Some(timing) = &mut ctx.timing {
             timing.controller_us = elapsed_us;
         }
     }
 
-    #[cfg(feature = "timing-diagnostics")]
-    let mixer_start_us = ctx.board.clock_micros();
+    let mixer_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
     let mixer_run = ctx.mixer.mix(
         &controls,
         MixerCtx {
@@ -231,16 +216,14 @@ where
             .state
             .update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER), ctx.params),
     }
-    #[cfg(feature = "timing-diagnostics")]
-    {
+    if let Some(mixer_start_us) = mixer_start_us {
         let elapsed_us = elapsed_u16(mixer_start_us, ctx.board.clock_micros());
         if let Some(timing) = &mut ctx.timing {
             timing.mixer_us = elapsed_us;
         }
     }
 
-    #[cfg(feature = "timing-diagnostics")]
-    let pwm_start_us = ctx.board.clock_micros();
+    let pwm_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
     let actuator_commands = mixer_run.commands;
     if !ctx.control_pipeline.pwm_rates_configured() {
         if ctx
@@ -263,8 +246,7 @@ where
     if let Err(error) = write_pwm_commands(ctx.board, ctx.pwm, ctx.pwm_output, &pwm_outputs) {
         crate::log_warn!("PWM driver rejected output command: {:?}", error);
     }
-    #[cfg(feature = "timing-diagnostics")]
-    {
+    if let Some(pwm_start_us) = pwm_start_us {
         let elapsed_us = elapsed_u16(pwm_start_us, ctx.board.clock_micros());
         if let Some(timing) = &mut ctx.timing {
             timing.pwm_us = elapsed_us;
@@ -280,7 +262,6 @@ where
     true
 }
 
-#[cfg(feature = "timing-diagnostics")]
 fn elapsed_u16(start_us: u64, end_us: u64) -> u16 {
     end_us.saturating_sub(start_us).min(u16::MAX as u64) as u16
 }

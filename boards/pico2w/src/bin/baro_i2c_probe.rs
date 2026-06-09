@@ -51,9 +51,14 @@ fn delay() {
     }
 }
 
-fn read_u8(i2c: &mut I2c<'static, rp::peripherals::I2C0, rp::i2c::Blocking>, addr: u8, reg: u8) -> Result<u8, ()> {
+fn read_u8(
+    i2c: &mut I2c<'static, rp::peripherals::I2C0, rp::i2c::Blocking>,
+    addr: u8,
+    reg: u8,
+) -> Result<u8, ()> {
     let mut out = [0_u8; 1];
-    i2c.blocking_write_read(addr, &[reg], &mut out).map_err(|_| ())?;
+    i2c.blocking_write_read(addr, &[reg], &mut out)
+        .map_err(|_| ())?;
     Ok(out[0])
 }
 
@@ -154,7 +159,12 @@ fn main() -> ! {
     i2c_config.sda_pullup = true;
     i2c_config.scl_pullup = true;
 
-    let mut i2c = I2c::new_blocking(peripherals.I2C0, peripherals.PIN_21, peripherals.PIN_20, i2c_config);
+    let mut i2c = I2c::new_blocking(
+        peripherals.I2C0,
+        peripherals.PIN_21,
+        peripherals.PIN_20,
+        i2c_config,
+    );
 
     for candidate in [0x68_u8, 0x69_u8] {
         match read_u8(&mut i2c, candidate, 0x75) {
@@ -211,7 +221,11 @@ fn main() -> ! {
     loop {
         match read_sample(&mut i2c, addr, &cal) {
             Ok((pressure, temperature)) => {
-                let _ = writeln!(writer, "baro pressure={:.1} temp={:.2}", pressure, temperature);
+                let _ = writeln!(
+                    writer,
+                    "baro pressure={:.1} temp={:.2}",
+                    pressure, temperature
+                );
             }
             Err(()) => {
                 let _ = writeln!(writer, "baro read failed");
