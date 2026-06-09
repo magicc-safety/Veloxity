@@ -1022,6 +1022,26 @@ struct LoopBench {
     max_mixer_us: u16,
     #[cfg(feature = "release-loop-classifier")]
     max_pwm_us: u16,
+    #[cfg(feature = "release-loop-classifier")]
+    control_count: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    control_sum_us: u64,
+    #[cfg(feature = "release-loop-classifier")]
+    control_max_us: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    control_missed_budget: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    control_buckets: [u32; LOOP_BENCH_BUCKETS],
+    #[cfg(feature = "release-loop-classifier")]
+    no_control_count: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    no_control_sum_us: u64,
+    #[cfg(feature = "release-loop-classifier")]
+    no_control_max_us: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    no_control_missed_budget: u32,
+    #[cfg(feature = "release-loop-classifier")]
+    no_control_buckets: [u32; LOOP_BENCH_BUCKETS],
     buckets: [u32; LOOP_BENCH_BUCKETS],
 }
 
@@ -1094,6 +1114,26 @@ impl LoopBench {
             max_mixer_us: 0,
             #[cfg(feature = "release-loop-classifier")]
             max_pwm_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            control_count: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            control_sum_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            control_max_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            control_missed_budget: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            control_buckets: [0; LOOP_BENCH_BUCKETS],
+            #[cfg(feature = "release-loop-classifier")]
+            no_control_count: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            no_control_sum_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            no_control_max_us: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            no_control_missed_budget: 0,
+            #[cfg(feature = "release-loop-classifier")]
+            no_control_buckets: [0; LOOP_BENCH_BUCKETS],
             buckets: [0; LOOP_BENCH_BUCKETS],
         }
     }
@@ -1128,6 +1168,8 @@ impl LoopBench {
         self.count = self.count.wrapping_add(1);
         self.sum_us = self.sum_us.saturating_add(elapsed_us as u64);
         self.max_us = self.max_us.max(elapsed_us);
+        #[cfg(feature = "release-loop-classifier")]
+        self.record_loop_closure_class(elapsed_us, class.ran_control);
         if elapsed_us > LOOP_BENCH_BUDGET_US {
             self.missed_250us = self.missed_250us.wrapping_add(1);
             self.slow_rx = self.slow_rx.wrapping_add(class.had_rx as u32);
@@ -1168,6 +1210,29 @@ impl LoopBench {
         if now_us >= self.next_report_us {
             self.report();
             self.reset(now_us);
+        }
+    }
+
+    #[cfg(feature = "release-loop-classifier")]
+    fn record_loop_closure_class(&mut self, elapsed_us: u32, ran_control: bool) {
+        let bucket =
+            (elapsed_us / LOOP_BENCH_BUCKET_US).min((LOOP_BENCH_BUCKETS - 1) as u32) as usize;
+        if ran_control {
+            self.control_count = self.control_count.wrapping_add(1);
+            self.control_sum_us = self.control_sum_us.saturating_add(elapsed_us as u64);
+            self.control_max_us = self.control_max_us.max(elapsed_us);
+            self.control_buckets[bucket] = self.control_buckets[bucket].wrapping_add(1);
+            if elapsed_us > LOOP_BENCH_BUDGET_US {
+                self.control_missed_budget = self.control_missed_budget.wrapping_add(1);
+            }
+        } else {
+            self.no_control_count = self.no_control_count.wrapping_add(1);
+            self.no_control_sum_us = self.no_control_sum_us.saturating_add(elapsed_us as u64);
+            self.no_control_max_us = self.no_control_max_us.max(elapsed_us);
+            self.no_control_buckets[bucket] = self.no_control_buckets[bucket].wrapping_add(1);
+            if elapsed_us > LOOP_BENCH_BUDGET_US {
+                self.no_control_missed_budget = self.no_control_missed_budget.wrapping_add(1);
+            }
         }
     }
 
@@ -1233,6 +1298,25 @@ impl LoopBench {
 
         #[cfg(feature = "release-loop-classifier")]
         {
+            let control_buckets = self.control_buckets;
+            let no_control_buckets = self.no_control_buckets;
+            self.report_loop_closure_class(
+                b'C',
+                self.control_count,
+                self.control_sum_us,
+                self.control_max_us,
+                self.control_missed_budget,
+                &control_buckets,
+            );
+            self.report_loop_closure_class(
+                b'N',
+                self.no_control_count,
+                self.no_control_sum_us,
+                self.no_control_max_us,
+                self.no_control_missed_budget,
+                &no_control_buckets,
+            );
+
             let mut text = [0_u8; 50];
             let mut pos = 0;
             let slow_control = self.slow_control.max(1);
@@ -1273,6 +1357,47 @@ impl LoopBench {
         }
     }
 
+    #[cfg(feature = "release-loop-classifier")]
+    fn report_loop_closure_class(
+        &mut self,
+        class: u8,
+        count: u32,
+        sum_us: u64,
+        max_us: u32,
+        missed_budget: u32,
+        buckets: &[u32; LOOP_BENCH_BUCKETS],
+    ) {
+        if count == 0 {
+            return;
+        }
+
+        let avg_us = (sum_us / count as u64).min(u32::MAX as u64) as u32;
+        let p90_us = Self::percentile_from(count, buckets, 90, max_us);
+        let p99_us = Self::percentile_from(count, buckets, 99, max_us);
+        let mut text = [0_u8; 50];
+        let mut pos = 0;
+        bench_write_bytes(&mut text, &mut pos, b"RLC ");
+        bench_write_bytes(&mut text, &mut pos, &[class]);
+        bench_write_bytes(&mut text, &mut pos, b" n");
+        bench_write_num(&mut text, &mut pos, count);
+        bench_write_bytes(&mut text, &mut pos, b" a");
+        bench_write_num(&mut text, &mut pos, avg_us);
+        bench_write_bytes(&mut text, &mut pos, b" p90");
+        bench_write_num(&mut text, &mut pos, p90_us);
+        bench_write_bytes(&mut text, &mut pos, b" p99");
+        bench_write_num(&mut text, &mut pos, p99_us);
+        bench_write_bytes(&mut text, &mut pos, b" x");
+        bench_write_num(&mut text, &mut pos, max_us);
+        bench_write_bytes(&mut text, &mut pos, b" m");
+        bench_write_num(&mut text, &mut pos, missed_budget);
+
+        let frame = statustext_frame(self.sequence, &text);
+        self.sequence = self.sequence.wrapping_add(1);
+        let _ = self
+            .mailbox
+            .write_from_priority(&frame, SerialTxPriority::REPLACEABLE_TELEMETRY);
+    }
+
     fn reset(&mut self, now_us: u64) {
         self.next_report_us = now_us.saturating_add(LOOP_BENCH_REPORT_US);
         self.count = 0;
@@ -1303,6 +1428,16 @@ impl LoopBench {
             self.max_controller_us = 0;
             self.max_mixer_us = 0;
             self.max_pwm_us = 0;
+            self.control_count = 0;
+            self.control_sum_us = 0;
+            self.control_max_us = 0;
+            self.control_missed_budget = 0;
+            self.control_buckets = [0; LOOP_BENCH_BUCKETS];
+            self.no_control_count = 0;
+            self.no_control_sum_us = 0;
+            self.no_control_max_us = 0;
+            self.no_control_missed_budget = 0;
+            self.no_control_buckets = [0; LOOP_BENCH_BUCKETS];
         }
         self.buckets = [0; LOOP_BENCH_BUCKETS];
     }
@@ -1317,6 +1452,24 @@ impl LoopBench {
             }
         }
         self.max_us
+    }
+
+    #[cfg(feature = "release-loop-classifier")]
+    fn percentile_from(
+        count: u32,
+        buckets: &[u32; LOOP_BENCH_BUCKETS],
+        percentile: u32,
+        max_us: u32,
+    ) -> u32 {
+        let target = count.saturating_mul(percentile).saturating_add(99) / 100;
+        let mut seen = 0_u32;
+        for (index, count) in buckets.iter().enumerate() {
+            seen = seen.saturating_add(*count);
+            if seen >= target {
+                return (index as u32).saturating_mul(LOOP_BENCH_BUCKET_US);
+            }
+        }
+        max_us
     }
 }
 

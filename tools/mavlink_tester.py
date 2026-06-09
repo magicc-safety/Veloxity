@@ -569,6 +569,17 @@ def parse_perf_text(text):
                 "max_us": int(parts[5][1:]),
                 "missed_budget": int(parts[6][1:]),
             }
+        if len(parts) == 8 and parts[0] == "RLC":
+            return {
+                "kind": "release_loop_class",
+                "class": parts[1],
+                "count": int(parts[2][1:]),
+                "avg_us": int(parts[3][1:]),
+                "p90_us": int(parts[4][3:]),
+                "p99_us": int(parts[5][3:]),
+                "max_us": int(parts[6][1:]),
+                "missed_budget": int(parts[7][1:]),
+            }
     except (ValueError, IndexError):
         return None
     return None
@@ -669,6 +680,28 @@ def summarize_perf(records):
             missed = sum(row["missed_budget"] for row in bench_rows)
             print(
                 "  release loop bench: "
+                f"n={total_count} avg={avg_us:.1f}us "
+                f"p90_max={p90_us}us p99_max={p99_us}us "
+                f"max={max_us}us missed_budget={missed}"
+            )
+    for cls, label in [("C", "release loop closure"), ("N", "release loop no-control")]:
+        rows = [
+            record["perf"]
+            for record in records
+            if record["perf"]["kind"] == "release_loop_class"
+            and record["perf"]["class"] == cls
+        ]
+        if not rows:
+            continue
+        total_count = sum(row["count"] for row in rows)
+        if total_count:
+            avg_us = sum(row["avg_us"] * row["count"] for row in rows) / total_count
+            max_us = max(row["max_us"] for row in rows)
+            p90_us = max(row["p90_us"] for row in rows)
+            p99_us = max(row["p99_us"] for row in rows)
+            missed = sum(row["missed_budget"] for row in rows)
+            print(
+                f"  {label}: "
                 f"n={total_count} avg={avg_us:.1f}us "
                 f"p90_max={p90_us}us p99_max={p99_us}us "
                 f"max={max_us}us missed_budget={missed}"

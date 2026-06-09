@@ -119,8 +119,27 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
 
 - RP2350 telemetry over ESP-NOW has carried MAVLink heartbeat, RC, TIMESYNC, STATUSTEXT, PERF, IMU,
   and barometer traffic in current branch testing.
-- Latest real-IMU release-loop run showed the loop average near `100 us`, with occasional spikes.
-  Spikes are the active area for firmware-side deferred processing and measurement work.
+- Latest real-IMU release-loop run through the ESP32C5 bridge used a 60 second measured window after
+  a 3 second warmup. The firmware was built with
+  `ism330dhcx-driver ism330dhcx-1k666 release-loop-bench`.
+  - IMU telemetry: `50.0 Hz`, board timestamp p99 `20.546 ms`.
+  - RC telemetry: `50.0 Hz`, board timestamp p99 `28.000 ms`.
+  - Barometer telemetry: `5.0 Hz`.
+  - Heartbeat and PERF statustext: `1.0 Hz`.
+  - Loop bench: `884263` loop samples, average `65.2 us`, p90 max `230 us`, p99 max `460 us`, max
+    `859 us`, `284` samples over the `600 us` budget.
+  - Transport throughput: about `5251 B/s`.
+  - MAVLink parser rejected `707` candidate frames by CRC; track this as ESP-NOW/USB serial
+    transport quality, not as a flight-loop timing failure.
+- Latest low-overhead classifier run split scheduler passes into closure/control and no-control
+  timing classes. The firmware was built with
+  `ism330dhcx-driver ism330dhcx-1k666 release-loop-classifier`.
+  - Closure/control pass: `103863` samples, average `393.3 us`, p90 max `510 us`, p99 max `710 us`,
+    max `971 us`, `2149` samples over `600 us`.
+  - No-control pass: `254588` samples, average `66.1 us`, p90 max `130 us`, p99 max `450 us`, max
+    `652 us`, `22` samples over `600 us`.
+  - All classifier passes: `358451` samples, average `160.9 us`, p90 max `430 us`, p99 max
+    `610 us`, max `971 us`, `2171` samples over `600 us`.
 - TIMESYNC request/response rate through the ESP-NOW bridge is not yet full parity with a wired
   link, but bidirectional MAVLink command/response routing is proven.
 

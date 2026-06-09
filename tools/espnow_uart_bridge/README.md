@@ -41,6 +41,25 @@ The current boards are configured as fixed ESP-NOW peers:
 
 Both images use Wi-Fi channel 1 and a `2000000` baud local serial rate.
 
+## MAVLink Runtime Test
+
+With the air XIAO connected to Pico UART0 and the ground XIAO connected to the host over USB-C, test
+the bridge as a MAVLink serial endpoint:
+
+```bash
+python3 tools/mavlink_tester.py \
+  --transport uart \
+  --device /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_38:44:BE:A4:15:B8-if00 \
+  --baud 2000000 \
+  --samples 20000 \
+  --duration-s 63 \
+  --warmup-s 3 \
+  --show 6 \
+  --diagnostics
+```
+
+The command measures 60 seconds after a 3 second warmup.
+
 ## Build
 
 Install and source ESP-IDF with ESP32-C5 support, then:

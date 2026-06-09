@@ -37,7 +37,6 @@ flows should not be reintroduced unless they are retested and updated against th
 ## Maintained Tutorials
 
 - [Voloxide ROScopter sim end-to-end](tutorials/voloxide-roscopter-sim-end-to-end.md)
-- [Pico 2 W MAVLink transport](tutorials/pico2w-mavlink-transport.md)
 - [Pico 2 W sensor bring-up](tutorials/pico2w-sensor-bringup.md)
 
 ROSplane tutorials were removed from this branch's active documentation because ROSplane has not

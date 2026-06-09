@@ -124,6 +124,67 @@ Use the bridge README for role-specific ESP-IDF commands:
 Operational rule from bring-up: put the XIAO boards into boot mode for flashing, then reset them
 after flashing so they leave download mode and run the flashed image.
 
+### Runtime Telemetry Test
+
+Use the ground XIAO USB Serial/JTAG endpoint as the host serial device. The current bridge UART rate
+is `2_000_000` baud.
+
+Example with the currently tested ground XIAO:
+
+```bash
+python3 tools/mavlink_tester.py \
+  --transport uart \
+  --device /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_38:44:BE:A4:15:B8-if00 \
+  --baud 2000000 \
+  --samples 20000 \
+  --duration-s 63 \
+  --warmup-s 3 \
+  --show 6 \
+  --diagnostics
+```
+
+The `63` second duration with a `3` second warmup produces a 60 second measured window.
+
+Latest 60 second result with RP2350 release firmware built as:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
+```
+
+| Stream | Measured rate | Notes |
+| --- | ---: | --- |
+| IMU telemetry | `50.0 Hz` | Board timestamp interval avg `20.000 ms`, p99 `20.546 ms`. |
+| RC telemetry | `50.0 Hz` | Board timestamp interval avg `20.000 ms`, p99 `28.000 ms`. |
+| Barometer telemetry | `5.0 Hz` | Host interval avg `199.986 ms`. |
+| Heartbeat | `1.0 Hz` | 60 frames in the 60 second window. |
+| PERF statustext | `1.0 Hz` | Loop bench avg `65.2 us`, p90 max `230 us`, p99 max `460 us`, max `859 us`. |
+
+Transport throughput in that run was about `5251 B/s`. The parser rejected `707` candidate frames by
+CRC over the 60 second run. Treat that as an ESP-NOW/USB serial transport-quality issue to track
+separately from RP2350 loop timing; the firmware loop timing stayed comfortably below the 600 us
+1.66 kHz budget except for `284` reported over-budget samples out of `884263` loop samples.
+
+To separate control-loop closure passes from passes that did not run control, use the classifier
+feature:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-1k666 release-loop-classifier'
+```
+
+Latest 60 second classifier result:
+
+| Pass class | Samples | Average | p90 max | p99 max | Max | Over 600 us |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Closure/control pass | `103863` | `393.3 us` | `510 us` | `710 us` | `971 us` | `2149` |
+| No-control pass | `254588` | `66.1 us` | `130 us` | `450 us` | `652 us` | `22` |
+| All classifier passes | `358451` | `160.9 us` | `430 us` | `610 us` | `971 us` | `2171` |
+
+In this report, a closure/control pass means `World` received a new processed IMU timestamp and ran
+estimator, controller, mixer, and PWM output. A no-control pass means the scheduler still serviced
+communication, sensors, RC/state, telemetry, and board actions, but did not close the control loop.
+
 ## Sensor Bring-Up
 
 Hardware probes live in `boards/pico2w/src/bin/`. Use them to isolate buses before debugging the

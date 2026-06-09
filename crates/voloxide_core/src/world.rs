@@ -500,7 +500,7 @@ where
             telemetry_due: stats.telemetry_us != 0,
             telemetry_deferred: false,
             ran_control: stats.ran_control,
-            elapsed_after_control_us: stats.total_us,
+            elapsed_after_control_us: stats.total_us as u32,
             estimator_us: stats.estimator_us,
             controller_us: stats.controller_us,
             mixer_us: stats.mixer_us,
