@@ -119,22 +119,74 @@ Current UART speed:
 
 For the full physical pinout, see [Pico 2 W flight hardware pinout](../pico2w-esc-imu-pinout.md).
 
-## Scope Timing Pins
+## Realtime Scheduler And Scope Timing
 
-The `scope-timing-pins` feature drives easy-to-probe Pico 2 W pins for logic-analyzer timing:
+The normal `World::run_once()` path is still used by simulation and broad host tests. The Pico 2 W
+firmware uses the realtime scheduler path in `World` so high-rate IMU closure is separated from
+slower service work:
+
+```text
+main loop on core 0
+├── realtime_scheduler_step
+│   ├── ImuControl when BoardIo::imu_pending() is true
+│   ├── Service when one deferred service phase is due and still early in the frame
+│   └── Idle otherwise
+├── run_imu_control_tick
+│   ├── drain latest IMU packet only
+│   ├── process IMU packet
+│   ├── update IMU health/calibration state
+│   └── run estimator/controller/mixer/PWM only for a new IMU timestamp
+└── run_service_step_with_deferral
+    ├── Input: MAVLink ingress, events, params, commands
+    ├── SensorsRc: non-IMU sensors and RC/state/LED/PWM state sync
+    ├── Responses: at most one queued response per service call
+    ├── Telemetry: one realtime telemetry group
+    ├── Flush: one budgeted serial flush step
+    └── DeferredBoard: board-specific deferred actions
+```
+
+The critical split is that RC command/state work is not run inside `run_imu_control_tick`. CRSF
+frames are still received on core 1 and queued, but the RC packet is drained and interpreted in the
+`SensorsRc` service phase. The control pipeline reads the latest already-computed command state.
+This preserves the expected ROSflight command/state behavior while keeping variable RC muxing and
+arming logic out of the IMU close-loop path.
+
+The service window is intentionally tight. A service phase can run only when:
+
+- no IMU sample is pending,
+- the service deferral deadline has elapsed,
+- the last control closure completed no more than `120 us` ago, and
+- this control sample has not already received a service phase.
+
+That gives each fresh IMU sample priority and prevents a late service phase from starting just
+before the next data-ready event.
+
+### Scope Timing Pins
+
+The `scope-timing-pins` feature drives easy-to-probe Pico 2 W pins for logic-analyzer timing.
+Connect analyzer ground to Pico ground and probe GP18, GP19, and GP22 at the Pico header.
 
 | Pico 2 W GPIO | Signal | What the pulse means |
 | --- | --- | --- |
-| GP18 | Loop pass boundary | Toggles at the start of each top-level `World::run_once()` call on core 0; edge-to-edge time is one full pass. |
-| GP19 | Control closure | High only after a fresh IMU timestamp is accepted and while estimator, controller, mixer, and PWM composition/write run. |
-| GP22 | Service or IMU producer | With only `scope-timing-pins`, high during non-control service work. With `imu-producer-scope`, high on core 1 from IMU producer start through SPI read/queue push completion. |
+| GP18 | Realtime pass boundary | Toggles at the start of each top-level realtime scheduler pass on core 0. Edge-to-edge time is a scheduler pass, not necessarily one control closure. |
+| GP19 | Control pipeline body | High only after a fresh IMU timestamp is accepted and while estimator, controller, mixer, PWM composition, and PWM write run. |
+| GP22 | Selected diagnostic window | Depends on the enabled scope feature. See below. |
 
-Connect the analyzer ground to Pico ground. Probe GP18, GP19, and GP22 at the Pico header. GP19
-should pulse at the IMU-driven control rate; GP18 will pulse more often because the firmware also
-services communication, sensors, RC/state, telemetry, and board actions between control closures.
-For the current no-baro IMU producer timing build, use `imu-producer-scope` and read GP22 pulse
-width as the core 1 IMU producer duration. Use GP22 falling edge to GP19 rising edge as the
-producer-to-control pickup latency, and GP19 pulse width as the inner control body timing.
+GP22 has several mutually-exclusive diagnostic modes:
+
+| Feature | GP22 meaning | Use |
+| --- | --- | --- |
+| `scope-timing-pins` only | Service phase duration | Measures non-control service work on core 0. |
+| `imu-producer-scope` | Core 1 IMU producer duration | Measures data-ready handling, SPI read, and IMU queue push. |
+| `pre-control-scope` | Pre-control work inside `run_imu_control_tick` | Measures IMU drain/process/health before GP19 rises. |
+| `rc-command-scope` | `run_rc_command_state_stages()` duration | Measures RC receive/interpreting, command muxing, state machine, PWM state sync, and LED update where that stage is called. |
+| `control-scope-estimator` | Estimator substage | Measures one control substage on GP22. |
+| `control-scope-controller` | Controller substage | Measures one control substage on GP22. |
+| `control-scope-mixer` | Mixer substage | Measures one control substage on GP22. |
+| `control-scope-pwm` | PWM composition/write substage | Measures one control substage on GP22. |
+
+Use only one GP22 mode at a time. The firmware has compile-time guards for the known conflicting
+scope modes.
 
 RP2350 interrupt-executor experiments are intentionally feature-gated. Use exactly one of:
 `raw-swi-smoke`, `interrupt-executor-smoke`, or `imu-producer-interrupt-executor`. The raw smoke
@@ -163,6 +215,88 @@ probe-rs download --probe 2e8a:000c-0:E6647C7403301534 \
 
 probe-rs reset --probe 2e8a:000c-0:E6647C7403301534 --chip RP235x
 ```
+
+### Logic-Analyzer Builds
+
+Common full-system producer timing build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins imu-producer-scope imu-producer-interrupt-executor'
+```
+
+Pre-control timing build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins pre-control-scope imu-producer-interrupt-executor'
+```
+
+RC command/state timing build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins rc-command-scope imu-producer-interrupt-executor'
+```
+
+Do not enable `timing-diagnostics`, `release-loop-bench`, `release-loop-classifier`, or
+`release-loop-spike-counter` when taking clean GPIO timing captures. Those features are useful for
+coarse telemetry, but they add work and can obscure the exact scope-edge timing.
+
+### Current Timing Measurements
+
+The current validated capture set used the real ISM330DHCX at its natural `1.666 kHz` ODR with full
+core 1 transport enabled. Budgets:
+
+- `600 us`: current 1.666 kHz IMU period.
+- `312.5 us`: desired 3.2 kHz close-loop budget.
+
+The measurements below are from Saleae CSV exports analyzed with `tools/analyze_scope_timing_csv.py`
+and companion edge-pair scripts.
+
+| Build / measurement | Mean | p99 | Worst | 312.5 us overruns | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| IMU producer high | `36.5 us` | `55.8 us` | `71.6 us` | `0` | Core 1 data-ready/SPI/queue work before the later RC split. |
+| IMU producer rising period | `563.3 us` | `577.2 us` | `590.9 us` | n/a | IMU arrival cadence was clean; the IMU was not the source of the long tail. |
+| Producer fall to control done | `218.2 us` | `314.1 us` | `393.9 us` | `143 / 12672` | Old full-system state before moving RC/state out of the hot tick. |
+| Pre-control before RC split | `88.7 us` | `143.5 us` | `179.6 us` | `0` | Full pre-control work; combined with control caused the 3.2 kHz misses. |
+| RC command/state stage | `49.7 us` | `98.8 us` | `146.9 us` | `0` | Confirmed RC/state was the major variable pre-control cost. |
+| Pre-control after RC split | `40.6 us` | `62.1 us` | `87.9 us` | `0` | Current hot IMU tick pre-control cost. |
+| Control pipeline after RC split | `123.5 us` | `189.3 us` | `239.1 us` | `0` | Current estimator/controller/mixer/PWM body on GP19. |
+| Full close-loop after RC split, pre-control rise to control fall | `168.4 us` | `241.6 us` | `286.4 us` | `0 / 6918` | Current measured close-loop path; worst margin is about `26 us` against 3.2 kHz. |
+| Realtime pass with control after RC split | `563.3 us` | `578.1 us` | `592.4 us` | n/a | The 600 us frame is clean in this capture. |
+
+Interpretation:
+
+- The firmware is clean for the `1.666 kHz` loop target with large margin.
+- The measured close-loop path is currently clean for `3.2 kHz`, but the worst-case margin is only
+  about `26 us`; more control-pipeline optimization is needed before treating 3.2 kHz as robust.
+- The remaining tail is now dominated by the control pipeline body on GP19, not by pre-control work.
+- Control start-to-start period is not the right 3.2 kHz metric on the current 1.666 kHz IMU ODR.
+  It naturally follows the IMU arrival period. Use pre-control start to control done for close-loop
+  work duration, and producer-period captures for IMU cadence.
+
+### Core 1 Transport Findings
+
+Several A/B feature gates are kept for future isolation:
+
+- `core1-disable-heartbeat`
+- `core1-disable-mavlink-tx`
+- `core1-disable-mavlink-rx`
+- `core1-disable-crsf`
+- `core1-disable-gps`
+
+Disabling CRSF plus MAVLink TX made the timing look close to an isolated IMU producer. CRSF alone
+was the largest single contributor to the old pre-control tail because completed CRSF packets were
+causing RC/state work to run inside the IMU tick. MAVLink TX also contributed by adding core 1
+transport pressure and mailbox activity. The current firmware mitigates this by:
+
+- moving RC/state out of `run_imu_control_tick`,
+- bounding response work to one response per realtime service call,
+- limiting service phases to the early post-control window,
+- reducing UART TX batch size to `64` bytes and adding a `100 us` TX pacing delay,
+- increasing CRSF UART read chunk size to `32` bytes, and
+- lowering UART/PIO/DMA transport interrupt priority relative to the IMU producer interrupt.
 
 ## ESP32C5 ESP-NOW Bridge
 
@@ -201,7 +335,7 @@ python3 tools/mavlink_tester.py \
 
 The `63` second duration with a `3` second warmup produces a 60 second measured window.
 
-Latest 60 second result with RP2350 release firmware built as:
+Historical 60 second result with RP2350 release firmware built as:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
@@ -218,18 +352,19 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --releas
 
 Transport throughput in that run was about `5251 B/s`. The parser rejected `707` candidate frames by
 CRC over the 60 second run. Treat that as an ESP-NOW/USB serial transport-quality issue to track
-separately from RP2350 loop timing; the firmware loop timing stayed comfortably below the 600 us
-1.66 kHz budget except for `284` reported over-budget samples out of `884263` loop samples.
+separately from RP2350 loop timing.
 
-To separate control-loop closure passes from passes that did not run control, use the classifier
-feature:
+Older bench and classifier reports counted broad scheduler passes rather than the exact IMU
+close-loop path. They were useful for finding the architecture problem, but GPIO captures are now
+the authoritative timing source for the realtime loop. To separate broad scheduler passes from
+passes that did not run control, use the classifier feature:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
   --features 'ism330dhcx-driver ism330dhcx-1k666 release-loop-classifier'
 ```
 
-Latest 60 second classifier result:
+Historical 60 second classifier result before the realtime RC/state split:
 
 | Pass class | Samples | Average | p90 max | p99 max | Max | Over 600 us |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -237,9 +372,10 @@ Latest 60 second classifier result:
 | No-control pass | `254588` | `66.1 us` | `130 us` | `450 us` | `652 us` | `22` |
 | All classifier passes | `358451` | `160.9 us` | `430 us` | `610 us` | `971 us` | `2171` |
 
-In this report, a closure/control pass means `World` received a new processed IMU timestamp and ran
-estimator, controller, mixer, and PWM output. A no-control pass means the scheduler still serviced
+In this report, a closure/control pass meant `World` received a new processed IMU timestamp and ran
+estimator, controller, mixer, and PWM output. A no-control pass meant the scheduler still serviced
 communication, sensors, RC/state, telemetry, and board actions, but did not close the control loop.
+Do not use those historical max values to evaluate the current 3.2 kHz close-loop budget.
 
 ## Sensor Bring-Up
 

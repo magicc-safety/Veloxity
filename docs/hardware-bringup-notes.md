@@ -117,47 +117,43 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
 
 ## Current End-To-End Findings
 
-- 2026-06-09 Saleae logic-analyzer capture in progress on RP2350/Pico 2 W loop timing.
-  - Flashed release firmware with
-    `ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins`.
-  - Deliberately did not enable `timing-diagnostics`, `release-loop-bench`,
-    `release-loop-classifier`, or `release-loop-spike-counter`; the firmware should be running the
-    normal release loop with telemetry plus GPIO strobes only.
-  - `GP18` is the loop-boundary toggle: it changes state at the start of each top-level
-    `World::run_once()` pass on core 0, so edge-to-edge time is one full pass.
-  - `GP19` is the control-closure strobe: high only during the fresh-IMU estimator, controller,
-    mixer, and PWM composition/write path.
-  - `GP22` is the non-control-work strobe with only `scope-timing-pins`. In the current
-    `imu-producer-scope` timing build, `GP22` instead marks the core 1 IMU producer duration from
-    observed data-ready/read start through SPI read and queue push completion.
-  - Flash command used the Raspberry Pi Debug Probe
-    `2e8a:000c-0:E6647C7403301534`; `probe-rs reset` returned success with warnings that the core
-    was already running and breakpoint cleanup timed out.
+- 2026-06-10 Saleae logic-analyzer captures validated the current RP2350/Pico 2 W realtime loop.
+  GPIO timing captures are now the authoritative loop-timing source; older MAVLink PERF and
+  classifier runs were useful for finding the issue but included broader scheduler work.
+- Current realtime firmware shape:
+  - core 1 owns ISM330DHCX data-ready handling, SPI read, IMU queue push, UART0 MAVLink transport,
+    UART1 CRSF receive, and GPS PIO service;
+  - core 0 owns `World`, the realtime scheduler, service phases, and the control pipeline;
+  - RC/state work is deferred to the `SensorsRc` service phase and is no longer run inside
+    `run_imu_control_tick`;
+  - one queued response is sent per realtime service response phase;
+  - service work can run only in the early post-control window.
+- Current timing-pin meanings:
+  - `GP18` toggles at each core 0 realtime scheduler pass boundary.
+  - `GP19` is high during the accepted-new-IMU estimator/controller/mixer/PWM body.
+  - `GP22` is selected by the scope feature: service, IMU producer, pre-control, RC command/state,
+    or one control substage.
+- Current validated close-loop timing after moving RC/state out of the hot IMU tick:
+  - pre-control work: mean `40.6 us`, p99 `62.1 us`, worst `87.9 us`;
+  - control pipeline: mean `123.5 us`, p99 `189.3 us`, worst `239.1 us`;
+  - full close-loop path from pre-control start to control done: mean `168.4 us`, p99 `241.6 us`,
+    worst `286.4 us`;
+  - 3.2 kHz budget misses: `0 / 6918` in the latest capture, with worst-case margin about `26 us`
+    against `312.5 us`;
+  - 1.666 kHz frame timing: no `600 us` overruns in the latest pre-control capture.
+- The measurement series found the main problem:
+  - the IMU producer cadence was clean and not the source of the long tail;
+  - disabling CRSF and MAVLink TX made timing close to the isolated IMU case;
+  - direct RC-stage scope captures showed `run_rc_command_state_stages()` could take p99 about
+    `98.8 us` and worst about `146.9 us`;
+  - moving RC/state to the service phase cut pre-control p99 from `143.5 us` to `62.1 us`.
 - RP2350 telemetry over ESP-NOW has carried MAVLink heartbeat, RC, TIMESYNC, STATUSTEXT, PERF, IMU,
-  and barometer traffic in current branch testing.
-- Latest real-IMU release-loop run through the ESP32C5 bridge used a 60 second measured window after
-  a 3 second warmup. The firmware was built with
-  `ism330dhcx-driver ism330dhcx-1k666 release-loop-bench`.
-  - IMU telemetry: `50.0 Hz`, board timestamp p99 `20.546 ms`.
-  - RC telemetry: `50.0 Hz`, board timestamp p99 `28.000 ms`.
-  - Barometer telemetry: `5.0 Hz`.
-  - Heartbeat and PERF statustext: `1.0 Hz`.
-  - Loop bench: `884263` loop samples, average `65.2 us`, p90 max `230 us`, p99 max `460 us`, max
-    `859 us`, `284` samples over the `600 us` budget.
-  - Transport throughput: about `5251 B/s`.
-  - MAVLink parser rejected `707` candidate frames by CRC; track this as ESP-NOW/USB serial
-    transport quality, not as a flight-loop timing failure.
-- Latest low-overhead classifier run split scheduler passes into closure/control and no-control
-  timing classes. The firmware was built with
-  `ism330dhcx-driver ism330dhcx-1k666 release-loop-classifier`.
-  - Closure/control pass: `103863` samples, average `393.3 us`, p90 max `510 us`, p99 max `710 us`,
-    max `971 us`, `2149` samples over `600 us`.
-  - No-control pass: `254588` samples, average `66.1 us`, p90 max `130 us`, p99 max `450 us`, max
-    `652 us`, `22` samples over `600 us`.
-  - All classifier passes: `358451` samples, average `160.9 us`, p90 max `430 us`, p99 max
-    `610 us`, max `971 us`, `2171` samples over `600 us`.
+  and pressure traffic in current branch testing. The current board has no flight barometer
+  installed for production use; pressure telemetry was from the earlier GY-91/BMP280 path.
 - TIMESYNC request/response rate through the ESP-NOW bridge is not yet full parity with a wired
   link, but bidirectional MAVLink command/response routing is proven.
+- See [RP2350 / Pico 2 W](boards/rp2350-pico2w.md) for the detailed scheduler, scope feature, and
+  timing table.
 
 ## Generated Artifacts
 

@@ -356,7 +356,8 @@ mutate RC, mutate command state, and mutate the flight state machine.
 
 ## Scheduler
 
-`World::run_once` is the scheduler entrypoint.
+`World::run_once` is the generic scheduler entrypoint. It is used by simulation, host tests, and
+boards that do not provide a board-specific realtime loop.
 
 ```text
 run_once
@@ -427,6 +428,67 @@ run_telemetry_stage
 ```
 
 The scheduler is deliberately explicit. Ordering is flight behavior.
+
+## Realtime Scheduler
+
+Board crates may use the finer-grained realtime scheduler methods instead of calling `run_once`
+directly. The Pico 2 W firmware does this so an IMU data-ready event can preempt slower service
+work without removing the ECS-style stage boundaries from `World`.
+
+The realtime scheduler decision is:
+
+```text
+realtime_scheduler_step
+├── ImuControl if BoardIo::imu_pending()
+├── Service if a deferred service phase is due and still early after the last control closure
+└── Idle otherwise
+```
+
+The IMU control path is intentionally short:
+
+```text
+run_imu_control_tick
+├── board.update_imu_sensor
+├── process_sensor_bus_after_update
+├── update_sensor_health_and_calibration
+└── run_control_and_mixing_stage_if_new_imu
+    └── estimator/controller/mixer/PWM for a new IMU timestamp
+```
+
+This path drains only the IMU producer queue. It does not run communication, telemetry, parameter
+service, non-IMU sensors, RC command/state, log drain, serial flush, or deferred board actions.
+Those operations are still part of the same `World` architecture; they are sliced into service
+phases:
+
+```text
+run_service_step_with_deferral
+├── Input
+│   └── run_communication_and_parameter_service_stage
+├── SensorsRc
+│   ├── board.update_service_sensor_bus
+│   ├── process non-IMU sensor packets
+│   ├── update_sensor_health_and_calibration
+│   └── run_rc_command_state_stages
+├── Responses
+│   └── drain_logs_and_send_responses_limited
+├── Telemetry
+│   └── run_realtime_telemetry_stage
+├── Flush
+│   └── board.serial_flush_budgeted
+└── DeferredBoard
+    └── board.run_deferred_board_actions
+```
+
+Each service call advances one phase. On the Pico 2 W, a service phase is allowed only when no IMU
+sample is pending and the loop is still within the configured post-control service window. This is
+what keeps telemetry, MAVLink command handling, RC interpretation, and board maintenance from
+starting late enough to steal time from the next IMU close-loop pass.
+
+RC command/state is deliberately in `SensorsRc`, not in `run_imu_control_tick`. CRSF packet parsing
+and queuing are board work; interpreting the newest RC packet, updating the command mux, running the
+state machine, syncing PWM output enable state, and updating LEDs are core `World` work. Keeping that
+work in a service phase preserves the expected ROSflight behavior while preventing variable RC
+packet arrivals from adding jitter to every IMU control closure.
 
 ## End-To-End Flow: ROSflight Standalone Sim
 

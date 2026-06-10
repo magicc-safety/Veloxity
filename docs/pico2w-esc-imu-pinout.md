@@ -74,11 +74,11 @@ on GPS `TX`, `SDA`, `SCL`, `PPS`, and any `DRDY` pad during bring-up.
 | ISM330DHCX INT2 reserve | GP15 | Optional FIFO/wakeup interrupt if needed |
 | GPS PPS / timepulse | GP16 | Optional GPIO interrupt input from GPS |
 | ESC telemetry reserve | GP17 | Reserved for AM32 telemetry or bidirectional DShot later |
-| Flight status LED / scope loop-boundary toggle | GP18 | Discrete GPIO LED by default; `scope-timing-pins` toggles this at each `World::run_once()` boundary |
+| Flight status LED / scope realtime-pass toggle | GP18 | Discrete GPIO LED by default; `scope-timing-pins` toggles this at each core 0 realtime scheduler pass boundary |
 | Addressable LED reserve / scope control strobe | GP19 | PIO-driven WS2812-style status strip by default; `scope-timing-pins` drives this high only during an IMU-triggered control closure |
 | Slow I2C SDA | GP20 | QMC5883L magnetometer plus GY-91/BMP280 pressure path |
 | Slow I2C SCL | GP21 | QMC5883L magnetometer plus GY-91/BMP280 pressure path |
-| Mag DRDY / aux interrupt / scope non-control strobe | GP22 | Optional QMC5883L data-ready input if exposed; otherwise spare GPIO. `scope-timing-pins` drives this high during non-control work. |
+| Mag DRDY / aux interrupt / scope diagnostic strobe | GP22 | Optional QMC5883L data-ready input if exposed; otherwise spare GPIO. `scope-timing-pins` uses this for the selected GP22 diagnostic mode. |
 | Future ADC0 | GP26 | Battery voltage/current path later |
 | Future ADC1 | GP27 | Battery voltage/current path later |
 | Future ADC2 | GP28 | Battery voltage/current path later |
@@ -232,9 +232,9 @@ This layout preserves LED options without stealing pins from sensors:
 
 | Pico 2 W | LED type | Notes |
 | --- | --- | --- |
-| GP18 | Discrete GPIO LED / scope loop-boundary toggle | Default flight/status LED; `scope-timing-pins` overrides this as a logic analyzer output |
+| GP18 | Discrete GPIO LED / scope realtime-pass toggle | Default flight/status LED; `scope-timing-pins` overrides this as a logic analyzer output |
 | GP19 | Addressable LED / scope control strobe | Optional PIO-driven WS2812-style status LED; `scope-timing-pins` overrides this as a logic analyzer output |
-| GP22 | Optional aux LED / scope non-control strobe | Optional spare status output; `scope-timing-pins` overrides this as a logic analyzer output |
+| GP22 | Optional aux LED / scope diagnostic strobe | Optional spare status output; `scope-timing-pins` overrides this as the selected GP22 diagnostic output |
 
 If GP22 is not needed for magnetometer data-ready, it can be used as a second discrete status LED.
 
@@ -254,32 +254,38 @@ depending on whether the ESC telemetry wire or bidirectional DShot turnaround is
 
 ## Firmware Shape
 
-Core 0 remains the deterministic flight side:
+Core 0 is the deterministic `World` side:
 
-- receives ISM330DHCX data-ready interrupts,
+- runs the realtime scheduler,
+- gives pending IMU samples priority over service work,
+- drains the latest queued IMU packet and closes the estimator/controller/mixer/PWM loop,
+- slices slower work into service phases,
+- runs RC command/state handling from the service `SensorsRc` phase,
+- runs telemetry enqueue, response drain, serial flush, and deferred board actions outside the hot
+  IMU tick.
+
+Core 1 owns hardware producers and transports that can jitter without directly blocking the control
+pipeline:
+
+- receives ISM330DHCX data-ready notifications,
 - samples the ISM330DHCX over SPI through the Embassy-supported `ism330dhcx-rs` driver,
 - pushes completed IMU packets into a board-local queue,
 - receives CRSF frames on UART1 and pushes completed RC packets into a board-local queue,
 - receives GPS serial data through the PIO UART and GPS PPS through a GPIO interrupt when wired,
-- polls the QMC5883L magnetometer over I2C or uses GP22 as a data-ready interrupt when available,
-- runs the Voloxide control loop from queued sensor samples,
-- polls slow barometer data separately.
+- runs UART0 MAVLink transport to the ESP32C5 bridge,
+- polls or services low-rate board-side sensor paths as they are enabled.
 
-Core 1 remains the communications side:
-
-- owns CYW43 Wi-Fi,
-- owns UDP MAVLink,
-- passes MAVLink bytes to core 0 through the mailbox.
-
-The IMU path should not cross the core boundary. Sensor samples should enter `voloxide_core` on core
-0 so the control loop is not gated by Wi-Fi, UDP, or mailbox scheduling.
+The IMU producer does cross from core 1 to core 0 through a small board-local queue, but the control
+pipeline does not wait on Wi-Fi, UDP, UART TX, CRSF parsing, GPS parsing, or mailbox scheduling.
+Core 0 closes the loop only from already-queued sensor and command state.
 
 ## Current Firmware Status
 
 The current RP2350 firmware path is designed around the ISM330DHCX as the flight IMU. The board
-code drains IMU samples from the ISM330DHCX queue, RC samples from the CRSF receiver queue, and
-barometer samples from the GY-91/BMP280 pressure path. The IMU path is intended to be
-interrupt-driven and to run at the closest natural ISM330DHCX ODR to 1.66 kHz.
+code drains IMU samples from the ISM330DHCX queue and RC samples from the CRSF receiver queue. The
+current board does not have a production barometer installed; the earlier GY-91/BMP280 pressure path
+remains a low-rate service-side reference path until the dedicated barometer hardware is added. The
+IMU path is interrupt-driven and currently runs at the closest natural ISM330DHCX ODR to `1.66 kHz`.
 
 Treat wiring changes as hardware changes that need fresh probe validation. Use
 `docs/tutorials/pico2w-sensor-bringup.md` to validate individual buses before debugging the full
