@@ -47,8 +47,8 @@ use core::fmt::Write;
 use heapless::String;
 
 const IMU_TIMEOUT_US: u64 = 100_000;
-const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 4;
-const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 260;
+const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 1;
+const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 120;
 #[cfg(feature = "timing-diagnostics")]
 const TIMING_DIAGNOSTIC_INTERVAL_US: u64 = 1_000_000;
 #[cfg(feature = "timing-diagnostics")]
@@ -439,7 +439,11 @@ where
         self.process_sensor_bus_after_update();
         self.update_sensor_health_and_calibration(self.board.clock_micros());
 
+        #[cfg(feature = "rc-command-scope")]
+        self.board.set_test_pin_3(true);
         self.run_rc_command_state_stages();
+        #[cfg(feature = "rc-command-scope")]
+        self.board.set_test_pin_3(false);
         let had_processed_imu = self.processed_sensors.imu.is_some();
         let had_processed_baro = self.processed_sensors.baro.is_some();
         let had_processed_rc = self.processed_sensors.rc.is_some();
@@ -489,7 +493,11 @@ where
         self.process_sensor_bus_after_update();
         self.update_sensor_health_and_calibration(self.board.clock_micros());
 
+        #[cfg(feature = "rc-command-scope")]
+        self.board.set_test_pin_3(true);
         self.run_rc_command_state_stages();
+        #[cfg(feature = "rc-command-scope")]
+        self.board.set_test_pin_3(false);
         let had_processed_imu = self.processed_sensors.imu.is_some();
         let had_processed_baro = self.processed_sensors.baro.is_some();
         let had_processed_rc = self.processed_sensors.rc.is_some();
@@ -646,12 +654,15 @@ where
     }
 
     pub fn run_imu_control_tick(&mut self) -> bool {
+        #[cfg(feature = "pre-control-scope")]
+        self.board.set_test_pin_3(true);
         let now_us = self.board.clock_micros();
         self.board.update_imu_sensor(&mut self.raw_sensors);
         let had_raw_imu = self.raw_sensors.imu.is_some();
         self.process_sensor_bus_after_update();
         self.update_sensor_health_and_calibration(now_us);
-        self.run_rc_command_state_stages();
+        #[cfg(feature = "pre-control-scope")]
+        self.board.set_test_pin_3(false);
         let ran_control = self.run_control_and_mixing_stage_if_new_imu();
         if had_raw_imu {
             self.last_realtime_control_us = self.board.clock_micros();
@@ -661,15 +672,18 @@ where
 
     pub fn run_imu_control_tick_classified(&mut self) -> WorldRunClass {
         let pass_start_us = self.board.clock_micros();
+        #[cfg(feature = "pre-control-scope")]
+        self.board.set_test_pin_3(true);
         let now_us = self.board.clock_micros();
         self.board.update_imu_sensor(&mut self.raw_sensors);
         let had_raw_imu = self.raw_sensors.imu.is_some();
         let had_raw_sensor = raw_sensor_present(&self.raw_sensors);
         self.process_sensor_bus_after_update();
         self.update_sensor_health_and_calibration(now_us);
-        self.run_rc_command_state_stages();
         let had_processed_imu = self.processed_sensors.imu.is_some();
         let had_processed_rc = self.processed_sensors.rc.is_some();
+        #[cfg(feature = "pre-control-scope")]
+        self.board.set_test_pin_3(false);
         let mut control_timing = ControlPipelineTiming::default();
         let ran_control =
             self.run_control_and_mixing_stage_if_new_imu_measured(&mut control_timing);

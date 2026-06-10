@@ -150,11 +150,12 @@ static CORE1_EXECUTOR: StaticCell<Executor> = StaticCell::new();
 ))]
 static CORE1_IMU_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
-const UART_TX_BATCH_BYTES: usize = 256;
+const UART_TX_BATCH_BYTES: usize = 64;
 const UART_RX_CHUNK_BYTES: usize = 16;
 const UART_IDLE_DELAY_US: u64 = 50;
+const UART_TX_BUDGET_DELAY_US: u64 = 100;
 const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
-const CRSF_RX_CHUNK_BYTES: usize = 8;
+const CRSF_RX_CHUNK_BYTES: usize = 32;
 const GPS_UART_BAUDRATE: u32 = 115_200;
 const MAIN_LOOP_MAX_SERVICE_DEFERRAL_US: u64 = 250;
 #[cfg(feature = "synthetic-imu")]
@@ -224,6 +225,23 @@ compile_error!("select only one synthetic IMU rate feature");
 ))]
 compile_error!(
     "select only one RP interrupt experiment feature: raw-swi-smoke, interrupt-executor-smoke, or imu-producer-interrupt-executor"
+);
+
+#[cfg(any(
+    all(feature = "pre-control-scope", feature = "imu-producer-scope"),
+    all(feature = "pre-control-scope", feature = "rc-command-scope"),
+    all(feature = "pre-control-scope", feature = "control-scope-estimator"),
+    all(feature = "pre-control-scope", feature = "control-scope-controller"),
+    all(feature = "pre-control-scope", feature = "control-scope-mixer"),
+    all(feature = "pre-control-scope", feature = "control-scope-pwm"),
+    all(feature = "rc-command-scope", feature = "imu-producer-scope"),
+    all(feature = "rc-command-scope", feature = "control-scope-estimator"),
+    all(feature = "rc-command-scope", feature = "control-scope-controller"),
+    all(feature = "rc-command-scope", feature = "control-scope-mixer"),
+    all(feature = "rc-command-scope", feature = "control-scope-pwm"),
+))]
+compile_error!(
+    "pre-control-scope and rc-command-scope use GP22 and cannot be combined with other GP22 scope modes"
 );
 #[cfg(all(
     feature = "ism330dhcx-driver",
@@ -729,6 +747,7 @@ async fn uart_tx_task(mut uart_tx: UartTx<'static, UartAsync>, mailbox: SharedMa
         } else {
             mailbox.record_uart_tx_error();
         }
+        Timer::after(Duration::from_micros(UART_TX_BUDGET_DELAY_US)).await;
     }
 }
 
@@ -805,6 +824,8 @@ struct ScopeTimingPins {
 #[cfg(all(
     feature = "scope-timing-pins",
     not(feature = "imu-producer-scope"),
+    not(feature = "pre-control-scope"),
+    not(feature = "rc-command-scope"),
     not(any(
         feature = "control-scope-estimator",
         feature = "control-scope-controller",
@@ -818,6 +839,8 @@ const SCOPE_GP22_MARKS_SERVICE: bool = true;
     feature = "scope-timing-pins",
     any(
         feature = "imu-producer-scope",
+        feature = "pre-control-scope",
+        feature = "rc-command-scope",
         feature = "control-scope-estimator",
         feature = "control-scope-controller",
         feature = "control-scope-mixer",
@@ -869,6 +892,9 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 not(feature = "synthetic-imu")
             )))]
             {
+                #[cfg(not(feature = "imu-producer-isolation"))]
+                configure_core1_transport_interrupt_priorities();
+
                 #[cfg(not(feature = "imu-producer-isolation"))]
                 let mavlink_uart = Uart::new(
                     resources.uart0,
@@ -1003,23 +1029,38 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 }
                 mailbox.set_comms_state(21);
                 executor.run(|spawner| {
-                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    #[cfg(not(any(
+                        feature = "imu-producer-isolation",
+                        feature = "core1-disable-heartbeat"
+                    )))]
                     if let Ok(token) = core1_heartbeat_task(mailbox) {
                         spawner.spawn(token);
                     }
-                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    #[cfg(not(any(
+                        feature = "imu-producer-isolation",
+                        feature = "core1-disable-mavlink-tx"
+                    )))]
                     if let Ok(token) = uart_tx_task(uart_tx, mailbox) {
                         spawner.spawn(token);
                     }
-                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    #[cfg(not(any(
+                        feature = "imu-producer-isolation",
+                        feature = "core1-disable-mavlink-rx"
+                    )))]
                     if let Ok(token) = uart_rx_task(uart_rx, mailbox) {
                         spawner.spawn(token);
                     }
-                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    #[cfg(not(any(
+                        feature = "imu-producer-isolation",
+                        feature = "core1-disable-crsf"
+                    )))]
                     if let Ok(token) = crsf_rx_task(crsf_rx) {
                         spawner.spawn(token);
                     }
-                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    #[cfg(not(any(
+                        feature = "imu-producer-isolation",
+                        feature = "core1-disable-gps"
+                    )))]
                     if let Ok(token) = gps_pio_task(gps_rx, gps_tx, gps_dma) {
                         spawner.spawn(token);
                     }
@@ -1047,6 +1088,14 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
             }
         },
     );
+}
+
+#[cfg(not(feature = "imu-producer-isolation"))]
+fn configure_core1_transport_interrupt_priorities() {
+    interrupt::UART0_IRQ.set_priority(Priority::P3);
+    interrupt::UART1_IRQ.set_priority(Priority::P3);
+    interrupt::PIO0_IRQ_0.set_priority(Priority::P3);
+    interrupt::DMA_IRQ_0.set_priority(Priority::P3);
 }
 
 fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> Pico2WWorld {

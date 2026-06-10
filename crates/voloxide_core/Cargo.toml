@@ -6,6 +6,8 @@ edition = "2024"
 [features]
 default = []
 timing-diagnostics = []
+pre-control-scope = []
+rc-command-scope = []
 control-scope-estimator = []
 control-scope-controller = []
 control-scope-mixer = []
