@@ -127,14 +127,20 @@ The `scope-timing-pins` feature drives easy-to-probe Pico 2 W pins for logic-ana
 | --- | --- | --- |
 | GP18 | Loop pass boundary | Toggles at the start of each top-level `World::run_once()` call on core 0; edge-to-edge time is one full pass. |
 | GP19 | Control closure | High only after a fresh IMU timestamp is accepted and while estimator, controller, mixer, and PWM composition/write run. |
-| GP22 | Non-control work | High during non-control work. On no-fresh-IMU passes this stays high for the full GP18 pass; on control passes it drops low while GP19 is high. |
+| GP22 | Service or IMU producer | With only `scope-timing-pins`, high during non-control service work. With `imu-producer-scope`, high on core 1 from IMU producer start through SPI read/queue push completion. |
 
 Connect the analyzer ground to Pico ground. Probe GP18, GP19, and GP22 at the Pico header. GP19
 should pulse at the IMU-driven control rate; GP18 will pulse more often because the firmware also
 services communication, sensors, RC/state, telemetry, and board actions between control closures.
-Use GP18 edge-to-edge intervals that overlap GP19 as full control-pass timing, GP18 intervals that
-do not overlap GP19 as full no-control-pass timing, and GP19 pulse width as the inner control body
-timing.
+For the current no-baro IMU producer timing build, use `imu-producer-scope` and read GP22 pulse
+width as the core 1 IMU producer duration. Use GP22 falling edge to GP19 rising edge as the
+producer-to-control pickup latency, and GP19 pulse width as the inner control body timing.
+
+RP2350 interrupt-executor experiments are intentionally feature-gated. Use exactly one of:
+`raw-swi-smoke`, `interrupt-executor-smoke`, or `imu-producer-interrupt-executor`. The raw smoke
+build only proves that `SWI_IRQ_5` can fire on core 1 by toggling GP22 from the interrupt handler.
+The executor smoke build proves that an Embassy interrupt executor task can poll from that IRQ. The
+real producer build moves only the ISM330DHCX producer task to that interrupt executor.
 
 Flash the logic-analyzer build:
 

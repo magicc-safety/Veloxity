@@ -1,5 +1,9 @@
 #![no_std]
 #![no_main]
+#![cfg_attr(
+    any(feature = "raw-swi-smoke", feature = "interrupt-executor-smoke"),
+    allow(dead_code, unused_imports)
+)]
 
 use core::ptr::addr_of_mut;
 
@@ -12,10 +16,20 @@ use pico2w::gps::{
 };
 #[cfg(any(
     feature = "synthetic-imu",
-    all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
+    all(
+        feature = "ism330dhcx-driver",
+        not(feature = "synthetic-imu"),
+        not(feature = "interrupt-executor-smoke"),
+        not(feature = "raw-swi-smoke")
+    )
 ))]
 use pico2w::ism330dhcx::SHARED_ISM330DHCX_IMU_QUEUE;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 use pico2w::ism330dhcx::{
     record_ism330dhcx_drdy_edge, record_ism330dhcx_init_attempt, record_ism330dhcx_init_failure,
     record_ism330dhcx_init_ok, record_ism330dhcx_read_error, record_ism330dhcx_read_ok,
@@ -28,6 +42,15 @@ use pico2w::rc_receiver::{
 use pico2w::{board, config::Pico2WConfig, pwm::PioPwmDriver};
 use rp2350_platform::hal::clocks::ClockConfig;
 use rp2350_platform::hal::dma;
+#[cfg(all(
+    any(
+        feature = "imu-producer-interrupt-executor",
+        feature = "interrupt-executor-smoke"
+    ),
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+use rp2350_platform::hal::executor::InterruptExecutor;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 use rp2350_platform::hal::gpio::{Input, Pull};
 #[cfg(any(
@@ -48,9 +71,7 @@ use rp2350_platform::hal::spi::{Blocking, Config as SpiConfig, Phase, Polarity, 
 use rp2350_platform::hal::{
     self as rp, Peri, bind_interrupts,
     config::Config as HalConfig,
-    executor::{Executor, InterruptExecutor},
-    interrupt,
-    interrupt::{InterruptExt, Priority},
+    executor::Executor,
     multicore::{Stack, spawn_core1},
     peripherals::{
         CORE1, DMA_CH0, DMA_CH1, DMA_CH2, DMA_CH3, DMA_CH4, PIN_0, PIN_1, PIN_6, PIN_7, PIN_8,
@@ -63,12 +84,30 @@ use rp2350_platform::hal::{
         UartRx, UartTx,
     },
 };
+#[cfg(all(
+    any(
+        feature = "imu-producer-interrupt-executor",
+        feature = "interrupt-executor-smoke",
+        feature = "raw-swi-smoke"
+    ),
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+use rp2350_platform::hal::{
+    interrupt,
+    interrupt::{InterruptExt, Priority},
+};
 use static_cell::StaticCell;
 #[cfg(feature = "release-loop-bench")]
 use voloxide_core::board::SerialTxPriority;
 #[cfg(any(
     feature = "synthetic-imu",
-    all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
+    all(
+        feature = "ism330dhcx-driver",
+        not(feature = "synthetic-imu"),
+        not(feature = "interrupt-executor-smoke"),
+        not(feature = "raw-swi-smoke")
+    )
 ))]
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
 use voloxide_core::world::RealtimeSchedulerStep;
@@ -175,39 +214,78 @@ const fn synthetic_imu_period_us() -> u64 {
     all(feature = "synthetic-imu-3333hz", feature = "synthetic-imu-4khz")
 ))]
 compile_error!("select only one synthetic IMU rate feature");
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(any(
+    all(feature = "raw-swi-smoke", feature = "interrupt-executor-smoke"),
+    all(feature = "raw-swi-smoke", feature = "imu-producer-interrupt-executor"),
+    all(
+        feature = "interrupt-executor-smoke",
+        feature = "imu-producer-interrupt-executor"
+    )
+))]
+compile_error!(
+    "select only one RP interrupt experiment feature: raw-swi-smoke, interrupt-executor-smoke, or imu-producer-interrupt-executor"
+);
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 #[cfg(feature = "ism330dhcx-1k666")]
 const ISM330DHCX_IMU_PERIOD_US: u64 = 0;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 #[cfg(not(feature = "ism330dhcx-1k666"))]
 const ISM330DHCX_IMU_PERIOD_US: u64 = 250;
 #[cfg(all(
     feature = "ism330dhcx-driver",
     feature = "ism330dhcx-1k666",
-    not(feature = "synthetic-imu")
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
 ))]
 const ISM330DHCX_CTRL1_XL: u8 = 0x84;
 #[cfg(all(
     feature = "ism330dhcx-driver",
     not(feature = "ism330dhcx-1k666"),
-    not(feature = "synthetic-imu")
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
 ))]
 const ISM330DHCX_CTRL1_XL: u8 = 0xa4;
 #[cfg(all(
     feature = "ism330dhcx-driver",
     feature = "ism330dhcx-1k666",
-    not(feature = "synthetic-imu")
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
 ))]
 const ISM330DHCX_CTRL2_G: u8 = 0x8c;
 #[cfg(all(
     feature = "ism330dhcx-driver",
     not(feature = "ism330dhcx-1k666"),
-    not(feature = "synthetic-imu")
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
 ))]
 const ISM330DHCX_CTRL2_G: u8 = 0xac;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 const ISM330DHCX_SPI_HZ: u32 = 10_000_000;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 const ISM330DHCX_WHO_AM_I: u8 = 0x6b;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_REPORT_US: u64 = 1_000_000;
@@ -320,7 +398,12 @@ async fn synthetic_imu_task() -> ! {
     }
 }
 
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 #[embassy_executor::task]
 async fn ism330dhcx_imu_task(
     mut spi: Spi<'static, SPI1, Blocking>,
@@ -382,7 +465,7 @@ async fn ism330dhcx_imu_task(
 }
 
 #[cfg(all(
-    any(feature = "interrupt-executor-smoke", feature = "raw-swi-smoke"),
+    feature = "interrupt-executor-smoke",
     feature = "imu-producer-scope",
     feature = "ism330dhcx-driver",
     not(feature = "synthetic-imu")
@@ -409,7 +492,30 @@ fn smoke_marker_delay() {
     }
 }
 
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "raw-swi-smoke",
+    feature = "imu-producer-scope",
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+#[inline(never)]
+fn run_raw_swi_smoke(mut scope: Output<'static>) -> ! {
+    scope.set_low();
+    interrupt::SWI_IRQ_5.set_priority(Priority::P1);
+    interrupt::SWI_IRQ_5.unpend();
+    unsafe { interrupt::SWI_IRQ_5.enable() };
+    loop {
+        interrupt::SWI_IRQ_5.pend();
+        smoke_marker_delay();
+    }
+}
+
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 fn ism330dhcx_init(
     spi: &mut Spi<'static, SPI1, Blocking>,
     cs: &mut Output<'static>,
@@ -426,7 +532,12 @@ fn ism330dhcx_init(
     Ok(who_am_i)
 }
 
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 fn ism330dhcx_read_packet(
     spi: &mut Spi<'static, SPI1, Blocking>,
     cs: &mut Output<'static>,
@@ -475,7 +586,12 @@ fn ism330dhcx_read_packet(
     })
 }
 
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 fn ism330dhcx_read_reg(
     spi: &mut Spi<'static, SPI1, Blocking>,
     cs: &mut Output<'static>,
@@ -489,7 +605,12 @@ fn ism330dhcx_read_reg(
     Ok(bytes[1])
 }
 
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+#[cfg(all(
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
 fn ism330dhcx_write_reg(
     spi: &mut Spi<'static, SPI1, Blocking>,
     cs: &mut Output<'static>,
@@ -728,82 +849,6 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
         unsafe { &mut *addr_of_mut!(CORE1_STACK) },
         move || {
             mailbox.set_comms_state(20);
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let mavlink_uart = Uart::new(
-                resources.uart0,
-                resources.pin0,
-                resources.pin1,
-                Irqs,
-                resources.dma_ch0,
-                resources.dma_ch1,
-                mavlink_uart_config(),
-            );
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let (uart_tx, uart_rx) = mavlink_uart.split();
-
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let crsf_uart = Uart::new(
-                resources.uart1,
-                resources.pin8,
-                resources.pin9,
-                Irqs,
-                resources.dma_ch2,
-                resources.dma_ch3,
-                crsf_uart_config(),
-            );
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let (_crsf_tx, crsf_rx) = crsf_uart.split();
-
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let mut pio = Pio::new(resources.pio0, Irqs);
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let gps_rx_program = PioUartDmaRxProgram::new(&mut pio.common);
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let gps_tx_program = PioUartTxProgram::new(&mut pio.common);
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let gps_rx = PioUartDmaRx::new(
-                GPS_UART_BAUDRATE,
-                &mut pio.common,
-                pio.sm0,
-                resources.pin7,
-                &gps_rx_program,
-            );
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let gps_tx = PioUartTx::new(
-                GPS_UART_BAUDRATE,
-                &mut pio.common,
-                pio.sm1,
-                resources.pin6,
-                &gps_tx_program,
-            );
-            #[cfg(not(feature = "imu-producer-isolation"))]
-            let gps_dma = dma::Channel::new(resources.dma_ch4, Irqs);
-
-            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-            let imu_spi = {
-                let mut spi_config = SpiConfig::default();
-                spi_config.frequency = ISM330DHCX_SPI_HZ;
-                spi_config.polarity = Polarity::IdleLow;
-                spi_config.phase = Phase::CaptureOnFirstTransition;
-                Spi::new_blocking(
-                    resources.spi1,
-                    resources.pin10,
-                    resources.pin11,
-                    resources.pin12,
-                    spi_config,
-                )
-            };
-            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-            let imu_cs = Output::new(resources.pin13, Level::High);
-            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-            let imu_drdy = Input::new(resources.pin14, Pull::Down);
-            #[cfg(all(
-                feature = "imu-producer-scope",
-                feature = "ism330dhcx-driver",
-                not(feature = "synthetic-imu")
-            ))]
-            let mut imu_scope = Output::new(resources.pin22, Level::Low);
-
             #[cfg(all(
                 feature = "raw-swi-smoke",
                 feature = "imu-producer-scope",
@@ -811,100 +856,193 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 not(feature = "synthetic-imu")
             ))]
             {
-                let _raw_scope = imu_scope;
-                interrupt::SWI_IRQ_5.set_priority(Priority::P1);
-                unsafe { interrupt::SWI_IRQ_5.enable() };
-                loop {
-                    interrupt::SWI_IRQ_5.pend();
-                    smoke_marker_delay();
-                }
+                let imu_scope = Output::new(resources.pin22, Level::Low);
+                run_raw_swi_smoke(imu_scope);
             }
 
-            let executor = CORE1_EXECUTOR.init(Executor::new());
-            #[cfg(all(
-                feature = "interrupt-executor-smoke",
+            #[cfg(not(all(
+                feature = "raw-swi-smoke",
                 feature = "imu-producer-scope",
                 feature = "ism330dhcx-driver",
                 not(feature = "synthetic-imu")
-            ))]
+            )))]
             {
-                imu_scope.set_high();
-                smoke_marker_delay();
-                imu_scope.set_low();
-                smoke_marker_delay();
-                interrupt::SWI_IRQ_5.set_priority(Priority::P1);
-                let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
-                imu_scope.set_high();
-                smoke_marker_delay();
-                imu_scope.set_low();
-                smoke_marker_delay();
-                if let Ok(token) = interrupt_executor_smoke_task(imu_scope) {
-                    imu_spawner.spawn(token);
-                }
-                interrupt::SWI_IRQ_5.pend();
-            }
-            #[cfg(all(
-                feature = "imu-producer-interrupt-executor",
-                not(feature = "interrupt-executor-smoke"),
-                feature = "ism330dhcx-driver",
-                not(feature = "synthetic-imu")
-            ))]
-            {
-                interrupt::SWI_IRQ_5.set_priority(Priority::P1);
-                let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
-                if let Ok(token) = ism330dhcx_imu_task(
-                    imu_spi,
-                    imu_cs,
-                    imu_drdy,
-                    #[cfg(feature = "imu-producer-scope")]
-                    imu_scope,
-                ) {
-                    imu_spawner.spawn(token);
-                }
-            }
-            mailbox.set_comms_state(21);
-            executor.run(|spawner| {
                 #[cfg(not(feature = "imu-producer-isolation"))]
-                if let Ok(token) = core1_heartbeat_task(mailbox) {
-                    spawner.spawn(token);
-                }
+                let mavlink_uart = Uart::new(
+                    resources.uart0,
+                    resources.pin0,
+                    resources.pin1,
+                    Irqs,
+                    resources.dma_ch0,
+                    resources.dma_ch1,
+                    mavlink_uart_config(),
+                );
                 #[cfg(not(feature = "imu-producer-isolation"))]
-                if let Ok(token) = uart_tx_task(uart_tx, mailbox) {
-                    spawner.spawn(token);
-                }
+                let (uart_tx, uart_rx) = mavlink_uart.split();
+
                 #[cfg(not(feature = "imu-producer-isolation"))]
-                if let Ok(token) = uart_rx_task(uart_rx, mailbox) {
-                    spawner.spawn(token);
-                }
+                let crsf_uart = Uart::new(
+                    resources.uart1,
+                    resources.pin8,
+                    resources.pin9,
+                    Irqs,
+                    resources.dma_ch2,
+                    resources.dma_ch3,
+                    crsf_uart_config(),
+                );
                 #[cfg(not(feature = "imu-producer-isolation"))]
-                if let Ok(token) = crsf_rx_task(crsf_rx) {
-                    spawner.spawn(token);
-                }
+                let (_crsf_tx, crsf_rx) = crsf_uart.split();
+
                 #[cfg(not(feature = "imu-producer-isolation"))]
-                if let Ok(token) = gps_pio_task(gps_rx, gps_tx, gps_dma) {
-                    spawner.spawn(token);
-                }
-                #[cfg(feature = "synthetic-imu")]
-                if let Ok(token) = synthetic_imu_task() {
-                    spawner.spawn(token);
-                }
+                let mut pio = Pio::new(resources.pio0, Irqs);
+                #[cfg(not(feature = "imu-producer-isolation"))]
+                let gps_rx_program = PioUartDmaRxProgram::new(&mut pio.common);
+                #[cfg(not(feature = "imu-producer-isolation"))]
+                let gps_tx_program = PioUartTxProgram::new(&mut pio.common);
+                #[cfg(not(feature = "imu-producer-isolation"))]
+                let gps_rx = PioUartDmaRx::new(
+                    GPS_UART_BAUDRATE,
+                    &mut pio.common,
+                    pio.sm0,
+                    resources.pin7,
+                    &gps_rx_program,
+                );
+                #[cfg(not(feature = "imu-producer-isolation"))]
+                let gps_tx = PioUartTx::new(
+                    GPS_UART_BAUDRATE,
+                    &mut pio.common,
+                    pio.sm1,
+                    resources.pin6,
+                    &gps_tx_program,
+                );
+                #[cfg(not(feature = "imu-producer-isolation"))]
+                let gps_dma = dma::Channel::new(resources.dma_ch4, Irqs);
+
                 #[cfg(all(
                     feature = "ism330dhcx-driver",
                     not(feature = "synthetic-imu"),
-                    not(feature = "imu-producer-interrupt-executor"),
                     not(feature = "interrupt-executor-smoke")
                 ))]
-                if let Ok(token) = ism330dhcx_imu_task(
-                    imu_spi,
-                    imu_cs,
-                    imu_drdy,
-                    #[cfg(feature = "imu-producer-scope")]
-                    imu_scope,
-                ) {
-                    spawner.spawn(token);
+                let imu_spi = {
+                    let mut spi_config = SpiConfig::default();
+                    spi_config.frequency = ISM330DHCX_SPI_HZ;
+                    spi_config.polarity = Polarity::IdleLow;
+                    spi_config.phase = Phase::CaptureOnFirstTransition;
+                    Spi::new_blocking(
+                        resources.spi1,
+                        resources.pin10,
+                        resources.pin11,
+                        resources.pin12,
+                        spi_config,
+                    )
+                };
+                #[cfg(all(
+                    feature = "ism330dhcx-driver",
+                    not(feature = "synthetic-imu"),
+                    not(feature = "interrupt-executor-smoke")
+                ))]
+                let imu_cs = Output::new(resources.pin13, Level::High);
+                #[cfg(all(
+                    feature = "ism330dhcx-driver",
+                    not(feature = "synthetic-imu"),
+                    not(feature = "interrupt-executor-smoke")
+                ))]
+                let imu_drdy = Input::new(resources.pin14, Pull::Down);
+                #[cfg(all(
+                    feature = "imu-producer-scope",
+                    feature = "ism330dhcx-driver",
+                    not(feature = "synthetic-imu")
+                ))]
+                let imu_scope = Output::new(resources.pin22, Level::Low);
+                #[cfg(feature = "interrupt-executor-smoke")]
+                let mut imu_scope = imu_scope;
+
+                let executor = CORE1_EXECUTOR.init(Executor::new());
+                #[cfg(all(
+                    feature = "interrupt-executor-smoke",
+                    feature = "imu-producer-scope",
+                    feature = "ism330dhcx-driver",
+                    not(feature = "synthetic-imu")
+                ))]
+                {
+                    imu_scope.set_high();
+                    smoke_marker_delay();
+                    imu_scope.set_low();
+                    smoke_marker_delay();
+                    interrupt::SWI_IRQ_5.set_priority(Priority::P1);
+                    let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
+                    imu_scope.set_high();
+                    smoke_marker_delay();
+                    imu_scope.set_low();
+                    smoke_marker_delay();
+                    if let Ok(token) = interrupt_executor_smoke_task(imu_scope) {
+                        imu_spawner.spawn(token);
+                    }
+                    interrupt::SWI_IRQ_5.pend();
                 }
-                mailbox.set_comms_state(22);
-            })
+                #[cfg(all(
+                    feature = "imu-producer-interrupt-executor",
+                    not(feature = "interrupt-executor-smoke"),
+                    feature = "ism330dhcx-driver",
+                    not(feature = "synthetic-imu")
+                ))]
+                {
+                    interrupt::SWI_IRQ_5.set_priority(Priority::P1);
+                    let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
+                    if let Ok(token) = ism330dhcx_imu_task(
+                        imu_spi,
+                        imu_cs,
+                        imu_drdy,
+                        #[cfg(feature = "imu-producer-scope")]
+                        imu_scope,
+                    ) {
+                        imu_spawner.spawn(token);
+                    }
+                }
+                mailbox.set_comms_state(21);
+                executor.run(|spawner| {
+                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    if let Ok(token) = core1_heartbeat_task(mailbox) {
+                        spawner.spawn(token);
+                    }
+                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    if let Ok(token) = uart_tx_task(uart_tx, mailbox) {
+                        spawner.spawn(token);
+                    }
+                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    if let Ok(token) = uart_rx_task(uart_rx, mailbox) {
+                        spawner.spawn(token);
+                    }
+                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    if let Ok(token) = crsf_rx_task(crsf_rx) {
+                        spawner.spawn(token);
+                    }
+                    #[cfg(not(feature = "imu-producer-isolation"))]
+                    if let Ok(token) = gps_pio_task(gps_rx, gps_tx, gps_dma) {
+                        spawner.spawn(token);
+                    }
+                    #[cfg(feature = "synthetic-imu")]
+                    if let Ok(token) = synthetic_imu_task() {
+                        spawner.spawn(token);
+                    }
+                    #[cfg(all(
+                        feature = "ism330dhcx-driver",
+                        not(feature = "synthetic-imu"),
+                        not(feature = "imu-producer-interrupt-executor"),
+                        not(feature = "interrupt-executor-smoke")
+                    ))]
+                    if let Ok(token) = ism330dhcx_imu_task(
+                        imu_spi,
+                        imu_cs,
+                        imu_drdy,
+                        #[cfg(feature = "imu-producer-scope")]
+                        imu_scope,
+                    ) {
+                        spawner.spawn(token);
+                    }
+                    mailbox.set_comms_state(22);
+                })
+            }
         },
     );
 }

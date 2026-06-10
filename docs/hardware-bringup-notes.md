@@ -127,8 +127,9 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
     `World::run_once()` pass on core 0, so edge-to-edge time is one full pass.
   - `GP19` is the control-closure strobe: high only during the fresh-IMU estimator, controller,
     mixer, and PWM composition/write path.
-  - `GP22` is the non-control-work strobe: high during non-control work, high for an entire
-    no-fresh-IMU pass, and low during the `GP19` control closure on control passes.
+  - `GP22` is the non-control-work strobe with only `scope-timing-pins`. In the current
+    `imu-producer-scope` timing build, `GP22` instead marks the core 1 IMU producer duration from
+    observed data-ready/read start through SPI read and queue push completion.
   - Flash command used the Raspberry Pi Debug Probe
     `2e8a:000c-0:E6647C7403301534`; `probe-rs reset` returned success with warnings that the core
     was already running and breakpoint cleanup timed out.
