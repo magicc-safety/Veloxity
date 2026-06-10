@@ -138,9 +138,11 @@ producer-to-control pickup latency, and GP19 pulse width as the inner control bo
 
 RP2350 interrupt-executor experiments are intentionally feature-gated. Use exactly one of:
 `raw-swi-smoke`, `interrupt-executor-smoke`, or `imu-producer-interrupt-executor`. The raw smoke
-build only proves that `SWI_IRQ_5` can fire on core 1 by toggling GP22 from the interrupt handler.
-The executor smoke build proves that an Embassy interrupt executor task can poll from that IRQ. The
-real producer build moves only the ISM330DHCX producer task to that interrupt executor.
+build proves that the selected RP2350 core 1 interrupt vector can fire by toggling GP22 from the
+interrupt handler. The current experiment uses `SIO_IRQ_BELL`, because `SIO_IRQ_FIFO` is owned by
+Embassy multicore and `SWI_IRQ_5` did not deliver on core 1 in bring-up captures. The executor smoke
+build proves that an Embassy interrupt executor task can poll from that IRQ. The real producer build
+moves only the ISM330DHCX producer task to that interrupt executor.
 
 Flash the logic-analyzer build:
 

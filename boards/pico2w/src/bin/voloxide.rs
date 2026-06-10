@@ -341,7 +341,7 @@ bind_interrupts!(struct Irqs {
     not(feature = "synthetic-imu")
 ))]
 #[interrupt]
-unsafe fn SWI_IRQ_5() {
+unsafe fn SIO_IRQ_BELL() {
     unsafe { CORE1_IMU_EXECUTOR.on_interrupt() };
 }
 
@@ -352,7 +352,7 @@ unsafe fn SWI_IRQ_5() {
     not(feature = "synthetic-imu")
 ))]
 #[interrupt]
-unsafe fn SWI_IRQ_5() {
+unsafe fn SIO_IRQ_BELL() {
     const SIO_GPIO_OUT_XOR0: *mut u32 = 0xd000_0028 as *mut u32;
     unsafe { core::ptr::write_volatile(SIO_GPIO_OUT_XOR0, 1 << 22) };
 }
@@ -500,12 +500,14 @@ fn smoke_marker_delay() {
 ))]
 #[inline(never)]
 fn run_raw_swi_smoke(mut scope: Output<'static>) -> ! {
-    scope.set_low();
-    interrupt::SWI_IRQ_5.set_priority(Priority::P1);
-    interrupt::SWI_IRQ_5.unpend();
-    unsafe { interrupt::SWI_IRQ_5.enable() };
+    scope.set_high();
+    smoke_marker_delay();
+    unsafe { cortex_m::interrupt::enable() };
+    interrupt::SIO_IRQ_BELL.set_priority(Priority::P1);
+    interrupt::SIO_IRQ_BELL.unpend();
+    unsafe { interrupt::SIO_IRQ_BELL.enable() };
     loop {
-        interrupt::SWI_IRQ_5.pend();
+        interrupt::SIO_IRQ_BELL.pend();
         smoke_marker_delay();
     }
 }
@@ -969,8 +971,8 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                     smoke_marker_delay();
                     imu_scope.set_low();
                     smoke_marker_delay();
-                    interrupt::SWI_IRQ_5.set_priority(Priority::P1);
-                    let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
+                    interrupt::SIO_IRQ_BELL.set_priority(Priority::P1);
+                    let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SIO_IRQ_BELL);
                     imu_scope.set_high();
                     smoke_marker_delay();
                     imu_scope.set_low();
@@ -978,7 +980,7 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                     if let Ok(token) = interrupt_executor_smoke_task(imu_scope) {
                         imu_spawner.spawn(token);
                     }
-                    interrupt::SWI_IRQ_5.pend();
+                    interrupt::SIO_IRQ_BELL.pend();
                 }
                 #[cfg(all(
                     feature = "imu-producer-interrupt-executor",
@@ -987,8 +989,8 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                     not(feature = "synthetic-imu")
                 ))]
                 {
-                    interrupt::SWI_IRQ_5.set_priority(Priority::P1);
-                    let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
+                    interrupt::SIO_IRQ_BELL.set_priority(Priority::P1);
+                    let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SIO_IRQ_BELL);
                     if let Ok(token) = ism330dhcx_imu_task(
                         imu_spi,
                         imu_cs,
