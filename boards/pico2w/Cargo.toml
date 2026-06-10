@@ -14,6 +14,16 @@ release-loop-bench = []
 release-loop-classifier = ["release-loop-bench"]
 release-loop-spike-counter = ["release-loop-bench"]
 scope-timing-pins = []
+imu-producer-scope = ["scope-timing-pins"]
+imu-producer-no-baro = ["imu-producer-scope"]
+imu-producer-isolation = ["imu-producer-no-baro"]
+imu-producer-interrupt-executor = []
+interrupt-executor-smoke = ["imu-producer-scope"]
+raw-swi-smoke = ["imu-producer-scope"]
+control-scope-estimator = ["voloxide_core/control-scope-estimator"]
+control-scope-controller = ["voloxide_core/control-scope-controller"]
+control-scope-mixer = ["voloxide_core/control-scope-mixer"]
+control-scope-pwm = ["voloxide_core/control-scope-pwm"]
 synthetic-imu = []
 synthetic-imu-1khz = ["synthetic-imu"]
 synthetic-imu-2khz = ["synthetic-imu"]
@@ -29,10 +39,7 @@ cortex-m = "0.7.7"
 cortex-m-rt = { version = "0.7.0" }
 crsf = "2.0.1"
 critical-section = "1.2.0"
-embassy-executor = { version = "0.10.0", features = [
-  "platform-cortex-m",
-  "executor-thread",
-] }
+embassy-executor = { version = "0.10.0" }
 embassy-sync = "0.8.0"
 embassy-time = "0.5.1"
 embedded-hal-nb = "1.0.0"

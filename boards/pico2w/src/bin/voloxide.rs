@@ -4,13 +4,8 @@
 use core::ptr::addr_of_mut;
 
 use cortex_m_rt::entry;
-use embassy_executor::Executor;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use embassy_time::with_timeout;
 use embassy_time::{Duration, Instant, Timer};
 use panic_halt as _;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use pico2w::barometer::SHARED_BARO_QUEUE;
 use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
 use pico2w::gps::{
     SHARED_GNSS_QUEUE, UbxNavPvtParser, make_ubx_packet, record_gps_byte, record_nav_pvt,
@@ -19,10 +14,11 @@ use pico2w::gps::{
     feature = "synthetic-imu",
     all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
 ))]
+use pico2w::ism330dhcx::SHARED_ISM330DHCX_IMU_QUEUE;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 use pico2w::ism330dhcx::{
-    SHARED_ISM330DHCX_IMU_QUEUE, record_ism330dhcx_drdy_edge, record_ism330dhcx_init_attempt,
-    record_ism330dhcx_init_failure, record_ism330dhcx_init_ok, record_ism330dhcx_read_error,
-    record_ism330dhcx_read_ok,
+    record_ism330dhcx_drdy_edge, record_ism330dhcx_init_attempt, record_ism330dhcx_init_failure,
+    record_ism330dhcx_init_ok, record_ism330dhcx_read_error, record_ism330dhcx_read_ok,
 };
 use pico2w::pio_uart_dma::{PioUartDmaRx, PioUartDmaRxProgram};
 use pico2w::rc_receiver::{
@@ -39,13 +35,22 @@ use rp2350_platform::hal::gpio::{Input, Pull};
     all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
 ))]
 use rp2350_platform::hal::gpio::{Level, Output};
+#[cfg(all(
+    feature = "imu-producer-scope",
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+use rp2350_platform::hal::peripherals::PIN_22;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, PIN_15, SPI1};
+use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, SPI1};
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 use rp2350_platform::hal::spi::{Blocking, Config as SpiConfig, Phase, Polarity, Spi};
 use rp2350_platform::hal::{
     self as rp, Peri, bind_interrupts,
     config::Config as HalConfig,
+    executor::{Executor, InterruptExecutor},
+    interrupt,
+    interrupt::{InterruptExt, Priority},
     multicore::{Stack, spawn_core1},
     peripherals::{
         CORE1, DMA_CH0, DMA_CH1, DMA_CH2, DMA_CH3, DMA_CH4, PIN_0, PIN_1, PIN_6, PIN_7, PIN_8,
@@ -61,15 +66,12 @@ use rp2350_platform::hal::{
 use static_cell::StaticCell;
 #[cfg(feature = "release-loop-bench")]
 use voloxide_core::board::SerialTxPriority;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use voloxide_core::errors::SensorError;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use voloxide_core::packets::BaroPacket;
 #[cfg(any(
     feature = "synthetic-imu",
     all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
 ))]
 use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
+use voloxide_core::world::RealtimeSchedulerStep;
 #[cfg(any(
     feature = "release-loop-classifier",
     feature = "release-loop-spike-counter"
@@ -99,6 +101,15 @@ type Pico2WWorld = World<
 
 static mut CORE1_STACK: Stack<65536> = Stack::new();
 static CORE1_EXECUTOR: StaticCell<Executor> = StaticCell::new();
+#[cfg(all(
+    any(
+        feature = "imu-producer-interrupt-executor",
+        feature = "interrupt-executor-smoke"
+    ),
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+static CORE1_IMU_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
 const UART_TX_BATCH_BYTES: usize = 256;
 const UART_RX_CHUNK_BYTES: usize = 16;
@@ -106,6 +117,7 @@ const UART_IDLE_DELAY_US: u64 = 50;
 const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 8;
 const GPS_UART_BAUDRATE: u32 = 115_200;
+const MAIN_LOOP_MAX_SERVICE_DEFERRAL_US: u64 = 250;
 #[cfg(feature = "synthetic-imu")]
 const SYNTHETIC_IMU_PERIOD_US: u64 = synthetic_imu_period_us();
 #[cfg(all(
@@ -194,8 +206,6 @@ const ISM330DHCX_CTRL2_G: u8 = 0x8c;
 ))]
 const ISM330DHCX_CTRL2_G: u8 = 0xac;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-const BMP280_SAMPLE_INTERVAL_US: u64 = 20_000;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 const ISM330DHCX_SPI_HZ: u32 = 10_000_000;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 const ISM330DHCX_WHO_AM_I: u8 = 0x6b;
@@ -244,6 +254,31 @@ bind_interrupts!(struct Irqs {
         dma::InterruptHandler<DMA_CH4>;
 });
 
+#[cfg(all(
+    any(
+        feature = "imu-producer-interrupt-executor",
+        feature = "interrupt-executor-smoke"
+    ),
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+#[interrupt]
+unsafe fn SWI_IRQ_5() {
+    unsafe { CORE1_IMU_EXECUTOR.on_interrupt() };
+}
+
+#[cfg(all(
+    feature = "raw-swi-smoke",
+    feature = "imu-producer-scope",
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+#[interrupt]
+unsafe fn SWI_IRQ_5() {
+    const SIO_GPIO_OUT_XOR0: *mut u32 = 0xd000_0028 as *mut u32;
+    unsafe { core::ptr::write_volatile(SIO_GPIO_OUT_XOR0, 1 << 22) };
+}
+
 fn mavlink_uart_config() -> UartConfig {
     let mut config = UartConfig::default();
     config.baudrate = MAVLINK_UART_BAUDRATE;
@@ -291,7 +326,7 @@ async fn ism330dhcx_imu_task(
     mut spi: Spi<'static, SPI1, Blocking>,
     mut cs: Output<'static>,
     mut drdy: Input<'static>,
-    mut baro_cs: Output<'static>,
+    #[cfg(feature = "imu-producer-scope")] mut imu_scope: Output<'static>,
 ) -> ! {
     let mut seq = 0_u32;
     loop {
@@ -308,35 +343,12 @@ async fn ism330dhcx_imu_task(
         }
 
         {
-            let mut baro = Bmp280State::new();
-            let mut next_baro_us = Instant::now().as_micros();
             loop {
-                let now_us = if ISM330DHCX_IMU_PERIOD_US == 0 {
-                    let now_us = Instant::now().as_micros();
-                    let baro_wait_us = next_baro_us.saturating_sub(now_us).max(1);
-                    match with_timeout(
-                        Duration::from_micros(baro_wait_us),
-                        drdy.wait_for_rising_edge(),
-                    )
-                    .await
-                    {
-                        Ok(()) => {
-                            record_ism330dhcx_drdy_edge();
-                            let now_us = Instant::now().as_micros();
-                            match ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
-                                Ok(packet) => {
-                                    record_ism330dhcx_read_ok();
-                                    SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
-                                    seq = seq.wrapping_add(1);
-                                }
-                                Err(()) => record_ism330dhcx_read_error(),
-                            }
-                            now_us
-                        }
-                        Err(_) => Instant::now().as_micros(),
-                    }
-                } else {
-                    Timer::after(Duration::from_micros(ISM330DHCX_IMU_PERIOD_US)).await;
+                if ISM330DHCX_IMU_PERIOD_US == 0 {
+                    drdy.wait_for_rising_edge().await;
+                    record_ism330dhcx_drdy_edge();
+                    #[cfg(feature = "imu-producer-scope")]
+                    imu_scope.set_high();
                     let now_us = Instant::now().as_micros();
                     match ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
                         Ok(packet) => {
@@ -346,17 +358,54 @@ async fn ism330dhcx_imu_task(
                         }
                         Err(()) => record_ism330dhcx_read_error(),
                     }
-                    now_us
+                    #[cfg(feature = "imu-producer-scope")]
+                    imu_scope.set_low();
+                } else {
+                    Timer::after(Duration::from_micros(ISM330DHCX_IMU_PERIOD_US)).await;
+                    #[cfg(feature = "imu-producer-scope")]
+                    imu_scope.set_high();
+                    let now_us = Instant::now().as_micros();
+                    match ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
+                        Ok(packet) => {
+                            record_ism330dhcx_read_ok();
+                            SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
+                            seq = seq.wrapping_add(1);
+                        }
+                        Err(()) => record_ism330dhcx_read_error(),
+                    }
+                    #[cfg(feature = "imu-producer-scope")]
+                    imu_scope.set_low();
                 };
-
-                if now_us >= next_baro_us {
-                    let sample = bmp280_sample(&mut spi, &mut baro_cs, &mut baro, now_us)
-                        .map_err(|_| SensorError::GenericSensorError("bmp280 spi error"));
-                    SHARED_BARO_QUEUE.push_from_sensor_task(sample);
-                    next_baro_us = now_us.saturating_add(BMP280_SAMPLE_INTERVAL_US);
-                }
             }
         }
+    }
+}
+
+#[cfg(all(
+    any(feature = "interrupt-executor-smoke", feature = "raw-swi-smoke"),
+    feature = "imu-producer-scope",
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+#[embassy_executor::task]
+async fn interrupt_executor_smoke_task(mut scope: Output<'static>) -> ! {
+    loop {
+        scope.set_high();
+        Timer::after(Duration::from_micros(200)).await;
+        scope.set_low();
+        Timer::after(Duration::from_micros(800)).await;
+    }
+}
+
+#[cfg(all(
+    any(feature = "interrupt-executor-smoke", feature = "raw-swi-smoke"),
+    feature = "imu-producer-scope",
+    feature = "ism330dhcx-driver",
+    not(feature = "synthetic-imu")
+))]
+fn smoke_marker_delay() {
+    for _ in 0..60_000 {
+        cortex_m::asm::nop();
     }
 }
 
@@ -452,180 +501,6 @@ fn ism330dhcx_write_reg(
     let result = spi.blocking_transfer_in_place(&mut bytes);
     cs.set_high();
     result.map_err(|_| ())
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-#[derive(Default)]
-struct Bmp280Calibration {
-    dig_t1: u16,
-    dig_t2: i16,
-    dig_t3: i16,
-    dig_p1: u16,
-    dig_p2: i16,
-    dig_p3: i16,
-    dig_p4: i16,
-    dig_p5: i16,
-    dig_p6: i16,
-    dig_p7: i16,
-    dig_p8: i16,
-    dig_p9: i16,
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-#[derive(Default)]
-struct Bmp280State {
-    initialized: bool,
-    calibration: Bmp280Calibration,
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-impl Bmp280State {
-    fn new() -> Self {
-        Self::default()
-    }
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn bmp280_sample(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    state: &mut Bmp280State,
-    now_us: u64,
-) -> Result<BaroPacket, ()> {
-    if !state.initialized {
-        bmp280_init(spi, cs, state)?;
-    }
-
-    let mut raw = [0_u8; 6];
-    bmp280_read_regs(spi, cs, 0xf7, &mut raw)?;
-    let adc_p = (((raw[0] as i32) << 12) | ((raw[1] as i32) << 4) | ((raw[2] as i32) >> 4)) as i32;
-    let adc_t = (((raw[3] as i32) << 12) | ((raw[4] as i32) << 4) | ((raw[5] as i32) >> 4)) as i32;
-    let (pressure, temperature) = compensate_bmp280(&state.calibration, adc_p, adc_t);
-
-    Ok(BaroPacket {
-        header: RosflightPacketHeader {
-            timestamp: now_us,
-            status: 0,
-        },
-        altitude: 0.0,
-        pressure,
-        temperature,
-    })
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn bmp280_init(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    state: &mut Bmp280State,
-) -> Result<(), ()> {
-    if bmp280_read_reg(spi, cs, 0xd0)? != 0x58 {
-        return Err(());
-    }
-
-    let mut raw = [0_u8; 24];
-    bmp280_read_regs(spi, cs, 0x88, &mut raw)?;
-    state.calibration = Bmp280Calibration {
-        dig_t1: u16_le(raw[0], raw[1]),
-        dig_t2: i16_le(raw[2], raw[3]),
-        dig_t3: i16_le(raw[4], raw[5]),
-        dig_p1: u16_le(raw[6], raw[7]),
-        dig_p2: i16_le(raw[8], raw[9]),
-        dig_p3: i16_le(raw[10], raw[11]),
-        dig_p4: i16_le(raw[12], raw[13]),
-        dig_p5: i16_le(raw[14], raw[15]),
-        dig_p6: i16_le(raw[16], raw[17]),
-        dig_p7: i16_le(raw[18], raw[19]),
-        dig_p8: i16_le(raw[20], raw[21]),
-        dig_p9: i16_le(raw[22], raw[23]),
-    };
-    bmp280_write_reg(spi, cs, 0xf5, 0xa0)?;
-    bmp280_write_reg(spi, cs, 0xf4, 0x4f)?;
-    state.initialized = true;
-    Ok(())
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn bmp280_read_reg(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    reg: u8,
-) -> Result<u8, ()> {
-    let mut out = [0_u8; 1];
-    bmp280_read_regs(spi, cs, reg, &mut out)?;
-    Ok(out[0])
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn bmp280_read_regs(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    reg: u8,
-    out: &mut [u8],
-) -> Result<(), ()> {
-    let mut txrx = [0_u8; 32];
-    if out.len() + 1 > txrx.len() {
-        return Err(());
-    }
-    txrx[0] = reg | 0x80;
-    cs.set_low();
-    let result = spi.blocking_transfer_in_place(&mut txrx[..out.len() + 1]);
-    cs.set_high();
-    result.map_err(|_| ())?;
-    out.copy_from_slice(&txrx[1..out.len() + 1]);
-    Ok(())
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn bmp280_write_reg(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    reg: u8,
-    value: u8,
-) -> Result<(), ()> {
-    let mut bytes = [reg & 0x7f, value];
-    cs.set_low();
-    let result = spi.blocking_transfer_in_place(&mut bytes);
-    cs.set_high();
-    result.map_err(|_| ())
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn u16_le(lsb: u8, msb: u8) -> u16 {
-    u16::from_le_bytes([lsb, msb])
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn i16_le(lsb: u8, msb: u8) -> i16 {
-    i16::from_le_bytes([lsb, msb])
-}
-
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-fn compensate_bmp280(cal: &Bmp280Calibration, adc_p: i32, adc_t: i32) -> (f32, f32) {
-    let var1 = (((adc_t >> 3) - ((cal.dig_t1 as i32) << 1)) * cal.dig_t2 as i32) >> 11;
-    let var2 = (((((adc_t >> 4) - cal.dig_t1 as i32) * ((adc_t >> 4) - cal.dig_t1 as i32)) >> 12)
-        * cal.dig_t3 as i32)
-        >> 14;
-    let t_fine = var1 + var2;
-    let temperature = ((t_fine * 5 + 128) >> 8) as f32 / 100.0;
-
-    let mut var1 = t_fine as i64 - 128_000;
-    let mut var2 = var1 * var1 * cal.dig_p6 as i64;
-    var2 += (var1 * cal.dig_p5 as i64) << 17;
-    var2 += (cal.dig_p4 as i64) << 35;
-    var1 = ((var1 * var1 * cal.dig_p3 as i64) >> 8) + ((var1 * cal.dig_p2 as i64) << 12);
-    var1 = (((1_i64 << 47) + var1) * cal.dig_p1 as i64) >> 33;
-    if var1 == 0 {
-        return (0.0, temperature);
-    }
-
-    let mut p = 1_048_576_i64 - adc_p as i64;
-    p = (((p << 31) - var2) * 3125) / var1;
-    var1 = (cal.dig_p9 as i64 * (p >> 13) * (p >> 13)) >> 25;
-    var2 = (cal.dig_p8 as i64 * p) >> 19;
-    p = ((p + var1 + var2) >> 8) + ((cal.dig_p7 as i64) << 4);
-
-    (p as f32 / 256.0, temperature)
 }
 
 #[embassy_executor::task]
@@ -790,8 +665,12 @@ struct Core1Resources {
     pin13: Peri<'static, PIN_13>,
     #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
     pin14: Peri<'static, PIN_14>,
-    #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-    pin15: Peri<'static, PIN_15>,
+    #[cfg(all(
+        feature = "imu-producer-scope",
+        feature = "ism330dhcx-driver",
+        not(feature = "synthetic-imu")
+    ))]
+    pin22: Peri<'static, PIN_22>,
 }
 
 #[cfg(feature = "scope-timing-pins")]
@@ -799,6 +678,30 @@ struct ScopeTimingPins {
     whole_loop: Output<'static>,
     whole_loop_high: bool,
 }
+
+#[cfg(all(
+    feature = "scope-timing-pins",
+    not(feature = "imu-producer-scope"),
+    not(any(
+        feature = "control-scope-estimator",
+        feature = "control-scope-controller",
+        feature = "control-scope-mixer",
+        feature = "control-scope-pwm"
+    ))
+))]
+const SCOPE_GP22_MARKS_SERVICE: bool = true;
+
+#[cfg(all(
+    feature = "scope-timing-pins",
+    any(
+        feature = "imu-producer-scope",
+        feature = "control-scope-estimator",
+        feature = "control-scope-controller",
+        feature = "control-scope-mixer",
+        feature = "control-scope-pwm"
+    )
+))]
+const SCOPE_GP22_MARKS_SERVICE: bool = false;
 
 #[cfg(feature = "scope-timing-pins")]
 impl ScopeTimingPins {
@@ -825,6 +728,7 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
         unsafe { &mut *addr_of_mut!(CORE1_STACK) },
         move || {
             mailbox.set_comms_state(20);
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let mavlink_uart = Uart::new(
                 resources.uart0,
                 resources.pin0,
@@ -834,8 +738,10 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 resources.dma_ch1,
                 mavlink_uart_config(),
             );
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let (uart_tx, uart_rx) = mavlink_uart.split();
 
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let crsf_uart = Uart::new(
                 resources.uart1,
                 resources.pin8,
@@ -845,11 +751,16 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 resources.dma_ch3,
                 crsf_uart_config(),
             );
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let (_crsf_tx, crsf_rx) = crsf_uart.split();
 
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let mut pio = Pio::new(resources.pio0, Irqs);
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let gps_rx_program = PioUartDmaRxProgram::new(&mut pio.common);
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let gps_tx_program = PioUartTxProgram::new(&mut pio.common);
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let gps_rx = PioUartDmaRx::new(
                 GPS_UART_BAUDRATE,
                 &mut pio.common,
@@ -857,6 +768,7 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 resources.pin7,
                 &gps_rx_program,
             );
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let gps_tx = PioUartTx::new(
                 GPS_UART_BAUDRATE,
                 &mut pio.common,
@@ -864,6 +776,7 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 resources.pin6,
                 &gps_tx_program,
             );
+            #[cfg(not(feature = "imu-producer-isolation"))]
             let gps_dma = dma::Channel::new(resources.dma_ch4, Irqs);
 
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
@@ -884,24 +797,90 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
             let imu_cs = Output::new(resources.pin13, Level::High);
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             let imu_drdy = Input::new(resources.pin14, Pull::Down);
-            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-            let baro_cs = Output::new(resources.pin15, Level::High);
+            #[cfg(all(
+                feature = "imu-producer-scope",
+                feature = "ism330dhcx-driver",
+                not(feature = "synthetic-imu")
+            ))]
+            let mut imu_scope = Output::new(resources.pin22, Level::Low);
+
+            #[cfg(all(
+                feature = "raw-swi-smoke",
+                feature = "imu-producer-scope",
+                feature = "ism330dhcx-driver",
+                not(feature = "synthetic-imu")
+            ))]
+            {
+                let _raw_scope = imu_scope;
+                interrupt::SWI_IRQ_5.set_priority(Priority::P1);
+                unsafe { interrupt::SWI_IRQ_5.enable() };
+                loop {
+                    interrupt::SWI_IRQ_5.pend();
+                    smoke_marker_delay();
+                }
+            }
 
             let executor = CORE1_EXECUTOR.init(Executor::new());
+            #[cfg(all(
+                feature = "interrupt-executor-smoke",
+                feature = "imu-producer-scope",
+                feature = "ism330dhcx-driver",
+                not(feature = "synthetic-imu")
+            ))]
+            {
+                imu_scope.set_high();
+                smoke_marker_delay();
+                imu_scope.set_low();
+                smoke_marker_delay();
+                interrupt::SWI_IRQ_5.set_priority(Priority::P1);
+                let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
+                imu_scope.set_high();
+                smoke_marker_delay();
+                imu_scope.set_low();
+                smoke_marker_delay();
+                if let Ok(token) = interrupt_executor_smoke_task(imu_scope) {
+                    imu_spawner.spawn(token);
+                }
+                interrupt::SWI_IRQ_5.pend();
+            }
+            #[cfg(all(
+                feature = "imu-producer-interrupt-executor",
+                not(feature = "interrupt-executor-smoke"),
+                feature = "ism330dhcx-driver",
+                not(feature = "synthetic-imu")
+            ))]
+            {
+                interrupt::SWI_IRQ_5.set_priority(Priority::P1);
+                let imu_spawner = CORE1_IMU_EXECUTOR.start(interrupt::SWI_IRQ_5);
+                if let Ok(token) = ism330dhcx_imu_task(
+                    imu_spi,
+                    imu_cs,
+                    imu_drdy,
+                    #[cfg(feature = "imu-producer-scope")]
+                    imu_scope,
+                ) {
+                    imu_spawner.spawn(token);
+                }
+            }
             mailbox.set_comms_state(21);
             executor.run(|spawner| {
+                #[cfg(not(feature = "imu-producer-isolation"))]
                 if let Ok(token) = core1_heartbeat_task(mailbox) {
                     spawner.spawn(token);
                 }
+                #[cfg(not(feature = "imu-producer-isolation"))]
                 if let Ok(token) = uart_tx_task(uart_tx, mailbox) {
                     spawner.spawn(token);
                 }
+                #[cfg(not(feature = "imu-producer-isolation"))]
                 if let Ok(token) = uart_rx_task(uart_rx, mailbox) {
                     spawner.spawn(token);
                 }
+                #[cfg(not(feature = "imu-producer-isolation"))]
                 if let Ok(token) = crsf_rx_task(crsf_rx) {
                     spawner.spawn(token);
                 }
+                #[cfg(not(feature = "imu-producer-isolation"))]
                 if let Ok(token) = gps_pio_task(gps_rx, gps_tx, gps_dma) {
                     spawner.spawn(token);
                 }
@@ -909,8 +888,19 @@ fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox
                 if let Ok(token) = synthetic_imu_task() {
                     spawner.spawn(token);
                 }
-                #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-                if let Ok(token) = ism330dhcx_imu_task(imu_spi, imu_cs, imu_drdy, baro_cs) {
+                #[cfg(all(
+                    feature = "ism330dhcx-driver",
+                    not(feature = "synthetic-imu"),
+                    not(feature = "imu-producer-interrupt-executor"),
+                    not(feature = "interrupt-executor-smoke")
+                ))]
+                if let Ok(token) = ism330dhcx_imu_task(
+                    imu_spi,
+                    imu_cs,
+                    imu_drdy,
+                    #[cfg(feature = "imu-producer-scope")]
+                    imu_scope,
+                ) {
                     spawner.spawn(token);
                 }
                 mailbox.set_comms_state(22);
@@ -1577,7 +1567,7 @@ fn main() -> ! {
     let mut scope_timing_pins = ScopeTimingPins::new(Output::new(peripherals.PIN_18, Level::Low));
     #[cfg(feature = "scope-timing-pins")]
     let control_scope_pin = Output::new(peripherals.PIN_19, Level::Low);
-    #[cfg(feature = "scope-timing-pins")]
+    #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
     let non_control_scope_pin = Output::new(peripherals.PIN_22, Level::Low);
 
     spawn_core1_services(
@@ -1609,8 +1599,12 @@ fn main() -> ! {
             pin13: peripherals.PIN_13,
             #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
             pin14: peripherals.PIN_14,
-            #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-            pin15: peripherals.PIN_15,
+            #[cfg(all(
+                feature = "imu-producer-scope",
+                feature = "ism330dhcx-driver",
+                not(feature = "synthetic-imu")
+            ))]
+            pin22: peripherals.PIN_22,
         },
         mailbox,
     );
@@ -1620,7 +1614,7 @@ fn main() -> ! {
         None,
         #[cfg(feature = "scope-timing-pins")]
         control_scope_pin,
-        #[cfg(feature = "scope-timing-pins")]
+        #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
         non_control_scope_pin,
     );
 
@@ -1634,44 +1628,93 @@ fn main() -> ! {
     #[cfg(feature = "release-loop-bench")]
     let mut loop_bench = LoopBench::new(mailbox);
     loop {
-        #[cfg(feature = "scope-timing-pins")]
-        scope_timing_pins.mark_loop_boundary();
-        #[cfg(feature = "scope-timing-pins")]
-        world.set_test_pin_3(true);
-        #[cfg(feature = "release-loop-bench")]
-        {
-            let start_us = Instant::now().as_micros();
-            #[cfg(feature = "release-loop-classifier")]
-            let class = world.run_once_budgeted_classified();
-            #[cfg(feature = "release-loop-spike-counter")]
-            let class = world.run_once_spike_counted();
-            #[cfg(not(any(
-                feature = "release-loop-classifier",
-                feature = "release-loop-spike-counter"
-            )))]
-            let _ = world.run_once();
-            let end_us = Instant::now().as_micros();
-            #[cfg(any(
-                feature = "release-loop-classifier",
-                feature = "release-loop-spike-counter"
-            ))]
-            loop_bench.record(
-                end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
-                end_us,
-                class,
-            );
-            #[cfg(not(any(
-                feature = "release-loop-classifier",
-                feature = "release-loop-spike-counter"
-            )))]
-            loop_bench.record(
-                end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
-                end_us,
-            );
+        match world.realtime_scheduler_step() {
+            RealtimeSchedulerStep::ImuControl => {
+                #[cfg(feature = "scope-timing-pins")]
+                scope_timing_pins.mark_loop_boundary();
+                #[cfg(feature = "release-loop-bench")]
+                {
+                    let start_us = Instant::now().as_micros();
+                    #[cfg(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    ))]
+                    let class = world.run_imu_control_tick_classified();
+                    #[cfg(not(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    )))]
+                    let _ = world.run_imu_control_tick();
+                    let end_us = Instant::now().as_micros();
+                    #[cfg(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    ))]
+                    loop_bench.record(
+                        end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
+                        end_us,
+                        class,
+                    );
+                    #[cfg(not(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    )))]
+                    loop_bench.record(
+                        end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
+                        end_us,
+                    );
+                }
+                #[cfg(not(feature = "release-loop-bench"))]
+                let _ = world.run_imu_control_tick();
+            }
+            RealtimeSchedulerStep::Service => {
+                #[cfg(feature = "scope-timing-pins")]
+                if SCOPE_GP22_MARKS_SERVICE {
+                    world.set_test_pin_3(true);
+                }
+                #[cfg(feature = "release-loop-bench")]
+                {
+                    let start_us = Instant::now().as_micros();
+                    #[cfg(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    ))]
+                    let class =
+                        world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
+                    #[cfg(not(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    )))]
+                    let _ = world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
+                    let end_us = Instant::now().as_micros();
+                    #[cfg(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    ))]
+                    loop_bench.record(
+                        end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
+                        end_us,
+                        class,
+                    );
+                    #[cfg(not(any(
+                        feature = "release-loop-classifier",
+                        feature = "release-loop-spike-counter"
+                    )))]
+                    loop_bench.record(
+                        end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
+                        end_us,
+                    );
+                }
+                #[cfg(not(feature = "release-loop-bench"))]
+                let _ = world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
+                #[cfg(feature = "scope-timing-pins")]
+                if SCOPE_GP22_MARKS_SERVICE {
+                    world.set_test_pin_3(false);
+                }
+            }
+            RealtimeSchedulerStep::Idle => {
+                core::hint::spin_loop();
+            }
         }
-        #[cfg(not(feature = "release-loop-bench"))]
-        let _ = world.run_once();
-        #[cfg(feature = "scope-timing-pins")]
-        world.set_test_pin_3(false);
     }
 }

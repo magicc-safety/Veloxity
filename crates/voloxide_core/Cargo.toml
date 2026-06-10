@@ -6,6 +6,10 @@ edition = "2024"
 [features]
 default = []
 timing-diagnostics = []
+control-scope-estimator = []
+control-scope-controller = []
+control-scope-mixer = []
+control-scope-pwm = []
 
 [dependencies]
 bitflags = { version = "2.6.0", default-features = false}

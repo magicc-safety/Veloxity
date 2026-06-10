@@ -9,6 +9,8 @@ embassy-rp = { version = "0.10.0", features = [
   "time-driver",
   "critical-section-impl",
   "rom-v2-intrinsics",
+  "executor-thread",
+  "executor-interrupt",
 ] }
 
 [lints]

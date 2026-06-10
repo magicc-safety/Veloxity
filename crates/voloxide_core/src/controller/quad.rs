@@ -179,6 +179,75 @@ impl<R: FlightFloat> Default for ControllerOutput<R> {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct MotorThrustModel<R: FlightFloat> {
+    resistance: R,
+    diameter_4: R,
+    diameter_5: R,
+    cq: R,
+    ct: R,
+    kv: R,
+    no_load_current: R,
+    num_motors: R,
+    max_voltage: R,
+    pi_2: R,
+}
+
+impl<R: FlightFloat> Default for MotorThrustModel<R> {
+    fn default() -> Self {
+        Self {
+            resistance: r::<R>(0.0),
+            diameter_4: r::<R>(0.0),
+            diameter_5: r::<R>(0.0),
+            cq: r::<R>(0.0),
+            ct: r::<R>(0.0),
+            kv: r::<R>(0.0),
+            no_load_current: r::<R>(0.0),
+            num_motors: r::<R>(0.0),
+            max_voltage: r::<R>(0.0),
+            pi_2: r::<R>(0.0),
+        }
+    }
+}
+
+impl<R: FlightFloat> MotorThrustModel<R> {
+    fn from_params(params: &Params) -> Self {
+        let diameter =
+            <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_PROP_DIAMETER));
+        let diameter_2 = diameter * diameter;
+        let pi = pi::<R>();
+        Self {
+            resistance: <R as FlightFloat>::from_f32(param_float(
+                params,
+                ParamId::PARAM_MOTOR_RESISTANCE,
+            )),
+            diameter_4: diameter_2 * diameter_2,
+            diameter_5: diameter_2 * diameter_2 * diameter,
+            cq: <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_PROP_CQ)),
+            ct: <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_PROP_CT)),
+            kv: <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_MOTOR_KV)),
+            no_load_current: <R as FlightFloat>::from_f32(param_float(
+                params,
+                ParamId::PARAM_NO_LOAD_CURRENT,
+            )),
+            num_motors: <R as FlightFloat>::from_i32(param_int(params, ParamId::PARAM_NUM_MOTORS)),
+            max_voltage: <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_VOLT_MAX)),
+            pi_2: pi * pi,
+        }
+    }
+
+    fn calculate_max_thrust(&self, air_density: R) -> R {
+        let a = self.resistance * air_density * self.diameter_5 * self.cq
+            / (r::<R>(4.0) * self.pi_2 * self.kv);
+        let b = self.kv;
+        let c = self.no_load_current * self.resistance - self.max_voltage;
+        let omega = (-b + (b * b - r::<R>(4.0) * a * c).sqrt()) / (r::<R>(2.0) * a);
+
+        air_density * self.diameter_4 * self.ct * omega * omega / (r::<R>(4.0) * self.pi_2)
+            * self.num_motors
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct QuadController<R: FlightFloat> {
     pub roll_rate_pid: Pid<R>,
     pub pitch_rate_pid: Pid<R>,
@@ -188,6 +257,7 @@ pub struct QuadController<R: FlightFloat> {
     equilibrium_torques: [R; 3],
     rc_max_throttle: R,
     use_motor_parameters: bool,
+    motor_thrust_model: MotorThrustModel<R>,
     gains_current: bool,
 }
 
@@ -202,6 +272,7 @@ impl<R: FlightFloat> Default for QuadController<R> {
             equilibrium_torques: [r::<R>(0.0); 3],
             rc_max_throttle: r::<R>(1.0),
             use_motor_parameters: false,
+            motor_thrust_model: MotorThrustModel::default(),
             gains_current: false,
         }
     }
@@ -224,6 +295,7 @@ impl<R: FlightFloat> QuadController<R> {
             equilibrium_torques: [r::<R>(0.0); 3],
             rc_max_throttle: r::<R>(1.0),
             use_motor_parameters: false,
+            motor_thrust_model: MotorThrustModel::default(),
             gains_current: true,
         }
     }
@@ -240,7 +312,6 @@ impl<R: FlightFloat> QuadController<R> {
         &mut self,
         state: &AttitudeState<R>,
         command: &CombinedControl,
-        params: &Params,
         dt: R,
         add_equilibrium_torques: bool,
         update_integrators: bool,
@@ -305,33 +376,36 @@ impl<R: FlightFloat> QuadController<R> {
             torque_z += self.equilibrium_torques[2];
         }
 
+        let max_thrust = if self.use_motor_parameters {
+            self.motor_thrust_model.calculate_max_thrust(air_density)
+        } else {
+            r::<R>(0.0)
+        };
+
         let forces = Vector::from([
             force_output(
                 <R as FlightFloat>::from_f32(command.fx.value),
                 command.fx.control_type,
-                params,
                 false,
-                air_density,
                 self.rc_max_throttle,
                 self.use_motor_parameters,
+                max_thrust,
             ),
             force_output(
                 <R as FlightFloat>::from_f32(command.fy.value),
                 command.fy.control_type,
-                params,
                 false,
-                air_density,
                 self.rc_max_throttle,
                 self.use_motor_parameters,
+                max_thrust,
             ),
             force_output(
                 <R as FlightFloat>::from_f32(command.fz.value),
                 command.fz.control_type,
-                params,
                 true,
-                air_density,
                 self.rc_max_throttle,
                 self.use_motor_parameters,
+                max_thrust,
             ),
         ]);
 
@@ -450,6 +524,7 @@ impl<R: FlightFloat> Controller<R> for QuadController<R> {
         self.rc_max_throttle =
             <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_RC_MAX_THROTTLE));
         self.use_motor_parameters = param_int(params, ParamId::PARAM_USE_MOTOR_PARAMETERS) != 0;
+        self.motor_thrust_model = MotorThrustModel::from_params(params);
         self.gains_current = true;
     }
 
@@ -463,7 +538,6 @@ impl<R: FlightFloat> Controller<R> for QuadController<R> {
         self.run_pid_control(
             state,
             ctx.command,
-            ctx.params,
             ctx.dt,
             true,
             update_integrators,
@@ -484,7 +558,6 @@ impl<R: FlightFloat> RcTrimCalibrator for QuadController<R> {
         let output = controller.run_pid_control(
             &AttitudeState::<R>::default(),
             rc_control,
-            params,
             r::<R>(0.0),
             false,
             false,
@@ -516,11 +589,10 @@ fn param_int(params: &Params, id: ParamId) -> i32 {
 fn force_output<R: FlightFloat>(
     value: R,
     control_type: ControlType,
-    params: &Params,
     is_fz: bool,
-    air_density: R,
     rc_max_throttle: R,
     use_motor_parameters: bool,
+    max_thrust: R,
 ) -> R {
     if control_type != ControlType::Throttle {
         return value;
@@ -530,34 +602,10 @@ fn force_output<R: FlightFloat>(
     let mut output = sign * value * rc_max_throttle;
 
     if use_motor_parameters {
-        output *= calculate_max_thrust(params, air_density);
+        output *= max_thrust;
     }
 
     output
-}
-
-fn calculate_max_thrust<R: FlightFloat>(params: &Params, air_density: R) -> R {
-    let resistance =
-        <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_MOTOR_RESISTANCE));
-    let diameter = <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_PROP_DIAMETER));
-    let cq = <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_PROP_CQ));
-    let ct = <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_PROP_CT));
-    let kv = <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_MOTOR_KV));
-    let no_load_current =
-        <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_NO_LOAD_CURRENT));
-    let num_motors = <R as FlightFloat>::from_i32(param_int(params, ParamId::PARAM_NUM_MOTORS));
-    let max_voltage = <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_VOLT_MAX));
-
-    let pi: R = pi();
-    let a = resistance * air_density * diameter.powf(r::<R>(5.0)) * cq
-        / (r::<R>(4.0) * pi.powf(r::<R>(2.0)) * kv);
-    let b = kv;
-    let c = no_load_current * resistance - max_voltage;
-    let omega = (-b + (b.powf(r::<R>(2.0)) - r::<R>(4.0) * a * c).sqrt()) / (r::<R>(2.0) * a);
-
-    air_density * diameter.powf(r::<R>(4.0)) * ct * omega.powf(r::<R>(2.0))
-        / (r::<R>(4.0) * pi.powf(r::<R>(2.0)))
-        * num_motors
 }
 
 fn controller_should_update_integrators<R: FlightFloat>(command: &CombinedControl, dt: R) -> bool {

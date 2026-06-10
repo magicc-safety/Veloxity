@@ -47,6 +47,15 @@ pub trait BoardIo {
     fn update_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         sensors.clear();
     }
+    fn imu_pending(&self) -> bool {
+        false
+    }
+    fn update_imu_sensor<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        self.update_sensor_bus(sensors);
+    }
+    fn update_service_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        self.update_sensor_bus(sensors);
+    }
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>>;
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>>;
     fn serial_tx_write_priority(
@@ -89,6 +98,9 @@ pub trait BoardIo {
         None
     }
     fn serial_flush(&mut self) {}
+    fn serial_flush_budgeted(&mut self, _max_units: usize) {
+        self.serial_flush();
+    }
     fn led0_on(&mut self) {}
     fn led0_off(&mut self) {}
     fn led0_toggle(&mut self) {}

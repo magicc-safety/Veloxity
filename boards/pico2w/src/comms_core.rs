@@ -308,14 +308,12 @@ impl MavlinkMailbox {
             return false;
         }
 
-        let slot = if self.tx_len < TX_FRAME_CAPACITY {
+        let mut slot = if self.tx_len < TX_FRAME_CAPACITY {
             let slot = self.tx_len;
             self.tx_len += 1;
             slot
         } else {
-            let Some(slot) = self.lowest_priority_slot() else {
-                return false;
-            };
+            let slot = self.tx_len - 1;
             if priority <= self.tx_frame_priorities[slot] {
                 return false;
             }
@@ -326,6 +324,12 @@ impl MavlinkMailbox {
         self.tx_frames[slot][..bytes.len()].copy_from_slice(bytes);
         self.tx_frame_lens[slot] = bytes.len() as u16;
         self.tx_frame_priorities[slot] = priority;
+        while slot > 0 && self.tx_frame_priorities[slot] > self.tx_frame_priorities[slot - 1] {
+            self.tx_frames.swap(slot, slot - 1);
+            self.tx_frame_lens.swap(slot, slot - 1);
+            self.tx_frame_priorities.swap(slot, slot - 1);
+            slot -= 1;
+        }
         true
     }
 
@@ -334,50 +338,23 @@ impl MavlinkMailbox {
             return 0;
         }
 
-        let slot = self.highest_priority_slot();
-        let len = self.tx_frame_lens[slot] as usize;
+        let len = self.tx_frame_lens[0] as usize;
         if len > out.len() {
             return 0;
         }
 
-        out[..len].copy_from_slice(&self.tx_frames[slot][..len]);
-        self.remove_tx_slot(slot);
+        out[..len].copy_from_slice(&self.tx_frames[0][..len]);
+        self.remove_tx_slot(0);
         len
     }
 
-    fn highest_priority_slot(&self) -> usize {
-        let mut best = 0;
-        let mut index = 1;
-        while index < self.tx_len {
-            if self.tx_frame_priorities[index] > self.tx_frame_priorities[best] {
-                best = index;
-            }
-            index += 1;
-        }
-        best
-    }
-
-    fn lowest_priority_slot(&self) -> Option<usize> {
-        if self.tx_len == 0 {
-            return None;
-        }
-        let mut lowest = 0;
-        let mut index = 1;
-        while index < self.tx_len {
-            if self.tx_frame_priorities[index] < self.tx_frame_priorities[lowest] {
-                lowest = index;
-            }
-            index += 1;
-        }
-        Some(lowest)
-    }
-
     fn remove_tx_slot(&mut self, slot: usize) {
-        let last = self.tx_len - 1;
-        if slot != last {
-            self.tx_frames[slot] = self.tx_frames[last];
-            self.tx_frame_lens[slot] = self.tx_frame_lens[last];
-            self.tx_frame_priorities[slot] = self.tx_frame_priorities[last];
+        let mut index = slot;
+        while index + 1 < self.tx_len {
+            self.tx_frames[index] = self.tx_frames[index + 1];
+            self.tx_frame_lens[index] = self.tx_frame_lens[index + 1];
+            self.tx_frame_priorities[index] = self.tx_frame_priorities[index + 1];
+            index += 1;
         }
         self.tx_len -= 1;
     }
@@ -499,5 +476,42 @@ fn priority_min(current: u8, value: u8) -> u8 {
         value
     } else {
         current.min(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tx_frames_pop_in_priority_order_without_scanning_for_best_slot() {
+        let mut mailbox = MavlinkMailbox::new();
+        assert!(mailbox.push_tx_frame(&[1], SerialTxPriority::DEFAULT.0));
+        assert!(mailbox.push_tx_frame(&[2], SerialTxPriority::CRITICAL.0));
+        assert!(mailbox.push_tx_frame(&[3], SerialTxPriority::REPLACEABLE_TELEMETRY.0));
+
+        let mut out = [0u8; MAVLINK_V1_MAX_FRAME_BYTES];
+        assert_eq!(mailbox.pop_tx_frame(&mut out), 1);
+        assert_eq!(out[0], 2);
+        assert_eq!(mailbox.pop_tx_frame(&mut out), 1);
+        assert_eq!(out[0], 1);
+        assert_eq!(mailbox.pop_tx_frame(&mut out), 1);
+        assert_eq!(out[0], 3);
+    }
+
+    #[test]
+    fn full_tx_queue_replaces_lowest_priority_frame_only_for_higher_priority() {
+        let mut mailbox = MavlinkMailbox::new();
+        for value in 0..TX_FRAME_CAPACITY {
+            assert!(mailbox.push_tx_frame(&[value as u8], SerialTxPriority::DEFAULT.0));
+        }
+
+        assert!(!mailbox.push_tx_frame(&[99], SerialTxPriority::REPLACEABLE_TELEMETRY.0));
+        assert!(mailbox.push_tx_frame(&[42], SerialTxPriority::CRITICAL.0));
+
+        let mut out = [0u8; MAVLINK_V1_MAX_FRAME_BYTES];
+        assert_eq!(mailbox.pop_tx_frame(&mut out), 1);
+        assert_eq!(out[0], 42);
+        assert_eq!(mailbox.stats.tx_replaced, 1);
     }
 }

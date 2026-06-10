@@ -47,6 +47,8 @@ use core::fmt::Write;
 use heapless::String;
 
 const IMU_TIMEOUT_US: u64 = 100_000;
+const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 4;
+const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 260;
 #[cfg(feature = "timing-diagnostics")]
 const TIMING_DIAGNOSTIC_INTERVAL_US: u64 = 1_000_000;
 #[cfg(feature = "timing-diagnostics")]
@@ -96,6 +98,37 @@ pub struct WorldRunClass {
     pub controller_us: u16,
     pub mixer_us: u16,
     pub pwm_us: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RealtimeSchedulerStep {
+    ImuControl,
+    Service,
+    Idle,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RealtimeServicePhase {
+    #[default]
+    Input,
+    SensorsRc,
+    Responses,
+    Telemetry,
+    Flush,
+    DeferredBoard,
+}
+
+impl RealtimeServicePhase {
+    fn next(self) -> Self {
+        match self {
+            Self::Input => Self::SensorsRc,
+            Self::SensorsRc => Self::Responses,
+            Self::Responses => Self::Telemetry,
+            Self::Telemetry => Self::Flush,
+            Self::Flush => Self::DeferredBoard,
+            Self::DeferredBoard => Self::Input,
+        }
+    }
 }
 
 #[cfg(feature = "timing-diagnostics")]
@@ -256,6 +289,10 @@ where
     pwm: PD,
     last_imu_seen: u64,
     last_rc_command_state_ms: Option<u32>,
+    last_realtime_control_us: u64,
+    last_realtime_service_control_us: u64,
+    next_realtime_service_us: u64,
+    realtime_service_phase: RealtimeServicePhase,
     #[cfg(feature = "timing-diagnostics")]
     timing_diagnostics: TimingDiagnostics,
 }
@@ -346,6 +383,10 @@ where
             pwm,
             last_imu_seen: now_us,
             last_rc_command_state_ms: None,
+            last_realtime_control_us: now_us,
+            last_realtime_service_control_us: 0,
+            next_realtime_service_us: now_us,
+            realtime_service_phase: RealtimeServicePhase::default(),
             #[cfg(feature = "timing-diagnostics")]
             timing_diagnostics: TimingDiagnostics::new(now_us),
         };
@@ -517,7 +558,7 @@ where
         let comm_us = elapsed_u16(comm_start_us, self.board.clock_micros());
 
         let sensor_start_us = self.board.clock_micros();
-        let sensor_timing = self.run_sensor_ingestion_and_health_stage_measured();
+        let sensor_timing = self.run_sensor_ingestion_and_health_stage_measured(true);
         let sensor_us = elapsed_u16(sensor_start_us, self.board.clock_micros());
 
         let rc_start_us = self.board.clock_micros();
@@ -584,6 +625,198 @@ where
         self.run_sensor_ingestion_and_health_stage();
     }
 
+    pub fn imu_pending(&self) -> bool {
+        self.board.imu_pending()
+    }
+
+    pub fn realtime_scheduler_step(&self) -> RealtimeSchedulerStep {
+        if self.imu_pending() {
+            return RealtimeSchedulerStep::ImuControl;
+        }
+        let now_us = self.board.clock_micros();
+        if now_us >= self.next_realtime_service_us
+            && now_us.saturating_sub(self.last_realtime_control_us)
+                <= REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US
+            && self.last_realtime_service_control_us != self.last_realtime_control_us
+        {
+            RealtimeSchedulerStep::Service
+        } else {
+            RealtimeSchedulerStep::Idle
+        }
+    }
+
+    pub fn run_imu_control_tick(&mut self) -> bool {
+        let now_us = self.board.clock_micros();
+        self.board.update_imu_sensor(&mut self.raw_sensors);
+        let had_raw_imu = self.raw_sensors.imu.is_some();
+        self.process_sensor_bus_after_update();
+        self.update_sensor_health_and_calibration(now_us);
+        self.run_rc_command_state_stages();
+        let ran_control = self.run_control_and_mixing_stage_if_new_imu();
+        if had_raw_imu {
+            self.last_realtime_control_us = self.board.clock_micros();
+        }
+        ran_control
+    }
+
+    pub fn run_imu_control_tick_classified(&mut self) -> WorldRunClass {
+        let pass_start_us = self.board.clock_micros();
+        let now_us = self.board.clock_micros();
+        self.board.update_imu_sensor(&mut self.raw_sensors);
+        let had_raw_imu = self.raw_sensors.imu.is_some();
+        let had_raw_sensor = raw_sensor_present(&self.raw_sensors);
+        self.process_sensor_bus_after_update();
+        self.update_sensor_health_and_calibration(now_us);
+        self.run_rc_command_state_stages();
+        let had_processed_imu = self.processed_sensors.imu.is_some();
+        let had_processed_rc = self.processed_sensors.rc.is_some();
+        let mut control_timing = ControlPipelineTiming::default();
+        let ran_control =
+            self.run_control_and_mixing_stage_if_new_imu_measured(&mut control_timing);
+        if had_raw_imu {
+            self.last_realtime_control_us = self.board.clock_micros();
+        }
+        let telemetry_due = self
+            .comm
+            .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
+            || !self.comm_events.is_empty();
+
+        WorldRunClass {
+            had_raw_sensor,
+            had_raw_imu,
+            had_processed_imu,
+            had_processed_rc,
+            telemetry_due,
+            telemetry_deferred: telemetry_due,
+            ran_control,
+            elapsed_after_control_us: self
+                .board
+                .clock_micros()
+                .saturating_sub(pass_start_us)
+                .min(u32::MAX as u64) as u32,
+            estimator_us: control_timing.estimator_us,
+            controller_us: control_timing.controller_us,
+            mixer_us: control_timing.mixer_us,
+            pwm_us: control_timing.pwm_us,
+            ..WorldRunClass::default()
+        }
+    }
+
+    pub fn run_service_step(&mut self) -> WorldRunClass {
+        let pass_start_us = self.board.clock_micros();
+        let had_rx = self.board.serial_rx_pending();
+        self.run_service_input_stage();
+        self.run_service_sensor_and_rc_stage();
+        self.drain_logs_and_send_responses();
+        self.run_telemetry_stage();
+        self.board.serial_flush();
+        self.board.run_deferred_board_actions();
+
+        WorldRunClass {
+            had_rx,
+            telemetry_due: self
+                .comm
+                .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
+                || !self.comm_events.is_empty(),
+            elapsed_after_control_us: self
+                .board
+                .clock_micros()
+                .saturating_sub(pass_start_us)
+                .min(u32::MAX as u64) as u32,
+            ..WorldRunClass::default()
+        }
+    }
+
+    pub fn run_service_step_with_deferral(
+        &mut self,
+        max_service_deferral_us: u64,
+    ) -> WorldRunClass {
+        let pass_start_us = self.board.clock_micros();
+        let had_rx = self.board.serial_rx_pending();
+        let phase = self.realtime_service_phase;
+        self.realtime_service_phase = self.realtime_service_phase.next();
+
+        match phase {
+            RealtimeServicePhase::Input => self.run_service_input_stage(),
+            RealtimeServicePhase::SensorsRc => self.run_service_sensor_and_rc_stage(),
+            RealtimeServicePhase::Responses => {
+                self.drain_logs_and_send_responses_limited(REALTIME_SERVICE_RESPONSE_BUDGET);
+            }
+            RealtimeServicePhase::Telemetry => self.run_realtime_telemetry_stage(),
+            RealtimeServicePhase::Flush => self.board.serial_flush_budgeted(1),
+            RealtimeServicePhase::DeferredBoard => self.board.run_deferred_board_actions(),
+        }
+
+        self.next_realtime_service_us = self
+            .board
+            .clock_micros()
+            .saturating_add(max_service_deferral_us);
+        self.last_realtime_service_control_us = self.last_realtime_control_us;
+
+        WorldRunClass {
+            had_rx,
+            elapsed_after_control_us: self
+                .board
+                .clock_micros()
+                .saturating_sub(pass_start_us)
+                .min(u32::MAX as u64) as u32,
+            ..WorldRunClass::default()
+        }
+    }
+
+    fn run_service_input_stage(&mut self) {
+        self.run_communication_and_parameter_service_stage();
+    }
+
+    fn run_service_sensor_and_rc_stage(&mut self) {
+        let now_us = self.board.clock_micros();
+        let latest_imu = self.processed_sensors.imu;
+        let latest_mag = self.processed_sensors.mag;
+        let latest_baro = self.processed_sensors.baro;
+        let latest_pitot = self.processed_sensors.pitot;
+        let latest_range = self.processed_sensors.range;
+        let latest_gnss = self.processed_sensors.gnss;
+        let latest_battery = self.processed_sensors.battery;
+        let latest_attitude = self.processed_sensors.attitude;
+
+        self.board.update_service_sensor_bus(&mut self.raw_sensors);
+        let had_raw_mag = self.raw_sensors.mag.is_some();
+        let had_raw_baro = self.raw_sensors.baro.is_some();
+        let had_raw_pitot = self.raw_sensors.pitot.is_some();
+        let had_raw_range = self.raw_sensors.range.is_some();
+        let had_raw_gnss = self.raw_sensors.gnss.is_some();
+        let had_raw_battery = self.raw_sensors.battery.is_some();
+        let had_raw_attitude = self.raw_sensors.attitude.is_some();
+        self.process_sensor_bus_after_update();
+        self.update_sensor_health_and_calibration(now_us);
+        self.run_rc_command_state_stages();
+
+        if self.processed_sensors.imu.is_none() {
+            self.processed_sensors.imu = latest_imu;
+        }
+        if !had_raw_mag {
+            self.processed_sensors.mag = latest_mag;
+        }
+        if !had_raw_baro {
+            self.processed_sensors.baro = latest_baro;
+        }
+        if !had_raw_pitot {
+            self.processed_sensors.pitot = latest_pitot;
+        }
+        if !had_raw_range {
+            self.processed_sensors.range = latest_range;
+        }
+        if !had_raw_gnss {
+            self.processed_sensors.gnss = latest_gnss;
+        }
+        if !had_raw_battery {
+            self.processed_sensors.battery = latest_battery;
+        }
+        if !had_raw_attitude {
+            self.processed_sensors.attitude = latest_attitude;
+        }
+    }
+
     pub fn run_communication_and_parameter_service_stage(&mut self) {
         self.process_comm_stage();
         if self.has_pending_companion_work() {
@@ -602,15 +835,22 @@ where
     }
 
     pub fn run_sensor_ingestion_and_health_stage(&mut self) {
+        self.run_sensor_ingestion_and_health_stage_without_log_drain();
+        self.drain_logs_and_send_responses();
+    }
+
+    fn run_sensor_ingestion_and_health_stage_without_log_drain(&mut self) {
         let now_us = self.board.clock_micros();
 
         self.run_sensor_ingestion_stage();
         self.update_sensor_health_and_calibration(now_us);
-        self.drain_logs_and_send_responses();
     }
 
     #[cfg(feature = "timing-diagnostics")]
-    fn run_sensor_ingestion_and_health_stage_measured(&mut self) -> SensorStageTiming {
+    fn run_sensor_ingestion_and_health_stage_measured(
+        &mut self,
+        drain_logs: bool,
+    ) -> SensorStageTiming {
         let now_us = self.board.clock_micros();
 
         let update_start_us = self.board.clock_micros();
@@ -629,9 +869,13 @@ where
         self.update_sensor_health_and_calibration(now_us);
         let health_us = elapsed_u16(health_start_us, self.board.clock_micros());
 
-        let log_start_us = self.board.clock_micros();
-        self.drain_logs_and_send_responses();
-        let log_response_us = elapsed_u16(log_start_us, self.board.clock_micros());
+        let log_response_us = if drain_logs {
+            let log_start_us = self.board.clock_micros();
+            self.drain_logs_and_send_responses();
+            elapsed_u16(log_start_us, self.board.clock_micros())
+        } else {
+            0
+        };
 
         SensorStageTiming {
             presence: sensor_presence,
@@ -875,6 +1119,21 @@ where
             .send_comm_responses(&mut self.board, &mut self.comm_events);
     }
 
+    fn drain_logs_and_send_responses_limited(&mut self, max_responses: usize) {
+        log_drain::drain_logs_to_comm_responses(LogDrainCtx {
+            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            connected: self.companion_link.connected,
+        });
+        if self.comm_events.is_empty() {
+            return;
+        }
+        self.comm.send_comm_responses_limited(
+            &mut self.board,
+            &mut self.comm_events,
+            max_responses,
+        );
+    }
+
     fn update_sensor_health_and_calibration(&mut self, now_us: u64) {
         update_sensor_health(SensorHealthCtx {
             now_us,
@@ -984,6 +1243,30 @@ where
 
         let sensor_error_count = self.board.sensors_errors_count();
         self.comm.send_named_telemetry_streams(
+            &mut self.board,
+            now_us,
+            &self.state,
+            &self.command,
+            &self.params,
+            &self.control_pipeline.latest_estimator_state,
+            &self.processed_sensors,
+            &self.control_pipeline.latest_pwm_outputs,
+            sensor_error_count,
+            self.control_pipeline.latest_loop_time_us,
+        );
+    }
+
+    fn run_realtime_telemetry_stage(&mut self) {
+        let now_us = self.board.clock_micros();
+        if !self
+            .comm
+            .named_telemetry_due(now_us, &self.processed_sensors)
+        {
+            return;
+        }
+
+        let sensor_error_count = self.board.sensors_errors_count();
+        self.comm.send_one_named_telemetry_stream(
             &mut self.board,
             now_us,
             &self.state,
@@ -1203,6 +1486,8 @@ mod tests {
         imu: Option<ImuPacket<f64>>,
         rc: Option<RcPacket>,
         update_count: usize,
+        serial_flush_count: usize,
+        deferred_board_action_count: usize,
         rx_pending: bool,
     }
 
@@ -1213,6 +1498,29 @@ mod tests {
             if let Some(imu) = self.imu.take() {
                 sensors.imu = Some(Ok(imu.cast()));
             }
+            if let Some(rc) = self.rc.take() {
+                sensors.rc = Some(Ok(rc));
+            }
+        }
+
+        fn imu_pending(&self) -> bool {
+            self.imu.is_some()
+        }
+
+        fn update_imu_sensor<R: crate::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+            sensors.clear();
+            self.update_count += 1;
+            if let Some(imu) = self.imu.take() {
+                sensors.imu = Some(Ok(imu.cast()));
+            }
+        }
+
+        fn update_service_sensor_bus<R: crate::math::FlightFloat>(
+            &mut self,
+            sensors: &mut SensorBus<R>,
+        ) {
+            sensors.clear();
+            self.update_count += 1;
             if let Some(rc) = self.rc.take() {
                 sensors.rc = Some(Ok(rc));
             }
@@ -1243,10 +1551,20 @@ mod tests {
         fn clock_micros(&self) -> u64 {
             self.current_time_us
         }
+
+        fn serial_flush(&mut self) {
+            self.serial_flush_count += 1;
+        }
+
+        fn run_deferred_board_actions(&mut self) {
+            self.deferred_board_action_count += 1;
+        }
     }
 
     #[derive(Default)]
-    struct SensorStageCommLink;
+    struct SensorStageCommLink {
+        baro_count: usize,
+    }
 
     impl CommInterface<SensorStageBoard> for SensorStageCommLink {
         fn send_heartbeat(
@@ -1313,6 +1631,7 @@ mod tests {
             _system_id: u8,
             _msg: crate::comm::messages::messages::SmallBaroMsg,
         ) {
+            self.baro_count += 1;
         }
 
         fn send_diff_pressure(
@@ -1666,6 +1985,8 @@ mod tests {
                 lol: false,
             }),
             update_count: 0,
+            serial_flush_count: 0,
+            deferred_board_action_count: 0,
             rx_pending: false,
         };
         let state = StateManager::new();
@@ -1682,7 +2003,7 @@ mod tests {
         >::init(
             board,
             params,
-            SensorStageCommLink,
+            SensorStageCommLink::default(),
             state,
             Default::default(),
             Default::default(),
@@ -1717,6 +2038,176 @@ mod tests {
         );
     }
 
+    #[test]
+    fn world_fast_tick_runs_sensor_rc_control_without_service_output() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard {
+                current_time_us: 10_000,
+                imu: Some(ImuPacket {
+                    header: RosflightPacketHeader {
+                        timestamp: 10_000,
+                        status: 0,
+                    },
+                    accel: [0.0, 0.0, -9.80665],
+                    gyro: [0.0, 0.0, 0.0],
+                    temperature: 25.0,
+                    seq: 1,
+                }),
+                rc: Some(RcPacket {
+                    header: RosflightPacketHeader {
+                        timestamp: 10_000,
+                        status: 0,
+                    },
+                    n_chan: 1,
+                    chan: [0.5; RC_PACKET_CHANNELS],
+                    lol: false,
+                }),
+                ..Default::default()
+            },
+            params,
+            SensorStageCommLink::default(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        assert!(!world.run_imu_control_tick());
+        assert_eq!(world.board.update_count, 1);
+        assert_eq!(world.board.serial_flush_count, 0);
+        assert_eq!(world.board.deferred_board_action_count, 0);
+
+        world.board.current_time_us = 12_500;
+        world.board.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 12_500,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 2,
+        });
+
+        assert!(world.run_imu_control_tick());
+        assert_eq!(world.board.update_count, 2);
+        assert_eq!(world.board.serial_flush_count, 0);
+        assert_eq!(world.board.deferred_board_action_count, 0);
+    }
+
+    #[test]
+    fn world_service_step_runs_service_sensors_comm_telemetry_and_board_service() {
+        let params = Params::new();
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard {
+                current_time_us: 1_100_000,
+                ..Default::default()
+            },
+            params,
+            SensorStageCommLink::default(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        world.processed_sensors.baro = Some(crate::packets::BaroPacket {
+            altitude: 42.0,
+            pressure: 90_000.0,
+            temperature: 21.0,
+            ..Default::default()
+        });
+
+        world.run_service_step();
+
+        assert_eq!(world.board.update_count, 1);
+        assert_eq!(world.board.serial_flush_count, 1);
+        assert_eq!(world.board.deferred_board_action_count, 1);
+        assert_eq!(world.comm.comm_link().baro_count, 1);
+    }
+
+    #[test]
+    fn realtime_scheduler_prefers_imu_and_idles_until_service_deadline() {
+        let params = Params::new();
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard {
+                current_time_us: 10_000,
+                ..Default::default()
+            },
+            params,
+            SensorStageCommLink::default(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+
+        assert_eq!(
+            world.realtime_scheduler_step(),
+            RealtimeSchedulerStep::Service
+        );
+        world.run_service_step_with_deferral(1_000);
+        assert_eq!(world.realtime_scheduler_step(), RealtimeSchedulerStep::Idle);
+
+        world.board.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 10_500,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+        assert_eq!(
+            world.realtime_scheduler_step(),
+            RealtimeSchedulerStep::ImuControl
+        );
+
+        world.board.current_time_us = 11_001;
+        assert_eq!(
+            world.realtime_scheduler_step(),
+            RealtimeSchedulerStep::ImuControl
+        );
+        let _ = world.run_imu_control_tick();
+        assert_eq!(
+            world.realtime_scheduler_step(),
+            RealtimeSchedulerStep::Service
+        );
+    }
+
     #[cfg(feature = "timing-diagnostics")]
     #[test]
     fn world_run_stats_classifies_idle_rx_sensor_and_control_passes() {
@@ -1743,7 +2234,7 @@ mod tests {
                 ..Default::default()
             },
             params,
-            SensorStageCommLink,
+            SensorStageCommLink::default(),
             StateManager::new(),
             Default::default(),
             Default::default(),
@@ -1781,7 +2272,7 @@ mod tests {
                 ..Default::default()
             },
             params,
-            SensorStageCommLink,
+            SensorStageCommLink::default(),
             StateManager::new(),
             Default::default(),
             Default::default(),

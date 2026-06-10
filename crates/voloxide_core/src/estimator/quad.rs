@@ -6,7 +6,7 @@ use crate::packets;
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
 
-use nalgebra::{Quaternion, SVector as Vector, UnitQuaternion};
+use nalgebra::{Quaternion, SVector as Vector};
 
 fn gravity<R: FlightFloat>() -> R {
     <R as FlightFloat>::from_f32(9.80665)
@@ -554,7 +554,21 @@ fn extatt_correction<R: FlightFloat>(
 }
 
 fn quaternion_to_euler<R: FlightFloat>(q: Quaternion<R>) -> Vector<R, 3> {
-    let (roll, pitch, yaw) = UnitQuaternion::new_normalize(q).euler_angles();
+    let two = <R as FlightFloat>::from_f32(2.0);
+    let one = <R as FlightFloat>::from_f32(1.0);
+    let minus_one = <R as FlightFloat>::from_f32(-1.0);
+
+    let sin_roll = two * (q.w * q.i + q.j * q.k);
+    let cos_roll = one - two * (q.i * q.i + q.j * q.j);
+    let roll = sin_roll.atan2(cos_roll);
+
+    let sin_pitch = two * (q.w * q.j - q.k * q.i);
+    let pitch = sin_pitch.clamp(minus_one, one).asin();
+
+    let sin_yaw = two * (q.w * q.k + q.i * q.j);
+    let cos_yaw = one - two * (q.j * q.j + q.k * q.k);
+    let yaw = sin_yaw.atan2(cos_yaw);
+
     Vector::from([roll, pitch, yaw])
 }
 

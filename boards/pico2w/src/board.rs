@@ -63,38 +63,47 @@ impl PicoSensorProducer {
     }
 
     fn drain_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
-        if self.ism330dhcx_imu.has_pending()
-            && let Some(imu) = self.ism330dhcx_imu.take_latest()
-        {
-            if let Some(last_seq) = self.last_imu_seq {
-                let expected = last_seq.wrapping_add(1);
-                if imu.seq != expected {
-                    self.imu_seq_gaps = self
-                        .imu_seq_gaps
-                        .wrapping_add(imu.seq.wrapping_sub(expected).max(1));
-                }
-            }
-            self.last_imu_seq = Some(imu.seq);
-            sensors.imu = Some(Ok(imu.cast()));
-        }
-        if self.crsf_rc.has_pending()
-            && let Some(rc) = self.crsf_rc.take_latest()
-        {
+        self.drain_imu_into(sensors);
+        self.drain_service_into(sensors);
+    }
+
+    fn drain_service_into<R: voloxide_core::math::FlightFloat>(
+        &mut self,
+        sensors: &mut SensorBus<R>,
+    ) {
+        if let Some(rc) = self.crsf_rc.take_latest() {
             sensors.rc = Some(Ok(rc));
         }
-        if self.gnss.has_pending()
-            && let Some(gnss) = self.gnss.take_latest()
-        {
+        if let Some(gnss) = self.gnss.take_latest() {
             sensors.gnss = Some(gnss);
         }
-        if self.baro.has_pending()
-            && let Some(baro) = self.baro.take_latest()
-        {
+        if let Some(baro) = self.baro.take_latest() {
             sensors.baro = Some(baro);
         }
         if let Some(baro) = self.pending_baro.take() {
             sensors.baro = Some(baro);
         }
+    }
+
+    fn imu_pending(&self) -> bool {
+        self.ism330dhcx_imu.has_pending()
+    }
+
+    fn drain_imu_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        let Some(imu) = self.ism330dhcx_imu.take_latest() else {
+            return;
+        };
+
+        if let Some(last_seq) = self.last_imu_seq {
+            let expected = last_seq.wrapping_add(1);
+            if imu.seq != expected {
+                self.imu_seq_gaps = self
+                    .imu_seq_gaps
+                    .wrapping_add(imu.seq.wrapping_sub(expected).max(1));
+            }
+        }
+        self.last_imu_seq = Some(imu.seq);
+        sensors.imu = Some(Ok(imu.cast()));
     }
 
     #[cfg(feature = "timing-diagnostics")]
@@ -126,7 +135,7 @@ pub struct Board {
     boot_time: Instant,
     #[cfg(feature = "scope-timing-pins")]
     control_scope_pin: Output<'static>,
-    #[cfg(feature = "scope-timing-pins")]
+    #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
     non_control_scope_pin: Output<'static>,
 }
 
@@ -135,7 +144,8 @@ impl Board {
         config: Pico2WConfig,
         gy91_baro: Option<Gy91>,
         #[cfg(feature = "scope-timing-pins")] control_scope_pin: Output<'static>,
-        #[cfg(feature = "scope-timing-pins")] non_control_scope_pin: Output<'static>,
+        #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
+        non_control_scope_pin: Output<'static>,
     ) -> (Self, PioPwmDriver) {
         (
             Self {
@@ -151,7 +161,7 @@ impl Board {
                 boot_time: Instant::now(),
                 #[cfg(feature = "scope-timing-pins")]
                 control_scope_pin,
-                #[cfg(feature = "scope-timing-pins")]
+                #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
                 non_control_scope_pin,
             },
             PioPwmDriver::new(),
@@ -174,6 +184,26 @@ impl BoardIo for Board {
     ) {
         sensors.clear();
         self.sensors.drain_into(sensors);
+    }
+
+    fn imu_pending(&self) -> bool {
+        self.sensors.imu_pending()
+    }
+
+    fn update_imu_sensor<R: voloxide_core::math::FlightFloat>(
+        &mut self,
+        sensors: &mut SensorBus<R>,
+    ) {
+        sensors.clear();
+        self.sensors.drain_imu_into(sensors);
+    }
+
+    fn update_service_sensor_bus<R: voloxide_core::math::FlightFloat>(
+        &mut self,
+        sensors: &mut SensorBus<R>,
+    ) {
+        sensors.clear();
+        self.sensors.drain_service_into(sensors);
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -214,7 +244,7 @@ impl BoardIo for Board {
         }
     }
 
-    #[cfg(feature = "scope-timing-pins")]
+    #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
     fn set_test_pin_3(&mut self, high: bool) {
         if high {
             self.non_control_scope_pin.set_high();

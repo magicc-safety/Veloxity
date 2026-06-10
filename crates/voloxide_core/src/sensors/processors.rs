@@ -160,6 +160,7 @@ pub struct ImuCalibrationState<R: FlightFloat> {
 #[derive(Copy, Clone)]
 pub struct ImuProcessor<R: FlightFloat> {
     calibration_state: ImuCalibrationState<R>,
+    mount_rotation: ImuMountRotation<R>,
 }
 
 impl<R: FlightFloat> Default for ImuProcessor<R> {
@@ -176,6 +177,7 @@ impl<R: FlightFloat> ImuProcessor<R> {
                 min_accel: [<R as FlightFloat>::from_f32(1000.0); 3],
                 ..Default::default()
             },
+            mount_rotation: ImuMountRotation::default(),
         }
     }
 
@@ -186,7 +188,7 @@ impl<R: FlightFloat> ImuProcessor<R> {
         params: &mut Params,
     ) -> Option<ImuPacket<R>> {
         if let Some(Ok(mut packet)) = packet.take() {
-            rotate_imu_in_place(&mut packet, params);
+            self.mount_rotation.rotate_imu_in_place(&mut packet, params);
             let is_calibrating = flags.intersects(CalibrationFlags::IMU);
 
             if is_calibrating {
@@ -671,16 +673,6 @@ fn vector_norm<R: FlightFloat>(vector: [R; 3]) -> R {
     (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt()
 }
 
-fn rotate_imu_in_place<R: FlightFloat>(packet: &mut ImuPacket<R>, params: &Params) {
-    let rotation = euler_rotation_matrix(
-        <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_IMU_ROLL)) * deg_to_rad(),
-        <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_IMU_PITCH)) * deg_to_rad(),
-        <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_IMU_YAW)) * deg_to_rad(),
-    );
-    packet.accel = rotate_vector_real(rotation, packet.accel);
-    packet.gyro = rotate_vector_real(rotation, packet.gyro);
-}
-
 fn rotate_mag_in_place(packet: &mut MagPacket, params: &Params) {
     let rotation = euler_rotation_matrix(
         param_float(params, ParamId::PARAM_MAG_ROLL) * deg_to_rad::<f32>(),
@@ -689,6 +681,53 @@ fn rotate_mag_in_place(packet: &mut MagPacket, params: &Params) {
     );
     let rotated = rotate_vector_real(rotation, [packet.flux[0], packet.flux[1], packet.flux[2]]);
     packet.flux = rotated;
+}
+
+#[derive(Copy, Clone)]
+struct ImuMountRotation<R: FlightFloat> {
+    angles_deg: [f32; 3],
+    rotation: [[R; 3]; 3],
+}
+
+impl<R: FlightFloat> ImuMountRotation<R> {
+    fn rotate_imu_in_place(&mut self, packet: &mut ImuPacket<R>, params: &Params) {
+        self.update_from_params(params);
+        packet.accel = rotate_vector_real(self.rotation, packet.accel);
+        packet.gyro = rotate_vector_real(self.rotation, packet.gyro);
+    }
+
+    fn update_from_params(&mut self, params: &Params) {
+        let angles_deg = [
+            param_float(params, ParamId::PARAM_IMU_ROLL),
+            param_float(params, ParamId::PARAM_IMU_PITCH),
+            param_float(params, ParamId::PARAM_IMU_YAW),
+        ];
+
+        if angles_deg == self.angles_deg {
+            return;
+        }
+
+        self.angles_deg = angles_deg;
+        self.rotation = imu_mount_rotation_matrix(angles_deg);
+    }
+}
+
+impl<R: FlightFloat> Default for ImuMountRotation<R> {
+    fn default() -> Self {
+        let angles_deg = [0.0; 3];
+        Self {
+            angles_deg,
+            rotation: imu_mount_rotation_matrix(angles_deg),
+        }
+    }
+}
+
+fn imu_mount_rotation_matrix<R: FlightFloat>(angles_deg: [f32; 3]) -> [[R; 3]; 3] {
+    euler_rotation_matrix(
+        <R as FlightFloat>::from_f32(angles_deg[0]) * deg_to_rad(),
+        <R as FlightFloat>::from_f32(angles_deg[1]) * deg_to_rad(),
+        <R as FlightFloat>::from_f32(angles_deg[2]) * deg_to_rad(),
+    )
 }
 
 fn euler_rotation_matrix<R: FlightFloat>(roll: R, pitch: R, yaw: R) -> [[R; 3]; 3] {
@@ -799,6 +838,40 @@ mod tests {
         assert!((processed.accel[1] - 1.0).abs() < 1e-6);
         assert!(processed.gyro[0].abs() < 1e-6);
         assert!((processed.gyro[1] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn imu_processor_refreshes_mount_rotation_after_param_change() {
+        let mut params = Params::new();
+        let mut processor = ImuProcessor::<f64>::new();
+
+        let unchanged: ImuPacket<f64> = process_one(
+            &mut processor,
+            ImuPacket {
+                accel: [1.0, 0.0, 0.0],
+                gyro: [1.0, 0.0, 0.0],
+                ..Default::default()
+            },
+            &mut params,
+        );
+        assert!((unchanged.accel[0] - 1.0).abs() < 1e-6);
+        assert!(unchanged.accel[1].abs() < 1e-6);
+
+        params.set_by_id(ParamId::PARAM_IMU_YAW, ParamValue::Float(90.0));
+        let rotated: ImuPacket<f64> = process_one(
+            &mut processor,
+            ImuPacket {
+                accel: [1.0, 0.0, 0.0],
+                gyro: [1.0, 0.0, 0.0],
+                ..Default::default()
+            },
+            &mut params,
+        );
+
+        assert!(rotated.accel[0].abs() < 1e-6);
+        assert!((rotated.accel[1] - 1.0).abs() < 1e-6);
+        assert!(rotated.gyro[0].abs() < 1e-6);
+        assert!((rotated.gyro[1] - 1.0).abs() < 1e-6);
     }
 
     #[test]

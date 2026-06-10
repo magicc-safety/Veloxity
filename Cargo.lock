@@ -524,7 +524,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d0d3b15c9d7dc4fec1d8cb77112472fb008b3b28c51ad23838d83587a6d2f1e"
 dependencies = [
  "cordyceps",
- "cortex-m",
  "critical-section",
  "document-features",
  "embassy-executor-macros 0.8.0",
@@ -616,6 +615,8 @@ dependencies = [
  "critical-section",
  "document-features",
  "embassy-embedded-hal",
+ "embassy-executor 0.10.0",
+ "embassy-executor-macros 0.8.0",
  "embassy-futures",
  "embassy-hal-internal 0.5.0",
  "embassy-sync",

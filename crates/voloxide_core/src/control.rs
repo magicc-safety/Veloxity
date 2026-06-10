@@ -13,6 +13,19 @@ use crate::{
     state_machine::{ErrorFlag, Event, StateManager},
 };
 
+#[cfg(any(
+    all(
+        feature = "control-scope-estimator",
+        feature = "control-scope-controller"
+    ),
+    all(feature = "control-scope-estimator", feature = "control-scope-mixer"),
+    all(feature = "control-scope-estimator", feature = "control-scope-pwm"),
+    all(feature = "control-scope-controller", feature = "control-scope-mixer"),
+    all(feature = "control-scope-controller", feature = "control-scope-pwm"),
+    all(feature = "control-scope-mixer", feature = "control-scope-pwm"),
+))]
+compile_error!("Enable only one control-scope-* feature at a time");
+
 pub struct ControlPipelineResource<S, A, R: FlightFloat> {
     pub latest_estimator_state: S,
     pub latest_actuator_commands: Option<A>,
@@ -109,6 +122,38 @@ where
     pub timing: Option<&'a mut ControlPipelineTiming>,
 }
 
+#[inline(always)]
+fn control_scope_estimator<B: BoardIo>(board: &mut B, high: bool) {
+    #[cfg(feature = "control-scope-estimator")]
+    board.set_test_pin_3(high);
+    #[cfg(not(feature = "control-scope-estimator"))]
+    let _ = (board, high);
+}
+
+#[inline(always)]
+fn control_scope_controller<B: BoardIo>(board: &mut B, high: bool) {
+    #[cfg(feature = "control-scope-controller")]
+    board.set_test_pin_3(high);
+    #[cfg(not(feature = "control-scope-controller"))]
+    let _ = (board, high);
+}
+
+#[inline(always)]
+fn control_scope_mixer<B: BoardIo>(board: &mut B, high: bool) {
+    #[cfg(feature = "control-scope-mixer")]
+    board.set_test_pin_3(high);
+    #[cfg(not(feature = "control-scope-mixer"))]
+    let _ = (board, high);
+}
+
+#[inline(always)]
+fn control_scope_pwm<B: BoardIo>(board: &mut B, high: bool) {
+    #[cfg(feature = "control-scope-pwm")]
+    board.set_test_pin_3(high);
+    #[cfg(not(feature = "control-scope-pwm"))]
+    let _ = (board, high);
+}
+
 pub fn run_control_pipeline_if_new_imu<B, E, C, M, PD, R>(
     mut ctx: ControlPipelineCtx<'_, B, E, C, M, PD, R>,
 ) -> bool
@@ -145,7 +190,6 @@ where
         Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS),
         ctx.params,
     );
-    ctx.board.set_test_pin_3(false);
     ctx.board.set_test_pin_2(true);
 
     let dt = <R as FlightFloat>::from_u64(current_time.saturating_sub(last_imu_time))
@@ -154,12 +198,14 @@ where
     let loop_start_us = ctx.board.clock_micros();
     let external_attitude = ctx.external_attitude.latest.take();
     let estimator_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
+    control_scope_estimator(ctx.board, true);
     let state = ctx.estimator.estimate_with_external_attitude_cached_params(
         ctx.sensors,
         ctx.params,
         dt,
         external_attitude,
     );
+    control_scope_estimator(ctx.board, false);
     if let Some(estimator_start_us) = estimator_start_us {
         let elapsed_us = elapsed_u16(estimator_start_us, ctx.board.clock_micros());
         if let Some(timing) = &mut ctx.timing {
@@ -180,6 +226,7 @@ where
     }
 
     let controller_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
+    control_scope_controller(ctx.board, true);
     let controls = ctx.controller.control(
         &state,
         ControllerCtx {
@@ -190,6 +237,7 @@ where
             dt,
         },
     );
+    control_scope_controller(ctx.board, false);
     if let Some(controller_start_us) = controller_start_us {
         let elapsed_us = elapsed_u16(controller_start_us, ctx.board.clock_micros());
         if let Some(timing) = &mut ctx.timing {
@@ -198,6 +246,7 @@ where
     }
 
     let mixer_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
+    control_scope_mixer(ctx.board, true);
     let mixer_run = ctx.mixer.mix(
         &controls,
         MixerCtx {
@@ -211,6 +260,7 @@ where
                 .map(|battery| <R as FlightFloat>::from_f32(battery.voltage)),
         },
     );
+    control_scope_mixer(ctx.board, false);
     match mixer_run.status {
         MixerStatus::Healthy => ctx
             .state
@@ -228,6 +278,7 @@ where
 
     let pwm_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
     let actuator_commands = mixer_run.commands;
+    control_scope_pwm(ctx.board, true);
     if !ctx.control_pipeline.pwm_rates_configured() {
         if ctx
             .pwm
@@ -249,6 +300,7 @@ where
     if let Err(error) = write_pwm_commands(ctx.board, ctx.pwm, ctx.pwm_output, &pwm_outputs) {
         crate::log_warn!("PWM driver rejected output command: {:?}", error);
     }
+    control_scope_pwm(ctx.board, false);
     if let Some(pwm_start_us) = pwm_start_us {
         let elapsed_us = elapsed_u16(pwm_start_us, ctx.board.clock_micros());
         if let Some(timing) = &mut ctx.timing {
@@ -263,7 +315,6 @@ where
     ctx.control_pipeline
         .set_latest(state, actuator_commands, pwm_outputs, loop_time_us);
     ctx.board.set_test_pin_2(false);
-    ctx.board.set_test_pin_3(true);
     true
 }
 
