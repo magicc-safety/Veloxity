@@ -10,7 +10,7 @@ use crate::{
     pwm::PwmDriver,
     pwm::system::{PwmOutputState, compose_pwm_outputs, write_pwm_commands},
     sensors::ProcessedSensors,
-    state_machine::{ErrorFlag, Event, StateManager},
+    state_machine::{ErrorFlag, StateManager},
 };
 
 #[cfg(any(
@@ -179,17 +179,13 @@ where
     }
 
     if current_time < last_imu_time {
-        ctx.state.update(
-            Event::ERROR_OCCURRED(ErrorFlag::TIME_GOING_BACKWARDS),
-            ctx.params,
-        );
+        ctx.state
+            .set_error_flag(ErrorFlag::TIME_GOING_BACKWARDS, true, ctx.params);
         return false;
     }
     ctx.control_pipeline.set_last_imu_time(current_time);
-    ctx.state.update(
-        Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS),
-        ctx.params,
-    );
+    ctx.state
+        .set_error_flag(ErrorFlag::TIME_GOING_BACKWARDS, false, ctx.params);
     ctx.board.set_test_pin_2(true);
 
     let dt = <R as FlightFloat>::from_u64(current_time.saturating_sub(last_imu_time))
@@ -214,17 +210,14 @@ where
     }
 
     if state.is_healthy() {
-        ctx.state.update(
-            Event::ERROR_CLEARED(ErrorFlag::UNHEALTHY_ESTIMATOR),
-            ctx.params,
-        );
+        ctx.state
+            .set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, false, ctx.params);
     } else {
-        ctx.state.update(
-            Event::ERROR_OCCURRED(ErrorFlag::UNHEALTHY_ESTIMATOR),
-            ctx.params,
-        );
+        ctx.state
+            .set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, true, ctx.params);
     }
 
+    let air_density = ctx.sensors.air_density();
     let controller_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
     control_scope_controller(ctx.board, true);
     let controls = ctx.controller.control(
@@ -233,7 +226,7 @@ where
             state_manager: ctx.state,
             command: ctx.command.combined_control(),
             params: ctx.params,
-            air_density: ctx.sensors.air_density(),
+            air_density,
             dt,
         },
     );
@@ -253,7 +246,7 @@ where
             state: ctx.state,
             params: ctx.params,
             rc_override: ctx.command.get_rc_override(),
-            air_density: ctx.sensors.air_density(),
+            air_density,
             battery_voltage: ctx
                 .sensors
                 .battery
@@ -262,12 +255,14 @@ where
     );
     control_scope_mixer(ctx.board, false);
     match mixer_run.status {
-        MixerStatus::Healthy => ctx
-            .state
-            .update(Event::ERROR_CLEARED(ErrorFlag::INVALID_MIXER), ctx.params),
-        MixerStatus::InvalidMixer => ctx
-            .state
-            .update(Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER), ctx.params),
+        MixerStatus::Healthy => {
+            ctx.state
+                .set_error_flag(ErrorFlag::INVALID_MIXER, false, ctx.params)
+        }
+        MixerStatus::InvalidMixer => {
+            ctx.state
+                .set_error_flag(ErrorFlag::INVALID_MIXER, true, ctx.params)
+        }
     }
     if let Some(mixer_start_us) = mixer_start_us {
         let elapsed_us = elapsed_u16(mixer_start_us, ctx.board.clock_micros());

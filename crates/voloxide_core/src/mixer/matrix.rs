@@ -494,12 +494,16 @@ impl<R: FlightFloat> MatrixMixer<R> {
     ) -> R {
         let mut value = <R as FlightFloat>::from_f32(0.0);
         for input in 0..NUM_MIXER_OUTPUTS {
+            let command = commands.u[input];
+            if command == <R as FlightFloat>::from_f32(0.0) {
+                continue;
+            }
             let row = if self.use_primary_row_for_override(input, rc_override) {
                 &self.primary_mixer[input]
             } else {
                 &self.secondary_mixer[input]
             };
-            value += commands.u[input] * row[output];
+            value += command * row[output];
         }
         value
     }

@@ -427,6 +427,17 @@ impl StateManager {
         self.machine.update(event, params);
     }
 
+    pub fn set_error_flag(&mut self, flag: ErrorFlag, is_present: bool, params: &Params) {
+        let already_present = self.get_errors().contains(flag);
+        if is_present {
+            if !already_present {
+                self.update(Event::ERROR_OCCURRED(flag), params);
+            }
+        } else if already_present {
+            self.update(Event::ERROR_CLEARED(flag), params);
+        }
+    }
+
     pub fn run(&mut self, params: &Params) {
         // process errors
         if self.get_errors().is_empty() {
