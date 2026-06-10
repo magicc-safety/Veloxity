@@ -497,51 +497,47 @@ fn accel_correction<R: FlightFloat>(
     attitude: Quaternion<R>,
     accel_lpf: Vector<R, 3>,
 ) -> Vector<R, 3> {
-    let accel_norm = accel_lpf.norm();
+    let accel_norm =
+        (accel_lpf[0] * accel_lpf[0] + accel_lpf[1] * accel_lpf[1] + accel_lpf[2] * accel_lpf[2])
+            .sqrt();
     if accel_norm <= <R as FlightFloat>::from_f32(1e-9) {
         return Vector::from([<R as FlightFloat>::from_f32(0.0); 3]);
     }
 
-    let a = accel_lpf / accel_norm;
-    let q_acc_inv = quaternion_between_vectors(
-        Vector::from([
-            <R as FlightFloat>::from_f32(0.0),
-            <R as FlightFloat>::from_f32(0.0),
-            <R as FlightFloat>::from_f32(-1.0),
-        ]),
-        a,
-    );
-    let q_tilde = q_acc_inv * attitude;
+    let ax = accel_lpf[0] / accel_norm;
+    let ay = accel_lpf[1] / accel_norm;
+    let az = accel_lpf[2] / accel_norm;
+
+    let one = <R as FlightFloat>::from_f32(1.0);
+    let mut q_acc_w = one - az;
+    let mut q_acc_x = ay;
+    let mut q_acc_y = -ax;
+    let mut q_acc_z = <R as FlightFloat>::from_f32(0.0);
+    if -az < <R as FlightFloat>::from_f32(-0.999_999) {
+        q_acc_w = <R as FlightFloat>::from_f32(0.0);
+        q_acc_x = one;
+        q_acc_y = <R as FlightFloat>::from_f32(0.0);
+    }
+    let q_acc_norm =
+        (q_acc_w * q_acc_w + q_acc_x * q_acc_x + q_acc_y * q_acc_y + q_acc_z * q_acc_z).sqrt();
+    if q_acc_norm > <R as FlightFloat>::from_f32(0.0) {
+        q_acc_w /= q_acc_norm;
+        q_acc_x /= q_acc_norm;
+        q_acc_y /= q_acc_norm;
+        q_acc_z /= q_acc_norm;
+    }
+
+    let q_tilde_w =
+        q_acc_w * attitude.w - q_acc_x * attitude.i - q_acc_y * attitude.j - q_acc_z * attitude.k;
+    let q_tilde_i =
+        q_acc_w * attitude.i + q_acc_x * attitude.w + q_acc_y * attitude.k - q_acc_z * attitude.j;
+    let q_tilde_j =
+        q_acc_w * attitude.j - q_acc_x * attitude.k + q_acc_y * attitude.w + q_acc_z * attitude.i;
     Vector::from([
-        <R as FlightFloat>::from_f32(-2.0) * q_tilde.w * q_tilde.i,
-        <R as FlightFloat>::from_f32(-2.0) * q_tilde.w * q_tilde.j,
+        <R as FlightFloat>::from_f32(-2.0) * q_tilde_w * q_tilde_i,
+        <R as FlightFloat>::from_f32(-2.0) * q_tilde_w * q_tilde_j,
         <R as FlightFloat>::from_f32(0.0),
     ])
-}
-
-fn quaternion_between_vectors<R: FlightFloat>(
-    from: Vector<R, 3>,
-    to: Vector<R, 3>,
-) -> Quaternion<R> {
-    let cross = from.cross(&to);
-    let dot = from[0] * to[0] + from[1] * to[1] + from[2] * to[2];
-    let mut q = if dot < <R as FlightFloat>::from_f32(-0.999_999) {
-        Quaternion::new(
-            <R as FlightFloat>::from_f32(0.0),
-            <R as FlightFloat>::from_f32(1.0),
-            <R as FlightFloat>::from_f32(0.0),
-            <R as FlightFloat>::from_f32(0.0),
-        )
-    } else {
-        Quaternion::new(
-            <R as FlightFloat>::from_f32(1.0) + dot,
-            cross[0],
-            cross[1],
-            cross[2],
-        )
-    };
-    q.normalize_mut();
-    q
 }
 
 fn extatt_correction<R: FlightFloat>(
