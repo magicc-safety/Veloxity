@@ -575,6 +575,10 @@ where
         self.comm.set_telemetry_rates(telemetry_rates);
     }
 
+    pub fn set_test_pin_3(&mut self, high: bool) {
+        self.board.set_test_pin_3(high);
+    }
+
     pub fn run_comm_param_sensor_stages(&mut self) {
         self.run_communication_and_parameter_service_stage();
         self.run_sensor_ingestion_and_health_stage();

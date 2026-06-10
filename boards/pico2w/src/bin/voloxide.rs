@@ -33,7 +33,16 @@ use pico2w::{board, config::Pico2WConfig, pwm::PioPwmDriver};
 use rp2350_platform::hal::clocks::ClockConfig;
 use rp2350_platform::hal::dma;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use rp2350_platform::hal::gpio::{Input, Pull};
+#[cfg(any(
+    feature = "scope-timing-pins",
+    all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu"))
+))]
+use rp2350_platform::hal::gpio::{Level, Output};
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
 use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, PIN_15, SPI1};
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
+use rp2350_platform::hal::spi::{Blocking, Config as SpiConfig, Phase, Polarity, Spi};
 use rp2350_platform::hal::{
     self as rp, Peri, bind_interrupts,
     config::Config as HalConfig,
@@ -48,11 +57,6 @@ use rp2350_platform::hal::{
         Async as UartAsync, Config as UartConfig, InterruptHandler as UartInterruptHandler, Uart,
         UartRx, UartTx,
     },
-};
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
-use rp2350_platform::hal::{
-    gpio::{Input, Level, Output, Pull},
-    spi::{Blocking, Config as SpiConfig, Phase, Polarity, Spi},
 };
 use static_cell::StaticCell;
 #[cfg(feature = "release-loop-bench")]
@@ -788,6 +792,31 @@ struct Core1Resources {
     pin14: Peri<'static, PIN_14>,
     #[cfg(all(feature = "ism330dhcx-driver", not(feature = "synthetic-imu")))]
     pin15: Peri<'static, PIN_15>,
+}
+
+#[cfg(feature = "scope-timing-pins")]
+struct ScopeTimingPins {
+    whole_loop: Output<'static>,
+    whole_loop_high: bool,
+}
+
+#[cfg(feature = "scope-timing-pins")]
+impl ScopeTimingPins {
+    fn new(whole_loop: Output<'static>) -> Self {
+        Self {
+            whole_loop,
+            whole_loop_high: false,
+        }
+    }
+
+    fn mark_loop_boundary(&mut self) {
+        self.whole_loop_high = !self.whole_loop_high;
+        if self.whole_loop_high {
+            self.whole_loop.set_high();
+        } else {
+            self.whole_loop.set_low();
+        }
+    }
 }
 
 fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox) {
@@ -1544,6 +1573,13 @@ fn main() -> ! {
     let config = Pico2WConfig::default();
     let mailbox = SHARED_MAVLINK_MAILBOX;
 
+    #[cfg(feature = "scope-timing-pins")]
+    let mut scope_timing_pins = ScopeTimingPins::new(Output::new(peripherals.PIN_18, Level::Low));
+    #[cfg(feature = "scope-timing-pins")]
+    let control_scope_pin = Output::new(peripherals.PIN_19, Level::Low);
+    #[cfg(feature = "scope-timing-pins")]
+    let non_control_scope_pin = Output::new(peripherals.PIN_22, Level::Low);
+
     spawn_core1_services(
         Core1Resources {
             core1: peripherals.CORE1,
@@ -1579,7 +1615,14 @@ fn main() -> ! {
         mailbox,
     );
 
-    let (mut board, pwm_driver) = board::Board::new_uart(config, None);
+    let (mut board, pwm_driver) = board::Board::new_uart(
+        config,
+        None,
+        #[cfg(feature = "scope-timing-pins")]
+        control_scope_pin,
+        #[cfg(feature = "scope-timing-pins")]
+        non_control_scope_pin,
+    );
 
     let mut params = Params::default();
     if !board.read_params(&mut params) {
@@ -1591,6 +1634,10 @@ fn main() -> ! {
     #[cfg(feature = "release-loop-bench")]
     let mut loop_bench = LoopBench::new(mailbox);
     loop {
+        #[cfg(feature = "scope-timing-pins")]
+        scope_timing_pins.mark_loop_boundary();
+        #[cfg(feature = "scope-timing-pins")]
+        world.set_test_pin_3(true);
         #[cfg(feature = "release-loop-bench")]
         {
             let start_us = Instant::now().as_micros();
@@ -1624,5 +1671,7 @@ fn main() -> ! {
         }
         #[cfg(not(feature = "release-loop-bench"))]
         let _ = world.run_once();
+        #[cfg(feature = "scope-timing-pins")]
+        world.set_test_pin_3(false);
     }
 }

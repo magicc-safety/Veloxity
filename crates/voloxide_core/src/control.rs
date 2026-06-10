@@ -145,6 +145,9 @@ where
         Event::ERROR_CLEARED(ErrorFlag::TIME_GOING_BACKWARDS),
         ctx.params,
     );
+    ctx.board.set_test_pin_3(false);
+    ctx.board.set_test_pin_2(true);
+
     let dt = <R as FlightFloat>::from_u64(current_time.saturating_sub(last_imu_time))
         * <R as FlightFloat>::from_f32(1e-6);
 
@@ -259,6 +262,8 @@ where
         .min(u16::MAX as u64) as u16;
     ctx.control_pipeline
         .set_latest(state, actuator_commands, pwm_outputs, loop_time_us);
+    ctx.board.set_test_pin_2(false);
+    ctx.board.set_test_pin_3(true);
     true
 }
 

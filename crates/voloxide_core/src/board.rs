@@ -75,6 +75,7 @@ pub trait BoardIo {
     fn clock_micros(&self) -> u64;
     fn set_test_pin_1(&mut self, _high: bool) {}
     fn set_test_pin_2(&mut self, _high: bool) {}
+    fn set_test_pin_3(&mut self, _high: bool) {}
     fn read_params(&mut self, _params: &mut Params) -> bool {
         false
     }

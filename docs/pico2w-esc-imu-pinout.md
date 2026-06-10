@@ -74,11 +74,11 @@ on GPS `TX`, `SDA`, `SCL`, `PPS`, and any `DRDY` pad during bring-up.
 | ISM330DHCX INT2 reserve | GP15 | Optional FIFO/wakeup interrupt if needed |
 | GPS PPS / timepulse | GP16 | Optional GPIO interrupt input from GPS |
 | ESC telemetry reserve | GP17 | Reserved for AM32 telemetry or bidirectional DShot later |
-| Flight status LED | GP18 | Discrete GPIO LED |
-| Addressable LED reserve | GP19 | PIO-driven WS2812-style status strip if needed |
+| Flight status LED / scope loop-boundary toggle | GP18 | Discrete GPIO LED by default; `scope-timing-pins` toggles this at each `World::run_once()` boundary |
+| Addressable LED reserve / scope control strobe | GP19 | PIO-driven WS2812-style status strip by default; `scope-timing-pins` drives this high only during an IMU-triggered control closure |
 | Slow I2C SDA | GP20 | QMC5883L magnetometer plus GY-91/BMP280 pressure path |
 | Slow I2C SCL | GP21 | QMC5883L magnetometer plus GY-91/BMP280 pressure path |
-| Mag DRDY / aux interrupt | GP22 | Optional QMC5883L data-ready input if exposed; otherwise spare GPIO |
+| Mag DRDY / aux interrupt / scope non-control strobe | GP22 | Optional QMC5883L data-ready input if exposed; otherwise spare GPIO. `scope-timing-pins` drives this high during non-control work. |
 | Future ADC0 | GP26 | Battery voltage/current path later |
 | Future ADC1 | GP27 | Battery voltage/current path later |
 | Future ADC2 | GP28 | Battery voltage/current path later |
@@ -120,8 +120,8 @@ when the ESP32C5 peer forwards bytes over ESP-NOW or UDP on its side.
   GP22 GPIO IRQ  <---------------------------  QMC5883L DRDY optional
 
   GP17 ESC TEL   <---------------------------  AM32 telemetry optional
-  GP18 GPIO LED  --------------------------->  discrete status LED
-  GP19 PIO LED   --------------------------->  addressable status LED optional
+  GP18 GPIO LED  --------------------------->  discrete status LED, or scope whole-loop strobe
+  GP19 PIO LED   --------------------------->  addressable status LED optional, or scope control strobe
 ```
 
 All external modules must share ground with the Pico. Keep the GP10-GP15 IMU bundle physically short
@@ -232,8 +232,9 @@ This layout preserves LED options without stealing pins from sensors:
 
 | Pico 2 W | LED type | Notes |
 | --- | --- | --- |
-| GP18 | Discrete GPIO LED | Default flight/status LED |
-| GP19 | Addressable LED | Optional PIO-driven WS2812-style status LED |
+| GP18 | Discrete GPIO LED / scope loop-boundary toggle | Default flight/status LED; `scope-timing-pins` overrides this as a logic analyzer output |
+| GP19 | Addressable LED / scope control strobe | Optional PIO-driven WS2812-style status LED; `scope-timing-pins` overrides this as a logic analyzer output |
+| GP22 | Optional aux LED / scope non-control strobe | Optional spare status output; `scope-timing-pins` overrides this as a logic analyzer output |
 
 If GP22 is not needed for magnetometer data-ready, it can be used as a second discrete status LED.
 

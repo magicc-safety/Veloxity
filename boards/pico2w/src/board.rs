@@ -15,6 +15,8 @@ use crate::{
     rc_receiver::{SHARED_CRSF_RC_QUEUE, SharedCrsfRcQueue},
 };
 use embassy_time::Instant;
+#[cfg(feature = "scope-timing-pins")]
+use rp2350_platform::hal::gpio::Output;
 use voloxide_core::{
     board::{BoardIo, SerialRxFrame, SerialTxPriority},
     errors,
@@ -122,10 +124,19 @@ pub struct Board {
     params: Params,
     params_valid: bool,
     boot_time: Instant,
+    #[cfg(feature = "scope-timing-pins")]
+    control_scope_pin: Output<'static>,
+    #[cfg(feature = "scope-timing-pins")]
+    non_control_scope_pin: Output<'static>,
 }
 
 impl Board {
-    pub fn new_uart(config: Pico2WConfig, gy91_baro: Option<Gy91>) -> (Self, PioPwmDriver) {
+    pub fn new_uart(
+        config: Pico2WConfig,
+        gy91_baro: Option<Gy91>,
+        #[cfg(feature = "scope-timing-pins")] control_scope_pin: Output<'static>,
+        #[cfg(feature = "scope-timing-pins")] non_control_scope_pin: Output<'static>,
+    ) -> (Self, PioPwmDriver) {
         (
             Self {
                 config,
@@ -138,6 +149,10 @@ impl Board {
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
+                #[cfg(feature = "scope-timing-pins")]
+                control_scope_pin,
+                #[cfg(feature = "scope-timing-pins")]
+                non_control_scope_pin,
             },
             PioPwmDriver::new(),
         )
@@ -188,6 +203,24 @@ impl BoardIo for Board {
 
     fn serial_rx_pending(&self) -> bool {
         self.mavlink.has_pending_rx_frame()
+    }
+
+    #[cfg(feature = "scope-timing-pins")]
+    fn set_test_pin_2(&mut self, high: bool) {
+        if high {
+            self.control_scope_pin.set_high();
+        } else {
+            self.control_scope_pin.set_low();
+        }
+    }
+
+    #[cfg(feature = "scope-timing-pins")]
+    fn set_test_pin_3(&mut self, high: bool) {
+        if high {
+            self.non_control_scope_pin.set_high();
+        } else {
+            self.non_control_scope_pin.set_low();
+        }
     }
 
     #[cfg(feature = "timing-diagnostics")]

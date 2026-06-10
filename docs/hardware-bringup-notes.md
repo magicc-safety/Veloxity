@@ -117,6 +117,21 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
 
 ## Current End-To-End Findings
 
+- 2026-06-09 Saleae logic-analyzer capture in progress on RP2350/Pico 2 W loop timing.
+  - Flashed release firmware with
+    `ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins`.
+  - Deliberately did not enable `timing-diagnostics`, `release-loop-bench`,
+    `release-loop-classifier`, or `release-loop-spike-counter`; the firmware should be running the
+    normal release loop with telemetry plus GPIO strobes only.
+  - `GP18` is the loop-boundary toggle: it changes state at the start of each top-level
+    `World::run_once()` pass on core 0, so edge-to-edge time is one full pass.
+  - `GP19` is the control-closure strobe: high only during the fresh-IMU estimator, controller,
+    mixer, and PWM composition/write path.
+  - `GP22` is the non-control-work strobe: high during non-control work, high for an entire
+    no-fresh-IMU pass, and low during the `GP19` control closure on control passes.
+  - Flash command used the Raspberry Pi Debug Probe
+    `2e8a:000c-0:E6647C7403301534`; `probe-rs reset` returned success with warnings that the core
+    was already running and breakpoint cleanup timed out.
 - RP2350 telemetry over ESP-NOW has carried MAVLink heartbeat, RC, TIMESYNC, STATUSTEXT, PERF, IMU,
   and barometer traffic in current branch testing.
 - Latest real-IMU release-loop run through the ESP32C5 bridge used a 60 second measured window after

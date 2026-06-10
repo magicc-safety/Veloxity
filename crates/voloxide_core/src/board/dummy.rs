@@ -45,6 +45,9 @@ impl BoardIo for DummyBoard {
     fn set_test_pin_2(&mut self, _high: bool) {
         // Dummy implementation does nothing
     }
+    fn set_test_pin_3(&mut self, _high: bool) {
+        // Dummy implementation does nothing
+    }
 }
 
 #[cfg(test)]

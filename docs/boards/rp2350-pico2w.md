@@ -66,6 +66,17 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --releas
   --features 'timing-diagnostics ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
 ```
 
+Logic-analyzer timing build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins'
+```
+
+Use this build when measuring loop timing with GPIO instead of MAVLink statustext diagnostics. Do
+not enable `timing-diagnostics`, `release-loop-bench`, `release-loop-classifier`, or
+`release-loop-spike-counter` for the cleanest timing measurement.
+
 ## Flash
 
 With a debug probe attached:
@@ -107,6 +118,43 @@ Current UART speed:
 ```
 
 For the full physical pinout, see [Pico 2 W flight hardware pinout](../pico2w-esc-imu-pinout.md).
+
+## Scope Timing Pins
+
+The `scope-timing-pins` feature drives easy-to-probe Pico 2 W pins for logic-analyzer timing:
+
+| Pico 2 W GPIO | Signal | What the pulse means |
+| --- | --- | --- |
+| GP18 | Loop pass boundary | Toggles at the start of each top-level `World::run_once()` call on core 0; edge-to-edge time is one full pass. |
+| GP19 | Control closure | High only after a fresh IMU timestamp is accepted and while estimator, controller, mixer, and PWM composition/write run. |
+| GP22 | Non-control work | High during non-control work. On no-fresh-IMU passes this stays high for the full GP18 pass; on control passes it drops low while GP19 is high. |
+
+Connect the analyzer ground to Pico ground. Probe GP18, GP19, and GP22 at the Pico header. GP19
+should pulse at the IMU-driven control rate; GP18 will pulse more often because the firmware also
+services communication, sensors, RC/state, telemetry, and board actions between control closures.
+Use GP18 edge-to-edge intervals that overlap GP19 as full control-pass timing, GP18 intervals that
+do not overlap GP19 as full no-control-pass timing, and GP19 pulse width as the inner control body
+timing.
+
+Flash the logic-analyzer build:
+
+```bash
+probe-rs download --chip RP235x --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/voloxide
+
+probe-rs reset --chip RP235x
+```
+
+If using the current debug probe from bring-up:
+
+```bash
+probe-rs download --probe 2e8a:000c-0:E6647C7403301534 \
+  --chip RP235x \
+  --protocol swd \
+  target/thumbv8m.main-none-eabihf/release/voloxide
+
+probe-rs reset --probe 2e8a:000c-0:E6647C7403301534 --chip RP235x
+```
 
 ## ESP32C5 ESP-NOW Bridge
 
