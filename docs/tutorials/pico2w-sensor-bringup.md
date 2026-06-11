@@ -49,8 +49,8 @@ probe-rs download --chip RP235x --protocol swd \
 probe-rs reset --chip RP235x
 ```
 
-The flight target for this branch is the native ISM330DHCX `3.333 kHz` ODR selected by
-`ism330dhcx-3k333`. Timing results should be collected from release builds, not debug builds.
+The default flight target for this branch is the real ISM330DHCX at its native `3.333 kHz` ODR.
+Timing results should be collected from release builds, not debug builds.
 
 ## Validate The Full Sensor Stack
 
@@ -97,8 +97,7 @@ probe-rs reset --chip RP235x
 Build a release firmware image with the current IMU feature set:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 imu-producer-interrupt-executor'
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
 ```
 
 Flash:
@@ -113,12 +112,15 @@ For timing diagnostics:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+  --features 'scope-timing-pins control-scope-controller'
 ```
 
 With `scope-timing-pins`, capture GP19 for the full control body and GP22 for the selected
-substage. The current high-rate link validation expects 400 Hz IMU telemetry, 100 Hz RC telemetry,
-50 Hz attitude, and 50 Hz output raw:
+substage. For the controller-scope build above, GP22 marks the controller substage. A good current
+loaded timing run looks like the 120-second baseline: rare GP19 full-control pulses over `300 us`,
+`0` pulses over `333.333 us`, and no GP22 controller pulses over `300 us`. The current high-rate
+link validation expects 400 Hz IMU telemetry, 100 Hz RC telemetry, 50 Hz attitude, and 50 Hz output
+raw:
 
 ```bash
 python3 tools/mavlink_tester.py \

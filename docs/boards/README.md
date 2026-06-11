@@ -5,7 +5,7 @@ are being brought back to current core APIs.
 
 | Board | Crate | Target | Status |
 | --- | --- | --- | --- |
-| Raspberry Pi Pico 2 W / RP2350 | `boards/pico2w` | `thumbv8m.main-none-eabihf` | Active hardware bring-up path; 3.333 kHz ISM330DHCX timing validated. |
+| Raspberry Pi Pico 2 W / RP2350 | `boards/pico2w` | `thumbv8m.main-none-eabihf` | Active hardware bring-up path; native 3.333 kHz ISM330DHCX timing validated under loaded telemetry, with rare strict-300-us misses. |
 | Nucleo-H753ZI | `boards/nucleo` | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed. |
 | Pixracer Pro / STM32H7 | `boards/pixracerpro` | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed. |
 

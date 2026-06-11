@@ -490,12 +490,13 @@ state machine, syncing PWM output enable state, and updating LEDs are core `Worl
 work in a service phase preserves the expected ROSflight behavior while preventing variable RC
 packet arrivals from adding jitter to every IMU control closure.
 
-On RP2350/Pico 2 W, the current validated firmware configuration uses the ISM330DHCX native
-3.333 kHz ODR. The board entry point is `boards/pico2w/src/bin/voloxide.rs`; the feature
-`ism330dhcx-3k333` selects that IMU rate, and the `scope-timing-pins` family exposes GP19 for the
-control body plus GP22 for the selected substage. Barometer and magnetometer work should remain in
-the service-side sensor path so adding those sensors does not turn the IMU interrupt path into a
-multi-sensor polling loop.
+On RP2350/Pico 2 W, the default firmware configuration uses the ISM330DHCX native `3.333 kHz` ODR.
+The board entry point is `boards/pico2w/src/bin/voloxide.rs`; `ism330dhcx-1k666` is the only
+lower-rate hardware IMU override. Core 1 owns transport and producer work, while the ISM330DHCX
+producer runs on an Embassy interrupt executor driven by `SIO_IRQ_BELL`. The `scope-timing-pins`
+family exposes GP19 for the control body plus GP22 for the selected substage. Barometer and
+magnetometer work should remain in the service-side sensor path so adding those sensors does not
+turn the IMU interrupt path into a multi-sensor polling loop.
 
 ## End-To-End Flow: ROSflight Standalone Sim
 

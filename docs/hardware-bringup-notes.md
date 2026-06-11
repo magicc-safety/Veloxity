@@ -58,11 +58,10 @@ probe-rs download --probe 2e8a:000c-0:E6647C7403301534 \
 Useful feature sets from current testing:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 imu-producer-interrupt-executor'
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
 
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+  --features 'scope-timing-pins control-scope-controller'
 ```
 
 Current RP2350 status:
@@ -145,6 +144,10 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
   p99.9 `265.120 us`, worst `328.160 us`. It had `15` pulses over `300 us`, `5` over
   `312.5 us`, and `0` over `333.333 us`. GP22 controller remained bounded: mean `38.209 us`,
   p99 `75.040 us`, p99.9 `85.600 us`, worst `125.920 us`, and `0` pulses over `300 us`.
+- A post-cleanup 24.4-second Saleae smoke capture after making the RP2350 baseline the default
+  produced `84107` GP19 control pulses: mean `148.784 us`, p99 `248.960 us`, p99.9 `274.560 us`,
+  worst `312.800 us`, `2` over `300 us`, `1` over `312.5 us`, and `0` over `333.333 us`. GP22
+  controller remained below `300 us`, with p99 `78.240 us` and worst `107.360 us`.
 - Current loaded telemetry validation over the ESP32C5 link:
   - IMU telemetry: `400 Hz`;
   - RC telemetry: `100 Hz`;

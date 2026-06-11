@@ -25,8 +25,10 @@ flows should not be reintroduced unless they are retested and updated against th
 5. [STM32 board guide](boards/stm32.md)
 
 The current RP2350/Pico 2 W firmware target is a native 3.333 kHz ISM330DHCX-driven control loop
-with high-rate telemetry validation. The measured hardware status, Saleae scope-pin meanings, and
-exact build/test commands live in the RP2350 guide and hardware bring-up notes.
+with high-rate telemetry validation. The 120-second loaded Saleae confirmation had rare strict
+`300 us` misses and no GP19 full-control pulse over `333.333 us`. The measured hardware status,
+Saleae scope-pin meanings, and exact build/test commands live in the RP2350 guide and hardware
+bring-up notes.
 
 ### I Want To Modify Firmware Logic
 

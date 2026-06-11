@@ -52,30 +52,37 @@ Release build:
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
 ```
 
-Useful feature build for the current high-rate IMU path:
+The default `pico2w` feature set is the validated hardware baseline: real ISM330DHCX data-ready
+input, native `3.333 kHz` ODR, the core 1 interrupt-executor IMU producer, bounded high-rate
+telemetry, CRSF RC input, GPS PIO service, and the UART MAVLink bridge.
 
-```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 imu-producer-interrupt-executor'
-```
+Remaining opt-in features should be treated as measurement, fallback, or bring-up tools:
+
+| Feature | Purpose | Normal flight build? |
+| --- | --- | --- |
+| `ism330dhcx-1k666` | Runs the ISM330DHCX at the lower `1.666 kHz` ODR for timing-margin comparisons. | No; default is `3.333 kHz`. |
+| `scope-timing-pins` | Enables GP18/GP19/GP22 Saleae timing outputs. | No; use only while measuring. |
+| `control-scope-estimator`, `control-scope-controller`, `control-scope-mixer`, `control-scope-pwm` | Selects which control substage GP22 marks. | No; combine one with `scope-timing-pins` during timing captures. |
+| `imu-producer-scope`, `pre-control-scope`, `rc-command-scope` | Uses GP22 for producer, pre-control, or RC service timing. | No; targeted timing captures only. |
+| `timing-diagnostics` | Emits coarse MAVLink STATUSTEXT timing diagnostics from measured world paths. | No; useful when a logic analyzer is unavailable. |
+| `release-loop-bench`, `release-loop-classifier` | Legacy onboard release-mode loop timing summaries. | No; prefer Saleae captures for final timing claims. |
 
 Logic-analyzer timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+  --features 'scope-timing-pins control-scope-controller'
 ```
 
 Timing diagnostics build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'timing-diagnostics ism330dhcx-driver ism330dhcx-3k333 imu-producer-interrupt-executor'
+  --features 'timing-diagnostics'
 ```
 
 Use the logic-analyzer timing build when measuring loop timing with GPIO instead of MAVLink
-statustext diagnostics. Do not enable `timing-diagnostics`, `release-loop-bench`,
-`release-loop-classifier`, or `release-loop-spike-counter` for the cleanest timing measurement.
+statustext diagnostics. Do not enable `timing-diagnostics` for clean Saleae timing captures.
 
 ## Flash
 
@@ -188,13 +195,14 @@ GP22 has several mutually-exclusive diagnostic modes:
 Use only one GP22 mode at a time. The firmware has compile-time guards for the known conflicting
 scope modes.
 
-RP2350 interrupt-executor experiments are intentionally feature-gated. Use exactly one of:
-`raw-swi-smoke`, `interrupt-executor-smoke`, or `imu-producer-interrupt-executor`. The raw smoke
-build proves that the selected RP2350 core 1 interrupt vector can fire by toggling GP22 from the
-interrupt handler. The current experiment uses `SIO_IRQ_BELL`, because `SIO_IRQ_FIFO` is owned by
-Embassy multicore and `SWI_IRQ_5` did not deliver on core 1 in bring-up captures. The executor smoke
-build proves that an Embassy interrupt executor task can poll from that IRQ. The real producer build
-moves only the ISM330DHCX producer task to that interrupt executor.
+The RP2350 interrupt-executor IMU producer is now the default firmware path. Core 1 still owns UART
+MAVLink transport, CRSF receive, GPS PIO service, and the ISM330DHCX producer, but the IMU producer
+itself runs on an Embassy `InterruptExecutor` driven by `SIO_IRQ_BELL`. That avoids waiting for the
+normal core 1 executor poll cadence before servicing a data-ready edge. `SIO_IRQ_FIFO` remains owned
+by Embassy multicore, and `SWI_IRQ_5` did not deliver reliably on core 1 during bring-up, so
+`SIO_IRQ_BELL` is the selected interrupt vector. The old raw interrupt and synthetic-IMU bring-up
+feature surface has been removed from the documented baseline because the real interrupt-executor
+producer has been validated on hardware.
 
 Flash the logic-analyzer build:
 
@@ -222,26 +230,26 @@ Common full-system producer timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins imu-producer-scope imu-producer-interrupt-executor'
+  --features 'scope-timing-pins imu-producer-scope'
 ```
 
 Pre-control timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins pre-control-scope imu-producer-interrupt-executor'
+  --features 'scope-timing-pins pre-control-scope'
 ```
 
 RC command/state timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins rc-command-scope imu-producer-interrupt-executor'
+  --features 'scope-timing-pins rc-command-scope'
 ```
 
-Do not enable `timing-diagnostics`, `release-loop-bench`, `release-loop-classifier`, or
-`release-loop-spike-counter` when taking clean GPIO timing captures. Those features are useful for
-coarse telemetry, but they add work and can obscure the exact scope-edge timing.
+Do not enable `timing-diagnostics`, `release-loop-bench`, or `release-loop-classifier` when taking
+clean GPIO timing captures. Those features are useful for coarse telemetry, but they add work and
+can obscure the exact scope-edge timing.
 
 ### Current Timing Measurements
 
@@ -260,7 +268,7 @@ Latest optimized build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+  --features 'scope-timing-pins control-scope-controller'
 ```
 
 | Measurement | Samples | Mean | p99 | p99.9 | Worst | Over 300 us | Over 312.5 us | Over 333.333 us |
@@ -280,9 +288,10 @@ headroom and producer-period captures when checking the exact IMU cadence.
 | GP19 full control body | `458796` | `127.588 us` | `231.520 us` | `265.120 us` | `328.160 us` | `15` | `5` | `0` |
 | GP22 controller substage | `458787` | `38.209 us` | `75.040 us` | `85.600 us` | `125.920 us` | `0` | `0` | `0` |
 
-The 120-second run confirmed no full-control pulse exceeded one `3.333 kHz` period. It did show
-rare strict-`300 us` misses, with `15 / 458796` GP19 pulses over `300 us`. The worst matched frame
-was `328.160 us` total, with `80.960 us` in controller and `247.200 us` outside controller.
+The 120-second run confirmed no full-control pulse exceeded `333.333 us`, the `3.0 kHz` comparison
+period. It did show rare strict-`300 us` misses against the `3.333 kHz` period, with `15 / 458796`
+GP19 pulses over `300 us`. The worst matched frame was `328.160 us` total, with `80.960 us` in
+controller and `247.200 us` outside controller.
 
 Loaded telemetry during the same timing campaign:
 
@@ -304,6 +313,12 @@ A later 120-second timing confirmation received about `29.42 kB/s`, with IMU tel
 `10 Hz`, and heartbeat at `1 Hz`. That pass reported `24` invalid CRC candidates and sequence-gap
 accounting reported estimated missing valid MAVLink frames, so keep the earlier clean receiver pass
 as the link-integrity reference and use the 120-second Saleae data as the longer timing reference.
+
+A post-cleanup 24.4-second Saleae smoke capture of the simplified default feature surface produced
+`84107` GP19 control pulses: mean `148.784 us`, p99 `248.960 us`, p99.9 `274.560 us`, worst
+`312.800 us`, with `2` pulses over `300 us`, `1` over `312.5 us`, and `0` over `333.333 us`. The
+GP22 controller substage remained bounded: mean `38.192 us`, p99 `78.240 us`, worst `107.360 us`,
+and `0` pulses over `300 us`.
 
 Interpretation:
 

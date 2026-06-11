@@ -122,12 +122,22 @@ The board crates own their runner configuration. For RP2350 work in this branch,
 been done with explicit `probe-rs` commands during hardware bring-up. See
 [RP2350 / Pico 2 W guide](boards/rp2350-pico2w.md).
 
-Current high-rate RP2350 timing build:
+Current high-rate RP2350 release build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
+```
+
+Current high-rate RP2350 Saleae timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+  --features 'scope-timing-pins control-scope-controller'
 ```
+
+The current validated loaded baseline expects `400 Hz` IMU telemetry, `100 Hz` RC telemetry,
+`50 Hz` attitude/output raw telemetry, and the 120-second Saleae result documented in the RP2350
+guide: rare GP19 full-control pulses over `300 us`, and `0` over `333.333 us`.
 
 Current high-rate telemetry integrity check against the ESP32C5 ground bridge:
 
