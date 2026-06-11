@@ -19,8 +19,6 @@ use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
 use core::marker::PhantomData;
 
-const HEARTBEAT_INTERVAL_US: u64 = 1_000_000; // 1 second = 1,000,000 microseconds
-const STATUS_INTERVAL_US: u64 = 100_000; // 10 Hz
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
 const OUTPUT_RAW_IMU_DIVISOR: u64 = 8;
@@ -28,6 +26,8 @@ const REALTIME_TELEMETRY_SCAN_BUDGET: u8 = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TelemetryRates {
+    pub heartbeat_hz: u16,
+    pub status_hz: u16,
     pub imu_hz: u16,
     pub attitude_hz: u16,
     pub output_raw_hz: u16,
@@ -44,6 +44,8 @@ pub struct TelemetryRates {
 impl TelemetryRates {
     pub const fn upstream() -> Self {
         Self {
+            heartbeat_hz: 1,
+            status_hz: 10,
             imu_hz: 0,
             attitude_hz: 0,
             output_raw_hz: 0,
@@ -60,6 +62,8 @@ impl TelemetryRates {
 
     pub const fn bounded_high_rate_transport() -> Self {
         Self {
+            heartbeat_hz: 1,
+            status_hz: 10,
             imu_hz: 400,
             attitude_hz: 50,
             output_raw_hz: 50,
@@ -116,6 +120,15 @@ fn stream_due(now_us: u64, last_us: &mut u64, rate_hz: u16) -> bool {
 fn stream_due_at(now_us: u64, last_us: u64, rate_hz: u16) -> bool {
     if rate_hz == 0 || last_us == 0 {
         return true;
+    }
+
+    let interval_us = 1_000_000_u64 / rate_hz as u64;
+    now_us.saturating_sub(last_us) >= interval_us
+}
+
+fn fixed_rate_due(now_us: u64, last_us: u64, rate_hz: u16) -> bool {
+    if rate_hz == 0 {
+        return false;
     }
 
     let interval_us = 1_000_000_u64 / rate_hz as u64;
@@ -224,8 +237,11 @@ where
     where
         R: FlightFloat,
     {
-        if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US
-            || now_us >= self.last_status_send_us + STATUS_INTERVAL_US
+        if fixed_rate_due(
+            now_us,
+            self.last_heartbeat_us,
+            self.telemetry_rates.heartbeat_hz,
+        ) || fixed_rate_due(now_us, self.last_status_send_us, self.telemetry_rates.status_hz)
         {
             return true;
         }
@@ -321,7 +337,11 @@ where
         A: AsRef<[R]>,
         R: FlightFloat,
     {
-        if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US {
+        if fixed_rate_due(
+            now_us,
+            self.last_heartbeat_us,
+            self.telemetry_rates.heartbeat_hz,
+        ) {
             self.send_rosflight_heartbeat(
                 board,
                 HeartbeatMsg {
@@ -340,7 +360,7 @@ where
             self.last_heartbeat_us = now_us;
         }
 
-        if now_us >= self.last_status_send_us + STATUS_INTERVAL_US {
+        if fixed_rate_due(now_us, self.last_status_send_us, self.telemetry_rates.status_hz) {
             self.send_rosflight_status(
                 board,
                 RosflightStatusMsg {
@@ -579,7 +599,11 @@ where
         A: AsRef<[R]>,
         R: FlightFloat,
     {
-        if now_us >= self.last_heartbeat_us + HEARTBEAT_INTERVAL_US {
+        if fixed_rate_due(
+            now_us,
+            self.last_heartbeat_us,
+            self.telemetry_rates.heartbeat_hz,
+        ) {
             self.send_rosflight_heartbeat(
                 board,
                 HeartbeatMsg {
@@ -599,7 +623,7 @@ where
             return true;
         }
 
-        if now_us >= self.last_status_send_us + STATUS_INTERVAL_US {
+        if fixed_rate_due(now_us, self.last_status_send_us, self.telemetry_rates.status_hz) {
             self.send_rosflight_status(
                 board,
                 RosflightStatusMsg {

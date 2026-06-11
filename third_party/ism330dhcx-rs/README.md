@@ -35,7 +35,7 @@ Add the driver to your `Cargo.toml` dependencies:
 
 ```toml
 [dependencies]
-ism330dhcx-rs = "0.1.0"
+ism330dhcx-rs = "2.0.0"
 ```
 
 Or, add it directly from the terminal:

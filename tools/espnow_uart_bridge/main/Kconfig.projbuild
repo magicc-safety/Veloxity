@@ -24,24 +24,37 @@ config BRIDGE_PEER_MAC
         Unicast ESP-NOW peer MAC. The air image points at the ground XIAO,
         and the ground image points at the air XIAO.
 
+config BRIDGE_AUTO_LEARN_PEER
+    bool "Learn peer MAC from first valid bridge packet"
+    default y
+    help
+        Learn the ESP-NOW peer from the first packet with valid bridge magic,
+        role, length, and CRC. This is useful when USB/JTAG serial labels do
+        not match the Wi-Fi STA MAC used by ESP-NOW. Disable this for a
+        fixed-peer deployment where BRIDGE_PEER_MAC is known to be the STA MAC.
+
 config BRIDGE_PACKET_PAYLOAD_MAX
     int "Maximum ESP-NOW bridge payload bytes per packet"
-    range 1 240
-    default 200
+    range 1 237
+    default 237
     help
-        Keep this conservative for bring-up. ESP-NOW v2 can carry larger
-        packets, but small chunks reduce loss and make UART bridging easier
-        to validate.
-
-config BRIDGE_QUEUE_DEPTH
-    int "Bridge queue depth"
-    range 4 128
-    default 32
+        Payload bytes carried after the bridge header. The default keeps the
+        complete bridge packet under the ESP-NOW v1 packet limit and allows
+        the largest MAVLink v1 frame that fits after the bridge header.
 
 config BRIDGE_SEND_TIMEOUT_MS
     int "ESP-NOW send callback timeout in milliseconds"
-    range 10 1000
+    range 1 1000
     default 100
+    help
+        Maximum time the bridge waits for the ESP-NOW send callback after
+        esp_now_send returns ESP_OK. A timeout is counted as a send failure so
+        a missing callback cannot stop the transmit task permanently.
+
+config BRIDGE_QUEUE_DEPTH
+    int "Bridge queue depth"
+    range 4 256
+    default 192
 
 config BRIDGE_TASK_STACK
     int "Bridge task stack size"

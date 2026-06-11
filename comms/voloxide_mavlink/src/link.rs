@@ -4,7 +4,10 @@ use mavio::Frame;
 use mavio::prelude::*;
 use voloxide_core::board::{self, SerialTxPriority};
 use voloxide_core::comm::interface::CommInterface;
-use voloxide_core::comm::messages::{Messages, Store, messages as core_messages};
+use voloxide_core::comm::messages::{
+    Messages, Store,
+    messages::{self as core_messages, DownlinkMessage},
+};
 
 static RX_BUFF_SIZE: usize = 2048;
 const MAV_COMP_ID_ROSFLIGHT_FIRMWARE: u8 = 250;
@@ -16,6 +19,283 @@ pub struct MavlinkInterface {
     mav_parser: parser::MavlinkParser,
 }
 
+pub struct MavlinkFrameEncoder {
+    pub component_id: u8,
+    sequence: u8,
+}
+
+impl MavlinkFrameEncoder {
+    pub fn new() -> Self {
+        Self {
+            component_id: MAV_COMP_ID_ROSFLIGHT_FIRMWARE,
+            sequence: 0,
+        }
+    }
+
+    fn frame_builder<T: Message>(&mut self, system_id: u8, msg: T) -> mavio::Result<Frame<V1>> {
+        let sequence = self.sequence;
+        self.sequence = self.sequence.wrapping_add(1);
+        self.frame_builder_with_sequence(system_id, sequence, msg)
+    }
+
+    fn frame_builder_with_sequence<T: Message>(
+        &self,
+        system_id: u8,
+        sequence: u8,
+        msg: T,
+    ) -> mavio::Result<Frame<V1>> {
+        let frame = Frame::builder()
+            .version(V1)
+            .system_id(system_id)
+            .component_id(self.component_id)
+            .sequence(sequence)
+            .message(&msg)?
+            .build();
+
+        Ok(frame)
+    }
+
+    fn encode_message<T: Message>(
+        &mut self,
+        system_id: u8,
+        msg: T,
+        out: &mut [u8],
+    ) -> Option<usize> {
+        let frame = self.frame_builder(system_id, msg).ok()?;
+        self.encode_frame(frame, out)
+    }
+
+    fn encode_message_with_sequence<T: Message>(
+        &self,
+        system_id: u8,
+        sequence: u8,
+        msg: T,
+        out: &mut [u8],
+    ) -> Option<usize> {
+        let frame = self
+            .frame_builder_with_sequence(system_id, sequence, msg)
+            .ok()?;
+        self.encode_frame(frame, out)
+    }
+
+    fn encode_frame(&self, frame: Frame<V1>, out: &mut [u8]) -> Option<usize> {
+        let mut pos = 0;
+        let header = frame.header();
+        let payload = frame.payload().bytes();
+        let crc = frame.checksum();
+        let frame_len = payload.len() + 8;
+
+        if frame_len > out.len() {
+            return None;
+        }
+
+        out[pos] = 0xFE;
+        pos += 1;
+        out[pos] = payload.len() as u8;
+        pos += 1;
+        out[pos] = header.sequence();
+        pos += 1;
+        out[pos] = header.system_id();
+        pos += 1;
+        out[pos] = header.component_id();
+        pos += 1;
+        out[pos] = header.message_id() as u8;
+        pos += 1;
+        out[pos..pos + payload.len()].copy_from_slice(payload);
+        pos += payload.len();
+        out[pos..pos + 2].copy_from_slice(&crc.to_le_bytes());
+        pos += 2;
+
+        Some(pos)
+    }
+
+    pub fn encode_downlink(
+        &mut self,
+        system_id: u8,
+        msg: DownlinkMessage,
+        out: &mut [u8],
+    ) -> Option<usize> {
+        match msg {
+            DownlinkMessage::Heartbeat(msg) => {
+                self.encode_message(system_id, mav_messages::Heartbeat::from(msg), out)
+            }
+            DownlinkMessage::ParamValue(msg) => {
+                self.encode_message(system_id, mav_messages::ParamValue::from(msg), out)
+            }
+            DownlinkMessage::Status(msg) => {
+                self.encode_message(system_id, mav_messages::RosflightStatus::from(msg), out)
+            }
+            DownlinkMessage::Timesync(msg) => {
+                self.encode_message(system_id, mav_messages::Timesync::from(msg), out)
+            }
+            DownlinkMessage::Version(msg) => {
+                self.encode_message(system_id, mav_messages::RosflightVersion::from(msg), out)
+            }
+            DownlinkMessage::OutputRaw(msg) => {
+                self.encode_message(system_id, mav_messages::RosflightOutputRaw::from(msg), out)
+            }
+            DownlinkMessage::Attitude(msg) => {
+                self.encode_message(system_id, mav_messages::AttitudeQuaternion::from(msg), out)
+            }
+            DownlinkMessage::Baro(msg) => {
+                self.encode_message(system_id, mav_messages::SmallBaro::from(msg), out)
+            }
+            DownlinkMessage::DiffPressure(msg) => {
+                self.encode_message(system_id, mav_messages::DiffPressure::from(msg), out)
+            }
+            DownlinkMessage::Imu(msg) => {
+                self.encode_message(system_id, mav_messages::SmallImu::from(msg), out)
+            }
+            DownlinkMessage::Mag(msg) => {
+                self.encode_message(system_id, mav_messages::SmallMag::from(msg), out)
+            }
+            DownlinkMessage::RcRaw(msg) | DownlinkMessage::RcChannels(msg) => {
+                self.encode_message(system_id, mav_messages::RcChannels::from(msg), out)
+            }
+            DownlinkMessage::Range(msg) => {
+                self.encode_message(system_id, mav_messages::SmallRange::from(msg), out)
+            }
+            DownlinkMessage::Gnss(msg) => {
+                self.encode_message(system_id, mav_messages::RosflightGnss::from(msg), out)
+            }
+            DownlinkMessage::CmdAck(msg) => {
+                self.encode_message(system_id, mav_messages::RosflightCmdAck::from(msg), out)
+            }
+            DownlinkMessage::BatteryStatus(msg) => self.encode_message(
+                system_id,
+                mav_messages::RosflightBatteryStatus::from(msg),
+                out,
+            ),
+            DownlinkMessage::Statustext(msg) => {
+                self.encode_message(system_id, mav_messages::Statustext::from(msg), out)
+            }
+            DownlinkMessage::HardError(msg) => {
+                self.encode_message(system_id, mav_messages::RosflightHardError::from(msg), out)
+            }
+        }
+    }
+
+    pub fn encode_downlink_with_sequence(
+        &self,
+        system_id: u8,
+        sequence: u8,
+        msg: DownlinkMessage,
+        out: &mut [u8],
+    ) -> Option<usize> {
+        match msg {
+            DownlinkMessage::Heartbeat(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::Heartbeat::from(msg),
+                out,
+            ),
+            DownlinkMessage::ParamValue(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::ParamValue::from(msg),
+                out,
+            ),
+            DownlinkMessage::Status(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::RosflightStatus::from(msg),
+                out,
+            ),
+            DownlinkMessage::Timesync(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::Timesync::from(msg),
+                out,
+            ),
+            DownlinkMessage::Version(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::RosflightVersion::from(msg),
+                out,
+            ),
+            DownlinkMessage::OutputRaw(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::RosflightOutputRaw::from(msg),
+                out,
+            ),
+            DownlinkMessage::Attitude(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::AttitudeQuaternion::from(msg),
+                out,
+            ),
+            DownlinkMessage::Baro(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::SmallBaro::from(msg),
+                out,
+            ),
+            DownlinkMessage::DiffPressure(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::DiffPressure::from(msg),
+                out,
+            ),
+            DownlinkMessage::Imu(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::SmallImu::from(msg),
+                out,
+            ),
+            DownlinkMessage::Mag(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::SmallMag::from(msg),
+                out,
+            ),
+            DownlinkMessage::RcRaw(msg) | DownlinkMessage::RcChannels(msg) => self
+                .encode_message_with_sequence(
+                    system_id,
+                    sequence,
+                    mav_messages::RcChannels::from(msg),
+                    out,
+                ),
+            DownlinkMessage::Range(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::SmallRange::from(msg),
+                out,
+            ),
+            DownlinkMessage::Gnss(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::RosflightGnss::from(msg),
+                out,
+            ),
+            DownlinkMessage::CmdAck(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::RosflightCmdAck::from(msg),
+                out,
+            ),
+            DownlinkMessage::BatteryStatus(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::RosflightBatteryStatus::from(msg),
+                out,
+            ),
+            DownlinkMessage::Statustext(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::Statustext::from(msg),
+                out,
+            ),
+            DownlinkMessage::HardError(msg) => self.encode_message_with_sequence(
+                system_id,
+                sequence,
+                mav_messages::RosflightHardError::from(msg),
+                out,
+            ),
+        }
+    }
+}
+
 impl MavlinkInterface {
     pub fn new() -> Self {
         Self {
@@ -25,29 +305,45 @@ impl MavlinkInterface {
         }
     }
 
-    fn frame_builder<T: Message>(&mut self, system_id: u8, msg: T) -> mavio::Result<Frame<V1>> {
+    fn frame_builder_with_sequence<T: Message>(
+        &self,
+        system_id: u8,
+        sequence: u8,
+        msg: T,
+    ) -> mavio::Result<Frame<V1>> {
         let frame = Frame::builder()
             .version(V1)
             .system_id(system_id)
             .component_id(self.component_id)
-            .sequence(self.sequence)
+            .sequence(sequence)
             .message(&msg)?
             .build();
-
-        // Increment the sequence number, wrapping on overflow
-        self.sequence = self.sequence.wrapping_add(1);
 
         Ok(frame)
     }
 
-    fn send_message<B: board::BoardIo, T: Message>(
+    fn next_sequence(&mut self) -> u8 {
+        let sequence = self.sequence;
+        self.sequence = self.sequence.wrapping_add(1);
+        sequence
+    }
+
+    fn send_downlink_or_message<B: board::BoardIo, T: Message>(
         &mut self,
         board: &mut B,
         system_id: u8,
-        msg: T,
+        downlink: DownlinkMessage,
+        msg: impl FnOnce() -> T,
         priority: SerialTxPriority,
     ) {
-        let frame = match self.frame_builder(system_id, msg) {
+        match board.serial_tx_enqueue_downlink(system_id, downlink, priority) {
+            Some(Ok(n)) if n > 0 => return,
+            Some(_) => return,
+            None => {}
+        }
+
+        let sequence = self.next_sequence();
+        let frame = match self.frame_builder_with_sequence(system_id, sequence, msg()) {
             Ok(f) => f,
             Err(_) => {
                 return;
@@ -158,10 +454,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightStatusMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RosflightStatus::from(msg),
+            DownlinkMessage::Status(msg),
+            || mav_messages::RosflightStatus::from(msg),
             SerialTxPriority::CRITICAL,
         );
     }
@@ -171,10 +468,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::TimesyncMsg,
     ) -> bool {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::Timesync::from(msg),
+            DownlinkMessage::Timesync(msg),
+            || mav_messages::Timesync::from(msg),
             SerialTxPriority::CRITICAL,
         );
         return true;
@@ -185,10 +483,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::ParamValueMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::ParamValue::from(msg),
+            DownlinkMessage::ParamValue(msg),
+            || mav_messages::ParamValue::from(msg),
             SerialTxPriority::CRITICAL,
         );
     }
@@ -198,10 +497,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::HeartbeatMsg,
     ) -> bool {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::Heartbeat::from(msg),
+            DownlinkMessage::Heartbeat(msg),
+            || mav_messages::Heartbeat::from(msg),
             SerialTxPriority::CRITICAL,
         );
         return true;
@@ -212,10 +512,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightVersionMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RosflightVersion::from(msg),
+            DownlinkMessage::Version(msg),
+            || mav_messages::RosflightVersion::from(msg),
             SerialTxPriority::CRITICAL,
         );
     }
@@ -225,26 +526,29 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::DiffPressureMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::DiffPressure::from(msg),
+            DownlinkMessage::DiffPressure(msg),
+            || mav_messages::DiffPressure::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_baro(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallBaroMsg) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::SmallBaro::from(msg),
+            DownlinkMessage::Baro(msg),
+            || mav_messages::SmallBaro::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_imu(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallImuMsg) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::SmallImu::from(msg),
+            DownlinkMessage::Imu(msg),
+            || mav_messages::SmallImu::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
@@ -254,10 +558,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::AttitudeQuaternionMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::AttitudeQuaternion::from(msg),
+            DownlinkMessage::Attitude(msg),
+            || mav_messages::AttitudeQuaternion::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
@@ -267,42 +572,47 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightOutputRawMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RosflightOutputRaw::from(msg),
+            DownlinkMessage::OutputRaw(msg),
+            || mav_messages::RosflightOutputRaw::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_rc_raw(&mut self, board: &mut B, system_id: u8, msg: core_messages::RcChannelsMsg) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RcChannels::from(msg),
+            DownlinkMessage::RcRaw(msg),
+            || mav_messages::RcChannels::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_range(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallRangeMsg) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::SmallRange::from(msg),
+            DownlinkMessage::Range(msg),
+            || mav_messages::SmallRange::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_mag(&mut self, board: &mut B, system_id: u8, msg: core_messages::SmallMagMsg) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::SmallMag::from(msg),
+            DownlinkMessage::Mag(msg),
+            || mav_messages::SmallMag::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_gnss(&mut self, board: &mut B, system_id: u8, msg: core_messages::RosflightGnssMsg) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RosflightGnss::from(msg),
+            DownlinkMessage::Gnss(msg),
+            || mav_messages::RosflightGnss::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
@@ -312,10 +622,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightCmdAckMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RosflightCmdAck::from(msg),
+            DownlinkMessage::CmdAck(msg),
+            || mav_messages::RosflightCmdAck::from(msg),
             SerialTxPriority::CRITICAL,
         );
     }
@@ -325,10 +636,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RcChannelsMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RcChannels::from(msg),
+            DownlinkMessage::RcChannels(msg),
+            || mav_messages::RcChannels::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
@@ -338,18 +650,20 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::BatteryStatusMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RosflightBatteryStatus::from(msg),
+            DownlinkMessage::BatteryStatus(msg),
+            || mav_messages::RosflightBatteryStatus::from(msg),
             SerialTxPriority::REPLACEABLE_TELEMETRY,
         );
     }
     fn send_statustext(&mut self, board: &mut B, system_id: u8, msg: core_messages::StatustextMsg) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::Statustext::from(msg),
+            DownlinkMessage::Statustext(msg),
+            || mav_messages::Statustext::from(msg),
             SerialTxPriority::CRITICAL,
         );
     }
@@ -359,10 +673,11 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
         system_id: u8,
         msg: core_messages::RosflightHardErrorMsg,
     ) {
-        self.send_message(
+        self.send_downlink_or_message(
             board,
             system_id,
-            mav_messages::RosflightHardError::from(msg),
+            DownlinkMessage::HardError(msg),
+            || mav_messages::RosflightHardError::from(msg),
             SerialTxPriority::CRITICAL,
         );
     }
@@ -373,7 +688,7 @@ mod tests {
     use super::*;
     use crate::generated::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
     use voloxide_core::{
-        board::{BoardIo, SerialRxFrame},
+        board::{BoardIo, SerialRxFrame, SerialTxPriority},
         comm::interface::CommInterface,
         errors,
         params::Params,
@@ -384,6 +699,38 @@ mod tests {
     struct FramedBoard {
         frame: Option<SerialRxFrame>,
         byte_reads: usize,
+    }
+
+    struct TxCaptureBoard {
+        bytes: [u8; 280],
+        len: usize,
+    }
+
+    struct DownlinkCaptureBoard {
+        accepted_len: usize,
+        enqueued: usize,
+        bytes_written: usize,
+        last_priority: SerialTxPriority,
+    }
+
+    impl Default for DownlinkCaptureBoard {
+        fn default() -> Self {
+            Self {
+                accepted_len: 1,
+                enqueued: 0,
+                bytes_written: 0,
+                last_priority: SerialTxPriority::default(),
+            }
+        }
+    }
+
+    impl Default for TxCaptureBoard {
+        fn default() -> Self {
+            Self {
+                bytes: [0; 280],
+                len: 0,
+            }
+        }
     }
 
     impl BoardIo for FramedBoard {
@@ -413,6 +760,82 @@ mod tests {
             bytes: &[u8],
         ) -> Option<core::result::Result<usize, errors::TelemError>> {
             Some(Ok(bytes.len()))
+        }
+
+        fn clock_millis(&self) -> u32 {
+            0
+        }
+
+        fn clock_micros(&self) -> u64 {
+            0
+        }
+    }
+
+    impl BoardIo for TxCaptureBoard {
+        fn update_sensor_bus<R: voloxide_core::math::FlightFloat>(
+            &mut self,
+            sensors: &mut SensorBus<R>,
+        ) {
+            sensors.clear();
+        }
+
+        fn serial_rx_read(
+            &mut self,
+            _buf: &mut [u8],
+        ) -> Option<core::result::Result<usize, errors::TelemError>> {
+            Some(Ok(0))
+        }
+
+        fn serial_tx_write(
+            &mut self,
+            bytes: &[u8],
+        ) -> Option<core::result::Result<usize, errors::TelemError>> {
+            self.bytes[..bytes.len()].copy_from_slice(bytes);
+            self.len = bytes.len();
+            Some(Ok(bytes.len()))
+        }
+
+        fn clock_millis(&self) -> u32 {
+            0
+        }
+
+        fn clock_micros(&self) -> u64 {
+            0
+        }
+    }
+
+    impl BoardIo for DownlinkCaptureBoard {
+        fn update_sensor_bus<R: voloxide_core::math::FlightFloat>(
+            &mut self,
+            sensors: &mut SensorBus<R>,
+        ) {
+            sensors.clear();
+        }
+
+        fn serial_rx_read(
+            &mut self,
+            _buf: &mut [u8],
+        ) -> Option<core::result::Result<usize, errors::TelemError>> {
+            Some(Ok(0))
+        }
+
+        fn serial_tx_write(
+            &mut self,
+            bytes: &[u8],
+        ) -> Option<core::result::Result<usize, errors::TelemError>> {
+            self.bytes_written += bytes.len();
+            Some(Ok(bytes.len()))
+        }
+
+        fn serial_tx_enqueue_downlink(
+            &mut self,
+            _system_id: u8,
+            _msg: DownlinkMessage,
+            priority: SerialTxPriority,
+        ) -> Option<core::result::Result<usize, errors::TelemError>> {
+            self.enqueued += 1;
+            self.last_priority = priority;
+            Some(Ok(self.accepted_len))
         }
 
         fn clock_millis(&self) -> u32 {
@@ -494,6 +917,158 @@ mod tests {
         link.handle_incoming_messages(&mut board, &mut messages);
 
         assert!(messages.offboard_control.is_none());
+    }
+
+    fn assert_encoded_matches_inline(
+        downlink: DownlinkMessage,
+        send_inline: impl FnOnce(&mut MavlinkInterface, &mut TxCaptureBoard),
+    ) {
+        let mut link = MavlinkInterface::new();
+        let mut board = TxCaptureBoard::default();
+        send_inline(&mut link, &mut board);
+
+        let mut encoder = MavlinkFrameEncoder::new();
+        let mut encoded = [0_u8; 280];
+        let len = encoder
+            .encode_downlink(1, downlink, &mut encoded)
+            .expect("encoded downlink");
+
+        assert_eq!(&encoded[..len], &board.bytes[..board.len]);
+    }
+
+    #[test]
+    fn core1_downlink_encoder_matches_inline_imu_frame() {
+        let msg = core_messages::SmallImuMsg {
+            time_boot_us: 123_456_789,
+            xacc: -0.1,
+            yacc: 0.2,
+            zacc: 9.81,
+            xgyro: 0.01,
+            ygyro: -0.02,
+            zgyro: 0.03,
+            temperature: 23.5,
+        };
+
+        assert_encoded_matches_inline(DownlinkMessage::Imu(msg), |link, board| {
+            link.send_imu(board, 1, msg)
+        });
+    }
+
+    #[test]
+    fn core1_downlink_encoder_matches_inline_rc_frame() {
+        let mut channels = [0_u16; core_messages::RC_PACKET_CHANNELS];
+        channels[..8].copy_from_slice(&[1500, 1501, 1100, 1499, 1000, 1000, 1000, 1000]);
+        let msg = core_messages::RcChannelsMsg {
+            time_boot_ms: 42_000,
+            chancount: 8,
+            channels,
+            rssi: 99,
+        };
+
+        assert_encoded_matches_inline(DownlinkMessage::RcRaw(msg), |link, board| {
+            link.send_rc_raw(board, 1, msg)
+        });
+    }
+
+    #[test]
+    fn core1_downlink_encoder_matches_inline_attitude_frame() {
+        let msg = core_messages::AttitudeQuaternionMsg {
+            time_boot_ms: 42,
+            q1: 1.0,
+            q2: 0.0,
+            q3: 0.1,
+            q4: -0.1,
+            rollspeed: 0.01,
+            pitchspeed: -0.02,
+            yawspeed: 0.03,
+        };
+
+        assert_encoded_matches_inline(DownlinkMessage::Attitude(msg), |link, board| {
+            link.send_attitude(board, 1, msg)
+        });
+    }
+
+    #[test]
+    fn core1_downlink_encoder_matches_inline_output_raw_frame() {
+        let msg = core_messages::RosflightOutputRawMsg {
+            stamp: 987_654,
+            values: [0.25; 14],
+        };
+
+        assert_encoded_matches_inline(DownlinkMessage::OutputRaw(msg), |link, board| {
+            link.send_output_raw(board, 1, msg)
+        });
+    }
+
+    #[test]
+    fn offload_downlink_path_does_not_encode_or_write_on_core0() {
+        let msg = core_messages::SmallImuMsg {
+            time_boot_us: 123_456_789,
+            xacc: -0.1,
+            yacc: 0.2,
+            zacc: 9.81,
+            xgyro: 0.01,
+            ygyro: -0.02,
+            zgyro: 0.03,
+            temperature: 23.5,
+        };
+        let mut link = MavlinkInterface::new();
+        let mut board = DownlinkCaptureBoard::default();
+
+        link.send_imu(&mut board, 1, msg);
+
+        assert_eq!(board.enqueued, 1);
+        assert_eq!(board.bytes_written, 0);
+        assert_eq!(link.sequence, 0);
+        assert_eq!(board.last_priority, SerialTxPriority::REPLACEABLE_TELEMETRY);
+    }
+
+    #[test]
+    fn full_replaceable_downlink_queue_drops_without_core0_encode() {
+        let msg = core_messages::SmallImuMsg {
+            time_boot_us: 123_456_789,
+            xacc: -0.1,
+            yacc: 0.2,
+            zacc: 9.81,
+            xgyro: 0.01,
+            ygyro: -0.02,
+            zgyro: 0.03,
+            temperature: 23.5,
+        };
+        let mut link = MavlinkInterface::new();
+        let mut board = DownlinkCaptureBoard {
+            accepted_len: 0,
+            ..Default::default()
+        };
+
+        link.send_imu(&mut board, 1, msg);
+
+        assert_eq!(board.enqueued, 1);
+        assert_eq!(board.bytes_written, 0);
+        assert_eq!(link.sequence, 0);
+    }
+
+    #[test]
+    fn full_critical_downlink_queue_drops_without_core0_encode() {
+        let msg = core_messages::HeartbeatMsg {
+            type_: 2,
+            autopilot: 0,
+            base_mode: 1,
+            custom_mode: 0,
+            system_status: 4,
+            mavlink_version: 3,
+        };
+        let mut link = MavlinkInterface::new();
+        let mut board = DownlinkCaptureBoard {
+            accepted_len: 0,
+            ..Default::default()
+        };
+
+        link.send_heartbeat(&mut board, 1, msg);
+
+        assert_eq!(board.enqueued, 1);
+        assert_eq!(board.bytes_written, 0);
+        assert_eq!(link.sequence, 0);
     }
 
     #[allow(dead_code)]

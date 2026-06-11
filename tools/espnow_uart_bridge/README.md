@@ -4,11 +4,18 @@ This is a test bridge for two Seeed Studio XIAO ESP32-C5 boards.
 
 - `air` firmware: XIAO UART pins connect to Pico UART0.
 - `ground` firmware: XIAO USB-C appears as the host serial endpoint.
-- Bytes are forwarded in both directions over ESP-NOW using unicast packets on a fixed channel.
+- MAVLink v1 frames are forwarded in both directions over ESP-NOW using unicast packets on a fixed
+  channel.
 
-The bridge intentionally acts as a transparent serial link. The ground XIAO uses USB Serial/JTAG as
-the local serial endpoint, and the air XIAO uses UART1. ESP-IDF logs and console output are disabled
-so the ground USB stream stays clean.
+The bridge is MAVLink-frame-aware rather than a fully transparent byte pipe. It scans local serial
+input for MAVLink v1 frames and packs only complete frames into ESP-NOW packets. If an ESP-NOW packet
+is lost, the host should see whole MAVLink frame loss/sequence gaps instead of partial-frame CRC
+corruption. The ground XIAO uses USB Serial/JTAG as the local serial endpoint, and the air XIAO uses
+UART1. ESP-IDF logs and console output are disabled so the ground USB stream stays clean.
+
+The bridge keeps one ESP-NOW packet in flight at a time and waits up to
+`CONFIG_BRIDGE_SEND_TIMEOUT_MS` for the send callback. That backpressure keeps packet ordering
+simple without allowing a missed callback to stop the transmit task forever.
 
 ## Wiring
 
@@ -23,12 +30,14 @@ Air-side XIAO to Pico:
 Power the air-side XIAO from USB-C for bench testing. Do not connect XIAO `5V` to the Pico/BEC rail while USB-C is also connected unless we deliberately verify that power path first.
 
 For isolated bidirectional bridge testing, disconnect the air XIAO from the Pico UART and jumper air
-XIAO `D6 / TX / GPIO11` to air XIAO `D7 / RX / GPIO12`. A byte pattern written to the ground USB
-endpoint should echo back exactly through:
+XIAO `D6 / TX / GPIO11` to air XIAO `D7 / RX / GPIO12`. A MAVLink frame written to the ground USB
+endpoint should echo back through:
 
 ```text
-ground USB -> ESP-NOW -> air UART TX -> air UART RX -> ESP-NOW -> ground USB
+ground USB MAVLink frame -> ESP-NOW -> air UART TX -> air UART RX -> ESP-NOW -> ground USB
 ```
+
+Arbitrary non-MAVLink byte patterns are intentionally discarded by the framed bridge.
 
 ## Peers
 

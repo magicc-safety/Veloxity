@@ -70,12 +70,16 @@ Current RP2350 status:
 - ISM330DHCX accelerometer/gyro path is validated through interrupt-driven firmware.
 - IMU is configured to the native `3.333 kHz` ODR for the current high-rate control-loop target.
 - GPS over PIO UART and ELRS/CRSF receiver have produced parsed MAVLink through the ESP-NOW bridge.
-- Barometer passthrough worked in earlier probes and is integrated through the board sensor path,
-  but still deserves a fresh post-flash validation run after hardware wiring changes.
+- Barometer passthrough worked in earlier probes and is integrated through the board sensor path.
+  The current production hardware still needs a fresh validation run after the dedicated barometer
+  wiring is installed.
 
 ## ESP-NOW Bridge
 
-The current bridge source lives in `tools/espnow_uart_bridge`. It is a transparent serial link:
+The current bridge source lives in `tools/espnow_uart_bridge`. It is MAVLink-frame-aware rather than
+a transparent byte pipe: local serial input is scanned for complete MAVLink v1 frames, and ESP-NOW
+packets are packed without splitting a MAVLink frame. Radio loss should therefore appear as whole
+MAVLink frame gaps, not partial-frame CRC corruption.
 
 - Ground role: USB Serial/JTAG local endpoint.
 - Air role: UART1 local endpoint on XIAO `D6/TX/GPIO11` and `D7/RX/GPIO12`.
@@ -128,8 +132,8 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
   - one queued response is sent per realtime service response phase;
   - service work can run only in the early post-control window.
 - Current timing-pin meanings:
-  - `GP18` toggles at each core 0 realtime scheduler pass boundary.
-  - `GP19` is high during the accepted-new-IMU estimator/controller/mixer/PWM body.
+  - `GP18` emits a short pulse when core 0 enters an IMU-control scheduler step.
+  - `GP19` is high for the complete fast-loop `run_imu_control_tick()` call.
   - `GP22` is selected by the scope feature: service, IMU producer, pre-control, RC command/state,
     or one control substage.
 - Current validated 3.333 kHz close-loop timing with loaded MAVLink telemetry:
@@ -144,23 +148,31 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
   p99.9 `265.120 us`, worst `328.160 us`. It had `15` pulses over `300 us`, `5` over
   `312.5 us`, and `0` over `333.333 us`. GP22 controller remained bounded: mean `38.209 us`,
   p99 `75.040 us`, p99.9 `85.600 us`, worst `125.920 us`, and `0` pulses over `300 us`.
-- A post-cleanup 24.4-second Saleae smoke capture after making the RP2350 baseline the default
+- A short post-cleanup 24.4-second Saleae check after making the RP2350 baseline the default
   produced `84107` GP19 control pulses: mean `148.784 us`, p99 `248.960 us`, p99.9 `274.560 us`,
   worst `312.800 us`, `2` over `300 us`, `1` over `312.5 us`, and `0` over `333.333 us`. GP22
-  controller remained below `300 us`, with p99 `78.240 us` and worst `107.360 us`.
-- Current loaded telemetry validation over the ESP32C5 link:
+  controller remained below `300 us`, with p99 `78.240 us` and worst `107.360 us`. Treat this as a
+  smoke check of the simplified feature surface; the 120-second capture remains the stronger timing
+  reference.
+- Current configured bounded telemetry profile:
   - IMU telemetry: `400 Hz`;
   - RC telemetry: `100 Hz`;
-  - attitude quaternion: `50 Hz`;
-  - output raw: `50 Hz`;
+  - attitude quaternion, output raw, differential pressure, and range: `50 Hz`;
+  - barometer, magnetometer, and battery: `25 Hz`;
   - GNSS: `10 Hz`;
-  - heartbeat: `1 Hz`;
+  - status: `10 Hz`;
+  - heartbeat: `1 Hz`.
+- Current loaded telemetry validation over the ESP32C5 link checked the streams present in the
+  current hardware setup:
+  - IMU telemetry, RC telemetry, attitude quaternion, output raw, GNSS, status, and heartbeat;
   - receiver throughput: about `29.15 kB/s`;
   - invalid CRCs: `0`;
   - estimated missing valid MAVLink sequence frames: `0`.
 - The 120-second timing confirmation received IMU telemetry at about `401 Hz`, RC telemetry at
   about `100 Hz`, attitude and output raw at about `50 Hz`, GNSS at `10 Hz`, status at `10 Hz`,
-  and heartbeat at `1 Hz`, with about `29.42 kB/s` received. That run saw `24` invalid CRC
+  and heartbeat at `1 Hz`, with about `29.42 kB/s` received. Use board timestamp deltas rather than
+  host inter-arrival timestamps for precise IMU telemetry-rate claims, because one UART read can
+  deliver multiple MAVLink frames with the same host timestamp. That run saw `24` invalid CRC
   candidates and sequence-gap accounting reported estimated missing frames, so it is a timing
   confirmation rather than the cleanest link-integrity reference.
 - The measurement series found the main problem:

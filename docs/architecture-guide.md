@@ -35,7 +35,7 @@ Use these terms consistently when reading or editing this codebase.
 | Receiver | Code that drains or reads events and applies the requested work. | `params::service`, `command::service`, `companion`, `params::reactions` |
 | Scheduler | Code that owns ordering. In core, this is `World::run_once` and the stage methods it calls. | `run_communication_and_parameter_service_stage`, `run_sensor_ingestion_and_health_stage` |
 | Stage | A named scheduler section grouping related systems in order. | communication/parameter service, sensor ingestion/health, RC/state, control/mixing, telemetry |
-| Adapter | Code outside `voloxide_core` that connects core contracts to a concrete runtime or protocol. | `voloxide_mavlink`, `sim`, `pixracerpro`, `nucleo`, ROS 2 shim |
+| Adapter | Code outside `voloxide_core` that connects core contracts to a concrete runtime or protocol. | `voloxide_mavlink`, `sim`, `pico2w`, `pixracerpro`, `nucleo`, ROS 2 shim |
 | Boundary | A place where one layer hands data to another layer through an explicit API. | ROS 2 C++ shim to Rust FFI, `CommInterface`, `BoardIo`, `PwmDriver` |
 | Wire message | Protocol-shaped data at a communication boundary. Core keeps protocol-neutral message structs; MAVLink encoding lives in `voloxide_mavlink`. | `ParamValueMsg`, `RosflightCmdMsg`, `StatustextMsg` |
 | Packet | Sensor or actuator data in Voloxide's firmware-facing representation. | `ImuPacket`, `RcPacket`, `BaroPacket`, `BatteryPacket` |
@@ -97,10 +97,12 @@ Voloxide/
 │           ├── conversions.rs
 │           └── parser.rs
 ├── platforms/
+│   ├── rp2350/
 │   └── stm_32/
-│   └── src/
-│       └── peripherals/
+│       └── src/
+│           └── peripherals/
 ├── boards/
+│   ├── pico2w/
 │   ├── nucleo/
 │   └── pixracerpro/
 ├── sim/
@@ -152,9 +154,10 @@ sim/ros2/voloxide_sil_board_shim
 ├── exposes sil_board/run
 └── calls the Rust sim crate through C ABI
 
-pixracerpro / nucleo
+pico2w / pixracerpro / nucleo
 ├── choose board/PWM/comm concrete types
-└── instantiate World for embedded targets
+├── instantiate World for embedded targets
+└── use platform crates for chip-family support where useful
 ```
 
 Core should never depend outward on `sim`, `voloxide_mavlink`, ROS 2 packages, or board crates.
@@ -490,13 +493,21 @@ state machine, syncing PWM output enable state, and updating LEDs are core `Worl
 work in a service phase preserves the expected ROSflight behavior while preventing variable RC
 packet arrivals from adding jitter to every IMU control closure.
 
-On RP2350/Pico 2 W, the default firmware configuration uses the ISM330DHCX native `3.333 kHz` ODR.
-The board entry point is `boards/pico2w/src/bin/voloxide.rs`; `ism330dhcx-1k666` is the only
-lower-rate hardware IMU override. Core 1 owns transport and producer work, while the ISM330DHCX
-producer runs on an Embassy interrupt executor driven by `SIO_IRQ_BELL`. The `scope-timing-pins`
-family exposes GP19 for the control body plus GP22 for the selected substage. Barometer and
-magnetometer work should remain in the service-side sensor path so adding those sensors does not
-turn the IMU interrupt path into a multi-sensor polling loop.
+On RP2350/Pico 2 W, IMU sampling, control cadence, and telemetry cadence are separate choices. The
+default firmware samples the ISM330DHCX at the high-rate ODR, runs the full control pipeline at
+`2 kHz`, and publishes bounded high-rate MAVLink telemetry. The board entry point is
+`boards/pico2w/src/bin/voloxide.rs`; `imu-odr-1666hz` is the lower-rate hardware IMU override and
+`ism330dhcx-1k666` remains only as a compatibility alias. Core 1 owns transport and producer work,
+while the ISM330DHCX producer runs on an Embassy interrupt executor driven by `SIO_IRQ_BELL`. The
+`scope-timing-pins` family exposes GP19 for control timing plus GP22 for the selected substage.
+Barometer and magnetometer work should remain in the service-side sensor path so adding those
+sensors does not turn the IMU interrupt path into a multi-sensor polling loop.
+
+The retained STM32 boards use the generic scheduler shape rather than the Pico 2 W realtime split.
+Their board crates instantiate `World`, wire STM32 peripheral tasks through the `BoardIo` contract,
+and run the ordinary firmware loop while renewed sensor bring-up is completed. That difference is
+intentional: RP2350 currently has measured high-rate hardware timing requirements, while the STM32
+paths are compile-current retained targets awaiting fresh hardware validation.
 
 ## End-To-End Flow: ROSflight Standalone Sim
 
@@ -678,8 +689,9 @@ fcu_clock_micros
 That prevents wall-clock jumps from becoming firmware time-backwards errors.
 
 The FFI simulator requires `VOLOXIDE_SIM_PARAM_DIR` to point at a writable runtime directory before
-`voloxide_sim_create` is called. The supported demo scripts set this under
-`target/voloxide-runtime/`, which is ignored by Git.
+`voloxide_sim_create` is called. The multirotor standalone launch defaults this to
+`/tmp/voloxide-sim-params/multirotor`, and the launch argument `voloxide_param_dir:=...` can move it
+to a persistent path.
 
 ## Simulator Integration Boundary
 
@@ -1029,3 +1041,69 @@ Use this order when stepping through the simulator integration:
 ```
 
 That path follows one simulator tick from ROS sensor input to firmware update to PWM output.
+
+## Code Reading Path For `boards/pico2w`
+
+Use this order when stepping through the active RP2350/Pico 2 W firmware:
+
+```text
+1. boards/pico2w/src/bin/voloxide.rs
+   ├── default feature-driven hardware setup
+   ├── core 0 realtime scheduler loop
+   ├── core 1 Embassy executor tasks
+   ├── ISM330DHCX interrupt executor startup
+   └── telemetry-rate selection
+
+2. boards/pico2w/src/board.rs
+   ├── BoardIo implementation
+   ├── newest-packet sensor queue drains
+   ├── serial mailbox bridge
+   ├── serial flush budget
+   └── deferred board actions
+
+3. boards/pico2w/src/ism330dhcx.rs
+   └── IMU packet queue and data-ready bookkeeping
+
+4. boards/pico2w/src/rc_receiver.rs
+   └── CRSF packet parsing and RC queueing
+
+5. boards/pico2w/src/gps.rs
+   └── GPS PIO UART and magnetometer-facing path
+
+6. crates/voloxide_core/src/world.rs
+   ├── realtime_scheduler_step
+   ├── run_imu_control_tick
+   └── run_service_step_with_deferral
+```
+
+Use [RP2350 / Pico 2 W](boards/rp2350-pico2w.md) for exact feature choices, scope-pin meanings,
+timing results, and flash commands.
+
+## Code Reading Path For STM32 Boards
+
+Use this order when renewing Nucleo-H753ZI or Pixracer Pro validation:
+
+```text
+1. boards/nucleo/src/bin/voloxide.rs
+   └── Nucleo World construction and firmware loop
+
+2. boards/nucleo/src/board.rs
+   └── Nucleo BoardIo and board setup
+
+3. boards/pixracerpro/src/bin/voloxide.rs
+   └── Pixracer Pro World construction and firmware loop
+
+4. boards/pixracerpro/src/board.rs
+   └── Pixracer Pro BoardIo and board setup
+
+5. platforms/stm_32/src/peripherals/
+   ├── IMU drivers
+   ├── barometer and magnetometer drivers
+   ├── serial/RC drivers
+   └── Embassy signal tasks
+
+6. crates/voloxide_core/src/world.rs
+   └── generic run_once scheduler and stage methods
+```
+
+Use [STM32 boards](boards/stm32.md) for the retained-target status and the validation order.

@@ -122,6 +122,8 @@ The board crates own their runner configuration. For RP2350 work in this branch,
 been done with explicit `probe-rs` commands during hardware bring-up. See
 [RP2350 / Pico 2 W guide](boards/rp2350-pico2w.md).
 
+### RP2350 Current Baseline
+
 Current high-rate RP2350 release build:
 
 ```bash
@@ -135,9 +137,12 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --releas
   --features 'scope-timing-pins control-scope-controller'
 ```
 
-The current validated loaded baseline expects `400 Hz` IMU telemetry, `100 Hz` RC telemetry,
-`50 Hz` attitude/output raw telemetry, and the 120-second Saleae result documented in the RP2350
-guide: rare GP19 full-control pulses over `300 us`, and `0` over `333.333 us`.
+The current bounded high-rate telemetry profile configures IMU at `400 Hz`, RC at `100 Hz`,
+attitude/output/differential-pressure/range at `50 Hz`, barometer/magnetometer/battery at `25 Hz`,
+GNSS at `10 Hz`, status at `10 Hz`, and heartbeat at `1 Hz`. The current acceptance command checks
+the streams present in the current hardware setup: IMU, RC, attitude, and output raw. The 120-second
+Saleae result documented in the RP2350 guide had rare GP19 full-control pulses over `300 us` and
+`0` over `333.333 us`.
 
 Current high-rate telemetry integrity check against the ESP32C5 ground bridge:
 
@@ -156,6 +161,13 @@ python3 tools/mavlink_tester.py \
   --expect-attitude-hz 50 \
   --expect-output-raw-hz 50
 ```
+
+### STM32 Retained Targets
+
+Nucleo-H753ZI and Pixracer Pro are compile-current retained targets. Use `cargo xtask check-board`
+and `cargo xtask build-board` as the current confidence level, then follow
+[STM32 boards](boards/stm32.md) for renewed sensor, serial, RC, and PWM validation before making
+flight-readiness claims.
 
 ## ROS 2 Shim Build
 

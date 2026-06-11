@@ -1588,6 +1588,7 @@ dependencies = [
  "embassy-time",
  "embedded-hal-nb",
  "fixed",
+ "heapless 0.8.0",
  "ism330dhcx-rs",
  "nb 1.1.0",
  "panic-halt",

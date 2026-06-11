@@ -78,9 +78,9 @@ use voloxide_core::{
     params::Params,
     state_machine::StateManager,
     vehicle::quadrotor,
-    world::World,
+    world::{ControlLoopRates, World},
 };
-use voloxide_mavlink::{MavlinkInterface, parser::MavlinkParser};
+use voloxide_mavlink::{MavlinkFrameEncoder, MavlinkInterface, parser::MavlinkParser};
 
 type PicoReal = f32;
 
@@ -109,6 +109,7 @@ const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 32;
 const GPS_UART_BAUDRATE: u32 = 115_200;
 const MAIN_LOOP_MAX_SERVICE_DEFERRAL_US: u64 = 250;
+const PICO2W_CONTROL_LOOP_HZ: u16 = 2_000;
 #[cfg(any(
     all(feature = "pre-control-scope", feature = "imu-producer-scope"),
     all(feature = "pre-control-scope", feature = "rc-command-scope"),
@@ -127,23 +128,19 @@ compile_error!(
 );
 #[cfg(all(feature = "ism330dhcx-driver"))]
 const ISM330DHCX_IMU_PERIOD_US: u64 = 0;
-#[cfg(all(feature = "ism330dhcx-driver", feature = "ism330dhcx-1k666"))]
-const ISM330DHCX_CTRL1_XL: u8 = 0x84;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "ism330dhcx-1k666")))]
-const ISM330DHCX_CTRL1_XL: u8 = 0x94;
-#[cfg(all(feature = "ism330dhcx-driver", feature = "ism330dhcx-1k666"))]
-const ISM330DHCX_CTRL2_G: u8 = 0x8c;
-#[cfg(all(feature = "ism330dhcx-driver", not(feature = "ism330dhcx-1k666")))]
-const ISM330DHCX_CTRL2_G: u8 = 0x9c;
+#[cfg(all(feature = "ism330dhcx-driver", feature = "imu-odr-1666hz"))]
+const ISM330DHCX_ODR_CONFIG: Ism330dhcxOdrConfig = Ism330dhcxOdrConfig::ODR_1666HZ;
+#[cfg(all(feature = "ism330dhcx-driver", not(feature = "imu-odr-1666hz")))]
+const ISM330DHCX_ODR_CONFIG: Ism330dhcxOdrConfig = Ism330dhcxOdrConfig::ODR_3333HZ;
 #[cfg(all(feature = "ism330dhcx-driver"))]
 const ISM330DHCX_SPI_HZ: u32 = 10_000_000;
 #[cfg(all(feature = "ism330dhcx-driver"))]
 const ISM330DHCX_WHO_AM_I: u8 = 0x6b;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_REPORT_US: u64 = 1_000_000;
-#[cfg(all(feature = "release-loop-bench", feature = "ism330dhcx-1k666"))]
+#[cfg(all(feature = "release-loop-bench", feature = "imu-odr-1666hz"))]
 const LOOP_BENCH_BUDGET_US: u32 = 600;
-#[cfg(all(feature = "release-loop-bench", not(feature = "ism330dhcx-1k666")))]
+#[cfg(all(feature = "release-loop-bench", not(feature = "imu-odr-1666hz")))]
 const LOOP_BENCH_BUDGET_US: u32 = 300;
 #[cfg(feature = "release-loop-bench")]
 const LOOP_BENCH_BUCKET_US: u32 = 10;
@@ -153,6 +150,27 @@ const LOOP_BENCH_BUCKETS: usize = 128;
 const MAVLINK_V1_STX: u8 = 0xfe;
 #[cfg(feature = "release-loop-bench")]
 const MAVLINK_STATUSTEXT_ID: u8 = 253;
+
+#[cfg(all(feature = "ism330dhcx-driver"))]
+#[derive(Clone, Copy)]
+struct Ism330dhcxOdrConfig {
+    accel_ctrl1_xl: u8,
+    gyro_ctrl2_g: u8,
+}
+
+#[cfg(all(feature = "ism330dhcx-driver"))]
+impl Ism330dhcxOdrConfig {
+    #[allow(dead_code)]
+    const ODR_1666HZ: Self = Self {
+        accel_ctrl1_xl: 0x84,
+        gyro_ctrl2_g: 0x8c,
+    };
+    #[allow(dead_code)]
+    const ODR_3333HZ: Self = Self {
+        accel_ctrl1_xl: 0x94,
+        gyro_ctrl2_g: 0x9c,
+    };
+}
 #[cfg(feature = "release-loop-bench")]
 const MAVLINK_STATUSTEXT_LEN: usize = 51;
 #[cfg(feature = "release-loop-bench")]
@@ -274,8 +292,10 @@ fn ism330dhcx_init(
         return Err(Some(who_am_i));
     }
     ism330dhcx_write_reg(spi, cs, 0x12, 0x44).map_err(|_| Some(who_am_i))?;
-    ism330dhcx_write_reg(spi, cs, 0x10, ISM330DHCX_CTRL1_XL).map_err(|_| Some(who_am_i))?;
-    ism330dhcx_write_reg(spi, cs, 0x11, ISM330DHCX_CTRL2_G).map_err(|_| Some(who_am_i))?;
+    ism330dhcx_write_reg(spi, cs, 0x10, ISM330DHCX_ODR_CONFIG.accel_ctrl1_xl)
+        .map_err(|_| Some(who_am_i))?;
+    ism330dhcx_write_reg(spi, cs, 0x11, ISM330DHCX_ODR_CONFIG.gyro_ctrl2_g)
+        .map_err(|_| Some(who_am_i))?;
     ism330dhcx_write_reg(spi, cs, 0x0b, 0x80).map_err(|_| Some(who_am_i))?;
     ism330dhcx_write_reg(spi, cs, 0x0d, 0x03).map_err(|_| Some(who_am_i))?;
     Ok(who_am_i)
@@ -450,8 +470,16 @@ async fn gps_write_packet(gps_tx: &mut PioUartTx<'static, PIO0, 1>, bytes: &[u8]
 #[embassy_executor::task]
 async fn uart_tx_task(mut uart_tx: UartTx<'static, UartAsync>, mailbox: SharedMavlinkMailbox) -> ! {
     let mut tx = [0_u8; UART_TX_BATCH_BYTES];
+    let mut encoder = MavlinkFrameEncoder::new();
     loop {
-        let n = mailbox.drain_tx_batch_into(&mut tx);
+        let mut n = mailbox.drain_tx_batch_into(&mut tx);
+        if n == 0 {
+            if let Some(queued) = mailbox.pop_downlink_message() {
+                n = encoder
+                    .encode_downlink(queued.system_id, queued.msg, &mut tx)
+                    .unwrap_or(0);
+            }
+        }
         if n == 0 {
             Timer::after(Duration::from_micros(UART_IDLE_DELAY_US)).await;
             continue;
@@ -526,8 +554,7 @@ struct Core1Resources {
 
 #[cfg(feature = "scope-timing-pins")]
 struct ScopeTimingPins {
-    whole_loop: Output<'static>,
-    whole_loop_high: bool,
+    imu_available: Output<'static>,
 }
 
 #[cfg(all(
@@ -560,20 +587,16 @@ const SCOPE_GP22_MARKS_SERVICE: bool = false;
 
 #[cfg(feature = "scope-timing-pins")]
 impl ScopeTimingPins {
-    fn new(whole_loop: Output<'static>) -> Self {
-        Self {
-            whole_loop,
-            whole_loop_high: false,
-        }
+    fn new(imu_available: Output<'static>) -> Self {
+        Self { imu_available }
     }
 
-    fn mark_loop_boundary(&mut self) {
-        self.whole_loop_high = !self.whole_loop_high;
-        if self.whole_loop_high {
-            self.whole_loop.set_high();
-        } else {
-            self.whole_loop.set_low();
+    fn pulse_imu_available(&mut self) {
+        self.imu_available.set_high();
+        for _ in 0..8 {
+            cortex_m::asm::nop();
         }
+        self.imu_available.set_low();
     }
 }
 
@@ -727,6 +750,8 @@ fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> 
     );
     #[cfg(all(feature = "release-loop-bench", feature = "ism330dhcx-driver"))]
     world.set_telemetry_rates(TelemetryRates {
+        heartbeat_hz: 1,
+        status_hz: 10,
         imu_hz: 50,
         attitude_hz: 1,
         output_raw_hz: 1,
@@ -741,6 +766,7 @@ fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> 
     });
     #[cfg(not(feature = "release-loop-bench"))]
     world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
+    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(PICO2W_CONTROL_LOOP_HZ));
     world
 }
 
@@ -1339,7 +1365,7 @@ fn main() -> ! {
         match world.realtime_scheduler_step() {
             RealtimeSchedulerStep::ImuControl => {
                 #[cfg(feature = "scope-timing-pins")]
-                scope_timing_pins.mark_loop_boundary();
+                scope_timing_pins.pulse_imu_available();
                 #[cfg(feature = "release-loop-bench")]
                 {
                     let start_us = Instant::now().as_micros();
@@ -1362,6 +1388,9 @@ fn main() -> ! {
                 }
                 #[cfg(not(feature = "release-loop-bench"))]
                 let _ = world.run_imu_control_tick();
+            }
+            RealtimeSchedulerStep::ControlUpdate => {
+                let _ = world.run_control_update_tick();
             }
             RealtimeSchedulerStep::Service => {
                 #[cfg(feature = "scope-timing-pins")]

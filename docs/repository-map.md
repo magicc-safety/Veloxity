@@ -96,6 +96,18 @@ Current RP2350/Pico 2 W work is concentrated in:
 | `platforms/rp2350/src/multicore.rs` | RP2350 core-role metadata. |
 | `platforms/rp2350/src/pio.rs` | Shared PIO allocation metadata. |
 
+Current retained STM32 work is concentrated in:
+
+| Path | Purpose |
+| --- | --- |
+| `boards/nucleo/src/bin/voloxide.rs` | Nucleo-H753ZI firmware entry point and `World` construction. |
+| `boards/nucleo/src/board.rs` | Nucleo `BoardIo` and board setup. |
+| `boards/pixracerpro/src/bin/voloxide.rs` | Pixracer Pro firmware entry point and `World` construction. |
+| `boards/pixracerpro/src/board.rs` | Pixracer Pro `BoardIo` and board setup. |
+| `boards/pixracerpro/src/pwm.rs` | Pixracer Pro PWM driver. |
+| `platforms/stm_32/src/peripherals/` | Shared STM32 sensor, serial, and signal-task drivers. |
+| `platforms/stm_32/stm32h7x3_common.rs` | Shared STM32H7 configuration. |
+
 ### Platform Crates
 
 Platform crates own reusable chip-family code. Board crates depend on them when a concept applies

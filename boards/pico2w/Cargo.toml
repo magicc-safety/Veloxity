@@ -9,7 +9,8 @@ default = ["ism330dhcx-driver", "imu-producer-interrupt-executor"]
 timing-diagnostics = ["voloxide_core/timing-diagnostics"]
 imu-400hz = []
 ism330dhcx-driver = ["dep:ism330dhcx-rs"]
-ism330dhcx-1k666 = ["ism330dhcx-driver"]
+imu-odr-1666hz = ["ism330dhcx-driver"]
+ism330dhcx-1k666 = ["imu-odr-1666hz"]
 release-loop-bench = []
 release-loop-classifier = ["release-loop-bench"]
 scope-timing-pins = []
@@ -41,6 +42,7 @@ embassy-sync = "0.8.0"
 embassy-time = "0.5.1"
 embedded-hal-nb = "1.0.0"
 fixed = "1.31.0"
+heapless = { version = "0.8.0", default-features = false }
 ism330dhcx-rs = { version = "2.0.0", default-features = false, features = ["async"], optional = true }
 nb = "1.1.0"
 panic-halt = "1.0.0"

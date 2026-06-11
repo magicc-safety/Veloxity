@@ -697,13 +697,15 @@ def summarize(name, records):
         )
     if board_deltas:
         ordered = sorted(board_deltas)
-        board_rate_hz = 1000.0 / statistics.fmean(board_deltas)
+        board_mean_ms = statistics.fmean(board_deltas)
+        board_rate_hz = 1000.0 / board_mean_ms if board_mean_ms > 0 else None
+        rate_text = f"{board_rate_hz:.1f}Hz" if board_rate_hz is not None else "n/a"
         print(
             "  board timestamp interval ms: "
-            f"min={ordered[0]:.3f} avg={statistics.fmean(board_deltas):.3f} "
+            f"min={ordered[0]:.3f} avg={board_mean_ms:.3f} "
             f"p50={percentile(ordered, 50):.3f} p90={percentile(ordered, 90):.3f} "
             f"p99={percentile(ordered, 99):.3f} max={ordered[-1]:.3f} "
-            f"rate={board_rate_hz:.1f}Hz"
+            f"rate={rate_text}"
         )
     loop_times = [record["loop_time_us"] for record in records if "loop_time_us" in record]
     if loop_times:

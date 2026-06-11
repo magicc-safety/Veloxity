@@ -5,13 +5,46 @@ use core::{
 
 use critical_section::Mutex;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pipe::Pipe};
+use heapless::Deque;
 use voloxide_core::board::{
     SERIAL_RX_FRAME_MAX_BYTES, SerialRxFrame, SerialRxPriority, SerialTxPriority,
 };
+use voloxide_core::comm::messages::messages::DownlinkMessage;
 
 const MAVLINK_V1_MAX_FRAME_BYTES: usize = 263;
 const TX_FRAME_CAPACITY: usize = 64;
 const RX_FRAME_CAPACITY: usize = 32;
+const DOWNLINK_CRITICAL_CAPACITY: usize = 64;
+const DOWNLINK_TELEMETRY_STREAMS: usize = 10;
+
+#[derive(Clone, Copy, Debug)]
+pub struct QueuedDownlinkMessage {
+    pub system_id: u8,
+    pub msg: DownlinkMessage,
+}
+
+fn downlink_telemetry_stream(msg: &DownlinkMessage) -> Option<usize> {
+    match msg {
+        DownlinkMessage::OutputRaw(_) => Some(0),
+        DownlinkMessage::Attitude(_) => Some(1),
+        DownlinkMessage::Baro(_) => Some(2),
+        DownlinkMessage::DiffPressure(_) => Some(3),
+        DownlinkMessage::Imu(_) => Some(4),
+        DownlinkMessage::Mag(_) => Some(5),
+        DownlinkMessage::RcRaw(_) | DownlinkMessage::RcChannels(_) => Some(6),
+        DownlinkMessage::Range(_) => Some(7),
+        DownlinkMessage::Gnss(_) => Some(8),
+        DownlinkMessage::BatteryStatus(_) => Some(9),
+        DownlinkMessage::Heartbeat(_)
+        | DownlinkMessage::ParamValue(_)
+        | DownlinkMessage::Status(_)
+        | DownlinkMessage::Timesync(_)
+        | DownlinkMessage::Version(_)
+        | DownlinkMessage::CmdAck(_)
+        | DownlinkMessage::Statustext(_)
+        | DownlinkMessage::HardError(_) => None,
+    }
+}
 
 pub static MAVLINK_MAILBOX: Mutex<RefCell<MavlinkMailbox>> =
     Mutex::new(RefCell::new(MavlinkMailbox::new()));
@@ -64,6 +97,47 @@ impl SharedMavlinkMailbox {
             });
             0
         }
+    }
+
+    pub fn enqueue_downlink(
+        &self,
+        system_id: u8,
+        msg: DownlinkMessage,
+        priority: SerialTxPriority,
+    ) -> usize {
+        let queued = QueuedDownlinkMessage { system_id, msg };
+        let sent = critical_section::with(|cs| {
+            self.inner
+                .borrow_ref_mut(cs)
+                .push_downlink_message(queued, priority.0)
+        });
+
+        if sent {
+            self.update_stats(|stats| {
+                stats.downlink_enqueued = stats.downlink_enqueued.wrapping_add(1);
+                stats.downlink_priority_min = priority_min(stats.downlink_priority_min, priority.0);
+                stats.downlink_priority_max = stats.downlink_priority_max.max(priority.0);
+            });
+            1
+        } else {
+            self.update_stats(|stats| {
+                stats.downlink_dropped = stats.downlink_dropped.wrapping_add(1);
+                stats.downlink_drop_priority_min =
+                    priority_min(stats.downlink_drop_priority_min, priority.0);
+                stats.downlink_drop_priority_max = stats.downlink_drop_priority_max.max(priority.0);
+            });
+            0
+        }
+    }
+
+    pub fn pop_downlink_message(&self) -> Option<QueuedDownlinkMessage> {
+        let msg = critical_section::with(|cs| self.inner.borrow_ref_mut(cs).pop_downlink_message());
+        if msg.is_some() {
+            self.update_stats(|stats| {
+                stats.downlink_drained = stats.downlink_drained.wrapping_add(1)
+            });
+        }
+        msg
     }
 
     pub fn push_rx(&self, bytes: &[u8]) -> usize {
@@ -189,6 +263,8 @@ impl SharedMavlinkMailbox {
             stats.tx_pending = mailbox.pending_bytes();
             stats.tx_pending_frames = mailbox.tx_len as u32;
             stats.rx_pending_frames = mailbox.rx_len as u32;
+            stats.downlink_pending =
+                (mailbox.downlink_critical.len() + mailbox.telemetry_pending_count()) as u32;
             stats
         });
         stats.comms_state = COMMS_STATE.load(Ordering::Acquire);
@@ -196,7 +272,8 @@ impl SharedMavlinkMailbox {
     }
 
     pub fn has_pending_tx(&self) -> bool {
-        self.stats().tx_pending != 0
+        let stats = self.stats();
+        stats.tx_pending != 0 || stats.downlink_pending != 0
     }
 
     fn update_stats(&self, update: impl FnOnce(&mut MavlinkMailboxStats)) {
@@ -241,6 +318,15 @@ pub struct MavlinkMailboxStats {
     pub uart_tx_errors: u32,
     pub uart_rx_errors: u32,
     pub uart_rx_parse_errors: u32,
+    pub downlink_enqueued: u32,
+    pub downlink_drained: u32,
+    pub downlink_dropped: u32,
+    pub downlink_replaced: u32,
+    pub downlink_pending: u32,
+    pub downlink_priority_min: u8,
+    pub downlink_priority_max: u8,
+    pub downlink_drop_priority_min: u8,
+    pub downlink_drop_priority_max: u8,
 }
 
 pub struct MavlinkMailbox {
@@ -253,6 +339,9 @@ pub struct MavlinkMailbox {
     rx_frame_lens: [u16; RX_FRAME_CAPACITY],
     rx_frame_priorities: [u8; RX_FRAME_CAPACITY],
     rx_len: usize,
+    downlink_critical: Deque<QueuedDownlinkMessage, DOWNLINK_CRITICAL_CAPACITY>,
+    downlink_telemetry: [Option<QueuedDownlinkMessage>; DOWNLINK_TELEMETRY_STREAMS],
+    downlink_telemetry_ready: Deque<usize, DOWNLINK_TELEMETRY_STREAMS>,
 }
 
 impl MavlinkMailbox {
@@ -291,6 +380,15 @@ impl MavlinkMailbox {
                 uart_tx_errors: 0,
                 uart_rx_errors: 0,
                 uart_rx_parse_errors: 0,
+                downlink_enqueued: 0,
+                downlink_drained: 0,
+                downlink_dropped: 0,
+                downlink_replaced: 0,
+                downlink_pending: 0,
+                downlink_priority_min: 0,
+                downlink_priority_max: 0,
+                downlink_drop_priority_min: 0,
+                downlink_drop_priority_max: 0,
             },
             tx_frames: [[0; MAVLINK_V1_MAX_FRAME_BYTES]; TX_FRAME_CAPACITY],
             tx_frame_lens: [0; TX_FRAME_CAPACITY],
@@ -300,7 +398,55 @@ impl MavlinkMailbox {
             rx_frame_lens: [0; RX_FRAME_CAPACITY],
             rx_frame_priorities: [0; RX_FRAME_CAPACITY],
             rx_len: 0,
+            downlink_critical: Deque::new(),
+            downlink_telemetry: [None; DOWNLINK_TELEMETRY_STREAMS],
+            downlink_telemetry_ready: Deque::new(),
         }
+    }
+
+    fn push_downlink_message(&mut self, msg: QueuedDownlinkMessage, priority: u8) -> bool {
+        if priority >= SerialTxPriority::DEFAULT.0 {
+            return self.downlink_critical.push_back(msg).is_ok();
+        }
+
+        let Some(stream) = downlink_telemetry_stream(&msg.msg) else {
+            return self.downlink_critical.push_back(msg).is_ok();
+        };
+
+        let replaced = self.downlink_telemetry[stream].is_some();
+        self.downlink_telemetry[stream] = Some(msg);
+        if replaced {
+            self.stats.downlink_replaced = self.stats.downlink_replaced.wrapping_add(1);
+            return true;
+        }
+
+        self.downlink_telemetry_ready.push_back(stream).is_ok()
+    }
+
+    fn pop_downlink_message(&mut self) -> Option<QueuedDownlinkMessage> {
+        if let Some(msg) = self.downlink_critical.pop_front() {
+            return Some(msg);
+        }
+
+        while let Some(stream) = self.downlink_telemetry_ready.pop_front() {
+            if let Some(msg) = self.downlink_telemetry[stream].take() {
+                return Some(msg);
+            }
+        }
+
+        None
+    }
+
+    fn telemetry_pending_count(&self) -> usize {
+        let mut count = 0;
+        let mut i = 0;
+        while i < DOWNLINK_TELEMETRY_STREAMS {
+            if self.downlink_telemetry[i].is_some() {
+                count += 1;
+            }
+            i += 1;
+        }
+        count
     }
 
     fn push_tx_frame(&mut self, bytes: &[u8], priority: u8) -> bool {
@@ -500,6 +646,11 @@ fn priority_min(current: u8, value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use voloxide_core::comm::messages::enums::{OffboardControlIgnore, OffboardControlMode};
+    use voloxide_core::comm::messages::messages::{
+        AttitudeQuaternionMsg, RosflightStatusMsg, SmallImuMsg,
+    };
+    use voloxide_core::state_machine::ErrorFlag;
 
     #[test]
     fn tx_frames_pop_in_priority_order() {
@@ -531,5 +682,127 @@ mod tests {
         assert_eq!(mailbox.pop_tx_frame(&mut out), 1);
         assert_eq!(out[0], 42);
         assert_eq!(mailbox.stats.tx_replaced, 1);
+    }
+
+    #[test]
+    fn replaceable_downlink_keeps_latest_per_telemetry_stream() {
+        let mut mailbox = MavlinkMailbox::new();
+
+        assert!(
+            mailbox
+                .push_downlink_message(queued_imu(1), SerialTxPriority::REPLACEABLE_TELEMETRY.0,)
+        );
+        assert!(
+            mailbox
+                .push_downlink_message(queued_imu(2), SerialTxPriority::REPLACEABLE_TELEMETRY.0,)
+        );
+
+        assert_eq!(mailbox.stats.downlink_replaced, 1);
+        assert_eq!(mailbox.telemetry_pending_count(), 1);
+
+        let msg = mailbox.pop_downlink_message().expect("latest IMU");
+        match msg.msg {
+            DownlinkMessage::Imu(imu) => assert_eq!(imu.time_boot_us, 2),
+            _ => panic!("expected IMU downlink"),
+        }
+        assert!(mailbox.pop_downlink_message().is_none());
+    }
+
+    #[test]
+    fn replaceable_downlink_preserves_distinct_streams() {
+        let mut mailbox = MavlinkMailbox::new();
+
+        assert!(
+            mailbox
+                .push_downlink_message(queued_imu(1), SerialTxPriority::REPLACEABLE_TELEMETRY.0,)
+        );
+        assert!(mailbox.push_downlink_message(
+            queued_attitude(2),
+            SerialTxPriority::REPLACEABLE_TELEMETRY.0,
+        ));
+
+        assert_eq!(mailbox.stats.downlink_replaced, 0);
+        assert_eq!(mailbox.telemetry_pending_count(), 2);
+
+        assert!(matches!(
+            mailbox.pop_downlink_message().map(|queued| queued.msg),
+            Some(DownlinkMessage::Imu(_))
+        ));
+        assert!(matches!(
+            mailbox.pop_downlink_message().map(|queued| queued.msg),
+            Some(DownlinkMessage::Attitude(_))
+        ));
+        assert!(mailbox.pop_downlink_message().is_none());
+    }
+
+    #[test]
+    fn non_replaceable_downlink_uses_critical_fifo_even_at_low_priority() {
+        let mut mailbox = MavlinkMailbox::new();
+
+        assert!(mailbox.push_downlink_message(
+            queued_status(1),
+            SerialTxPriority::REPLACEABLE_TELEMETRY.0,
+        ));
+        assert!(mailbox.push_downlink_message(
+            queued_status(2),
+            SerialTxPriority::REPLACEABLE_TELEMETRY.0,
+        ));
+
+        assert_eq!(mailbox.stats.downlink_replaced, 0);
+        assert_eq!(mailbox.telemetry_pending_count(), 0);
+        assert_eq!(mailbox.downlink_critical.len(), 2);
+
+        let first = mailbox.pop_downlink_message().expect("first status");
+        let second = mailbox.pop_downlink_message().expect("second status");
+        assert!(matches!(first.msg, DownlinkMessage::Status(status) if status.num_errors == 1));
+        assert!(matches!(second.msg, DownlinkMessage::Status(status) if status.num_errors == 2));
+    }
+
+    fn queued_imu(time_boot_us: u64) -> QueuedDownlinkMessage {
+        QueuedDownlinkMessage {
+            system_id: 1,
+            msg: DownlinkMessage::Imu(SmallImuMsg {
+                time_boot_us,
+                xacc: 0.0,
+                yacc: 0.0,
+                zacc: 0.0,
+                xgyro: 0.0,
+                ygyro: 0.0,
+                zgyro: 0.0,
+                temperature: 0.0,
+            }),
+        }
+    }
+
+    fn queued_attitude(time_boot_ms: u32) -> QueuedDownlinkMessage {
+        QueuedDownlinkMessage {
+            system_id: 1,
+            msg: DownlinkMessage::Attitude(AttitudeQuaternionMsg {
+                time_boot_ms,
+                q1: 1.0,
+                q2: 0.0,
+                q3: 0.0,
+                q4: 0.0,
+                rollspeed: 0.0,
+                pitchspeed: 0.0,
+                yawspeed: 0.0,
+            }),
+        }
+    }
+
+    fn queued_status(num_errors: i16) -> QueuedDownlinkMessage {
+        QueuedDownlinkMessage {
+            system_id: 1,
+            msg: DownlinkMessage::Status(RosflightStatusMsg {
+                armed: 0,
+                failsafe: 0,
+                rc_override: 0,
+                offboard: 0,
+                error_code: ErrorFlag::empty(),
+                control_mode: OffboardControlMode::ModePassThrough,
+                num_errors,
+                loop_time_us: 0,
+            }),
+        }
     }
 }

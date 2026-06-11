@@ -297,6 +297,29 @@ pub mod messages {
         pub battery_voltage: f32,
         pub battery_current: f32,
     }
+
+    #[derive(Debug, Clone, Copy)]
+    pub enum DownlinkMessage {
+        Heartbeat(HeartbeatMsg),
+        ParamValue(ParamValueMsg),
+        Status(RosflightStatusMsg),
+        Timesync(TimesyncMsg),
+        Version(RosflightVersionMsg),
+        OutputRaw(RosflightOutputRawMsg),
+        Attitude(AttitudeQuaternionMsg),
+        Baro(SmallBaroMsg),
+        DiffPressure(DiffPressureMsg),
+        Imu(SmallImuMsg),
+        Mag(SmallMagMsg),
+        RcRaw(RcChannelsMsg),
+        Range(SmallRangeMsg),
+        Gnss(RosflightGnssMsg),
+        CmdAck(RosflightCmdAckMsg),
+        RcChannels(RcChannelsMsg),
+        BatteryStatus(BatteryStatusMsg),
+        Statustext(StatustextMsg),
+        HardError(RosflightHardErrorMsg),
+    }
 }
 
 // Enums

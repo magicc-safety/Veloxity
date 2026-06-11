@@ -177,13 +177,6 @@ ros2 service call /calibrate_baro std_srvs/srv/Trigger
 ros2 service call /param_write std_srvs/srv/Trigger
 ```
 
-For fixed-wing, load:
-
-```bash
-ros2 service call /param_load_from_file rosflight_msgs/srv/ParamFile \
-  "{filename: $(pwd)/fixedwing_firmware.yaml}"
-```
-
 Watch Terminal 1 during init. You should see parameter traffic and the startup calibration errors
 recover.
 

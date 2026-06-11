@@ -19,6 +19,7 @@ use embassy_time::Instant;
 use rp2350_platform::hal::gpio::Output;
 use voloxide_core::{
     board::{BoardIo, SerialRxFrame, SerialTxPriority},
+    comm::messages::messages::DownlinkMessage,
     errors,
     packets::BaroPacket,
     params::Params,
@@ -231,6 +232,15 @@ impl BoardIo for Board {
         Some(Ok(self.mavlink.write_from_priority(bytes, priority)))
     }
 
+    fn serial_tx_enqueue_downlink(
+        &mut self,
+        system_id: u8,
+        msg: DownlinkMessage,
+        priority: SerialTxPriority,
+    ) -> Option<Result<usize, errors::TelemError>> {
+        Some(Ok(self.mavlink.enqueue_downlink(system_id, msg, priority)))
+    }
+
     fn serial_rx_pending(&self) -> bool {
         self.mavlink.has_pending_rx_frame()
     }
@@ -341,6 +351,42 @@ impl BoardIo for Board {
                 Some(out)
             }
             6 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PUDQ p");
+                write_diag_num(&mut out, &mut offset, stats.downlink_pending);
+                write_diag_bytes(&mut out, &mut offset, b" e");
+                write_diag_num(&mut out, &mut offset, stats.downlink_enqueued);
+                write_diag_bytes(&mut out, &mut offset, b" o");
+                write_diag_num(&mut out, &mut offset, stats.downlink_drained);
+                write_diag_bytes(&mut out, &mut offset, b" d");
+                write_diag_num(&mut out, &mut offset, stats.downlink_dropped);
+                write_diag_bytes(&mut out, &mut offset, b" r");
+                write_diag_num(&mut out, &mut offset, stats.downlink_replaced);
+                self.diag_index = 7;
+                Some(out)
+            }
+            7 => {
+                let mut offset = 0;
+                write_diag_bytes(&mut out, &mut offset, b"PUDP w");
+                write_diag_num(&mut out, &mut offset, stats.downlink_priority_min as u32);
+                write_diag_bytes(&mut out, &mut offset, b" x");
+                write_diag_num(&mut out, &mut offset, stats.downlink_priority_max as u32);
+                write_diag_bytes(&mut out, &mut offset, b" dw");
+                write_diag_num(
+                    &mut out,
+                    &mut offset,
+                    stats.downlink_drop_priority_min as u32,
+                );
+                write_diag_bytes(&mut out, &mut offset, b" dx");
+                write_diag_num(
+                    &mut out,
+                    &mut offset,
+                    stats.downlink_drop_priority_max as u32,
+                );
+                self.diag_index = 8;
+                Some(out)
+            }
+            8 => {
                 let stats = gps_stats();
                 let mut offset = 0;
                 write_diag_bytes(&mut out, &mut offset, b"GPS b");
@@ -353,10 +399,10 @@ impl BoardIo for Board {
                 write_diag_num(&mut out, &mut offset, stats.last_frame);
                 write_diag_bytes(&mut out, &mut offset, b" p");
                 write_diag_num(&mut out, &mut offset, stats.nav_pvt);
-                self.diag_index = 7;
+                self.diag_index = 9;
                 Some(out)
             }
-            7 => {
+            9 => {
                 let stats = crsf_stats();
                 let mut offset = 0;
                 write_diag_bytes(&mut out, &mut offset, b"CRSF b");
@@ -367,10 +413,10 @@ impl BoardIo for Board {
                 write_diag_num(&mut out, &mut offset, stats.read_errors);
                 write_diag_bytes(&mut out, &mut offset, b" d");
                 write_diag_num(&mut out, &mut offset, stats.queue_drops);
-                self.diag_index = 8;
+                self.diag_index = 10;
                 Some(out)
             }
-            8 => {
+            10 => {
                 #[cfg(feature = "ism330dhcx-driver")]
                 let stats = ism330dhcx_stats();
                 let mut offset = 0;
@@ -394,10 +440,10 @@ impl BoardIo for Board {
                 write_diag_num(&mut out, &mut offset, stats.drdy_edges);
                 #[cfg(not(feature = "ism330dhcx-driver"))]
                 write_diag_num(&mut out, &mut offset, 0);
-                self.diag_index = 9;
+                self.diag_index = 11;
                 Some(out)
             }
-            9 => {
+            11 => {
                 #[cfg(feature = "ism330dhcx-driver")]
                 let stats = ism330dhcx_stats();
                 let mut offset = 0;
@@ -415,14 +461,14 @@ impl BoardIo for Board {
                 write_diag_num(&mut out, &mut offset, self.sensors.imu_queue_drops());
                 write_diag_bytes(&mut out, &mut offset, b" g");
                 write_diag_num(&mut out, &mut offset, self.sensors.imu_sequence_gaps());
-                self.diag_index = 10;
+                self.diag_index = 12;
                 Some(out)
             }
-            10 => {
+            12 => {
                 let mut offset = 0;
                 write_diag_bytes(&mut out, &mut offset, b"BRDQ d");
                 write_diag_num(&mut out, &mut offset, self.sensors.baro_queue_drops());
-                self.diag_index = 11;
+                self.diag_index = 13;
                 Some(out)
             }
             _ => {

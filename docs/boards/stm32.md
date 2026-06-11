@@ -23,6 +23,22 @@ readiness.
 | `platforms/stm_32/stm32h7x3_common.rs` | Shared STM32H7 configuration. |
 | `platforms/stm_32/src/peripherals/` | Shared STM32 peripheral drivers and Embassy signal tasks. |
 
+## Firmware Model
+
+The STM32 boards follow the generic embedded firmware shape:
+
+- the board crate initializes chip clocks, pins, serial transports, sensor peripherals, and PWM;
+- Embassy peripheral tasks produce packets or signal new sensor data to board-owned queues;
+- the board `BoardIo` implementation drains those queues into `voloxide_core` sensor resources;
+- the board constructs a `World` with STM32-specific board, PWM, and MAVLink transport types;
+- the firmware loop uses the ordinary `World::run_once()` scheduler shape until renewed hardware
+  work proves a need for a board-specific realtime split.
+
+That differs from the active Pico 2 W path. Pico 2 W uses a measured high-rate IMU/control loop with
+`realtime_scheduler_step()`, `run_imu_control_tick()`, and service phases. STM32 has richer retained
+sensor-driver coverage in `platforms/stm_32`, but those paths have not yet gone through the same
+current-branch timing and end-to-end telemetry validation.
+
 ## Install
 
 ```bash
@@ -58,15 +74,25 @@ cargo build -p nucleo --target thumbv7em-none-eabihf --bin voloxide
 cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
 ```
 
-## Run Or Flash
+## Flash Or Run
+
+Prefer the repository wrapper when the local runner is configured:
+
+```bash
+cargo xtask flash-board nucleo
+cargo xtask flash-board pixracerpro
+```
+
+Direct `cargo run` is also valid when the board crate runner and probe selection match the connected
+hardware:
 
 ```bash
 cargo run -p nucleo --target thumbv7em-none-eabihf --bin voloxide
 cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
 ```
 
-The exact probe selection may need to be supplied by your local `probe-rs` setup. Check attached
-probes with:
+Treat flashing as the start of renewed validation, not proof of readiness. The exact probe
+selection may need to be supplied by your local `probe-rs` setup. Check attached probes with:
 
 ```bash
 probe-rs list

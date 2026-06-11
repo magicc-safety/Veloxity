@@ -8,7 +8,8 @@ The current GY-91 board should no longer feed accel/gyro data into the flight lo
 ## Electrical Assumptions
 
 - ESC: SEQURE Blueson A2 4-in-1 AM32 ESC.
-- Motor protocol: DShot600 first, with DShot300 and DShot150 available by changing PIO timing.
+- Motor output: GP2-GP5 are reserved for the 4-in-1 ESC signal lines. The current `PioPwmDriver`
+  stores and composes output commands but does not yet emit DShot/PWM waveforms.
 - ESC signal voltage: Pico 2 W drives 3.3 V GPIO. Confirm the ESC input accepts 3.3 V logic before
   flight hardware testing.
 - Power: the ESC has no BEC. Do not power the Pico 2 W from the ESC signal harness unless an
@@ -52,18 +53,18 @@ the Pico. The M100 Pro GPS/magnetometer path is expected to be direct-wired beca
 logic and its open-drain I2C lines should use the Pico-side 3.3 V pullups. Still confirm idle voltage
 on GPS `TX`, `SDA`, `SCL`, `PPS`, and any `DRDY` pad during bring-up.
 
-## Proposed Header GPIO Allocation
+## Current Header GPIO Allocation
 
 | Function | Pico 2 W GPIO | Notes |
 | --- | ---: | --- |
 | Companion UART0 TX | GP0 | Pico TX to ESP32C5 RX |
 | Companion UART0 RX | GP1 | ESP32C5 TX to Pico RX |
-| ESC motor 1 signal | GP2 | DShot PIO output bit 0 |
-| ESC motor 2 signal | GP3 | DShot PIO output bit 1 |
-| ESC motor 3 signal | GP4 | DShot PIO output bit 2 |
-| ESC motor 4 signal | GP5 | DShot PIO output bit 3 |
-| GPS PIO UART RX | GP6 | GPS TX to Pico RX |
-| GPS PIO UART TX | GP7 | Pico TX to GPS RX for configuration |
+| ESC motor 1 signal | GP2 | Reserved ESC output 1; waveform generation still pending |
+| ESC motor 2 signal | GP3 | Reserved ESC output 2; waveform generation still pending |
+| ESC motor 3 signal | GP4 | Reserved ESC output 3; waveform generation still pending |
+| ESC motor 4 signal | GP5 | Reserved ESC output 4; waveform generation still pending |
+| GPS PIO UART TX | GP6 | Pico TX to GPS RX for configuration |
+| GPS PIO UART RX | GP7 | GPS TX to Pico RX |
 | RC receiver UART1 TX | GP8 | Pico TX to receiver RX for CRSF telemetry/config |
 | RC receiver UART1 RX | GP9 | Receiver TX to Pico RX for CRSF channel frames |
 | ISM330DHCX SPI1 SCK | GP10 | Hardware SPI fast IMU bus |
@@ -74,8 +75,8 @@ on GPS `TX`, `SDA`, `SCL`, `PPS`, and any `DRDY` pad during bring-up.
 | ISM330DHCX INT2 reserve | GP15 | Optional FIFO/wakeup interrupt if needed |
 | GPS PPS / timepulse | GP16 | Optional GPIO interrupt input from GPS |
 | ESC telemetry reserve | GP17 | Reserved for AM32 telemetry or bidirectional DShot later |
-| Flight status LED / scope realtime-pass toggle | GP18 | Discrete GPIO LED by default; `scope-timing-pins` toggles this at each core 0 realtime scheduler pass boundary |
-| Addressable LED reserve / scope control strobe | GP19 | PIO-driven WS2812-style status strip by default; `scope-timing-pins` drives this high only during an IMU-triggered control closure |
+| Flight status LED / scope IMU strobe | GP18 | Discrete GPIO LED by default; `scope-timing-pins` pulses this when core 0 enters an IMU-control scheduler step |
+| Addressable LED reserve / scope fast-loop strobe | GP19 | PIO-driven WS2812-style status strip by default; `scope-timing-pins` drives this high for the complete fast loop |
 | Slow I2C SDA | GP20 | QMC5883L magnetometer plus GY-91/BMP280 pressure path |
 | Slow I2C SCL | GP21 | QMC5883L magnetometer plus GY-91/BMP280 pressure path |
 | Mag DRDY / aux interrupt / scope diagnostic strobe | GP22 | Optional QMC5883L data-ready input if exposed; otherwise spare GPIO. `scope-timing-pins` uses this for the selected GP22 diagnostic mode. |
@@ -96,13 +97,13 @@ when the ESP32C5 peer forwards bytes over ESP-NOW or UDP on its side.
   GP0  UART0 TX  --------------------------->  ESP32C5 RX
   GP1  UART0 RX  <---------------------------  ESP32C5 TX
 
-  GP2  DShot M1  --------------------------->  4-in-1 ESC M1
-  GP3  DShot M2  --------------------------->  4-in-1 ESC M2
-  GP4  DShot M3  --------------------------->  4-in-1 ESC M3
-  GP5  DShot M4  --------------------------->  4-in-1 ESC M4
+  GP2  ESC M1 reserve ---------------------->  4-in-1 ESC M1
+  GP3  ESC M2 reserve ---------------------->  4-in-1 ESC M2
+  GP4  ESC M3 reserve ---------------------->  4-in-1 ESC M3
+  GP5  ESC M4 reserve ---------------------->  4-in-1 ESC M4
 
-  GP6  GPS RX    <---------------------------  HGLRC M100 GPS TX
-  GP7  GPS TX    --------------------------->  HGLRC M100 GPS RX
+  GP6  GPS TX    --------------------------->  HGLRC M100 GPS RX
+  GP7  GPS RX    <---------------------------  HGLRC M100 GPS TX
   GP16 GPS PPS   <---------------------------  HGLRC M100 PPS/timepulse
 
   GP8  UART1 TX  --------------------------->  RP4TD-M RX
@@ -120,8 +121,8 @@ when the ESP32C5 peer forwards bytes over ESP-NOW or UDP on its side.
   GP22 GPIO IRQ  <---------------------------  QMC5883L DRDY optional
 
   GP17 ESC TEL   <---------------------------  AM32 telemetry optional
-  GP18 GPIO LED  --------------------------->  discrete status LED, or scope whole-loop strobe
-  GP19 PIO LED   --------------------------->  addressable status LED optional, or scope control strobe
+  GP18 GPIO LED  --------------------------->  discrete status LED, or scope IMU-available strobe
+  GP19 PIO LED   --------------------------->  addressable status LED optional, or scope fast-loop strobe
 ```
 
 All external modules must share ground with the Pico. Keep the GP10-GP15 IMU bundle physically short
@@ -194,8 +195,8 @@ The QMC5883L uses the shared slow I2C bus.
 | --- | --- | --- |
 | Regulated 5 V | VCC | GPS module power; vendor input range is 3.6-5.5 V |
 | GND | GND | Common ground |
-| GP6 | TX | GPS serial data to Pico |
-| GP7 | RX | Optional GPS configuration from Pico |
+| GP6 | RX | Optional GPS configuration from Pico |
+| GP7 | TX | GPS serial data to Pico |
 | GP16 | PPS / timepulse | Optional timepulse interrupt |
 | GP20 | SDA | QMC5883L I2C data |
 | GP21 | SCL | QMC5883L I2C clock |
@@ -232,8 +233,8 @@ This layout preserves LED options without stealing pins from sensors:
 
 | Pico 2 W | LED type | Notes |
 | --- | --- | --- |
-| GP18 | Discrete GPIO LED / scope realtime-pass toggle | Default flight/status LED; `scope-timing-pins` overrides this as a logic analyzer output |
-| GP19 | Addressable LED / scope control strobe | Optional PIO-driven WS2812-style status LED; `scope-timing-pins` overrides this as a logic analyzer output |
+| GP18 | Discrete GPIO LED / scope IMU-available strobe | Default flight/status LED; `scope-timing-pins` overrides this as a logic analyzer output |
+| GP19 | Addressable LED / scope fast-loop strobe | Optional PIO-driven WS2812-style status LED; `scope-timing-pins` overrides this as a logic analyzer output |
 | GP22 | Optional aux LED / scope diagnostic strobe | Optional spare status output; `scope-timing-pins` overrides this as the selected GP22 diagnostic output |
 
 If GP22 is not needed for magnetometer data-ready, it can be used as a second discrete status LED.
@@ -242,15 +243,17 @@ If GP22 is not needed for magnetometer data-ready, it can be used as a second di
 
 | Block | State machine | Purpose | GPIOs |
 | --- | --- | --- | --- |
-| PIO0 | SM0 | CYW43 Wi-Fi transport | internal Pico 2 W radio pins |
-| PIO1 | SM0 | 4-lane DShot motor output | GP2-GP5 |
-| PIO1 | SM1 | GPS serial input/output | GP6-GP7 |
+| PIO0 | SM0 | GPS serial RX | GP7 |
+| PIO0 | SM1 | GPS serial TX | GP6 |
+| PIO1 | SM0 | Reserved 4-lane motor output | GP2-GP5 |
+| PIO1 | SM1 | Reserved motor telemetry / bidirectional DShot turnaround | GP17 |
 | PIO2 | SM0 | addressable LED reserve | GP19 |
 
-The DShot output should be a single PIO program that emits four motor lines in parallel from packed
-DMA words. That keeps all motors frame-synchronous and consumes one state machine instead of four.
-AM32 telemetry remains reserved on GP17; final implementation can use a normal GPIO/PIO input path
-depending on whether the ESC telemetry wire or bidirectional DShot turnaround is used.
+The DShot output should eventually be a single PIO program that emits four motor lines in parallel
+from packed DMA words. That keeps all motors frame-synchronous and consumes one state machine
+instead of four. AM32 telemetry remains reserved on GP17; final implementation can use a normal
+GPIO/PIO input path depending on whether the ESC telemetry wire or bidirectional DShot turnaround is
+used.
 
 ## Firmware Shape
 
@@ -285,8 +288,9 @@ The current RP2350 firmware path is designed around the ISM330DHCX as the flight
 code drains IMU samples from the ISM330DHCX queue and RC samples from the CRSF receiver queue. The
 current board does not have a production barometer installed; the earlier GY-91/BMP280 pressure path
 remains a low-rate service-side reference path until the dedicated barometer hardware is added. The
-IMU path is interrupt-driven and the default firmware uses the native ISM330DHCX `3.333 kHz` ODR.
-Use `ism330dhcx-1k666` only when deliberately testing the lower-rate timing-margin mode.
+IMU path is interrupt-driven. The default firmware samples the ISM330DHCX at the high-rate ODR but
+runs the full control update at `2 kHz`. Use `imu-odr-1666hz` only when deliberately testing the
+lower-rate timing-margin mode; `ism330dhcx-1k666` remains as a compatibility alias.
 
 Core 0 closes the control loop only from the latest queued IMU packet plus already-processed command
 state. RC interpretation, barometer, magnetometer, GPS, telemetry, and parameter work run in bounded

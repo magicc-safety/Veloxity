@@ -81,8 +81,8 @@ impl Default for GpsPinout {
     fn default() -> Self {
         Self {
             serial_bus: GpsSerialBus::PioUart,
-            tx_gpio: 7,
-            rx_gpio: 6,
+            tx_gpio: 6,
+            rx_gpio: 7,
             pps_gpio: Some(16),
             magnetometer_data_ready_gpio: None,
         }

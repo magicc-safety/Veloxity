@@ -11,12 +11,12 @@ are being brought back to current core APIs.
 
 ## Shared Firmware Shape
 
-Every board crate performs the same high-level steps:
+Every board crate performs the same high-level setup:
 
 1. Initialize board peripherals.
 2. Load persisted parameters or write defaults.
 3. Construct the board-specific `World` type.
-4. Call `world.run_once()` forever.
+4. Enter the board's scheduler loop.
 
 The board crate chooses the concrete types for:
 
@@ -28,12 +28,11 @@ The board crate chooses the concrete types for:
 - PWM driver
 - floating-point type where the board uses the explicit generic form
 
-The core loop lives in `crates/voloxide_core/src/world.rs`; board crates should not duplicate that
-logic.
-
-The Pico 2 W firmware uses the finer-grained realtime scheduler rather than a plain `run_once()`
-loop. Its hot path is `World::run_imu_control_tick()`, which drains only the IMU queue before
-running estimator/controller/mixer/PWM work. Slower work is sliced through service phases.
+The generic core loop lives in `crates/voloxide_core/src/world.rs`; board crates should not
+duplicate flight logic. The retained STM32 paths use the ordinary `world.run_once()` shape while
+they are brought back through hardware validation. The Pico 2 W firmware uses the finer-grained
+realtime scheduler instead: `realtime_scheduler_step()` chooses between `run_imu_control_tick()` for
+fresh IMU samples and bounded service phases for slower work.
 
 ## Board Guides
 

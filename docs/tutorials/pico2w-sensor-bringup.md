@@ -108,7 +108,7 @@ probe-rs download --chip RP235x --protocol swd \
 probe-rs reset --chip RP235x
 ```
 
-For timing diagnostics:
+For GPIO timing capture:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
@@ -118,9 +118,11 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --releas
 With `scope-timing-pins`, capture GP19 for the full control body and GP22 for the selected
 substage. For the controller-scope build above, GP22 marks the controller substage. A good current
 loaded timing run looks like the 120-second baseline: rare GP19 full-control pulses over `300 us`,
-`0` pulses over `333.333 us`, and no GP22 controller pulses over `300 us`. The current high-rate
-link validation expects 400 Hz IMU telemetry, 100 Hz RC telemetry, 50 Hz attitude, and 50 Hz output
-raw:
+`0` pulses over `333.333 us`, and no GP22 controller pulses over `300 us`. The bounded high-rate
+telemetry profile configures IMU at `400 Hz`, RC at `100 Hz`, attitude/output/differential-pressure
+and range at `50 Hz`, barometer/magnetometer/battery at `25 Hz`, GNSS at `10 Hz`, status at
+`10 Hz`, and heartbeat at `1 Hz`. The current high-rate link acceptance command checks the streams
+present in the current hardware setup: IMU, RC, attitude, and output raw.
 
 ```bash
 python3 tools/mavlink_tester.py \

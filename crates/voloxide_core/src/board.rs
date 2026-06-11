@@ -1,4 +1,7 @@
-use crate::{errors, math::FlightFloat, params::Params, sensors::SensorBus};
+use crate::{
+    comm::messages::messages::DownlinkMessage, errors, math::FlightFloat, params::Params,
+    sensors::SensorBus,
+};
 pub mod dummy;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -64,6 +67,14 @@ pub trait BoardIo {
         _priority: SerialTxPriority,
     ) -> Option<Result<usize, errors::TelemError>> {
         self.serial_tx_write(bytes)
+    }
+    fn serial_tx_enqueue_downlink(
+        &mut self,
+        _system_id: u8,
+        _msg: DownlinkMessage,
+        _priority: SerialTxPriority,
+    ) -> Option<Result<usize, errors::TelemError>> {
+        None
     }
     fn serial_rx_frame_read(&mut self) -> Option<Result<SerialRxFrame, errors::TelemError>> {
         None

@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "bridge.c"
+    SRCS "bridge.c" "mavlink_frame_packer.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_driver_uart
