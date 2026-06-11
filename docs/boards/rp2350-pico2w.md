@@ -273,6 +273,17 @@ no full-control pulses over either the old `312.5 us` comparison budget or the `
 The mid-capture GP19 rate measured about `3527.9 Hz`; use the pulse-width statistics for processing
 headroom and producer-period captures when checking the exact IMU cadence.
 
+120-second confirmation run of the same reverted baseline:
+
+| Measurement | Samples | Mean | p99 | p99.9 | Worst | Over 300 us | Over 312.5 us | Over 333.333 us |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| GP19 full control body | `458796` | `127.588 us` | `231.520 us` | `265.120 us` | `328.160 us` | `15` | `5` | `0` |
+| GP22 controller substage | `458787` | `38.209 us` | `75.040 us` | `85.600 us` | `125.920 us` | `0` | `0` | `0` |
+
+The 120-second run confirmed no full-control pulse exceeded one `3.333 kHz` period. It did show
+rare strict-`300 us` misses, with `15 / 458796` GP19 pulses over `300 us`. The worst matched frame
+was `328.160 us` total, with `80.960 us` in controller and `247.200 us` outside controller.
+
 Loaded telemetry during the same timing campaign:
 
 | Stream | Expected rate | Current result |
@@ -287,6 +298,12 @@ Loaded telemetry during the same timing campaign:
 The loaded receiver pass showed about `29.15 kB/s` over the UART/ESP-NOW path, `0` invalid CRCs,
 and no estimated missing valid MAVLink sequence frames. Status telemetry reported average loop time
 about `128.1 us`, p99 `224 us`, and max `241 us` after the realtime-path optimization.
+
+A later 120-second timing confirmation received about `29.42 kB/s`, with IMU telemetry at about
+`401 Hz`, RC at about `100 Hz`, attitude/output raw at about `50 Hz`, GNSS at `10 Hz`, status at
+`10 Hz`, and heartbeat at `1 Hz`. That pass reported `24` invalid CRC candidates and sequence-gap
+accounting reported estimated missing valid MAVLink frames, so keep the earlier clean receiver pass
+as the link-integrity reference and use the 120-second Saleae data as the longer timing reference.
 
 Interpretation:
 

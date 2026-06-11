@@ -140,6 +140,11 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
     `0`;
   - GP22 controller substage: mean `37.595 us`, p99 `73.820 us`, worst `117.886 us`;
   - the three GP19 pulses over `300 us` were `308.382 us`, `301.340 us`, and `300.110 us`.
+- A longer 120-second confirmation run of the same reverted baseline with controller scope and
+  loaded telemetry produced `458796` GP19 control pulses: mean `127.588 us`, p99 `231.520 us`,
+  p99.9 `265.120 us`, worst `328.160 us`. It had `15` pulses over `300 us`, `5` over
+  `312.5 us`, and `0` over `333.333 us`. GP22 controller remained bounded: mean `38.209 us`,
+  p99 `75.040 us`, p99.9 `85.600 us`, worst `125.920 us`, and `0` pulses over `300 us`.
 - Current loaded telemetry validation over the ESP32C5 link:
   - IMU telemetry: `400 Hz`;
   - RC telemetry: `100 Hz`;
@@ -150,6 +155,11 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
   - receiver throughput: about `29.15 kB/s`;
   - invalid CRCs: `0`;
   - estimated missing valid MAVLink sequence frames: `0`.
+- The 120-second timing confirmation received IMU telemetry at about `401 Hz`, RC telemetry at
+  about `100 Hz`, attitude and output raw at about `50 Hz`, GNSS at `10 Hz`, status at `10 Hz`,
+  and heartbeat at `1 Hz`, with about `29.42 kB/s` received. That run saw `24` invalid CRC
+  candidates and sequence-gap accounting reported estimated missing frames, so it is a timing
+  confirmation rather than the cleanest link-integrity reference.
 - The measurement series found the main problem:
   - the IMU producer cadence was clean and not the source of the long tail;
   - disabling CRSF and MAVLink TX made timing close to the isolated IMU case;
