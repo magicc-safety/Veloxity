@@ -31,7 +31,7 @@ use crate::{
     rc::Rc,
     rc::system::{RcCommandStateCtx, run_rc_command_state},
     sensors::health::{SensorHealthCtx, update_sensor_health},
-    sensors::ingestion::{SensorProcessorSet, process_sensor_bus},
+    sensors::ingestion::{SensorProcessorSet, process_imu_sensor, process_sensor_bus},
     sensors::processors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
     state_machine::{ErrorFlag, Event, StateManager},
@@ -659,7 +659,7 @@ where
         let now_us = self.board.clock_micros();
         self.board.update_imu_sensor(&mut self.raw_sensors);
         let had_raw_imu = self.raw_sensors.imu.is_some();
-        self.process_sensor_bus_after_update();
+        self.process_imu_sensor_after_update();
         self.update_sensor_health_and_calibration(now_us);
         #[cfg(feature = "pre-control-scope")]
         self.board.set_test_pin_3(false);
@@ -667,6 +667,7 @@ where
         if had_raw_imu {
             self.last_realtime_control_us = self.board.clock_micros();
         }
+        self.run_realtime_telemetry_stage();
         ran_control
     }
 
@@ -677,8 +678,8 @@ where
         let now_us = self.board.clock_micros();
         self.board.update_imu_sensor(&mut self.raw_sensors);
         let had_raw_imu = self.raw_sensors.imu.is_some();
-        let had_raw_sensor = raw_sensor_present(&self.raw_sensors);
-        self.process_sensor_bus_after_update();
+        let had_raw_sensor = had_raw_imu;
+        self.process_imu_sensor_after_update();
         self.update_sensor_health_and_calibration(now_us);
         let had_processed_imu = self.processed_sensors.imu.is_some();
         let had_processed_rc = self.processed_sensors.rc.is_some();
@@ -690,6 +691,7 @@ where
         if had_raw_imu {
             self.last_realtime_control_us = self.board.clock_micros();
         }
+        self.run_realtime_telemetry_stage();
         let telemetry_due = self
             .comm
             .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
@@ -791,6 +793,7 @@ where
         let latest_range = self.processed_sensors.range;
         let latest_gnss = self.processed_sensors.gnss;
         let latest_battery = self.processed_sensors.battery;
+        let latest_rc = self.processed_sensors.rc;
         let latest_attitude = self.processed_sensors.attitude;
 
         self.board.update_service_sensor_bus(&mut self.raw_sensors);
@@ -800,6 +803,7 @@ where
         let had_raw_range = self.raw_sensors.range.is_some();
         let had_raw_gnss = self.raw_sensors.gnss.is_some();
         let had_raw_battery = self.raw_sensors.battery.is_some();
+        let had_raw_rc = self.raw_sensors.rc.is_some();
         let had_raw_attitude = self.raw_sensors.attitude.is_some();
         self.process_sensor_bus_after_update();
         self.update_sensor_health_and_calibration(now_us);
@@ -825,6 +829,9 @@ where
         }
         if !had_raw_battery {
             self.processed_sensors.battery = latest_battery;
+        }
+        if !had_raw_rc {
+            self.processed_sensors.rc = latest_rc;
         }
         if !had_raw_attitude {
             self.processed_sensors.attitude = latest_attitude;
@@ -1097,6 +1104,30 @@ where
             &mut self.raw_sensors,
             &mut self.processed_sensors,
             &mut self.sensor_processors,
+            &mut self.cal_flags,
+            &mut self.params,
+        );
+        if calibration_flags_before.contains(CalibrationFlags::GYRO)
+            && !self.cal_flags.contains(CalibrationFlags::GYRO)
+            && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)
+        {
+            self.estimator.reset_adaptive_bias();
+        }
+        if calibration_flags_before.contains(CalibrationFlags::ACCEL)
+            && !self.cal_flags.contains(CalibrationFlags::ACCEL)
+            && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
+        {
+            self.estimator.reset();
+            self.control_pipeline = ControlPipelineResource::default();
+        }
+    }
+
+    fn process_imu_sensor_after_update(&mut self) {
+        let calibration_flags_before = self.cal_flags;
+        process_imu_sensor(
+            &mut self.raw_sensors,
+            &mut self.processed_sensors,
+            &mut self.sensor_processors.imu,
             &mut self.cal_flags,
             &mut self.params,
         );
@@ -2986,6 +3017,7 @@ mod tests {
 
         let mut world = test_world();
         world.companion_link.connected = true;
+        while crate::log::Logger::pop().is_some() {}
 
         crate::log_info!("world log");
         world.run_comm_param_sensor_stages();

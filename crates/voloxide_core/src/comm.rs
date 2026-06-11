@@ -24,7 +24,7 @@ const STATUS_INTERVAL_US: u64 = 100_000; // 10 Hz
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
 const OUTPUT_RAW_IMU_DIVISOR: u64 = 8;
-const REALTIME_TELEMETRY_SCAN_BUDGET: u8 = 2;
+const REALTIME_TELEMETRY_SCAN_BUDGET: u8 = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TelemetryRates {
@@ -60,9 +60,9 @@ impl TelemetryRates {
 
     pub const fn bounded_high_rate_transport() -> Self {
         Self {
-            imu_hz: 0,
+            imu_hz: 400,
             attitude_hz: 50,
-            output_raw_hz: 0,
+            output_raw_hz: 50,
             diff_pressure_hz: 50,
             baro_hz: 25,
             mag_hz: 25,
@@ -1954,37 +1954,37 @@ mod tests {
         assert_eq!(manager.comm_link().imu_count, 1);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
-        assert_eq!(manager.comm_link().output_raw_count, 0);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
 
         send_at(&mut manager, &mut board, 2_000);
+        assert_eq!(manager.comm_link().imu_count, 1);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
+
+        send_at(&mut manager, &mut board, 3_500);
         assert_eq!(manager.comm_link().imu_count, 2);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
-        assert_eq!(manager.comm_link().output_raw_count, 0);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
 
-        send_at(&mut manager, &mut board, 3_500);
+        send_at(&mut manager, &mut board, 11_000);
         assert_eq!(manager.comm_link().imu_count, 3);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
-        assert_eq!(manager.comm_link().output_raw_count, 0);
-
-        send_at(&mut manager, &mut board, 11_000);
-        assert_eq!(manager.comm_link().imu_count, 4);
-        assert_eq!(manager.comm_link().attitude_count, 1);
-        assert_eq!(manager.comm_link().baro_count, 1);
-        assert_eq!(manager.comm_link().output_raw_count, 0);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
 
         send_at(&mut manager, &mut board, 21_000);
-        assert_eq!(manager.comm_link().imu_count, 5);
+        assert_eq!(manager.comm_link().imu_count, 4);
         assert_eq!(manager.comm_link().attitude_count, 2);
         assert_eq!(manager.comm_link().baro_count, 1);
-        assert_eq!(manager.comm_link().output_raw_count, 0);
+        assert_eq!(manager.comm_link().output_raw_count, 2);
 
         send_at(&mut manager, &mut board, 41_000);
-        assert_eq!(manager.comm_link().imu_count, 6);
+        assert_eq!(manager.comm_link().imu_count, 5);
         assert_eq!(manager.comm_link().attitude_count, 3);
         assert_eq!(manager.comm_link().baro_count, 2);
-        assert_eq!(manager.comm_link().output_raw_count, 0);
+        assert_eq!(manager.comm_link().output_raw_count, 3);
     }
 
     #[test]

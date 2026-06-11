@@ -2,7 +2,7 @@ use crate::{
     math::FlightFloat,
     params::{ParamId, ParamValue, Params},
     sensors::ProcessedSensors,
-    state_machine::{ErrorFlag, Event, StateManager},
+    state_machine::{ErrorFlag, StateManager},
 };
 
 pub struct SensorHealthCtx<'a, R: FlightFloat> {
@@ -17,25 +17,21 @@ pub struct SensorHealthCtx<'a, R: FlightFloat> {
 pub fn update_sensor_health<R: FlightFloat>(ctx: SensorHealthCtx<'_, R>) {
     if ctx.sensors.imu.is_some() {
         *ctx.last_imu_seen = ctx.now_us;
-        ctx.state.update(
-            Event::ERROR_CLEARED(ErrorFlag::IMU_NOT_RESPONDING),
-            ctx.params,
-        );
+        ctx.state
+            .set_error_flag(ErrorFlag::IMU_NOT_RESPONDING, false, ctx.params);
         update_imu_calibration_error(ctx.state, ctx.params);
     } else if ctx.now_us > *ctx.last_imu_seen + ctx.imu_timeout_us {
-        ctx.state.update(
-            Event::ERROR_OCCURRED(ErrorFlag::IMU_NOT_RESPONDING),
-            ctx.params,
-        );
+        ctx.state
+            .set_error_flag(ErrorFlag::IMU_NOT_RESPONDING, true, ctx.params);
     }
 }
 
 fn update_imu_calibration_error(state: &mut StateManager, params: &Params) {
     let error = ErrorFlag::UNCALIBRATED_IMU;
     if imu_bias_params_are_all_zero(params) {
-        state.update(Event::ERROR_OCCURRED(error), params);
+        state.set_error_flag(error, true, params);
     } else {
-        state.update(Event::ERROR_CLEARED(error), params);
+        state.set_error_flag(error, false, params);
     }
 }
 
@@ -55,7 +51,10 @@ fn imu_bias_params_are_all_zero(params: &Params) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packets::{ImuPacket, RosflightPacketHeader};
+    use crate::{
+        packets::{ImuPacket, RosflightPacketHeader},
+        state_machine::Event,
+    };
 
     const TEST_IMU_TIMEOUT_US: u64 = 100_000;
 

@@ -85,12 +85,12 @@ impl MavlinkParser {
             188 => 249, // ROSFLIGHT_CMD
             189 => 113, // ROSFLIGHT_CMD_ACK
             190 => 181, // ROSFLIGHT_OUTPUT_RAW
-            191 => 183, // ROSFLIGHT_STATUS
+            191 => 12,  // ROSFLIGHT_STATUS
             192 => 134, // ROSFLIGHT_VERSION
             193 => 1,   // ROSFLIGHT_AUX_CMD
             195 => 65,  // EXTERNAL_ATTITUDE
             196 => 10,  // ROSFLIGHT_HARD_ERROR
-            197 => 192, // ROSFLIGHT_GNSS
+            197 => 221, // ROSFLIGHT_GNSS
             199 => 48,  // ROSFLIGHT_BATTERY_STATUS
             253 => 83,  // STATUSTEXT
             _ => {

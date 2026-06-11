@@ -150,10 +150,9 @@ static CORE1_EXECUTOR: StaticCell<Executor> = StaticCell::new();
 ))]
 static CORE1_IMU_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
-const UART_TX_BATCH_BYTES: usize = 64;
+const UART_TX_BATCH_BYTES: usize = 512;
 const UART_RX_CHUNK_BYTES: usize = 16;
 const UART_IDLE_DELAY_US: u64 = 50;
-const UART_TX_BUDGET_DELAY_US: u64 = 100;
 const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 32;
 const GPS_UART_BAUDRATE: u32 = 115_200;
@@ -249,7 +248,9 @@ compile_error!(
     not(feature = "interrupt-executor-smoke"),
     not(feature = "raw-swi-smoke")
 ))]
-#[cfg(feature = "ism330dhcx-1k666")]
+#[cfg(all(feature = "ism330dhcx-1k666", feature = "ism330dhcx-3k333"))]
+compile_error!("select only one ISM330DHCX ODR feature: ism330dhcx-1k666 or ism330dhcx-3k333");
+#[cfg(any(feature = "ism330dhcx-1k666", feature = "ism330dhcx-3k333"))]
 const ISM330DHCX_IMU_PERIOD_US: u64 = 0;
 #[cfg(all(
     feature = "ism330dhcx-driver",
@@ -257,7 +258,7 @@ const ISM330DHCX_IMU_PERIOD_US: u64 = 0;
     not(feature = "interrupt-executor-smoke"),
     not(feature = "raw-swi-smoke")
 ))]
-#[cfg(not(feature = "ism330dhcx-1k666"))]
+#[cfg(not(any(feature = "ism330dhcx-1k666", feature = "ism330dhcx-3k333")))]
 const ISM330DHCX_IMU_PERIOD_US: u64 = 250;
 #[cfg(all(
     feature = "ism330dhcx-driver",
@@ -269,7 +270,16 @@ const ISM330DHCX_IMU_PERIOD_US: u64 = 250;
 const ISM330DHCX_CTRL1_XL: u8 = 0x84;
 #[cfg(all(
     feature = "ism330dhcx-driver",
+    feature = "ism330dhcx-3k333",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
+const ISM330DHCX_CTRL1_XL: u8 = 0x94;
+#[cfg(all(
+    feature = "ism330dhcx-driver",
     not(feature = "ism330dhcx-1k666"),
+    not(feature = "ism330dhcx-3k333"),
     not(feature = "synthetic-imu"),
     not(feature = "interrupt-executor-smoke"),
     not(feature = "raw-swi-smoke")
@@ -285,7 +295,16 @@ const ISM330DHCX_CTRL1_XL: u8 = 0xa4;
 const ISM330DHCX_CTRL2_G: u8 = 0x8c;
 #[cfg(all(
     feature = "ism330dhcx-driver",
+    feature = "ism330dhcx-3k333",
+    not(feature = "synthetic-imu"),
+    not(feature = "interrupt-executor-smoke"),
+    not(feature = "raw-swi-smoke")
+))]
+const ISM330DHCX_CTRL2_G: u8 = 0x9c;
+#[cfg(all(
+    feature = "ism330dhcx-driver",
     not(feature = "ism330dhcx-1k666"),
+    not(feature = "ism330dhcx-3k333"),
     not(feature = "synthetic-imu"),
     not(feature = "interrupt-executor-smoke"),
     not(feature = "raw-swi-smoke")
@@ -313,11 +332,18 @@ const LOOP_BENCH_REPORT_US: u64 = 1_000_000;
     not(feature = "synthetic-imu")
 ))]
 const LOOP_BENCH_BUDGET_US: u32 = 600;
+#[cfg(all(
+    feature = "release-loop-bench",
+    feature = "ism330dhcx-3k333",
+    not(feature = "synthetic-imu")
+))]
+const LOOP_BENCH_BUDGET_US: u32 = 300;
 #[cfg(all(feature = "release-loop-bench", feature = "synthetic-imu-3333hz"))]
 const LOOP_BENCH_BUDGET_US: u32 = 300;
 #[cfg(all(
     feature = "release-loop-bench",
     not(feature = "ism330dhcx-1k666"),
+    not(feature = "ism330dhcx-3k333"),
     not(feature = "synthetic-imu-3333hz")
 ))]
 const LOOP_BENCH_BUDGET_US: u32 = 250;
@@ -747,7 +773,6 @@ async fn uart_tx_task(mut uart_tx: UartTx<'static, UartAsync>, mailbox: SharedMa
         } else {
             mailbox.record_uart_tx_error();
         }
-        Timer::after(Duration::from_micros(UART_TX_BUDGET_DELAY_US)).await;
     }
 }
 
@@ -1156,7 +1181,10 @@ fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> 
         rc_hz: 50,
         output_raw_imu_divisor: 0,
     });
-    #[cfg(all(not(feature = "synthetic-imu"), not(feature = "release-loop-bench")))]
+    #[cfg(all(
+        not(feature = "synthetic-imu"),
+        not(feature = "release-loop-bench")
+    ))]
     world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
     world
 }

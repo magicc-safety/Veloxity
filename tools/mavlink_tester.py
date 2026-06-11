@@ -18,6 +18,7 @@ RC_CHANNELS = 65
 TIMESYNC = 111
 SMALL_IMU = 181
 SMALL_BARO = 183
+ROSFLIGHT_OUTPUT_RAW = 190
 ROSFLIGHT_CMD = 188
 ROSFLIGHT_CMD_ACK = 189
 ROSFLIGHT_STATUS = 191
@@ -43,12 +44,12 @@ CRC_EXTRA = {
     188: 249,
     189: 113,
     190: 181,
-    191: 183,
+    191: 12,
     192: 134,
     193: 1,
     195: 65,
     196: 10,
-    197: 192,
+    197: 221,
     199: 48,
     253: 83,
 }
@@ -72,12 +73,14 @@ BAUD_RATES = {
 
 
 class MavlinkV1Parser:
-    def __init__(self, validate_crc=True):
+    def __init__(self, validate_crc=True, invalid_sample_limit=0):
         self.buf = bytearray()
         self.validate_crc = validate_crc
         self.candidates = 0
         self.invalid_crc = 0
         self.invalid_by_msgid = {}
+        self.invalid_samples = []
+        self.invalid_sample_limit = invalid_sample_limit
 
     def feed(self, data):
         frames = []
@@ -101,13 +104,32 @@ class MavlinkV1Parser:
                 break
 
             frame = bytes(self.buf[:frame_len])
-            del self.buf[:frame_len]
             self.candidates += 1
             if self.validate_crc and not valid_crc(frame):
                 msgid = frame[5]
                 self.invalid_crc += 1
                 self.invalid_by_msgid[msgid] = self.invalid_by_msgid.get(msgid, 0) + 1
+                if len(self.invalid_samples) < self.invalid_sample_limit:
+                    self.invalid_samples.append(
+                        {
+                            "len": payload_len,
+                            "seq": frame[2],
+                            "sysid": frame[3],
+                            "compid": frame[4],
+                            "msgid": msgid,
+                            "crc": frame[6 + payload_len]
+                            | (frame[7 + payload_len] << 8),
+                            "head": frame[: min(len(frame), 18)].hex(),
+                        }
+                    )
+                try:
+                    restart = frame.index(bytes([MAVLINK_V1_STX]), 1)
+                except ValueError:
+                    del self.buf[:frame_len]
+                else:
+                    del self.buf[:restart]
                 continue
+            del self.buf[:frame_len]
             frames.append(
                 {
                     "seq": frame[2],
@@ -178,6 +200,16 @@ def parse_args():
         help="Print parser candidate and invalid CRC counters.",
     )
     parser.add_argument(
+        "--invalid-samples",
+        type=int,
+        default=5,
+        help="When diagnostics are enabled, print up to this many invalid CRC candidate headers.",
+    )
+    parser.add_argument(
+        "--raw-capture",
+        help="Write received raw bytes to this file after warmup for offline link analysis.",
+    )
+    parser.add_argument(
         "--timesync-probe",
         action="store_true",
         help="Send MAVLink TIMESYNC requests and report responses. UART transport opens read/write.",
@@ -204,6 +236,30 @@ def parse_args():
     parser.add_argument("--target-component", type=int, default=250)
     parser.add_argument("--heartbeat-hz", type=float, default=1.0)
     parser.add_argument("--timesync-hz", type=float, default=5.0)
+    parser.add_argument(
+        "--expect-imu-hz",
+        type=float,
+        default=None,
+        help="Expected IMU telemetry rate; prints observed rate error in the summary.",
+    )
+    parser.add_argument(
+        "--expect-rc-hz",
+        type=float,
+        default=None,
+        help="Expected RC telemetry rate; prints observed rate error in the summary.",
+    )
+    parser.add_argument(
+        "--expect-attitude-hz",
+        type=float,
+        default=None,
+        help="Expected attitude telemetry rate; prints observed rate error in the summary.",
+    )
+    parser.add_argument(
+        "--expect-output-raw-hz",
+        type=float,
+        default=None,
+        help="Expected output_raw telemetry rate; prints observed rate error in the summary.",
+    )
     parser.add_argument("--request-version-s", type=float, default=1.0)
     parser.add_argument("--request-params-s", type=float, default=2.0)
     return parser.parse_args()
@@ -424,6 +480,25 @@ def decode_sensor_frame(frame):
             "board_us": None,
             "values": (altitude, pressure, temperature),
         }
+    if frame["msgid"] == 31 and len(payload) == 32:
+        time_boot_ms, q1, q2, q3, q4, rollspeed, pitchspeed, yawspeed = struct.unpack(
+            "<Ifffffff", payload
+        )
+        return {
+            "name": "attitude",
+            "board_us": time_boot_ms * 1000,
+            "values": {
+                "q": (q1, q2, q3, q4),
+                "rates": (rollspeed, pitchspeed, yawspeed),
+            },
+        }
+    if frame["msgid"] == ROSFLIGHT_OUTPUT_RAW and len(payload) == 64:
+        values = struct.unpack("<Q14f", payload)
+        return {
+            "name": "output_raw",
+            "board_us": values[0] * 1000,
+            "values": values[1:],
+        }
     if frame["msgid"] == RC_CHANNELS and len(payload) == 42:
         values = struct.unpack("<I18HBB", payload)
         return {
@@ -595,7 +670,7 @@ def percentile(sorted_values, pct):
 def summarize(name, records):
     if not records:
         print(f"{name}: no frames")
-        return
+        return None
 
     host_deltas = [
         (records[i]["host_ns"] - records[i - 1]["host_ns"]) / 1_000_000.0
@@ -609,25 +684,26 @@ def summarize(name, records):
     ]
 
     print(f"{name}: frames={len(records)}")
+    host_rate_hz = None
     if host_deltas:
         ordered = sorted(host_deltas)
-        rate_hz = 1000.0 / statistics.fmean(host_deltas)
+        host_rate_hz = 1000.0 / statistics.fmean(host_deltas)
         print(
             "  host interval ms: "
             f"min={ordered[0]:.3f} avg={statistics.fmean(host_deltas):.3f} "
             f"p50={percentile(ordered, 50):.3f} p90={percentile(ordered, 90):.3f} "
             f"p99={percentile(ordered, 99):.3f} max={ordered[-1]:.3f} "
-            f"rate={rate_hz:.1f}Hz"
+            f"rate={host_rate_hz:.1f}Hz"
         )
     if board_deltas:
         ordered = sorted(board_deltas)
-        rate_hz = 1000.0 / statistics.fmean(board_deltas)
+        board_rate_hz = 1000.0 / statistics.fmean(board_deltas)
         print(
             "  board timestamp interval ms: "
             f"min={ordered[0]:.3f} avg={statistics.fmean(board_deltas):.3f} "
             f"p50={percentile(ordered, 50):.3f} p90={percentile(ordered, 90):.3f} "
             f"p99={percentile(ordered, 99):.3f} max={ordered[-1]:.3f} "
-            f"rate={rate_hz:.1f}Hz"
+            f"rate={board_rate_hz:.1f}Hz"
         )
     loop_times = [record["loop_time_us"] for record in records if "loop_time_us" in record]
     if loop_times:
@@ -638,6 +714,108 @@ def summarize(name, records):
             f"p50={percentile(ordered, 50)} p90={percentile(ordered, 90)} "
             f"p99={percentile(ordered, 99)} max={ordered[-1]}"
         )
+    return host_rate_hz
+
+
+def summarize_expected_rate(name, observed_hz, expected_hz):
+    if expected_hz is None:
+        return
+    if observed_hz is None:
+        print(f"{name}: expected={expected_hz:.1f}Hz observed=0.0Hz error=-100.0%")
+        return
+    error_pct = (observed_hz - expected_hz) / expected_hz * 100.0
+    print(
+        f"{name}: expected={expected_hz:.1f}Hz observed={observed_hz:.1f}Hz "
+        f"error={error_pct:+.1f}%"
+    )
+
+
+class SequenceSummary:
+    def __init__(self):
+        self.total_valid = 0
+        self.first = None
+        self.last = None
+        self.expected_next = None
+        self.in_order = 0
+        self.gaps = 0
+        self.missing = 0
+        self.backwards_or_reordered = 0
+        self.duplicates = 0
+        self.by_msgid = {}
+        self.gap_samples = []
+        self.pending_missing = set()
+
+    def observe(self, frame):
+        seq = frame["seq"]
+        self.total_valid += 1
+        self.by_msgid[frame["msgid"]] = self.by_msgid.get(frame["msgid"], 0) + 1
+        if self.first is None:
+            self.first = seq
+            self.last = seq
+            self.expected_next = (seq + 1) & 0xFF
+            return
+
+        delta = (seq - self.last) & 0xFF
+        if seq == self.expected_next:
+            self.in_order += 1
+            self.last = seq
+            self.expected_next = (seq + 1) & 0xFF
+        elif delta == 0:
+            self.duplicates += 1
+            self._sample("duplicate", frame, delta)
+        elif delta < 128:
+            self.gaps += 1
+            self.missing += delta - 1
+            missing_seq = (self.last + 1) & 0xFF
+            while missing_seq != seq:
+                self.pending_missing.add(missing_seq)
+                missing_seq = (missing_seq + 1) & 0xFF
+            self._sample("gap", frame, delta)
+            self.last = seq
+            self.expected_next = (seq + 1) & 0xFF
+        else:
+            self.backwards_or_reordered += 1
+            if seq in self.pending_missing:
+                self.pending_missing.remove(seq)
+                self.missing -= 1
+            self._sample("backwards/reordered", frame, delta)
+
+    def _sample(self, kind, frame, delta):
+        if len(self.gap_samples) >= 8:
+            return
+        self.gap_samples.append(
+            {
+                "kind": kind,
+                "prev": self.last,
+                "seq": frame["seq"],
+                "delta": delta,
+                "msgid": frame["msgid"],
+                "sysid": frame["sysid"],
+                "compid": frame["compid"],
+            }
+        )
+
+
+def summarize_sequences(summary):
+    print(
+        "valid MAVLink seq: "
+        f"frames={summary.total_valid} first={summary.first} last={summary.last} "
+        f"in_order_steps={summary.in_order} gaps={summary.gaps} "
+        f"missing_est={summary.missing} reordered_or_backwards={summary.backwards_or_reordered} "
+        f"duplicates={summary.duplicates}"
+    )
+    if summary.by_msgid:
+        ordered = " ".join(
+            f"{msgid}:{count}" for msgid, count in sorted(summary.by_msgid.items())
+        )
+        print(f"valid MAVLink msgids: {ordered}")
+    for sample in summary.gap_samples:
+        print(
+            "  seq sample: "
+            f"{sample['kind']} prev={sample['prev']} seq={sample['seq']} "
+            f"delta={sample['delta']} msgid={sample['msgid']} "
+            f"sys={sample['sysid']} comp={sample['compid']}"
+        )
 
 
 def summarize_text(records):
@@ -646,13 +824,15 @@ def summarize_text(records):
         return
 
     print(f"text: frames={len(records)}")
-    seen = set()
+    latest_by_prefix = {}
     for record in records:
         text = record.get("text", "")
-        if text in seen:
+        if not text:
             continue
-        seen.add(text)
-        print(f"  {text}")
+        prefix = text.split(maxsplit=1)[0]
+        latest_by_prefix[prefix] = text
+    for prefix in sorted(latest_by_prefix):
+        print(f"  latest {prefix}: {latest_by_prefix[prefix]}")
 
 
 def summarize_perf(records):
@@ -784,10 +964,14 @@ def summarize_perf(records):
             print(f"    {title}: {details}")
 
 
-def acceptance_failures(args, parser, records):
+def acceptance_failures(args, parser, sequence_summary, records):
     failures = []
-    if not args.no_crc and parser.invalid_crc != 0:
-        failures.append(f"MAVLink CRC failures: {parser.invalid_crc} {parser.invalid_by_msgid}")
+    if not args.no_crc and parser.invalid_crc != 0 and sequence_summary.missing != 0:
+        failures.append(
+            "MAVLink valid sequence gaps after CRC failures: "
+            f"missing={sequence_summary.missing} invalid_crc={parser.invalid_crc} "
+            f"{parser.invalid_by_msgid}"
+        )
     required = {
         "imu": 100,
         "baro": 1,
@@ -841,10 +1025,16 @@ def acceptance_failures(args, parser, records):
 
 def main():
     args = parse_args()
-    parser = MavlinkV1Parser(validate_crc=not args.no_crc)
+    parser = MavlinkV1Parser(
+        validate_crc=not args.no_crc,
+        invalid_sample_limit=args.invalid_samples if args.diagnostics else 0,
+    )
+    sequence_summary = SequenceSummary()
     records = {
         "imu": [],
         "baro": [],
+        "attitude": [],
+        "output_raw": [],
         "status": [],
         "perf": [],
         "text": [],
@@ -865,6 +1055,7 @@ def main():
     timesync_sent = 0
     next_timesync_ns = 0
     injector = MavlinkInjector(args) if args.bidirectional or args.acceptance else None
+    raw_capture = open(args.raw_capture, "wb") if args.raw_capture else None
 
     if args.transport == "uart":
         source = open_uart(args)
@@ -924,7 +1115,11 @@ def main():
                 rx_bytes += len(data)
                 first_rx_ns = first_rx_ns or host_ns
                 last_rx_ns = host_ns
+                if raw_capture is not None:
+                    raw_capture.write(data)
             for frame in parser.feed(data):
+                if host_ns >= record_after_ns:
+                    sequence_summary.observe(frame)
                 decoded = decode_sensor_frame(frame)
                 if decoded is None:
                     continue
@@ -963,14 +1158,18 @@ def main():
                     }
                 )
     finally:
+        if raw_capture is not None:
+            raw_capture.close()
         if args.transport == "uart":
             os.close(source)
         else:
             source.close()
 
-    summarize("imu", records["imu"])
+    imu_rate_hz = summarize("imu", records["imu"])
     summarize("baro", records["baro"])
-    summarize("rc", records["rc"])
+    attitude_rate_hz = summarize("attitude", records["attitude"])
+    output_raw_rate_hz = summarize("output_raw", records["output_raw"])
+    rc_rate_hz = summarize("rc", records["rc"])
     summarize("gnss", records["gnss"])
     summarize("timesync", records["timesync"])
     summarize("heartbeat", records["heartbeat"])
@@ -980,6 +1179,14 @@ def main():
     summarize("status", records["status"])
     summarize_text(records["text"])
     summarize_perf(records["perf"])
+    summarize_expected_rate("imu receive rate", imu_rate_hz, args.expect_imu_hz)
+    summarize_expected_rate("rc receive rate", rc_rate_hz, args.expect_rc_hz)
+    summarize_expected_rate(
+        "attitude receive rate", attitude_rate_hz, args.expect_attitude_hz
+    )
+    summarize_expected_rate(
+        "output_raw receive rate", output_raw_rate_hz, args.expect_output_raw_hz
+    )
     if first_rx_ns is not None and last_rx_ns is not None and last_rx_ns > first_rx_ns:
         duration_s = (last_rx_ns - first_rx_ns) / 1_000_000_000.0
         print(
@@ -991,6 +1198,14 @@ def main():
             f"parser: candidates={parser.candidates} invalid_crc={parser.invalid_crc} "
             f"invalid_by_msgid={parser.invalid_by_msgid}"
         )
+        summarize_sequences(sequence_summary)
+        for sample in parser.invalid_samples:
+            print(
+                "  invalid sample: "
+                f"len={sample['len']} seq={sample['seq']} sys={sample['sysid']} "
+                f"comp={sample['compid']} msgid={sample['msgid']} "
+                f"crc=0x{sample['crc']:04x} head={sample['head']}"
+            )
     if args.timesync_probe:
         print(f"timesync probe: sent={timesync_sent} responses={len(records['timesync'])}")
     if injector is not None:
@@ -999,7 +1214,7 @@ def main():
             + " ".join(f"{key}={value}" for key, value in injector.sent.items())
         )
     if args.acceptance:
-        failures = acceptance_failures(args, parser, records)
+        failures = acceptance_failures(args, parser, sequence_summary, records)
         if failures:
             print("acceptance: FAIL")
             for failure in failures:

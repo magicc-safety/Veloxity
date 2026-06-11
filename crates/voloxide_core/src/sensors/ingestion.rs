@@ -173,6 +173,23 @@ pub fn process_sensor_bus<
     }
 }
 
+pub fn process_imu_sensor<R, ImuProc>(
+    raw: &mut SensorBus<R>,
+    processed: &mut ProcessedSensors<R>,
+    imu_processor: &mut ImuProc,
+    flags: &mut CalibrationFlags,
+    params: &mut Params,
+) where
+    R: FlightFloat,
+    ImuProc: SensorPacketProcessor<ImuPacket<R>>,
+{
+    if raw.imu.is_some() {
+        processed.imu = imu_processor.process(&mut raw.imu, flags, params);
+    } else {
+        processed.imu = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +289,45 @@ mod tests {
 
         assert!(processed.imu.is_none());
         assert!(processed.rc.is_none());
+    }
+
+    #[test]
+    fn process_imu_sensor_leaves_service_sensor_state_intact() {
+        let mut raw = SensorBus::<f64>::default();
+        let mut processed = ProcessedSensors::<f64> {
+            rc: Some(RcPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 100,
+                    status: 0,
+                },
+                n_chan: 1,
+                chan: [0.0; RC_PACKET_CHANNELS],
+                lol: false,
+            }),
+            ..Default::default()
+        };
+        let mut processor = PassthroughImuProcessor;
+        let mut flags = CalibrationFlags::empty();
+        let mut params = Params::new();
+
+        raw.imu = Some(Ok(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 200,
+                status: 0,
+            },
+            ..Default::default()
+        }));
+
+        process_imu_sensor(
+            &mut raw,
+            &mut processed,
+            &mut processor,
+            &mut flags,
+            &mut params,
+        );
+
+        assert!(raw.imu.is_none());
+        assert_eq!(processed.imu.unwrap().header.timestamp, 200);
+        assert_eq!(processed.rc.unwrap().header.timestamp, 100);
     }
 }
