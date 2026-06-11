@@ -48,6 +48,7 @@ use heapless::String;
 
 const IMU_TIMEOUT_US: u64 = 100_000;
 const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 1;
+const REALTIME_SERVICE_TELEMETRY_BUDGET: usize = 3;
 const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 120;
 #[cfg(feature = "timing-diagnostics")]
 const TIMING_DIAGNOSTIC_INTERVAL_US: u64 = 1_000_000;
@@ -628,6 +629,10 @@ where
         self.board.set_test_pin_3(high);
     }
 
+    pub fn set_test_pin_2(&mut self, high: bool) {
+        self.board.set_test_pin_2(high);
+    }
+
     pub fn run_comm_param_sensor_stages(&mut self) {
         self.run_communication_and_parameter_service_stage();
         self.run_sensor_ingestion_and_health_stage();
@@ -667,7 +672,6 @@ where
         if had_raw_imu {
             self.last_realtime_control_us = self.board.clock_micros();
         }
-        self.run_realtime_telemetry_stage();
         ran_control
     }
 
@@ -691,7 +695,6 @@ where
         if had_raw_imu {
             self.last_realtime_control_us = self.board.clock_micros();
         }
-        self.run_realtime_telemetry_stage();
         let telemetry_due = self
             .comm
             .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
@@ -703,7 +706,7 @@ where
             had_processed_imu,
             had_processed_rc,
             telemetry_due,
-            telemetry_deferred: telemetry_due,
+            telemetry_deferred: false,
             ran_control,
             elapsed_after_control_us: self
                 .board
@@ -752,13 +755,17 @@ where
         let phase = self.realtime_service_phase;
         self.realtime_service_phase = self.realtime_service_phase.next();
 
+        self.run_realtime_imu_telemetry_stage();
+
         match phase {
             RealtimeServicePhase::Input => self.run_service_input_stage(),
             RealtimeServicePhase::SensorsRc => self.run_service_sensor_and_rc_stage(),
             RealtimeServicePhase::Responses => {
                 self.drain_logs_and_send_responses_limited(REALTIME_SERVICE_RESPONSE_BUDGET);
             }
-            RealtimeServicePhase::Telemetry => self.run_realtime_telemetry_stage(),
+            RealtimeServicePhase::Telemetry => {
+                self.run_realtime_telemetry_stage_budgeted(REALTIME_SERVICE_TELEMETRY_BUDGET);
+            }
             RealtimeServicePhase::Flush => self.board.serial_flush_budgeted(1),
             RealtimeServicePhase::DeferredBoard => self.board.run_deferred_board_actions(),
         }
@@ -1301,13 +1308,29 @@ where
         );
     }
 
-    fn run_realtime_telemetry_stage(&mut self) {
+    fn run_realtime_telemetry_stage_budgeted(&mut self, max_streams: usize) {
+        let mut sent = 0;
+        while sent < max_streams && self.send_realtime_telemetry_stream() {
+            sent += 1;
+        }
+    }
+
+    fn run_realtime_imu_telemetry_stage(&mut self) {
+        let now_us = self.board.clock_micros();
+        let _ = self.comm.send_realtime_imu_telemetry_if_due(
+            &mut self.board,
+            now_us,
+            &self.processed_sensors,
+        );
+    }
+
+    fn send_realtime_telemetry_stream(&mut self) -> bool {
         let now_us = self.board.clock_micros();
         if !self
             .comm
             .named_telemetry_due(now_us, &self.processed_sensors)
         {
-            return;
+            return false;
         }
 
         let sensor_error_count = self.board.sensors_errors_count();
@@ -1322,7 +1345,7 @@ where
             &self.control_pipeline.latest_pwm_outputs,
             sensor_error_count,
             self.control_pipeline.latest_loop_time_us,
-        );
+        )
     }
 
     #[cfg(feature = "timing-diagnostics")]

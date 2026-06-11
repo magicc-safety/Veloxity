@@ -165,6 +165,7 @@ where
     telemetry_rates: TelemetryRates,
     telemetry_rate_state: TelemetryRateState,
     realtime_telemetry_cursor: u8,
+    last_realtime_imu_telemetry_timestamp: Option<u64>,
 
     pub sysid: u8,
     comm_link: T,
@@ -185,6 +186,7 @@ where
             telemetry_rates: TelemetryRates::upstream(),
             telemetry_rate_state: TelemetryRateState::default(),
             realtime_telemetry_cursor: 0,
+            last_realtime_imu_telemetry_timestamp: None,
 
             sysid: 1,
             comm_link,
@@ -211,6 +213,7 @@ where
         self.telemetry_rates = telemetry_rates;
         self.telemetry_rate_state = TelemetryRateState::default();
         self.output_raw_imu_count = 0;
+        self.last_realtime_imu_telemetry_timestamp = None;
     }
 
     pub fn named_telemetry_due<R>(
@@ -614,6 +617,10 @@ where
             return true;
         }
 
+        if self.send_imu_if_due(board, now_us, processed_sensors) {
+            return true;
+        }
+
         const REALTIME_TELEMETRY_GROUPS: u8 = 10;
         let mut checked = 0;
         while checked < REALTIME_TELEMETRY_SCAN_BUDGET {
@@ -624,30 +631,7 @@ where
 
             match group {
                 0 => {
-                    let Some(imu_packet) = processed_sensors.imu else {
-                        continue;
-                    };
-                    if !stream_due(
-                        now_us,
-                        &mut self.telemetry_rate_state.imu_us,
-                        self.telemetry_rates.imu_hz,
-                    ) {
-                        continue;
-                    }
-                    self.send_rosflight_small_imu(
-                        board,
-                        SmallImuMsg {
-                            temperature: imu_packet.temperature,
-                            time_boot_us: imu_packet.header.timestamp,
-                            xacc: imu_packet.accel[0].to_f32_lossy(),
-                            yacc: imu_packet.accel[1].to_f32_lossy(),
-                            zacc: imu_packet.accel[2].to_f32_lossy(),
-                            xgyro: imu_packet.gyro[0].to_f32_lossy(),
-                            ygyro: imu_packet.gyro[1].to_f32_lossy(),
-                            zgyro: imu_packet.gyro[2].to_f32_lossy(),
-                        },
-                    );
-                    return true;
+                    continue;
                 }
                 1 => {
                     let Some(imu_packet) = processed_sensors.imu else {
@@ -877,6 +861,57 @@ where
         }
 
         false
+    }
+
+    pub fn send_realtime_imu_telemetry_if_due<R>(
+        &mut self,
+        board: &mut B,
+        now_us: u64,
+        processed_sensors: &ProcessedSensors<R>,
+    ) -> bool
+    where
+        R: FlightFloat,
+    {
+        self.send_imu_if_due(board, now_us, processed_sensors)
+    }
+
+    fn send_imu_if_due<R>(
+        &mut self,
+        board: &mut B,
+        now_us: u64,
+        processed_sensors: &ProcessedSensors<R>,
+    ) -> bool
+    where
+        R: FlightFloat,
+    {
+        let Some(imu_packet) = processed_sensors.imu else {
+            return false;
+        };
+        if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
+            return false;
+        }
+        if !stream_due(
+            now_us,
+            &mut self.telemetry_rate_state.imu_us,
+            self.telemetry_rates.imu_hz,
+        ) {
+            return false;
+        }
+        self.send_rosflight_small_imu(
+            board,
+            SmallImuMsg {
+                temperature: imu_packet.temperature,
+                time_boot_us: imu_packet.header.timestamp,
+                xacc: imu_packet.accel[0].to_f32_lossy(),
+                yacc: imu_packet.accel[1].to_f32_lossy(),
+                zacc: imu_packet.accel[2].to_f32_lossy(),
+                xgyro: imu_packet.gyro[0].to_f32_lossy(),
+                ygyro: imu_packet.gyro[1].to_f32_lossy(),
+                zgyro: imu_packet.gyro[2].to_f32_lossy(),
+            },
+        );
+        self.last_realtime_imu_telemetry_timestamp = Some(imu_packet.header.timestamp);
+        true
     }
 
     fn send_output_raw<A, R>(&mut self, board: &mut B, actuator_commands: &A)
