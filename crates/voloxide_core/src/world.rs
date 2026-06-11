@@ -209,6 +209,9 @@ enum RealtimeServicePhase {
     DeferredBoard,
 }
 
+const REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 2;
+const REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 1;
+
 impl RealtimeServicePhase {
     fn next(self) -> Self {
         match self {
@@ -873,7 +876,7 @@ where
         let phase = self.realtime_service_phase;
         self.realtime_service_phase = self.realtime_service_phase.next();
 
-        self.run_realtime_imu_telemetry_stage();
+        self.run_realtime_telemetry_stage_budgeted(REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP);
 
         match phase {
             RealtimeServicePhase::Input => self.run_service_input_stage(),
@@ -885,7 +888,9 @@ where
             RealtimeServicePhase::Telemetry0
             | RealtimeServicePhase::Telemetry1
             | RealtimeServicePhase::Telemetry2 => {
-                self.run_realtime_telemetry_stage_budgeted(1);
+                self.run_realtime_telemetry_stage_budgeted(
+                    REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE,
+                );
             }
             RealtimeServicePhase::Flush => self.board.serial_flush_budgeted(1),
             RealtimeServicePhase::DeferredBoard => self.board.run_deferred_board_actions(),
@@ -1534,15 +1539,6 @@ where
         while sent < max_streams && self.send_realtime_telemetry_stream() {
             sent += 1;
         }
-    }
-
-    fn run_realtime_imu_telemetry_stage(&mut self) {
-        let now_us = self.board.clock_micros();
-        let _ = self.comm.send_realtime_imu_telemetry_if_due(
-            &mut self.board,
-            now_us,
-            &self.processed_sensors,
-        );
     }
 
     fn send_realtime_telemetry_stream(&mut self) -> bool {

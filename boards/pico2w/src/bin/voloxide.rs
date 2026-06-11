@@ -109,7 +109,7 @@ const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 32;
 const GPS_UART_BAUDRATE: u32 = 115_200;
 const MAIN_LOOP_MAX_SERVICE_DEFERRAL_US: u64 = 250;
-const PICO2W_CONTROL_LOOP_HZ: u16 = 2_000;
+const PICO2W_CONTROL_LOOP_HZ: u16 = 1_000;
 #[cfg(any(
     all(feature = "pre-control-scope", feature = "imu-producer-scope"),
     all(feature = "pre-control-scope", feature = "rc-command-scope"),
