@@ -84,6 +84,18 @@ Board crates own physical integration:
 
 They should not reimplement flight logic that belongs in `voloxide_core`.
 
+Current RP2350/Pico 2 W work is concentrated in:
+
+| Path | Purpose |
+| --- | --- |
+| `boards/pico2w/src/bin/voloxide.rs` | Main RP2350 firmware entry point, Embassy task setup, core split, and IMU ODR feature selection. |
+| `boards/pico2w/src/board.rs` | `BoardIo` implementation, sensor queue drains, serial flush budget, and service hooks. |
+| `boards/pico2w/src/ism330dhcx.rs` | ISM330DHCX data-ready/SPI packet producer path. |
+| `boards/pico2w/src/rc_receiver.rs` | CRSF receiver path feeding service-side RC state. |
+| `boards/pico2w/src/comms_core.rs` | Core-to-transport MAVLink mailbox used by UART/ESP-NOW testing. |
+| `platforms/rp2350/src/multicore.rs` | RP2350 core-role metadata. |
+| `platforms/rp2350/src/pio.rs` | Shared PIO allocation metadata. |
+
 ### Platform Crates
 
 Platform crates own reusable chip-family code. Board crates depend on them when a concept applies

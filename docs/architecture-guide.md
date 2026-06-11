@@ -449,7 +449,7 @@ The IMU control path is intentionally short:
 ```text
 run_imu_control_tick
 ├── board.update_imu_sensor
-├── process_sensor_bus_after_update
+├── sensors::ingestion::process_imu_sensor
 ├── update_sensor_health_and_calibration
 └── run_control_and_mixing_stage_if_new_imu
     └── estimator/controller/mixer/PWM for a new IMU timestamp
@@ -489,6 +489,13 @@ and queuing are board work; interpreting the newest RC packet, updating the comm
 state machine, syncing PWM output enable state, and updating LEDs are core `World` work. Keeping that
 work in a service phase preserves the expected ROSflight behavior while preventing variable RC
 packet arrivals from adding jitter to every IMU control closure.
+
+On RP2350/Pico 2 W, the current validated firmware configuration uses the ISM330DHCX native
+3.333 kHz ODR. The board entry point is `boards/pico2w/src/bin/voloxide.rs`; the feature
+`ism330dhcx-3k333` selects that IMU rate, and the `scope-timing-pins` family exposes GP19 for the
+control body plus GP22 for the selected substage. Barometer and magnetometer work should remain in
+the service-side sensor path so adding those sensors does not turn the IMU interrupt path into a
+multi-sensor polling loop.
 
 ## End-To-End Flow: ROSflight Standalone Sim
 

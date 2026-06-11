@@ -24,6 +24,10 @@ flows should not be reintroduced unless they are retested and updated against th
 4. [ESP32C5 ESP-NOW UART bridge](../tools/espnow_uart_bridge/README.md)
 5. [STM32 board guide](boards/stm32.md)
 
+The current RP2350/Pico 2 W firmware target is a native 3.333 kHz ISM330DHCX-driven control loop
+with high-rate telemetry validation. The measured hardware status, Saleae scope-pin meanings, and
+exact build/test commands live in the RP2350 guide and hardware bring-up notes.
+
 ### I Want To Modify Firmware Logic
 
 1. [Core architecture](architecture-guide.md)

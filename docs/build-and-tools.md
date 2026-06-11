@@ -122,6 +122,31 @@ The board crates own their runner configuration. For RP2350 work in this branch,
 been done with explicit `probe-rs` commands during hardware bring-up. See
 [RP2350 / Pico 2 W guide](boards/rp2350-pico2w.md).
 
+Current high-rate RP2350 timing build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+```
+
+Current high-rate telemetry integrity check against the ESP32C5 ground bridge:
+
+```bash
+python3 tools/mavlink_tester.py \
+  --transport uart \
+  --device /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_38:44:BE:A4:15:B8-if00 \
+  --baud 2000000 \
+  --duration-s 45 \
+  --warmup-s 3 \
+  --show 4 \
+  --diagnostics \
+  --acceptance \
+  --expect-imu-hz 400 \
+  --expect-rc-hz 100 \
+  --expect-attitude-hz 50 \
+  --expect-output-raw-hz 50
+```
+
 ## ROS 2 Shim Build
 
 The build/source helper is:

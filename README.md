@@ -27,7 +27,7 @@ Read these in order if you are new to the repository:
 | --- | --- |
 | ROSflight multirotor simulator with Rust firmware | Actively tested in this branch |
 | ROScopter waypoint/autonomy stack on top of Voloxide SIL | Actively tested in this branch |
-| RP2350/Pico 2 W hardware path | Active hardware bring-up path |
+| RP2350/Pico 2 W hardware path | Active hardware bring-up path; native 3.333 kHz ISM330DHCX control-loop timing validated |
 | ESP32C5 ESP-NOW UART bridge | Tested as an isolated UART-over-air link |
 | Nucleo-H753ZI | Retained and compile-current; needs renewed sensor bring-up |
 | Pixracer Pro / STM32H7 | Retained and compile-current; needs renewed sensor bring-up |
@@ -44,6 +44,12 @@ cargo xtask check-board pico2w
 cargo xtask check-board nucleo
 cargo xtask check-board pixracerpro
 ```
+
+The current RP2350/Pico 2 W hardware path uses the ISM330DHCX data-ready interrupt at the native
+3.333 kHz ODR for the control loop. The hot path is IMU-only and reuses the latest command/sensor
+state; RC, barometer, magnetometer, telemetry, parameters, and transport work run in bounded service
+phases. See [RP2350 / Pico 2 W](docs/boards/rp2350-pico2w.md) for the measured timing and flash
+commands.
 
 For ROSflight simulation, source ROS 2 and the ROSflight workspace first, then build the shim:
 

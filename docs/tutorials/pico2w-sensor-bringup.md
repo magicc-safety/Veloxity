@@ -49,8 +49,8 @@ probe-rs download --chip RP235x --protocol swd \
 probe-rs reset --chip RP235x
 ```
 
-The flight target for this branch is the closest natural ISM330DHCX ODR to 1.66 kHz. Timing results
-should be collected from release builds, not debug builds.
+The flight target for this branch is the native ISM330DHCX `3.333 kHz` ODR selected by
+`ism330dhcx-3k333`. Timing results should be collected from release builds, not debug builds.
 
 ## Validate The Full Sensor Stack
 
@@ -98,7 +98,7 @@ Build a release firmware image with the current IMU feature set:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
+  --features 'ism330dhcx-driver ism330dhcx-3k333 imu-producer-interrupt-executor'
 ```
 
 Flash:
@@ -113,7 +113,27 @@ For timing diagnostics:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'timing-diagnostics ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
+  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+```
+
+With `scope-timing-pins`, capture GP19 for the full control body and GP22 for the selected
+substage. The current high-rate link validation expects 400 Hz IMU telemetry, 100 Hz RC telemetry,
+50 Hz attitude, and 50 Hz output raw:
+
+```bash
+python3 tools/mavlink_tester.py \
+  --transport uart \
+  --device /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_38:44:BE:A4:15:B8-if00 \
+  --baud 2000000 \
+  --duration-s 45 \
+  --warmup-s 3 \
+  --show 4 \
+  --diagnostics \
+  --acceptance \
+  --expect-imu-hz 400 \
+  --expect-rc-hz 100 \
+  --expect-attitude-hz 50 \
+  --expect-output-raw-hz 50
 ```
 
 ## Debugging Rule

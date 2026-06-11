@@ -56,26 +56,26 @@ Useful feature build for the current high-rate IMU path:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
-```
-
-Timing diagnostics build:
-
-```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'timing-diagnostics ism330dhcx-driver ism330dhcx-1k666 release-loop-bench'
+  --features 'ism330dhcx-driver ism330dhcx-3k333 imu-producer-interrupt-executor'
 ```
 
 Logic-analyzer timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins'
+  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
 ```
 
-Use this build when measuring loop timing with GPIO instead of MAVLink statustext diagnostics. Do
-not enable `timing-diagnostics`, `release-loop-bench`, `release-loop-classifier`, or
-`release-loop-spike-counter` for the cleanest timing measurement.
+Timing diagnostics build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'timing-diagnostics ism330dhcx-driver ism330dhcx-3k333 imu-producer-interrupt-executor'
+```
+
+Use the logic-analyzer timing build when measuring loop timing with GPIO instead of MAVLink
+statustext diagnostics. Do not enable `timing-diagnostics`, `release-loop-bench`,
+`release-loop-classifier`, or `release-loop-spike-counter` for the cleanest timing measurement.
 
 ## Flash
 
@@ -222,21 +222,21 @@ Common full-system producer timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins imu-producer-scope imu-producer-interrupt-executor'
+  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins imu-producer-scope imu-producer-interrupt-executor'
 ```
 
 Pre-control timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins pre-control-scope imu-producer-interrupt-executor'
+  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins pre-control-scope imu-producer-interrupt-executor'
 ```
 
 RC command/state timing build:
 
 ```bash
 cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
-  --features 'ism330dhcx-driver ism330dhcx-1k666 scope-timing-pins rc-command-scope imu-producer-interrupt-executor'
+  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins rc-command-scope imu-producer-interrupt-executor'
 ```
 
 Do not enable `timing-diagnostics`, `release-loop-bench`, `release-loop-classifier`, or
@@ -245,36 +245,62 @@ coarse telemetry, but they add work and can obscure the exact scope-edge timing.
 
 ### Current Timing Measurements
 
-The current validated capture set used the real ISM330DHCX at its natural `1.666 kHz` ODR with full
-core 1 transport enabled. Budgets:
+The current validated capture set used the real ISM330DHCX at its native `3.333 kHz` ODR with full
+core 1 transport enabled and loaded MAVLink telemetry over the ESP32C5 bridge. Relevant budgets:
 
-- `600 us`: current 1.666 kHz IMU period.
-- `312.5 us`: desired 3.2 kHz close-loop budget.
+- `300 us`: nominal 3.333 kHz IMU/control period.
+- `312.5 us`: older 3.2 kHz comparison budget.
+- `333.333 us`: looser 3.0 kHz comparison budget.
 
-The measurements below are from Saleae CSV exports analyzed with `tools/analyze_scope_timing_csv.py`
-and companion edge-pair scripts.
+The measurements below are from Saleae CSV exports. Saleae channel mapping in the current exports
+is Channel 0 = GP19 full control body, Channel 1 = GP18 realtime pass boundary, and Channel 3 =
+GP22 selected diagnostic window.
 
-| Build / measurement | Mean | p99 | Worst | 312.5 us overruns | Notes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| IMU producer high | `36.5 us` | `55.8 us` | `71.6 us` | `0` | Core 1 data-ready/SPI/queue work before the later RC split. |
-| IMU producer rising period | `563.3 us` | `577.2 us` | `590.9 us` | n/a | IMU arrival cadence was clean; the IMU was not the source of the long tail. |
-| Producer fall to control done | `218.2 us` | `314.1 us` | `393.9 us` | `143 / 12672` | Old full-system state before moving RC/state out of the hot tick. |
-| Pre-control before RC split | `88.7 us` | `143.5 us` | `179.6 us` | `0` | Full pre-control work; combined with control caused the 3.2 kHz misses. |
-| RC command/state stage | `49.7 us` | `98.8 us` | `146.9 us` | `0` | Confirmed RC/state was the major variable pre-control cost. |
-| Pre-control after RC split | `40.6 us` | `62.1 us` | `87.9 us` | `0` | Current hot IMU tick pre-control cost. |
-| Control pipeline after RC split | `123.5 us` | `189.3 us` | `239.1 us` | `0` | Current estimator/controller/mixer/PWM body on GP19. |
-| Full close-loop after RC split, pre-control rise to control fall | `168.4 us` | `241.6 us` | `286.4 us` | `0 / 6918` | Current measured close-loop path; worst margin is about `26 us` against 3.2 kHz. |
-| Realtime pass with control after RC split | `563.3 us` | `578.1 us` | `592.4 us` | n/a | The 600 us frame is clean in this capture. |
+Latest optimized build:
+
+```bash
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+  --features 'ism330dhcx-driver ism330dhcx-3k333 scope-timing-pins control-scope-controller imu-producer-interrupt-executor'
+```
+
+| Measurement | Samples | Mean | p99 | p99.9 | Worst | Over 300 us | Over 312.5 us | Over 333.333 us |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| GP19 full control body | `214524` | `125.119 us` | `229.092 us` | `257.906 us` | `308.382 us` | `3` | `0` | `0` |
+| GP22 controller substage | n/a | `37.595 us` | `73.820 us` | n/a | `117.886 us` | `0` | `0` | `0` |
+
+The three GP19 pulses over `300 us` were `308.382 us`, `301.340 us`, and `300.110 us`. There were
+no full-control pulses over either the old `312.5 us` comparison budget or the `333.333 us` period.
+The mid-capture GP19 rate measured about `3527.9 Hz`; use the pulse-width statistics for processing
+headroom and producer-period captures when checking the exact IMU cadence.
+
+Loaded telemetry during the same timing campaign:
+
+| Stream | Expected rate | Current result |
+| --- | ---: | --- |
+| IMU telemetry | `400 Hz` | Hit expected rate during high-rate link validation. |
+| RC raw telemetry | `100 Hz` | Hit expected rate after RC input was restored. |
+| Attitude quaternion | `50 Hz` | Hit expected rate. |
+| Output raw | `50 Hz` | Hit expected rate. |
+| GNSS | `10 Hz` | Decoded in the current stream. |
+| Heartbeat | `1 Hz` | Decoded in the current stream. |
+
+The loaded receiver pass showed about `29.15 kB/s` over the UART/ESP-NOW path, `0` invalid CRCs,
+and no estimated missing valid MAVLink sequence frames. Status telemetry reported average loop time
+about `128.1 us`, p99 `224 us`, and max `241 us` after the realtime-path optimization.
 
 Interpretation:
 
-- The firmware is clean for the `1.666 kHz` loop target with large margin.
-- The measured close-loop path is currently clean for `3.2 kHz`, but the worst-case margin is only
-  about `26 us`; more control-pipeline optimization is needed before treating 3.2 kHz as robust.
-- The remaining tail is now dominated by the control pipeline body on GP19, not by pre-control work.
-- Control start-to-start period is not the right 3.2 kHz metric on the current 1.666 kHz IMU ODR.
-  It naturally follows the IMU arrival period. Use pre-control start to control done for close-loop
-  work duration, and producer-period captures for IMU cadence.
+- The current firmware is viable at the native `3.333 kHz` IMU/control update rate under the tested
+  telemetry load.
+- There is useful average headroom, and the p99 path is well under one 3.333 kHz period.
+- The remaining tail is still in the control body, so future estimator/controller/mixer/PWM
+  optimizations are the right place to find more margin.
+- Barometer and magnetometer work should stay in service-side low-rate paths and feed latest-value
+  state into the estimator. They should not be polled synchronously inside `run_imu_control_tick`.
+
+Historical note: earlier 1.666 kHz captures found that RC/state work inside the IMU tick was the
+major avoidable tail. Moving RC/state into the service phase cut pre-control p99 from about
+`143.5 us` to about `62.1 us` before the current 3.333 kHz validation.
 
 ### Core 1 Transport Findings
 
@@ -294,7 +320,7 @@ transport pressure and mailbox activity. The current firmware mitigates this by:
 - moving RC/state out of `run_imu_control_tick`,
 - bounding response work to one response per realtime service call,
 - limiting service phases to the early post-control window,
-- reducing UART TX batch size to `64` bytes and adding a `100 us` TX pacing delay,
+- using a bounded UART TX batch path for high-rate telemetry,
 - increasing CRSF UART read chunk size to `32` bytes, and
 - lowering UART/PIO/DMA transport interrupt priority relative to the IMU producer interrupt.
 
@@ -375,7 +401,25 @@ Historical 60 second classifier result before the realtime RC/state split:
 In this report, a closure/control pass meant `World` received a new processed IMU timestamp and ran
 estimator, controller, mixer, and PWM output. A no-control pass meant the scheduler still serviced
 communication, sensors, RC/state, telemetry, and board actions, but did not close the control loop.
-Do not use those historical max values to evaluate the current 3.2 kHz close-loop budget.
+Do not use those historical max values to evaluate the current native 3.333 kHz close-loop budget.
+
+Current high-rate receiver validation command:
+
+```bash
+python3 tools/mavlink_tester.py \
+  --transport uart \
+  --device /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_38:44:BE:A4:15:B8-if00 \
+  --baud 2000000 \
+  --duration-s 45 \
+  --warmup-s 3 \
+  --show 4 \
+  --diagnostics \
+  --acceptance \
+  --expect-imu-hz 400 \
+  --expect-rc-hz 100 \
+  --expect-attitude-hz 50 \
+  --expect-output-raw-hz 50
+```
 
 ## Sensor Bring-Up
 
@@ -396,8 +440,7 @@ low-rate path and can be polled outside the critical control pass.
 
 - ESP32C5 bridge can pass UART data bidirectionally over ESP-NOW in isolation.
 - The RP2350 firmware path is designed to keep communication work out of the measured control pass.
-- The control pass is IMU-driven and intended to run at the closest natural ISM330DHCX rate to
-  1.66 kHz.
+- The control pass is IMU-driven and validated at the native ISM330DHCX `3.333 kHz` ODR.
 - Runtime telemetry and diagnostics should be tested in release mode when evaluating timing.
 
 Use [hardware bring-up notes](../hardware-bringup-notes.md) for the concise latest runbook.

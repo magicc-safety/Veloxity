@@ -5,7 +5,7 @@ are being brought back to current core APIs.
 
 | Board | Crate | Target | Status |
 | --- | --- | --- | --- |
-| Raspberry Pi Pico 2 W / RP2350 | `boards/pico2w` | `thumbv8m.main-none-eabihf` | Active hardware bring-up path. |
+| Raspberry Pi Pico 2 W / RP2350 | `boards/pico2w` | `thumbv8m.main-none-eabihf` | Active hardware bring-up path; 3.333 kHz ISM330DHCX timing validated. |
 | Nucleo-H753ZI | `boards/nucleo` | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed. |
 | Pixracer Pro / STM32H7 | `boards/pixracerpro` | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed. |
 
@@ -30,6 +30,10 @@ The board crate chooses the concrete types for:
 
 The core loop lives in `crates/voloxide_core/src/world.rs`; board crates should not duplicate that
 logic.
+
+The Pico 2 W firmware uses the finer-grained realtime scheduler rather than a plain `run_once()`
+loop. Its hot path is `World::run_imu_control_tick()`, which drains only the IMU queue before
+running estimator/controller/mixer/PWM work. Slower work is sliced through service phases.
 
 ## Board Guides
 
