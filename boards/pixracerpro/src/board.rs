@@ -155,9 +155,9 @@ impl BoardIo for Board {
         sensor_poll_diagnostics::record_bus(sensors);
         #[cfg(feature = "sensor-poll-diagnostics")]
         self.log_sbus_diagnostics_if_due();
-        let mut delay = Delay;
-
+        #[cfg(not(feature = "scope-timing-pins"))]
         if sensors.imu.is_some() {
+            let mut delay = Delay;
             self.set_test_pin_1(true);
             delay.delay_us(1u32);
             self.set_test_pin_1(false);
@@ -175,6 +175,7 @@ impl BoardIo for Board {
             .map(|result| result.map(|packet| packet.cast()));
         #[cfg(feature = "sensor-poll-diagnostics")]
         sensor_poll_diagnostics::record_bus(sensors);
+        #[cfg(not(feature = "scope-timing-pins"))]
         if sensors.imu.is_some() {
             let mut delay = Delay;
             self.set_test_pin_1(true);
@@ -609,8 +610,10 @@ impl Board {
 
         // Test PWM pins
         let mut test_pin_1 = Output::new(p.PD11, Level::Low, Speed::VeryHigh);
+        #[cfg(not(feature = "scope-timing-pins"))]
         test_pin_1.set_high();
         let mut test_pin_2 = Output::new(p.PD12, Level::Low, Speed::VeryHigh);
+        #[cfg(not(feature = "scope-timing-pins"))]
         test_pin_2.set_high();
 
         // Setup Probe GPIO's
