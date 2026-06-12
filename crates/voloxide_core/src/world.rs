@@ -939,6 +939,7 @@ where
         let latest_attitude = self.processed_sensors.attitude;
 
         self.board.update_service_sensor_bus(&mut self.raw_sensors);
+        let had_raw_imu = self.raw_sensors.imu.is_some();
         let had_raw_mag = self.raw_sensors.mag.is_some();
         let had_raw_baro = self.raw_sensors.baro.is_some();
         let had_raw_pitot = self.raw_sensors.pitot.is_some();
@@ -948,9 +949,8 @@ where
         let had_raw_rc = self.raw_sensors.rc.is_some();
         let had_raw_attitude = self.raw_sensors.attitude.is_some();
         self.process_sensor_bus_after_update();
-        self.update_sensor_health_and_calibration(now_us);
 
-        if self.processed_sensors.imu.is_none() {
+        if !had_raw_imu {
             self.processed_sensors.imu = latest_imu;
         }
         if !had_raw_mag {
@@ -977,6 +977,8 @@ where
         if !had_raw_attitude {
             self.processed_sensors.attitude = latest_attitude;
         }
+
+        self.update_sensor_health_and_calibration(now_us);
     }
 
     pub fn run_communication_and_parameter_service_stage(&mut self) {
@@ -2451,6 +2453,53 @@ mod tests {
         assert_eq!(world.board.serial_flush_count, 1);
         assert_eq!(world.board.deferred_board_action_count, 1);
         assert_eq!(world.comm.comm_link().baro_count, 1);
+    }
+
+    #[test]
+    fn service_sensor_stage_preserves_previous_imu_for_health_when_service_poll_omits_imu() {
+        let params = Params::new();
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard {
+                current_time_us: IMU_TIMEOUT_US + 1,
+                ..Default::default()
+            },
+            params,
+            SensorStageCommLink::default(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        world.processed_sensors.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        world.run_service_step();
+
+        assert!(world.processed_sensors.imu.is_some());
+        assert!(
+            !world
+                .state
+                .get_errors()
+                .contains(crate::state_machine::ErrorFlag::IMU_NOT_RESPONDING)
+        );
     }
 
     #[test]
