@@ -72,9 +72,15 @@ fn main() -> ! {
         #[cfg(not(feature = "legacy-run-once"))]
         match world.realtime_scheduler_step() {
             RealtimeSchedulerStep::ImuControl => {
+                #[cfg(feature = "timing-diagnostics")]
+                let _ = world.run_imu_control_tick_classified();
+                #[cfg(not(feature = "timing-diagnostics"))]
                 let _ = world.run_imu_control_tick();
             }
             RealtimeSchedulerStep::ControlUpdate => {
+                #[cfg(feature = "timing-diagnostics")]
+                let _ = world.run_control_update_tick_classified();
+                #[cfg(not(feature = "timing-diagnostics"))]
                 let _ = world.run_control_update_tick();
             }
             RealtimeSchedulerStep::Service => {

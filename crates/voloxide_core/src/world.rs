@@ -798,6 +798,34 @@ where
         ran_control
     }
 
+    #[cfg(feature = "timing-diagnostics")]
+    pub fn run_control_update_tick_classified(&mut self) -> WorldRunClass {
+        let pass_start_us = self.board.clock_micros();
+        let now_us = self.board.clock_micros();
+        let mut control_timing = ControlPipelineTiming::default();
+        let ran_control =
+            self.run_control_and_mixing_stage_if_control_due_measured(now_us, &mut control_timing);
+        if ran_control {
+            self.last_realtime_control_us = self.board.clock_micros();
+        }
+
+        let class = WorldRunClass {
+            ran_control,
+            elapsed_after_control_us: self
+                .board
+                .clock_micros()
+                .saturating_sub(pass_start_us)
+                .min(u32::MAX as u64) as u32,
+            estimator_us: control_timing.estimator_us,
+            controller_us: control_timing.controller_us,
+            mixer_us: control_timing.mixer_us,
+            pwm_us: control_timing.pwm_us,
+            ..WorldRunClass::default()
+        };
+        self.record_timing_diagnostics(stats_from_realtime_class(class));
+        class
+    }
+
     pub fn run_imu_control_tick_classified(&mut self) -> WorldRunClass {
         let pass_start_us = self.board.clock_micros();
         #[cfg(feature = "pre-control-scope")]
@@ -824,7 +852,7 @@ where
             .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
             || !self.comm_events.is_empty();
 
-        WorldRunClass {
+        let class = WorldRunClass {
             had_raw_sensor,
             had_raw_imu,
             had_processed_imu,
@@ -842,7 +870,10 @@ where
             mixer_us: control_timing.mixer_us,
             pwm_us: control_timing.pwm_us,
             ..WorldRunClass::default()
-        }
+        };
+        #[cfg(feature = "timing-diagnostics")]
+        self.record_timing_diagnostics(stats_from_realtime_class(class));
+        class
     }
 
     pub fn run_service_step(&mut self) -> WorldRunClass {
@@ -905,7 +936,7 @@ where
             .saturating_add(max_service_deferral_us);
         self.last_realtime_service_control_us = self.last_realtime_control_us;
 
-        WorldRunClass {
+        let class = WorldRunClass {
             had_rx,
             elapsed_after_control_us: self
                 .board
@@ -913,7 +944,10 @@ where
                 .saturating_sub(pass_start_us)
                 .min(u32::MAX as u64) as u32,
             ..WorldRunClass::default()
-        }
+        };
+        #[cfg(feature = "timing-diagnostics")]
+        self.record_timing_diagnostics(stats_from_realtime_class(class));
+        class
     }
 
     fn run_service_input_stage(&mut self) {
@@ -1760,6 +1794,27 @@ fn timing_class_index(stats: WorldRunStats) -> usize {
         1
     } else {
         0
+    }
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn stats_from_realtime_class(class: WorldRunClass) -> WorldRunStats {
+    WorldRunStats {
+        total_us: class.elapsed_after_control_us.min(u16::MAX as u32) as u16,
+        control_us: if class.ran_control {
+            class.elapsed_after_control_us.min(u16::MAX as u32) as u16
+        } else {
+            0
+        },
+        estimator_us: class.estimator_us,
+        controller_us: class.controller_us,
+        mixer_us: class.mixer_us,
+        pwm_us: class.pwm_us,
+        had_rx: class.had_rx,
+        had_sensor: class.had_raw_sensor,
+        had_imu: class.had_raw_imu || class.had_processed_imu,
+        ran_control: class.ran_control,
+        ..WorldRunStats::default()
     }
 }
 
