@@ -670,6 +670,14 @@ ROS topic callback
 └── *_available = true
 ```
 
+IMU is intentionally handled as a latest-sample latch. Once the shim has seen the first
+`sim/sensors/imu/data` message, every `sil_board/run` call includes the latest IMU sample instead
+of consuming it as a one-shot. This matches the C SIL behavior more closely: the simulator's IMU
+publisher and the SIL manager both run at 400 Hz, but they are separate ROS timers and can phase
+slip. Treating IMU as one-shot can create artificial 5 ms gaps when `sil_board/run` fires just
+before the next IMU callback. Lower-rate sensors still use availability flags so mag, baro, GNSS,
+airspeed, range, battery, and RC updates are admitted when fresh data arrives.
+
 When `rosflight_sil_manager` calls `sil_board/run`, the shim executes:
 
 ```text
@@ -689,6 +697,10 @@ fcu_clock_micros
 ```
 
 That prevents wall-clock jumps from becoming firmware time-backwards errors.
+
+The shim also logs diagnostic warnings if `sil_board/run` itself is not being called for more than
+10 ms or if a firmware service step takes more than 4 ms. These warnings are meant to separate SIL
+service-cadence problems from downstream `rosflight_io` or ROScopter estimator behavior.
 
 The FFI simulator requires `VOLOXIDE_SIM_PARAM_DIR` to point at a writable runtime directory before
 `voloxide_sim_create` is called. The multirotor standalone launch defaults this to

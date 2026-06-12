@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <rclcpp/rclcpp.hpp>
@@ -27,6 +28,9 @@ constexpr std::size_t kPwmChannelCount = 14;
 constexpr uint16_t kDisabledPwmMicros = 1000;
 constexpr uint16_t kRcLowMicros = 1000;
 constexpr uint16_t kRcCenterMicros = 1500;
+constexpr auto kExpectedSilRunPeriod = std::chrono::microseconds{2500};
+constexpr auto kWarnSilRunGap = std::chrono::milliseconds{10};
+constexpr auto kWarnSilRunDuration = std::chrono::milliseconds{4};
 
 VoloxideFfiVector3 vector_to_ffi(const geometry_msgs::msg::Vector3 & vector)
 {
@@ -72,7 +76,7 @@ public:
       "sim/sensors/imu/data", 1,
       [this](sensor_msgs::msg::Imu::ConstSharedPtr message) {
         latest_imu_ = *message;
-        imu_available_ = true;
+        imu_seen_ = true;
       });
 
     imu_temperature_subscription_ = create_subscription<sensor_msgs::msg::Temperature>(
@@ -151,6 +155,22 @@ private:
       return false;
     }
 
+    const auto run_start = std::chrono::steady_clock::now();
+    if (last_run_start_) {
+      const auto gap = run_start - *last_run_start_;
+      if (gap > kWarnSilRunGap) {
+        const auto gap_us = std::chrono::duration_cast<std::chrono::microseconds>(gap).count();
+        const auto missed_periods =
+          gap_us / std::chrono::duration_cast<std::chrono::microseconds>(kExpectedSilRunPeriod).count();
+        RCLCPP_WARN(
+          get_logger(),
+          "sil_board/run service gap: %ld us (~%ld x 400 Hz periods)",
+          static_cast<long>(gap_us),
+          static_cast<long>(missed_periods));
+      }
+    }
+    last_run_start_ = run_start;
+
     auto snapshot = build_sensor_snapshot();
     if (!voloxide_sim_set_sensors(firmware_.get(), &snapshot)) {
       RCLCPP_WARN(get_logger(), "failed to pass sensor snapshot to Voloxide");
@@ -172,6 +192,15 @@ private:
     }
     pwm_outputs_ = outputs;
     publish_pwm();
+    const auto duration = std::chrono::steady_clock::now() - run_start;
+    if (duration > kWarnSilRunDuration) {
+      const auto duration_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+      RCLCPP_WARN(
+        get_logger(),
+        "sil_board/run service duration: %ld us",
+        static_cast<long>(duration_us));
+    }
     return true;
   }
 
@@ -180,7 +209,7 @@ private:
     VoloxideFfiSensorSnapshot snapshot{};
     const auto timestamp_us = fcu_clock_micros();
 
-    snapshot.has_imu = imu_available_;
+    snapshot.has_imu = imu_seen_;
     if (snapshot.has_imu) {
       snapshot.imu.timestamp_us = timestamp_us;
       snapshot.imu.angular_velocity = vector_to_ffi(latest_imu_.angular_velocity);
@@ -188,7 +217,6 @@ private:
       snapshot.imu.temperature_kelvin = imu_temperature_available_ ?
         static_cast<float>(latest_imu_temperature_.temperature) :
         298.15f;
-      imu_available_ = false;
     }
 
     snapshot.has_mag = mag_available_;
@@ -315,7 +343,7 @@ private:
   rosflight_msgs::msg::BatteryStatus latest_battery_;
   rosflight_msgs::msg::RCRaw latest_rc_;
 
-  bool imu_available_{false};
+  bool imu_seen_{false};
   bool imu_temperature_available_{false};
   bool mag_available_{false};
   bool baro_available_{false};
@@ -328,6 +356,7 @@ private:
   std::array<uint16_t, kPwmChannelCount> pwm_outputs_{};
   std::unique_ptr<VoloxideFfiHandle, FirmwareDeleter> firmware_;
   std::chrono::steady_clock::time_point boot_time_{std::chrono::steady_clock::now()};
+  std::optional<std::chrono::steady_clock::time_point> last_run_start_;
 };
 }  // namespace voloxide_sil_board_shim
 

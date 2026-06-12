@@ -106,9 +106,23 @@ Use this only when you specifically want the upstream ROSflight C firmware endpo
 ```bash
 ros2 launch voloxide_sil_board_shim multirotor_standalone_sil.launch.py \
   firmware:=c \
-  use_rviz:=false \
-  use_builtin_rc:=false
+  use_rviz:=true
 ```
+
+Run the same firmware init, mission load, arm, and override sequence for both endpoints when
+checking parity. The Voloxide FFI shim is expected to present the same ROSflight SIL boundary as
+the C firmware: `rosflight_sil_manager` calls `sil_board/run`, sensor data enters through the
+standalone sim topics, MAVLink goes through unmodified `rosflight_io`, and motor output is published
+on `sim/pwm_output`.
+
+One important detail is the IMU handoff. The shim latches the latest IMU sample after the first
+`sim/sensors/imu/data` message and includes that sample on every firmware step. This avoids false
+ROScopter IMU silence warnings caused by phase drift between the 400 Hz IMU publisher and the
+400 Hz `sil_board/run` service timer. Lower-rate sensors remain availability-gated.
+
+Brief `Autopilot ERROR: Unhealthy estimator` messages can occur around computer-control and mode
+transitions with both the Voloxide endpoint and upstream C endpoint. Treat those as ROSflight/C
+parity behavior unless they are paired with persistent ROScopter sensor silence warnings.
 
 ## Phase 3: Initialize The Running Firmware
 
