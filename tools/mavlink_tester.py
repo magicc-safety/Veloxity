@@ -837,6 +837,50 @@ def summarize_text(records):
         print(f"  latest {prefix}: {latest_by_prefix[prefix]}")
 
 
+def summarize_status_diagnostics(records, recent_limit=24):
+    diagnostics = []
+    latest_txq = None
+    latest_txd = None
+    latest_tms_by_label = {}
+    tms_counts_by_label = {}
+
+    for record in records:
+        text = record.get("text", "")
+        if not text:
+            continue
+        if text.startswith("TXQ "):
+            latest_txq = text
+            diagnostics.append(text)
+            continue
+        if text.startswith("TXD "):
+            latest_txd = text
+            diagnostics.append(text)
+            continue
+        if text.startswith("TMS "):
+            parts = text.split()
+            label = parts[1] if len(parts) > 1 else "?"
+            latest_tms_by_label[label] = text
+            tms_counts_by_label[label] = tms_counts_by_label.get(label, 0) + 1
+            diagnostics.append(text)
+
+    if latest_txq is None and latest_txd is None and not latest_tms_by_label:
+        return
+
+    print("status diagnostics:")
+    if latest_txq is not None:
+        print(f"  latest TXQ: {latest_txq}")
+    if latest_txd is not None:
+        print(f"  latest TXD: {latest_txd}")
+    if latest_tms_by_label:
+        for label in sorted(latest_tms_by_label):
+            count = tms_counts_by_label[label]
+            print(f"  latest TMS {label} ({count} frames): {latest_tms_by_label[label]}")
+    if diagnostics:
+        print(f"  recent diagnostics ({min(len(diagnostics), recent_limit)} of {len(diagnostics)}):")
+        for text in diagnostics[-recent_limit:]:
+            print(f"    {text}")
+
+
 def summarize_perf(records):
     if not records:
         print("perf: no timing diagnostic frames")
@@ -1180,6 +1224,7 @@ def main():
     summarize("version", records["version"])
     summarize("status", records["status"])
     summarize_text(records["text"])
+    summarize_status_diagnostics(records["text"])
     summarize_perf(records["perf"])
     summarize_expected_rate("imu receive rate", imu_rate_hz, args.expect_imu_hz)
     summarize_expected_rate("rc receive rate", rc_rate_hz, args.expect_rc_hz)
