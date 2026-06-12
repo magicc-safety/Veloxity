@@ -23,7 +23,7 @@ const PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 4;
 #[cfg(not(feature = "legacy-run-once"))]
 const PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 2;
 #[cfg(not(feature = "legacy-run-once"))]
-const PIXRACER_POST_CONTROL_TELEMETRY_STREAMS: usize = 2;
+const PIXRACER_POST_CONTROL_TELEMETRY_STREAMS: usize = 3;
 
 type PixracerWorld<'a> = World<
     board::Board,
