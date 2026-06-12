@@ -162,12 +162,25 @@ python3 tools/mavlink_tester.py \
   --expect-output-raw-hz 50
 ```
 
-### STM32 Retained Targets
+### STM32 Targets
 
-Nucleo-H753ZI and Pixracer Pro are compile-current retained targets. Use `cargo xtask check-board`
-and `cargo xtask build-board` as the current confidence level, then follow
-[STM32 boards](boards/stm32.md) for renewed sensor, serial, RC, and PWM validation before making
-flight-readiness claims.
+Nucleo-H753ZI is a compile-current retained target. Use `cargo xtask check-board` and
+`cargo xtask build-board` as the current confidence level before renewed hardware validation.
+
+Pixracer Pro is the active STM32 validation target. The current high-rate timing build is:
+
+```bash
+cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide --release \
+  --features 'scope-timing-pins timing-diagnostics'
+```
+
+The current Pixracer Pro hardware baseline is a fixed `400 Hz` control loop with a board-specific
+post-control telemetry burst of four streams. A 120-second bidirectional MAVLink load at `921600`
+baud passed with zero CRC errors, zero MAVLink sequence gaps, clean TX enqueue/drain diagnostics,
+about `398 Hz` IMU telemetry, exact `100 Hz` RC and `50 Hz` attitude/output streams, and roughly
+`1.9 ms` of control-period slack at the observed worst case. Follow
+[STM32 boards](boards/stm32.md) for the decision record, scope-pin meanings, and remaining
+real-flight validation steps.
 
 ## ROS 2 Shim Build
 

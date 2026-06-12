@@ -1,13 +1,13 @@
 # Board Bring-Up Guide
 
-Voloxide has one actively exercised hardware path on this branch and two retained STM32 paths that
-are being brought back to current core APIs.
+Voloxide has two actively exercised hardware paths on this branch and one retained STM32 path that
+is kept compile-current.
 
 | Board | Crate | Target | Status |
 | --- | --- | --- | --- |
 | Raspberry Pi Pico 2 W / RP2350 | `boards/pico2w` | `thumbv8m.main-none-eabihf` | Active hardware bring-up path; high-rate ISM330DHCX intake with stable 1.5 kHz fixed control validated under loaded telemetry. |
 | Nucleo-H753ZI | `boards/nucleo` | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed. |
-| Pixracer Pro / STM32H7 | `boards/pixracerpro` | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed. |
+| Pixracer Pro / STM32H7 | `boards/pixracerpro` | `thumbv7em-none-eabihf` | Active STM32 validation path; fixed 400 Hz control timing and high-rate MAVLink telemetry validated on hardware. |
 
 ## Shared Firmware Shape
 
@@ -29,10 +29,10 @@ The board crate chooses the concrete types for:
 - floating-point type where the board uses the explicit generic form
 
 The generic core loop lives in `crates/voloxide_core/src/world.rs`; board crates should not
-duplicate flight logic. The retained STM32 paths use the ordinary `world.run_once()` shape while
-they are brought back through hardware validation. The Pico 2 W firmware uses the finer-grained
-realtime scheduler instead: `realtime_scheduler_step()` chooses between `run_imu_control_tick()` for
-fresh IMU samples and bounded service phases for slower work.
+duplicate flight logic. Pico 2 W and Pixracer Pro both use the finer-grained realtime scheduler:
+`realtime_scheduler_step()` chooses between `run_imu_control_tick()` for fresh IMU samples and
+bounded service phases for slower work. Nucleo remains on the ordinary `world.run_once()` shape
+while it stays compile-current.
 
 ## Board Guides
 
