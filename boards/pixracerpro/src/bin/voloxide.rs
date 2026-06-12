@@ -9,8 +9,12 @@ use voloxide_core::world::ControlLoopRates;
 #[cfg(not(feature = "legacy-run-once"))]
 use voloxide_core::world::RealtimeSchedulerStep;
 use voloxide_core::{
-    board::BoardIo, comm::TelemetryRates, params::Params, state_machine::StateManager,
-    vehicle::quadrotor, world::World,
+    board::BoardIo,
+    comm::{NamedTelemetryStream, TelemetryRates},
+    params::Params,
+    state_machine::StateManager,
+    vehicle::quadrotor,
+    world::World,
 };
 use voloxide_mavlink::MavlinkInterface;
 
@@ -24,6 +28,9 @@ const PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 4;
 const PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 2;
 #[cfg(not(feature = "legacy-run-once"))]
 const PIXRACER_POST_CONTROL_TELEMETRY_STREAMS: usize = 4;
+#[cfg(not(feature = "legacy-run-once"))]
+const PIXRACER_POST_CONTROL_PRIORITY_STREAMS: &[NamedTelemetryStream] =
+    &[NamedTelemetryStream::Imu];
 
 type PixracerWorld<'a> = World<
     board::Board,
@@ -82,7 +89,8 @@ fn main() -> ! {
                 {
                     let class = world.run_imu_control_tick_classified();
                     if class.ran_control {
-                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                        let _ = world.run_realtime_telemetry_stage_prioritized(
+                            PIXRACER_POST_CONTROL_PRIORITY_STREAMS,
                             PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
                         );
                     }
@@ -90,7 +98,8 @@ fn main() -> ! {
                 #[cfg(not(feature = "timing-diagnostics"))]
                 {
                     if world.run_imu_control_tick() {
-                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                        let _ = world.run_realtime_telemetry_stage_prioritized(
+                            PIXRACER_POST_CONTROL_PRIORITY_STREAMS,
                             PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
                         );
                     }
@@ -101,7 +110,8 @@ fn main() -> ! {
                 {
                     let class = world.run_control_update_tick_classified();
                     if class.ran_control {
-                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                        let _ = world.run_realtime_telemetry_stage_prioritized(
+                            PIXRACER_POST_CONTROL_PRIORITY_STREAMS,
                             PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
                         );
                     }
@@ -109,7 +119,8 @@ fn main() -> ! {
                 #[cfg(not(feature = "timing-diagnostics"))]
                 {
                     if world.run_control_update_tick() {
-                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                        let _ = world.run_realtime_telemetry_stage_prioritized(
+                            PIXRACER_POST_CONTROL_PRIORITY_STREAMS,
                             PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
                         );
                     }

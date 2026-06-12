@@ -30,7 +30,7 @@ const MAV_TYPE_QUADROTOR: u8 = 2;
 const OUTPUT_RAW_IMU_DIVISOR: u64 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NamedTelemetryStream {
+pub enum NamedTelemetryStream {
     Heartbeat,
     Status,
     Imu,
@@ -398,9 +398,10 @@ where
 
         let consider = |selected: &mut Option<NamedTelemetryStream>,
                         selected_deadline: &mut u64,
-                        stream: NamedTelemetryStream,
-                        deadline: Option<u64>| {
-            let Some(deadline) = deadline else {
+                        stream: NamedTelemetryStream| {
+            let Some(deadline) =
+                self.named_telemetry_stream_deadline(stream, now_us, processed_sensors)
+            else {
                 return;
             };
             #[cfg(feature = "timing-diagnostics")]
@@ -417,68 +418,28 @@ where
             &mut selected,
             &mut selected_deadline,
             NamedTelemetryStream::Heartbeat,
-            fixed_rate_due_deadline_us(
-                now_us,
-                self.last_heartbeat_us,
-                self.telemetry_rates.heartbeat_hz,
-            ),
         );
         consider(
             &mut selected,
             &mut selected_deadline,
             NamedTelemetryStream::Status,
-            fixed_rate_due_deadline_us(
-                now_us,
-                self.last_status_send_us,
-                self.telemetry_rates.status_hz,
-            ),
         );
 
-        if let Some(imu_packet) = processed_sensors.imu {
-            let imu_deadline = if self.last_realtime_imu_telemetry_timestamp
-                == Some(imu_packet.header.timestamp)
-            {
-                None
-            } else {
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.imu_us,
-                    self.telemetry_rates.imu_hz,
-                )
-            };
+        if processed_sensors.imu.is_some() {
             consider(
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Imu,
-                imu_deadline,
             );
             consider(
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Attitude,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.attitude_us,
-                    self.telemetry_rates.attitude_hz,
-                ),
             );
-
-            let output_raw_deadline = if self.telemetry_rates.output_raw_hz == 0 {
-                (self.telemetry_rates.output_raw_imu_divisor != 0
-                    && self.output_raw_imu_count % self.telemetry_rates.output_raw_imu_divisor == 0)
-                    .then_some(now_us)
-            } else {
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.output_raw_us,
-                    self.telemetry_rates.output_raw_hz,
-                )
-            };
             consider(
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::OutputRaw,
-                output_raw_deadline,
             );
         }
 
@@ -487,11 +448,6 @@ where
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Rc,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.rc_us,
-                    self.telemetry_rates.rc_hz,
-                ),
             );
         }
         if processed_sensors.gnss.is_some() {
@@ -499,11 +455,6 @@ where
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Gnss,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.gnss_us,
-                    self.telemetry_rates.gnss_hz,
-                ),
             );
         }
         if processed_sensors.pitot.is_some() {
@@ -511,11 +462,6 @@ where
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::DiffPressure,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.diff_pressure_us,
-                    self.telemetry_rates.diff_pressure_hz,
-                ),
             );
         }
         if processed_sensors.baro.is_some() {
@@ -523,11 +469,6 @@ where
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Baro,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.baro_us,
-                    self.telemetry_rates.baro_hz,
-                ),
             );
         }
         if processed_sensors.mag.is_some() {
@@ -535,11 +476,6 @@ where
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Mag,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.mag_us,
-                    self.telemetry_rates.mag_hz,
-                ),
             );
         }
         if processed_sensors.range.is_some() {
@@ -547,11 +483,6 @@ where
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Range,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.range_us,
-                    self.telemetry_rates.range_hz,
-                ),
             );
         }
         if processed_sensors.battery.is_some() {
@@ -559,15 +490,115 @@ where
                 &mut selected,
                 &mut selected_deadline,
                 NamedTelemetryStream::Battery,
-                stream_due_deadline_us(
-                    now_us,
-                    self.telemetry_rate_state.battery_us,
-                    self.telemetry_rates.battery_hz,
-                ),
             );
         }
 
         selected
+    }
+
+    fn named_telemetry_stream_deadline<R>(
+        &self,
+        stream: NamedTelemetryStream,
+        now_us: u64,
+        processed_sensors: &ProcessedSensors<R>,
+    ) -> Option<u64>
+    where
+        R: FlightFloat,
+    {
+        match stream {
+            NamedTelemetryStream::Heartbeat => fixed_rate_due_deadline_us(
+                now_us,
+                self.last_heartbeat_us,
+                self.telemetry_rates.heartbeat_hz,
+            ),
+            NamedTelemetryStream::Status => fixed_rate_due_deadline_us(
+                now_us,
+                self.last_status_send_us,
+                self.telemetry_rates.status_hz,
+            ),
+            NamedTelemetryStream::Imu => {
+                let imu_packet = processed_sensors.imu?;
+                if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
+                    None
+                } else {
+                    stream_due_deadline_us(
+                        now_us,
+                        self.telemetry_rate_state.imu_us,
+                        self.telemetry_rates.imu_hz,
+                    )
+                }
+            }
+            NamedTelemetryStream::Rc => processed_sensors.rc.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.rc_us,
+                    self.telemetry_rates.rc_hz,
+                )
+            }),
+            NamedTelemetryStream::Attitude => processed_sensors.imu.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.attitude_us,
+                    self.telemetry_rates.attitude_hz,
+                )
+            }),
+            NamedTelemetryStream::OutputRaw => processed_sensors.imu.as_ref().and_then(|_| {
+                if self.telemetry_rates.output_raw_hz == 0 {
+                    (self.telemetry_rates.output_raw_imu_divisor != 0
+                        && self.output_raw_imu_count % self.telemetry_rates.output_raw_imu_divisor
+                            == 0)
+                        .then_some(now_us)
+                } else {
+                    stream_due_deadline_us(
+                        now_us,
+                        self.telemetry_rate_state.output_raw_us,
+                        self.telemetry_rates.output_raw_hz,
+                    )
+                }
+            }),
+            NamedTelemetryStream::Gnss => processed_sensors.gnss.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.gnss_us,
+                    self.telemetry_rates.gnss_hz,
+                )
+            }),
+            NamedTelemetryStream::DiffPressure => processed_sensors.pitot.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.diff_pressure_us,
+                    self.telemetry_rates.diff_pressure_hz,
+                )
+            }),
+            NamedTelemetryStream::Baro => processed_sensors.baro.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.baro_us,
+                    self.telemetry_rates.baro_hz,
+                )
+            }),
+            NamedTelemetryStream::Mag => processed_sensors.mag.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.mag_us,
+                    self.telemetry_rates.mag_hz,
+                )
+            }),
+            NamedTelemetryStream::Range => processed_sensors.range.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.range_us,
+                    self.telemetry_rates.range_hz,
+                )
+            }),
+            NamedTelemetryStream::Battery => processed_sensors.battery.as_ref().and_then(|_| {
+                stream_due_deadline_us(
+                    now_us,
+                    self.telemetry_rate_state.battery_us,
+                    self.telemetry_rates.battery_hz,
+                )
+            }),
+        }
     }
 
     fn targets_this_system(&self, target_system: u8) -> bool {
@@ -864,6 +895,86 @@ where
         #[cfg(feature = "timing-diagnostics")]
         record_telemetry_stream_selected(stream);
 
+        self.send_selected_named_telemetry_stream(
+            stream,
+            board,
+            now_us,
+            state_manager,
+            command_manager,
+            params,
+            estimator_state,
+            processed_sensors,
+            actuator_commands,
+            sensor_error_count,
+            loop_time_us,
+        )
+    }
+
+    pub fn send_named_telemetry_stream_if_due<S, A, R>(
+        &mut self,
+        stream: NamedTelemetryStream,
+        board: &mut B,
+        now_us: u64,
+        state_manager: &StateManager,
+        command_manager: &CommandManager,
+        params: &Params,
+        estimator_state: &S,
+        processed_sensors: &ProcessedSensors<R>,
+        actuator_commands: &A,
+        sensor_error_count: u16,
+        loop_time_us: u16,
+    ) -> bool
+    where
+        S: AttitudeEstimate,
+        A: AsRef<[R]>,
+        R: FlightFloat,
+    {
+        if self
+            .named_telemetry_stream_deadline(stream, now_us, processed_sensors)
+            .is_none()
+        {
+            return false;
+        }
+        #[cfg(feature = "timing-diagnostics")]
+        {
+            record_telemetry_stream_due(stream);
+            record_telemetry_stream_selected(stream);
+        }
+
+        self.send_selected_named_telemetry_stream(
+            stream,
+            board,
+            now_us,
+            state_manager,
+            command_manager,
+            params,
+            estimator_state,
+            processed_sensors,
+            actuator_commands,
+            sensor_error_count,
+            loop_time_us,
+        )
+    }
+
+    fn send_selected_named_telemetry_stream<S, A, R>(
+        &mut self,
+        stream: NamedTelemetryStream,
+        board: &mut B,
+        now_us: u64,
+        state_manager: &StateManager,
+        command_manager: &CommandManager,
+        params: &Params,
+        estimator_state: &S,
+        processed_sensors: &ProcessedSensors<R>,
+        actuator_commands: &A,
+        sensor_error_count: u16,
+        loop_time_us: u16,
+    ) -> bool
+    where
+        S: AttitudeEstimate,
+        A: AsRef<[R]>,
+        R: FlightFloat,
+    {
         let sent = match stream {
             NamedTelemetryStream::Heartbeat => {
                 self.send_rosflight_heartbeat(
@@ -2210,6 +2321,93 @@ mod tests {
         ));
         assert_eq!(manager.comm_link().output_raw_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
+    }
+
+    #[test]
+    fn realtime_priority_telemetry_uses_stream_due_and_freshness_gates() {
+        let mut board = TestBoard {
+            current_time_us: 1_100_000,
+            tx_write_count: 0,
+            ..Default::default()
+        };
+        let now_us = board.clock_micros();
+        let mut manager = CommManager::new(RecordingCommLink::new(), now_us);
+        manager.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
+        manager.last_heartbeat_us = now_us;
+        manager.last_status_send_us = now_us;
+        manager.telemetry_rate_state.rc_us = 1_000_000;
+        manager.telemetry_rate_state.imu_us = 1_097_500;
+
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let actuator_commands = [0.1, 0.2, 0.3, 0.4];
+        let mut processed_sensors = ProcessedSensors::<f64>::default();
+        processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 9_000,
+                status: 0,
+            },
+            accel: [1.0, 2.0, 3.0],
+            gyro: [4.0, 5.0, 6.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+        processed_sensors.rc = Some(crate::packets::RcPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 8_000,
+                status: 0,
+            },
+            n_chan: 8,
+            chan: [0.5; RC_PACKET_CHANNELS],
+            lol: false,
+        });
+
+        assert!(manager.send_named_telemetry_stream_if_due(
+            NamedTelemetryStream::Imu,
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &params,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+            0,
+            0,
+        ));
+        assert_eq!(manager.comm_link().imu_count, 1);
+        assert_eq!(manager.comm_link().rc_channels_count, 0);
+
+        assert!(!manager.send_named_telemetry_stream_if_due(
+            NamedTelemetryStream::Imu,
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &params,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+            0,
+            0,
+        ));
+        assert_eq!(manager.comm_link().imu_count, 1);
+
+        assert!(manager.send_one_named_telemetry_stream(
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &params,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+            0,
+            0,
+        ));
+        assert_eq!(manager.comm_link().imu_count, 1);
     }
 
     #[test]

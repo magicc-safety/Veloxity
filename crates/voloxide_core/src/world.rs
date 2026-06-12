@@ -1,7 +1,7 @@
 use crate::{
     board::BoardIo,
     comm::messages::messages::RosflightHardErrorMsg,
-    comm::{CommManager, TelemetryRates, interface::CommInterface},
+    comm::{CommManager, NamedTelemetryStream, TelemetryRates, interface::CommInterface},
     command::CommandManager,
     command::service::{
         self as command_service, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx,
@@ -1617,6 +1617,31 @@ where
         sent
     }
 
+    /// Sends board-selected priority streams first, then fills the remaining budget normally.
+    ///
+    /// `priority_streams` is a board policy list. Core still applies the normal due/freshness gates
+    /// for each stream, so stale or not-yet-due priority streams are skipped without consuming
+    /// budget.
+    pub fn run_realtime_telemetry_stage_prioritized(
+        &mut self,
+        priority_streams: &[NamedTelemetryStream],
+        max_streams: usize,
+    ) -> usize {
+        let mut sent = 0;
+        for stream in priority_streams.iter().copied() {
+            if sent >= max_streams {
+                return sent;
+            }
+            if self.send_realtime_telemetry_stream_by_name(stream) {
+                sent += 1;
+            }
+        }
+        while sent < max_streams && self.send_realtime_telemetry_stream() {
+            sent += 1;
+        }
+        sent
+    }
+
     fn send_realtime_telemetry_stream(&mut self) -> bool {
         let now_us = self.board.clock_micros();
         if !self
@@ -1628,6 +1653,24 @@ where
 
         let sensor_error_count = self.board.sensors_errors_count();
         self.comm.send_one_named_telemetry_stream(
+            &mut self.board,
+            now_us,
+            &self.state,
+            &self.command,
+            &self.params,
+            &self.control_pipeline.latest_estimator_state,
+            &self.processed_sensors,
+            &self.control_pipeline.latest_pwm_outputs,
+            sensor_error_count,
+            self.control_pipeline.latest_loop_time_us,
+        )
+    }
+
+    fn send_realtime_telemetry_stream_by_name(&mut self, stream: NamedTelemetryStream) -> bool {
+        let now_us = self.board.clock_micros();
+        let sensor_error_count = self.board.sensors_errors_count();
+        self.comm.send_named_telemetry_stream_if_due(
+            stream,
             &mut self.board,
             now_us,
             &self.state,

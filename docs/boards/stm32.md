@@ -51,10 +51,12 @@ cargo check -p pixracerpro --target thumbv7em-none-eabihf --features legacy-run-
 The realtime Pixracer Pro entrypoint uses a board-specific telemetry policy. It keeps the shared
 core defaults intact, but asks the realtime service step to send more named telemetry streams per
 service opportunity and sends up to four telemetry streams immediately after each completed control
-update. Hardware diagnostics showed that UART baud, TX pipe drain, and final send gating were not
-the limiter; telemetry needed more scheduling opportunities in the measured post-control slack.
-The post-control burst is intentionally Pixracer Pro-specific until RP2350/Pico 2 W is retested for
-consistency.
+update. The post-control burst uses a Pixracer Pro-owned priority list with IMU first, so
+control-rate IMU telemetry gets the first due/freshness-checked opportunity before the remaining
+budget falls back to the normal scheduler. Hardware diagnostics showed that UART baud, TX pipe
+drain, and final send gating were not the limiter; telemetry needed more scheduling opportunities
+in the measured post-control slack. The post-control burst is intentionally Pixracer Pro-specific
+until RP2350/Pico 2 W is retested for consistency.
 
 ## Install
 
@@ -204,6 +206,8 @@ Diagnostic decision record:
 - Adding a small post-control telemetry burst fixed the rates. Burst `3` hit the target streams;
   burst `4` is the current Pixracer Pro value for extra scheduling margin and still keeps the
   `400 Hz` control loop comfortably inside budget.
+- The current burst tries `NamedTelemetryStream::Imu` first with the normal due/freshness gates,
+  then spends the remaining budget through the ordinary due-deadline scheduler.
 
 `TMS` emits one stream per diagnostic interval so scheduler visibility does not flood the shared
 STATUSTEXT response queue. Readiness probes such as `named_telemetry_due()` do not update TMS

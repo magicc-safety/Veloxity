@@ -39,6 +39,9 @@ post-control telemetry burst only after hardware measurements show unused post-c
 insufficient telemetry selection opportunities. The helper is
 `World::run_realtime_telemetry_stage_budgeted(max_streams)`; the board entrypoint should keep the
 budget as a board-local constant and document the Saleae/MAVLink evidence that supports it.
+If a board needs a specific control-rate stream to be tried first, use
+`World::run_realtime_telemetry_stage_prioritized(priority_streams, max_streams)` with a board-owned
+`NamedTelemetryStream` priority list rather than adding stream-specific control flow to the core.
 
 ## Board Guides
 
