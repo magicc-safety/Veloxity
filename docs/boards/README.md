@@ -34,6 +34,12 @@ duplicate flight logic. Pico 2 W and Pixracer Pro both use the finer-grained rea
 bounded service phases for slower work. Nucleo remains on the ordinary `world.run_once()` shape
 while it stays compile-current.
 
+When adding a new realtime board, start with the service-phase scheduler defaults. Add a
+post-control telemetry burst only after hardware measurements show unused post-control slack and
+insufficient telemetry selection opportunities. The helper is
+`World::run_realtime_telemetry_stage_budgeted(max_streams)`; the board entrypoint should keep the
+budget as a board-local constant and document the Saleae/MAVLink evidence that supports it.
+
 ## Board Guides
 
 - [RP2350 / Pico 2 W](rp2350-pico2w.md)

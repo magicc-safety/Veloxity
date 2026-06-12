@@ -488,6 +488,29 @@ sample is pending and the loop is still within the configured post-control servi
 what keeps telemetry, MAVLink command handling, RC interpretation, and board maintenance from
 starting late enough to steal time from the next IMU close-loop pass.
 
+Boards that use the realtime scheduler can optionally add a board-specific post-control telemetry
+burst by calling `World::run_realtime_telemetry_stage_budgeted(max_streams)` after a control tick
+returns `ran_control == true`. This helper sends up to `max_streams` due named telemetry streams and
+returns the number actually sent. It does not replace the service phases; RX handling, parameter
+service, response drain, slower sensors, serial flush, and deferred board actions still belong in
+`run_service_step_with_deferral` or
+`run_service_step_with_deferral_and_telemetry_budget`.
+
+Use this pattern only when measurements show that the board has post-control slack but the service
+scheduler does not provide enough telemetry selection opportunities. The board entrypoint should
+own the budget as a named constant, keep it small, and document the hardware result that justifies
+it. A new board should validate the setting with:
+
+- scope timing for the control deadline and control-active pulse;
+- MAVLink load testing with expected bidirectional traffic;
+- TX enqueue/drain diagnostics or equivalent transport counters;
+- control p99/max timing with enough slack to the next deadline;
+- stream-rate checks for every high-rate stream the board enables.
+
+If the board already decouples telemetry production and transport through a mailbox or second-core
+drain path, prefer validating that existing design before copying another board's post-control
+burst.
+
 RC command/state is deliberately in `RcCommand`, not in `run_imu_control_tick` or
 `run_control_update_tick`. CRSF packet parsing and queuing are board work; draining the newest RC
 packet happens in `Sensors`, while interpreting it, updating the command mux, running the state

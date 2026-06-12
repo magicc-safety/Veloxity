@@ -1603,6 +1603,12 @@ where
         );
     }
 
+    /// Sends up to `max_streams` currently due named telemetry streams.
+    ///
+    /// Board realtime loops may call this after a completed control update when hardware timing
+    /// shows enough post-control slack and service phases alone do not provide enough telemetry
+    /// scheduling opportunities. Keep the budget board-specific and validate the resulting control
+    /// p99/max timing with scope pins or timing diagnostics before making it a production default.
     pub fn run_realtime_telemetry_stage_budgeted(&mut self, max_streams: usize) -> usize {
         let mut sent = 0;
         while sent < max_streams && self.send_realtime_telemetry_stream() {
