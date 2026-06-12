@@ -492,10 +492,11 @@ Boards that use the realtime scheduler can optionally add a board-specific post-
 burst after a control tick returns `ran_control == true`. Use
 `World::run_realtime_telemetry_stage_budgeted(max_streams)` when ordinary due-deadline ordering is
 enough. Use `World::run_realtime_telemetry_stage_prioritized(priority_streams, max_streams)` when
-the board needs some streams to get the first due/freshness-checked opportunity in that burst. The
-priority list is board policy; core only knows the generic `NamedTelemetryStream` identities and
-still applies the normal due/freshness gates. Both helpers return the number of streams actually
-sent.
+the board needs some streams to get the first opportunity in that burst. The priority list is board
+policy; each entry names a generic `NamedTelemetryStream` plus a `RealtimeTelemetryPriorityGate`.
+`DueDeadline` uses the stream's normal rate and freshness gates. `FreshSample` is for streams whose
+cadence is already enforced by the realtime/control tick; it sends a new sample once without waiting
+for the independent telemetry due timer. Both helpers return the number of streams actually sent.
 
 These helpers do not replace the service phases; RX handling, parameter service, response drain,
 slower sensors, serial flush, and deferred board actions still belong in
@@ -515,7 +516,10 @@ it. A new board should validate the setting with:
 If the board already decouples telemetry production and transport through a mailbox or second-core
 drain path, prefer validating that existing design before copying another board's post-control
 burst. If a priority burst is needed, keep the priority list small and board-owned, for example
-`&[NamedTelemetryStream::Imu]` for a board that has measured control-rate IMU telemetry misses.
+`RealtimeTelemetryPriority { stream: NamedTelemetryStream::Imu, gate:
+RealtimeTelemetryPriorityGate::FreshSample }` for a board whose control tick is the measured IMU
+telemetry cadence source. Use `DueDeadline` when the telemetry rate timer, rather than the control
+tick, should remain authoritative.
 
 RC command/state is deliberately in `RcCommand`, not in `run_imu_control_tick` or
 `run_control_update_tick`. CRSF packet parsing and queuing are board work; draining the newest RC

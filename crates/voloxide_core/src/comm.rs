@@ -45,6 +45,20 @@ pub enum NamedTelemetryStream {
     Battery,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RealtimeTelemetryPriorityGate {
+    /// Use the stream's normal telemetry rate and freshness gates.
+    DueDeadline,
+    /// Send a fresh sample immediately, without waiting for the stream's rate gate.
+    FreshSample,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RealtimeTelemetryPriority {
+    pub stream: NamedTelemetryStream,
+    pub gate: RealtimeTelemetryPriorityGate,
+}
+
 #[cfg(feature = "timing-diagnostics")]
 const NAMED_TELEMETRY_STREAM_COUNT: usize = 12;
 
@@ -416,6 +430,33 @@ where
             ImuTelemetryReadiness::Due
         } else {
             ImuTelemetryReadiness::NotDue
+        }
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    pub fn imu_telemetry_readiness_for_gate<R>(
+        &self,
+        now_us: u64,
+        processed_sensors: &ProcessedSensors<R>,
+        gate: RealtimeTelemetryPriorityGate,
+    ) -> ImuTelemetryReadiness
+    where
+        R: FlightFloat,
+    {
+        match gate {
+            RealtimeTelemetryPriorityGate::DueDeadline => {
+                self.imu_telemetry_readiness(now_us, processed_sensors)
+            }
+            RealtimeTelemetryPriorityGate::FreshSample => {
+                let Some(imu_packet) = processed_sensors.imu else {
+                    return ImuTelemetryReadiness::NoImu;
+                };
+                if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
+                    ImuTelemetryReadiness::Stale
+                } else {
+                    ImuTelemetryReadiness::Due
+                }
+            }
         }
     }
 
@@ -993,9 +1034,117 @@ where
         )
     }
 
+    pub fn send_named_telemetry_stream_with_gate<S, A, R>(
+        &mut self,
+        priority: RealtimeTelemetryPriority,
+        board: &mut B,
+        now_us: u64,
+        state_manager: &StateManager,
+        command_manager: &CommandManager,
+        params: &Params,
+        estimator_state: &S,
+        processed_sensors: &ProcessedSensors<R>,
+        actuator_commands: &A,
+        sensor_error_count: u16,
+        loop_time_us: u16,
+    ) -> bool
+    where
+        S: AttitudeEstimate,
+        A: AsRef<[R]>,
+        R: FlightFloat,
+    {
+        match priority.gate {
+            RealtimeTelemetryPriorityGate::DueDeadline => self.send_named_telemetry_stream_if_due(
+                priority.stream,
+                board,
+                now_us,
+                state_manager,
+                command_manager,
+                params,
+                estimator_state,
+                processed_sensors,
+                actuator_commands,
+                sensor_error_count,
+                loop_time_us,
+            ),
+            RealtimeTelemetryPriorityGate::FreshSample => {
+                if priority.stream != NamedTelemetryStream::Imu {
+                    return self.send_named_telemetry_stream_if_due(
+                        priority.stream,
+                        board,
+                        now_us,
+                        state_manager,
+                        command_manager,
+                        params,
+                        estimator_state,
+                        processed_sensors,
+                        actuator_commands,
+                        sensor_error_count,
+                        loop_time_us,
+                    );
+                }
+                #[cfg(feature = "timing-diagnostics")]
+                {
+                    record_telemetry_stream_due(priority.stream);
+                    record_telemetry_stream_selected(priority.stream);
+                }
+                self.send_selected_named_telemetry_stream_with_gate(
+                    priority.stream,
+                    priority.gate,
+                    board,
+                    now_us,
+                    state_manager,
+                    command_manager,
+                    params,
+                    estimator_state,
+                    processed_sensors,
+                    actuator_commands,
+                    sensor_error_count,
+                    loop_time_us,
+                )
+            }
+        }
+    }
+
     fn send_selected_named_telemetry_stream<S, A, R>(
         &mut self,
         stream: NamedTelemetryStream,
+        board: &mut B,
+        now_us: u64,
+        state_manager: &StateManager,
+        command_manager: &CommandManager,
+        params: &Params,
+        estimator_state: &S,
+        processed_sensors: &ProcessedSensors<R>,
+        actuator_commands: &A,
+        sensor_error_count: u16,
+        loop_time_us: u16,
+    ) -> bool
+    where
+        S: AttitudeEstimate,
+        A: AsRef<[R]>,
+        R: FlightFloat,
+    {
+        self.send_selected_named_telemetry_stream_with_gate(
+            stream,
+            RealtimeTelemetryPriorityGate::DueDeadline,
+            board,
+            now_us,
+            state_manager,
+            command_manager,
+            params,
+            estimator_state,
+            processed_sensors,
+            actuator_commands,
+            sensor_error_count,
+            loop_time_us,
+        )
+    }
+
+    fn send_selected_named_telemetry_stream_with_gate<S, A, R>(
+        &mut self,
+        stream: NamedTelemetryStream,
+        gate: RealtimeTelemetryPriorityGate,
         board: &mut B,
         now_us: u64,
         state_manager: &StateManager,
@@ -1049,7 +1198,14 @@ where
                 self.last_status_send_us = now_us;
                 true
             }
-            NamedTelemetryStream::Imu => self.send_imu_if_due(board, now_us, processed_sensors),
+            NamedTelemetryStream::Imu => match gate {
+                RealtimeTelemetryPriorityGate::DueDeadline => {
+                    self.send_imu_if_due(board, now_us, processed_sensors)
+                }
+                RealtimeTelemetryPriorityGate::FreshSample => {
+                    self.send_imu_if_fresh(board, now_us, processed_sensors)
+                }
+            },
             NamedTelemetryStream::Rc => self.send_rc_if_due(board, now_us, processed_sensors),
             NamedTelemetryStream::Attitude => match processed_sensors.imu {
                 Some(imu_packet) => {
@@ -1336,6 +1492,39 @@ where
                 zgyro: imu_packet.gyro[2].to_f32_lossy(),
             },
         );
+        self.last_realtime_imu_telemetry_timestamp = Some(imu_packet.header.timestamp);
+        true
+    }
+
+    fn send_imu_if_fresh<R>(
+        &mut self,
+        board: &mut B,
+        now_us: u64,
+        processed_sensors: &ProcessedSensors<R>,
+    ) -> bool
+    where
+        R: FlightFloat,
+    {
+        let Some(imu_packet) = processed_sensors.imu else {
+            return false;
+        };
+        if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
+            return false;
+        }
+        self.send_rosflight_small_imu(
+            board,
+            SmallImuMsg {
+                temperature: imu_packet.temperature,
+                time_boot_us: imu_packet.header.timestamp,
+                xacc: imu_packet.accel[0].to_f32_lossy(),
+                yacc: imu_packet.accel[1].to_f32_lossy(),
+                zacc: imu_packet.accel[2].to_f32_lossy(),
+                xgyro: imu_packet.gyro[0].to_f32_lossy(),
+                ygyro: imu_packet.gyro[1].to_f32_lossy(),
+                zgyro: imu_packet.gyro[2].to_f32_lossy(),
+            },
+        );
+        self.telemetry_rate_state.imu_us = now_us;
         self.last_realtime_imu_telemetry_timestamp = Some(imu_packet.header.timestamp);
         true
     }
@@ -2433,6 +2622,89 @@ mod tests {
         assert_eq!(manager.comm_link().imu_count, 1);
 
         assert!(manager.send_one_named_telemetry_stream(
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &params,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+            0,
+            0,
+        ));
+        assert_eq!(manager.comm_link().imu_count, 1);
+    }
+
+    #[test]
+    fn realtime_priority_telemetry_fresh_sample_gate_bypasses_imu_due_phase() {
+        let mut board = TestBoard {
+            current_time_us: 1_100_000,
+            tx_write_count: 0,
+            ..Default::default()
+        };
+        let now_us = board.clock_micros();
+        let mut manager = CommManager::new(RecordingCommLink::new(), now_us);
+        manager.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
+        manager.last_heartbeat_us = now_us;
+        manager.last_status_send_us = now_us;
+        manager.telemetry_rate_state.imu_us = now_us - 1_000;
+
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let actuator_commands = [0.1, 0.2, 0.3, 0.4];
+        let mut processed_sensors = ProcessedSensors::<f64>::default();
+        processed_sensors.imu = Some(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 9_000,
+                status: 0,
+            },
+            accel: [1.0, 2.0, 3.0],
+            gyro: [4.0, 5.0, 6.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        assert!(!manager.send_named_telemetry_stream_if_due(
+            NamedTelemetryStream::Imu,
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &params,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+            0,
+            0,
+        ));
+        assert_eq!(manager.comm_link().imu_count, 0);
+
+        assert!(manager.send_named_telemetry_stream_with_gate(
+            RealtimeTelemetryPriority {
+                stream: NamedTelemetryStream::Imu,
+                gate: RealtimeTelemetryPriorityGate::FreshSample,
+            },
+            &mut board,
+            now_us,
+            &state_manager,
+            &command_manager,
+            &params,
+            &estimator_state,
+            &processed_sensors,
+            &actuator_commands,
+            0,
+            0,
+        ));
+        assert_eq!(manager.comm_link().imu_count, 1);
+
+        assert!(!manager.send_named_telemetry_stream_with_gate(
+            RealtimeTelemetryPriority {
+                stream: NamedTelemetryStream::Imu,
+                gate: RealtimeTelemetryPriorityGate::FreshSample,
+            },
             &mut board,
             now_us,
             &state_manager,

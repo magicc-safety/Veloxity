@@ -10,7 +10,10 @@ use voloxide_core::world::ControlLoopRates;
 use voloxide_core::world::RealtimeSchedulerStep;
 use voloxide_core::{
     board::BoardIo,
-    comm::{NamedTelemetryStream, TelemetryRates},
+    comm::{
+        NamedTelemetryStream, RealtimeTelemetryPriority, RealtimeTelemetryPriorityGate,
+        TelemetryRates,
+    },
     params::Params,
     state_machine::StateManager,
     vehicle::quadrotor,
@@ -29,8 +32,11 @@ const PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 2;
 #[cfg(not(feature = "legacy-run-once"))]
 const PIXRACER_POST_CONTROL_TELEMETRY_STREAMS: usize = 4;
 #[cfg(not(feature = "legacy-run-once"))]
-const PIXRACER_POST_CONTROL_PRIORITY_STREAMS: &[NamedTelemetryStream] =
-    &[NamedTelemetryStream::Imu];
+const PIXRACER_POST_CONTROL_PRIORITY_STREAMS: &[RealtimeTelemetryPriority] =
+    &[RealtimeTelemetryPriority {
+        stream: NamedTelemetryStream::Imu,
+        gate: RealtimeTelemetryPriorityGate::FreshSample,
+    }];
 
 type PixracerWorld<'a> = World<
     board::Board,

@@ -206,8 +206,12 @@ Diagnostic decision record:
 - Adding a small post-control telemetry burst fixed the rates. Burst `3` hit the target streams;
   burst `4` is the current Pixracer Pro value for extra scheduling margin and still keeps the
   `400 Hz` control loop comfortably inside budget.
-- The current burst tries `NamedTelemetryStream::Imu` first with the normal due/freshness gates,
-  then spends the remaining budget through the ordinary due-deadline scheduler.
+- The current burst tries IMU first with
+  `RealtimeTelemetryPriorityGate::FreshSample`, then spends the remaining budget through the
+  ordinary due-deadline scheduler. This keeps the IMU telemetry paced by fresh control-rate samples
+  instead of by a second telemetry due timer, which previously drifted a few microseconds out of
+  phase and caused occasional `5 ms` IMU telemetry gaps even though control and sensor cadence were
+  healthy.
 
 `TMS` emits one stream per diagnostic interval so scheduler visibility does not flood the shared
 STATUSTEXT response queue. Readiness probes such as `named_telemetry_due()` do not update TMS

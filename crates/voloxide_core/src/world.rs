@@ -3,7 +3,7 @@ use crate::comm::ImuTelemetryReadiness;
 use crate::{
     board::BoardIo,
     comm::messages::messages::RosflightHardErrorMsg,
-    comm::{CommManager, NamedTelemetryStream, TelemetryRates, interface::CommInterface},
+    comm::{CommManager, RealtimeTelemetryPriority, TelemetryRates, interface::CommInterface},
     command::CommandManager,
     command::service::{
         self as command_service, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx,
@@ -1747,20 +1747,20 @@ where
 
     /// Sends board-selected priority streams first, then fills the remaining budget normally.
     ///
-    /// `priority_streams` is a board policy list. Core still applies the normal due/freshness gates
-    /// for each stream, so stale or not-yet-due priority streams are skipped without consuming
-    /// budget.
+    /// `priority_streams` is a board policy list. Core applies each stream's configured priority
+    /// gate, so boards can choose normal due-deadline behavior or a stricter freshness gate for
+    /// streams paced by the control tick.
     pub fn run_realtime_telemetry_stage_prioritized(
         &mut self,
-        priority_streams: &[NamedTelemetryStream],
+        priority_streams: &[RealtimeTelemetryPriority],
         max_streams: usize,
     ) -> usize {
         let mut sent = 0;
-        for stream in priority_streams.iter().copied() {
+        for priority in priority_streams.iter().copied() {
             if sent >= max_streams {
                 return sent;
             }
-            if self.send_realtime_telemetry_stream_by_name(stream) {
+            if self.send_realtime_telemetry_stream_by_priority(priority) {
                 sent += 1;
             }
         }
@@ -1794,24 +1794,28 @@ where
         )
     }
 
-    fn send_realtime_telemetry_stream_by_name(&mut self, stream: NamedTelemetryStream) -> bool {
+    fn send_realtime_telemetry_stream_by_priority(
+        &mut self,
+        priority: RealtimeTelemetryPriority,
+    ) -> bool {
         let now_us = self.board.clock_micros();
         #[cfg(feature = "timing-diagnostics")]
-        let imu_readiness = if stream == NamedTelemetryStream::Imu {
+        let imu_readiness = if priority.stream == crate::comm::NamedTelemetryStream::Imu {
             self.realtime_cadence_diagnostics.priority_imu_attempt = self
                 .realtime_cadence_diagnostics
                 .priority_imu_attempt
                 .saturating_add(1);
-            Some(
-                self.comm
-                    .imu_telemetry_readiness(now_us, &self.processed_sensors),
-            )
+            Some(self.comm.imu_telemetry_readiness_for_gate(
+                now_us,
+                &self.processed_sensors,
+                priority.gate,
+            ))
         } else {
             None
         };
         let sensor_error_count = self.board.sensors_errors_count();
-        let sent = self.comm.send_named_telemetry_stream_if_due(
-            stream,
+        let sent = self.comm.send_named_telemetry_stream_with_gate(
+            priority,
             &mut self.board,
             now_us,
             &self.state,

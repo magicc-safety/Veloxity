@@ -41,7 +41,10 @@ insufficient telemetry selection opportunities. The helper is
 budget as a board-local constant and document the Saleae/MAVLink evidence that supports it.
 If a board needs a specific control-rate stream to be tried first, use
 `World::run_realtime_telemetry_stage_prioritized(priority_streams, max_streams)` with a board-owned
-`NamedTelemetryStream` priority list rather than adding stream-specific control flow to the core.
+priority list rather than adding stream-specific control flow to the core. Each priority entry names
+a `NamedTelemetryStream` and a `RealtimeTelemetryPriorityGate`; use `DueDeadline` for normal
+rate-gated priority and `FreshSample` only for streams whose cadence is already controlled by the
+board's realtime loop.
 
 ## Board Guides
 
