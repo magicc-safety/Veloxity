@@ -30,7 +30,7 @@ Read these in order if you are new to the repository:
 | RP2350/Pico 2 W hardware path | Active hardware bring-up path; high-rate ISM330DHCX intake with a stable 1.5 kHz fixed control loop validated under loaded telemetry |
 | ESP32C5 ESP-NOW UART bridge | Tested as an isolated UART-over-air link |
 | Nucleo-H753ZI | Retained and compile-current; needs renewed sensor bring-up |
-| Pixracer Pro / STM32H7 | Retained and compile-current; needs renewed sensor bring-up |
+| Pixracer Pro / STM32H7 | Active STM32 hardware validation path; clean 400 Hz control timing and high-rate MAVLink telemetry validated on Pixracer Pro |
 | ROSplane simulator/autonomy | Not documented as supported on this branch because it has not been retested |
 
 ## Quick Build
@@ -51,6 +51,12 @@ path is IMU-only and reuses the latest command/sensor state; RC, barometer, magn
 telemetry, parameters, and transport work run in bounded service phases. The default `pico2w`
 release build selects this baseline. See
 [RP2350 / Pico 2 W](docs/boards/rp2350-pico2w.md) for the measured timing and flash commands.
+
+The current Pixracer Pro / STM32H7 path runs a fixed `400 Hz` control loop with board-specific
+post-control telemetry scheduling. Hardware tests at `921600` baud show clean `400 Hz`-class IMU
+telemetry, exact `100 Hz` RC and `50 Hz` attitude/output streams, zero CRC errors or MAVLink
+sequence gaps, and roughly `1.9 ms` of control-period slack at the observed worst case. See
+[STM32 boards](docs/boards/stm32.md) for the Pixracer Pro timing decisions and diagnostics.
 
 For ROSflight simulation, source ROS 2 and the ROSflight workspace first, then build the shim:
 

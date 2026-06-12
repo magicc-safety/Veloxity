@@ -14,6 +14,13 @@ include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 
 static mut PARAM_STORE: Option<Params> = None;
 
+fn spawn_task<S: Send>(
+    spawner: &embassy_executor::SendSpawner,
+    token: Result<embassy_executor::SpawnToken<S>, embassy_executor::SpawnError>,
+) {
+    spawner.spawn(token.expect("failed to allocate Embassy task"));
+}
+
 pub struct Board {
     _probe: [Output<'static>; 4],
     pub start_time: embassy_time::Instant,
@@ -123,6 +130,26 @@ impl BoardIo for Board {
         sensors.imu = peripherals::bmi08x::IMU_SIGNAL
             .try_take()
             .map(|result| result.map(|packet| packet.cast()));
+        sensors.mag = peripherals::iis2mdc::MAG_SIGNAL.try_take();
+        sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
+        sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
+        sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+    }
+
+    fn imu_pending(&self) -> bool {
+        peripherals::bmi08x::IMU_SIGNAL.signaled()
+    }
+
+    fn update_imu_sensor<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        sensors.clear();
+        sensors.imu = peripherals::bmi08x::IMU_SIGNAL
+            .try_take()
+            .map(|result| result.map(|packet| packet.cast()));
+    }
+
+    fn update_service_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        sensors.clear();
         sensors.mag = peripherals::iis2mdc::MAG_SIGNAL.try_take();
         sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
@@ -327,8 +354,8 @@ impl Board {
         // P1 Priority Task for Rx Tememetry
         interrupt::SAI1.set_priority(Priority::P1);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        let _ = spawner1.spawn(peripherals::telem::task_rx(telem2_rx));
-        spawner1.spawn(peripherals::vcp::task(vcp)).unwrap();
+        spawn_task(&spawner1, peripherals::telem::task_rx(telem2_rx));
+        spawn_task(&spawner1, peripherals::vcp::task(vcp));
 
         //GPS USART7
         let mut uart7config = usart::Config::default();
@@ -432,9 +459,7 @@ impl Board {
         // P2 Priority Task for Gyros
         interrupt::SAI2.set_priority(Priority::P2);
         let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
-        spawner2
-            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
-            .unwrap();
+        spawn_task(&spawner2, peripherals::bmi08x::task(bmi08x_sensor));
 
         // Detect GPIO input.
         let usd_detect = embassy_stm32::gpio::Input::new(p.PG3, Pull::None);
@@ -449,27 +474,17 @@ impl Board {
         //spawner3
         //    .spawn(peripherals::dlhrl20g::task(dlhr_sensor))
         //    .unwrap();
-        spawner3
-            .spawn(peripherals::iis2mdc::task(iis_sensor))
-            .unwrap();
-        spawner3
-            .spawn(peripherals::dps310::task(dps_sensor))
-            .unwrap();
-        spawner3
-            .spawn(peripherals::ublox::task(ublox_sensor))
-            .unwrap();
-        spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
-        spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
+        spawn_task(&spawner3, peripherals::iis2mdc::task(iis_sensor));
+        spawn_task(&spawner3, peripherals::dps310::task(dps_sensor));
+        spawn_task(&spawner3, peripherals::ublox::task(ublox_sensor));
+        spawn_task(&spawner3, peripherals::pps::task(pps_sensor));
+        spawn_task(&spawner3, peripherals::sbus::task(sbus_rx));
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);
         let spawner4 = P4_EXECUTOR.start(interrupt::SAI4);
-        spawner4
-            .spawn(peripherals::telem::task_tx(telem2_tx))
-            .unwrap();
-        spawner4
-            .spawn(peripherals::sd_card::task(usd_card))
-            .unwrap();
+        spawn_task(&spawner4, peripherals::telem::task_tx(telem2_tx));
+        spawn_task(&spawner4, peripherals::sd_card::task(usd_card));
 
         // SERVOS + TIMERS
         // TIM1

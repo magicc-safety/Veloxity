@@ -1,15 +1,14 @@
 # STM32 Boards
 
-This page covers the retained STM32 board paths:
+This page covers the STM32 board paths:
 
 - Nucleo-H753ZI: `boards/nucleo`
 - Pixracer Pro / STM32H7: `boards/pixracerpro`
 - shared platform code: `platforms/stm_32`
 
 These boards are kept in the repository because they are part of the intended hardware support
-matrix. They are behind the Pico 2 W path in validation on this branch, so a successful compile
-check should be treated as the starting point for renewed sensor bring-up, not proof of flight
-readiness.
+matrix. Pixracer Pro is now the active STM32 validation path. Nucleo-H753ZI remains compile-current
+and should still be treated as awaiting renewed hardware validation.
 
 ## Source Layout
 
@@ -31,13 +30,31 @@ The STM32 boards follow the generic embedded firmware shape:
 - Embassy peripheral tasks produce packets or signal new sensor data to board-owned queues;
 - the board `BoardIo` implementation drains those queues into `voloxide_core` sensor resources;
 - the board constructs a `World` with STM32-specific board, PWM, and MAVLink transport types;
-- the firmware loop uses the ordinary `World::run_once()` scheduler shape until renewed hardware
-  work proves a need for a board-specific realtime split.
+- Pixracer Pro uses the realtime `World` scheduler entrypoints with a fixed `400 Hz` control update
+  baseline and board-specific post-control telemetry scheduling;
+- Nucleo keeps the ordinary `World::run_once()` firmware loop for now, while its `BoardIo` adapter
+  exposes the same IMU/service sensor split so it stays compile-current.
 
-That differs from the active Pico 2 W path. Pico 2 W uses a measured high-rate IMU/control loop with
-`realtime_scheduler_step()`, `run_imu_control_tick()`, and service phases. STM32 has richer retained
-sensor-driver coverage in `platforms/stm_32`, but those paths have not yet gone through the same
-current-branch timing and end-to-end telemetry validation.
+That still differs from the active Pico 2 W path. Pico 2 W uses a dual-core board runtime around the
+same core scheduler. STM32 keeps its interrupt executor model: peripheral tasks produce IMU, RC, and
+other sensor packets, and one high-level firmware loop owns `World`. The first Pixracer Pro port
+does not rewrite driver tasks; it changes only how board-owned packets are presented to the core
+fast path and service path.
+
+Pixracer Pro has a `legacy-run-once` feature for A/B testing against the ordinary `World::run_once()`
+loop:
+
+```bash
+cargo check -p pixracerpro --target thumbv7em-none-eabihf --features legacy-run-once
+```
+
+The realtime Pixracer Pro entrypoint uses a board-specific telemetry policy. It keeps the shared
+core defaults intact, but asks the realtime service step to send more named telemetry streams per
+service opportunity and sends up to four telemetry streams immediately after each completed control
+update. Hardware diagnostics showed that UART baud, TX pipe drain, and final send gating were not
+the limiter; telemetry needed more scheduling opportunities in the measured post-control slack.
+The post-control burst is intentionally Pixracer Pro-specific until RP2350/Pico 2 W is retested for
+consistency.
 
 ## Install
 
@@ -123,6 +140,75 @@ The current compatibility update makes the ADIS16500 and BMI08x IMU packet signa
 `ImuPacket<f64>`, matching their existing `f64` sensor math and the current generic packet type in
 `voloxide_core`.
 
+## Pixracer Pro Timing And Telemetry Validation
+
+Pixracer Pro has been validated on hardware with the bounded high-rate MAVLink profile:
+
+| Stream | Configured rate | Observed result |
+| --- | --- | --- |
+| IMU | `400 Hz` | About `398 Hz` in the latest 120-second burst-4 run. |
+| RC | `100 Hz` | `100.0 Hz`. |
+| Attitude | `50 Hz` | `50.0 Hz`. |
+| Output raw | `50 Hz` | `50.0 Hz`. |
+| Status | `10 Hz` | `10.0 Hz`. |
+| Heartbeat | `1 Hz` | `1.0 Hz`. |
+
+The latest 120-second bidirectional MAVLink load at `921600` baud passed acceptance with zero CRC
+errors, zero MAVLink sequence gaps, and about `29.7 kB/s` RX throughput. TX enqueue and UART drain
+matched exactly with no partial writes or errors. The run injected ground-station MAVLink heartbeat
+and TIMESYNC frames plus version and parameter requests, so it exercises telemetry, parser, and
+response paths. It is not a substitute for a full flight-command profile; offboard/setpoint/RC
+override traffic should be tested separately if those are part of the mission.
+
+Control timing stayed well inside the `2.5 ms` period. The latest burst-4 run reported firmware
+loop timing around `406 us` average, `471 us` p99, and `534 us` max, with control perf max around
+`598 us`. That leaves roughly `1.9 ms` of slack in the worst observed control pass. Saleae captures
+show PD12 control-active pulses completing well before the next PD11 `400 Hz` deadline marker.
+
+Use this diagnostic firmware when validating the current MAVLink throughput issue:
+
+```bash
+cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide --release \
+  --features 'scope-timing-pins timing-diagnostics'
+```
+
+The `scope-timing-pins` feature maps the Pixracer Pro timing signals as follows:
+
+| Pin | Meaning |
+| --- | --- |
+| PD11 | 400 Hz control-deadline marker |
+| PD12 | Control pipeline active time |
+
+PD11 should pulse every `2.5 ms`. PD12 should remain well shorter than that period and should not
+overlap the next PD11 marker. The post-control telemetry burst is outside the measured control
+pipeline active pulse; use MAVLink timing diagnostics and TXQ/TXD counters to assess telemetry load.
+
+The `timing-diagnostics` feature emits STATUSTEXT diagnostics, including:
+
+| Prefix | Meaning |
+| --- | --- |
+| `TXQ` | Firmware writes into the telemetry TX pipe: attempts, full-frame successes, attempted bytes, accepted bytes, partial errors, and total errors. |
+| `TXD` | Async UART TX task drain/write counters: pipe reads, read bytes, UART writes, written bytes, and UART errors. |
+| `TMS` | Rotating telemetry scheduler counters per stream: eligible during actual send attempts, selected, sent, and selected-but-failed-final-gate counts. |
+
+Diagnostic decision record:
+
+- Initial Pixracer Pro runs produced only about 75% of the requested high-rate streams even though
+  control timing had substantial slack.
+- Increasing UART baud and increasing the per-service stream budget did not materially improve the
+  rates.
+- `TXQ` and `TXD` matched exactly with zero partial writes or errors, ruling out UART baud, TX pipe
+  capacity, and async drain as the limiter.
+- `TMS` showed selected streams sent successfully (`f0`), so the missing frames were caused by too
+  few scheduling opportunities, not final send gating.
+- Adding a small post-control telemetry burst fixed the rates. Burst `3` hit the target streams;
+  burst `4` is the current Pixracer Pro value for extra scheduling margin and still keeps the
+  `400 Hz` control loop comfortably inside budget.
+
+`TMS` emits one stream per diagnostic interval so scheduler visibility does not flood the shared
+STATUSTEXT response queue. Readiness probes such as `named_telemetry_due()` do not update TMS
+counters; the counters describe actual realtime send attempts.
+
 ## Bring-Up Order
 
 For renewed STM32 validation, use this order:
@@ -133,9 +219,11 @@ For renewed STM32 validation, use this order:
 4. Bring up serial/MAVLink communication.
 5. Validate IMU packet production.
 6. Validate barometer and magnetometer packet production.
-7. Validate RC input.
-8. Confirm PWM output behavior with props removed.
-9. Only then compare behavior against the simulator and ROSflight C firmware.
+7. Validate GNSS when hardware lock/data is available.
+8. Validate RC input.
+9. Confirm PWM output behavior with props removed.
+10. Run the loaded MAVLink acceptance test with any expected real-flight command streams.
+11. Only then compare behavior against the simulator and ROSflight C firmware.
 
 Do not treat stale STM32 notes from older branches as authoritative. Update this page and the
 hardware runbook as each sensor path is revalidated.

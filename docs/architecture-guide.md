@@ -505,11 +505,19 @@ while the ISM330DHCX producer runs on an Embassy interrupt executor driven by `S
 Barometer and magnetometer work should remain in the service-side sensor path so adding those
 sensors does not turn the IMU interrupt path into a multi-sensor polling loop.
 
-The retained STM32 boards use the generic scheduler shape rather than the Pico 2 W realtime split.
-Their board crates instantiate `World`, wire STM32 peripheral tasks through the `BoardIo` contract,
-and run the ordinary firmware loop while renewed sensor bring-up is completed. That difference is
-intentional: RP2350 currently has measured high-rate hardware timing requirements, while the STM32
-paths are compile-current retained targets awaiting fresh hardware validation.
+Pixracer Pro also uses the realtime scheduler, but its board runtime differs from the Pico 2 W
+dual-core path. STM32 peripheral tasks produce IMU, RC, and slower sensor packets, while one
+high-level firmware loop owns `World`. Hardware timing showed that Pixracer Pro had enough control
+slack for `400 Hz`, but the separate service window did not create enough telemetry scheduling
+opportunities for the bounded high-rate MAVLink profile. The Pixracer Pro entrypoint therefore uses
+a board-specific post-control telemetry burst: selected telemetry streams are enqueued immediately
+after a completed control update, while the ordinary service phases continue to handle RX,
+responses, slower sensors, and board maintenance.
+
+This decision is intentionally board-specific. RP2350/Pico 2 W already decouples downlink transport
+through its mailbox/core split and should be retested for consistency before porting any additional
+Pixracer Pro scheduling policy there. Nucleo-H753ZI remains compile-current and uses the ordinary
+firmware loop until renewed hardware validation justifies moving it to the realtime split.
 
 ## End-To-End Flow: ROSflight Standalone Sim
 

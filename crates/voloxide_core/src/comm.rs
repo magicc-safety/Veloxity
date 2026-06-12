@@ -17,7 +17,13 @@ use crate::packets::{RC_PACKET_CHANNELS, RangeType};
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
+#[cfg(feature = "timing-diagnostics")]
+use core::fmt::Write;
 use core::marker::PhantomData;
+#[cfg(feature = "timing-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+#[cfg(feature = "timing-diagnostics")]
+use heapless::String;
 
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
@@ -37,6 +43,97 @@ enum NamedTelemetryStream {
     Mag,
     Range,
     Battery,
+}
+
+#[cfg(feature = "timing-diagnostics")]
+const NAMED_TELEMETRY_STREAM_COUNT: usize = 12;
+
+#[cfg(feature = "timing-diagnostics")]
+impl NamedTelemetryStream {
+    const fn index(self) -> usize {
+        match self {
+            Self::Heartbeat => 0,
+            Self::Status => 1,
+            Self::Imu => 2,
+            Self::Rc => 3,
+            Self::Attitude => 4,
+            Self::OutputRaw => 5,
+            Self::Gnss => 6,
+            Self::DiffPressure => 7,
+            Self::Baro => 8,
+            Self::Mag => 9,
+            Self::Range => 10,
+            Self::Battery => 11,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Heartbeat => "H",
+            Self::Status => "S",
+            Self::Imu => "I",
+            Self::Rc => "R",
+            Self::Attitude => "A",
+            Self::OutputRaw => "O",
+            Self::Gnss => "G",
+            Self::DiffPressure => "D",
+            Self::Baro => "B",
+            Self::Mag => "M",
+            Self::Range => "N",
+            Self::Battery => "P",
+        }
+    }
+
+    const fn from_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Self::Heartbeat),
+            1 => Some(Self::Status),
+            2 => Some(Self::Imu),
+            3 => Some(Self::Rc),
+            4 => Some(Self::Attitude),
+            5 => Some(Self::OutputRaw),
+            6 => Some(Self::Gnss),
+            7 => Some(Self::DiffPressure),
+            8 => Some(Self::Baro),
+            9 => Some(Self::Mag),
+            10 => Some(Self::Range),
+            11 => Some(Self::Battery),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "timing-diagnostics")]
+static TELEMETRY_STREAM_DUE: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
+    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
+#[cfg(feature = "timing-diagnostics")]
+static TELEMETRY_STREAM_SELECTED: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
+    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
+#[cfg(feature = "timing-diagnostics")]
+static TELEMETRY_STREAM_SENT: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
+    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
+#[cfg(feature = "timing-diagnostics")]
+static TELEMETRY_STREAM_FAILED: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
+    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
+
+#[cfg(feature = "timing-diagnostics")]
+fn record_telemetry_stream_due(stream: NamedTelemetryStream) {
+    TELEMETRY_STREAM_DUE[stream.index()].fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn record_telemetry_stream_selected(stream: NamedTelemetryStream) {
+    TELEMETRY_STREAM_SELECTED[stream.index()].fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn record_telemetry_stream_sent(stream: NamedTelemetryStream) {
+    TELEMETRY_STREAM_SENT[stream.index()].fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn record_telemetry_stream_failed(stream: NamedTelemetryStream) {
+    TELEMETRY_STREAM_FAILED[stream.index()].fetch_add(1, Ordering::Relaxed);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -220,6 +317,8 @@ where
     telemetry_rates: TelemetryRates,
     telemetry_rate_state: TelemetryRateState,
     last_realtime_imu_telemetry_timestamp: Option<u64>,
+    #[cfg(feature = "timing-diagnostics")]
+    telemetry_diag_text_index: usize,
 
     pub sysid: u8,
     comm_link: T,
@@ -240,6 +339,8 @@ where
             telemetry_rates: TelemetryRates::upstream(),
             telemetry_rate_state: TelemetryRateState::default(),
             last_realtime_imu_telemetry_timestamp: None,
+            #[cfg(feature = "timing-diagnostics")]
+            telemetry_diag_text_index: 0,
 
             sysid: 1,
             comm_link,
@@ -277,7 +378,7 @@ where
     where
         R: FlightFloat,
     {
-        self.select_due_named_telemetry_stream(now_us, processed_sensors)
+        self.select_due_named_telemetry_stream(now_us, processed_sensors, false)
             .is_some()
     }
 
@@ -285,27 +386,32 @@ where
         &self,
         now_us: u64,
         processed_sensors: &ProcessedSensors<R>,
+        record_diagnostics: bool,
     ) -> Option<NamedTelemetryStream>
     where
         R: FlightFloat,
     {
+        #[cfg(not(feature = "timing-diagnostics"))]
+        let _ = record_diagnostics;
         let mut selected = None;
         let mut selected_deadline = u64::MAX;
 
-        fn consider(
-            selected: &mut Option<NamedTelemetryStream>,
-            selected_deadline: &mut u64,
-            stream: NamedTelemetryStream,
-            deadline: Option<u64>,
-        ) {
+        let consider = |selected: &mut Option<NamedTelemetryStream>,
+                        selected_deadline: &mut u64,
+                        stream: NamedTelemetryStream,
+                        deadline: Option<u64>| {
             let Some(deadline) = deadline else {
                 return;
             };
+            #[cfg(feature = "timing-diagnostics")]
+            if record_diagnostics {
+                record_telemetry_stream_due(stream);
+            }
             if selected.is_none() || deadline < *selected_deadline {
                 *selected = Some(stream);
                 *selected_deadline = deadline;
             }
-        }
+        };
 
         consider(
             &mut selected,
@@ -751,11 +857,14 @@ where
         A: AsRef<[R]>,
         R: FlightFloat,
     {
-        let Some(stream) = self.select_due_named_telemetry_stream(now_us, processed_sensors) else {
+        let Some(stream) = self.select_due_named_telemetry_stream(now_us, processed_sensors, true)
+        else {
             return false;
         };
+        #[cfg(feature = "timing-diagnostics")]
+        record_telemetry_stream_selected(stream);
 
-        match stream {
+        let sent = match stream {
             NamedTelemetryStream::Heartbeat => {
                 self.send_rosflight_heartbeat(
                     board,
@@ -794,200 +903,254 @@ where
             }
             NamedTelemetryStream::Imu => self.send_imu_if_due(board, now_us, processed_sensors),
             NamedTelemetryStream::Rc => self.send_rc_if_due(board, now_us, processed_sensors),
-            NamedTelemetryStream::Attitude => {
-                let Some(imu_packet) = processed_sensors.imu else {
-                    return false;
-                };
-                if !stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.attitude_us,
-                    self.telemetry_rates.attitude_hz,
-                ) {
-                    return false;
+            NamedTelemetryStream::Attitude => match processed_sensors.imu {
+                Some(imu_packet) => {
+                    if !stream_due(
+                        now_us,
+                        &mut self.telemetry_rate_state.attitude_us,
+                        self.telemetry_rates.attitude_hz,
+                    ) {
+                        false
+                    } else {
+                        let q = estimator_state.q();
+                        let qd = estimator_state.q_dot();
+                        let rollspeed =
+                            2.0 * (q[0] * qd[1] - q[1] * qd[0] - q[2] * qd[3] + q[3] * qd[2]);
+                        let pitchspeed =
+                            2.0 * (q[0] * qd[2] - q[1] * qd[3] - q[2] * qd[0] + q[3] * qd[1]);
+                        let yawspeed =
+                            2.0 * (q[0] * qd[3] - q[1] * qd[2] - q[2] * qd[1] + q[3] * qd[0]);
+                        self.send_rosflight_attitude_quaternion(
+                            board,
+                            AttitudeQuaternionMsg {
+                                time_boot_ms: (imu_packet.header.timestamp / 1000) as u32,
+                                q1: q[0],
+                                q2: q[1],
+                                q3: q[2],
+                                q4: q[3],
+                                rollspeed,
+                                pitchspeed,
+                                yawspeed,
+                            },
+                        );
+                        true
+                    }
                 }
-                let q = estimator_state.q();
-                let qd = estimator_state.q_dot();
-                let rollspeed = 2.0 * (q[0] * qd[1] - q[1] * qd[0] - q[2] * qd[3] + q[3] * qd[2]);
-                let pitchspeed = 2.0 * (q[0] * qd[2] - q[1] * qd[3] - q[2] * qd[0] + q[3] * qd[1]);
-                let yawspeed = 2.0 * (q[0] * qd[3] - q[1] * qd[2] - q[2] * qd[1] + q[3] * qd[0]);
-                self.send_rosflight_attitude_quaternion(
-                    board,
-                    AttitudeQuaternionMsg {
-                        time_boot_ms: (imu_packet.header.timestamp / 1000) as u32,
-                        q1: q[0],
-                        q2: q[1],
-                        q3: q[2],
-                        q4: q[3],
-                        rollspeed,
-                        pitchspeed,
-                        yawspeed,
-                    },
-                );
-                true
-            }
+                None => false,
+            },
             NamedTelemetryStream::OutputRaw => {
                 if processed_sensors.imu.is_none() {
-                    return false;
-                }
-                let output_raw_due = if self.telemetry_rates.output_raw_hz == 0 {
-                    self.telemetry_rates.output_raw_imu_divisor != 0
-                        && self.output_raw_imu_count % self.telemetry_rates.output_raw_imu_divisor
-                            == 0
+                    false
                 } else {
-                    stream_due(
+                    let output_raw_due = if self.telemetry_rates.output_raw_hz == 0 {
+                        self.telemetry_rates.output_raw_imu_divisor != 0
+                            && self.output_raw_imu_count
+                                % self.telemetry_rates.output_raw_imu_divisor
+                                == 0
+                    } else {
+                        stream_due(
+                            now_us,
+                            &mut self.telemetry_rate_state.output_raw_us,
+                            self.telemetry_rates.output_raw_hz,
+                        )
+                    };
+                    self.output_raw_imu_count = self.output_raw_imu_count.wrapping_add(1);
+                    if !output_raw_due {
+                        false
+                    } else {
+                        self.send_output_raw(board, actuator_commands);
+                        true
+                    }
+                }
+            }
+            NamedTelemetryStream::Gnss => match processed_sensors.gnss {
+                Some(packet) => {
+                    if !stream_due(
                         now_us,
-                        &mut self.telemetry_rate_state.output_raw_us,
-                        self.telemetry_rates.output_raw_hz,
-                    )
-                };
-                self.output_raw_imu_count = self.output_raw_imu_count.wrapping_add(1);
-                if !output_raw_due {
-                    return false;
+                        &mut self.telemetry_rate_state.gnss_us,
+                        self.telemetry_rates.gnss_hz,
+                    ) {
+                        false
+                    } else {
+                        self.send_rosflight_gnss(
+                            board,
+                            RosflightGnssMsg {
+                                rosflight_timestamp: packet.header.timestamp,
+                                seconds: packet.unix_seconds,
+                                nanos: packet.unix_nanos,
+                                fix_type: packet.fix_type,
+                                num_sat: packet.num_sats,
+                                lat: packet.lat,
+                                lon: packet.lon,
+                                height: packet.height,
+                                vel_n: packet.vel_n,
+                                vel_e: packet.vel_e,
+                                vel_d: packet.vel_d,
+                                s_acc: packet.s_acc,
+                                h_acc: packet.h_acc,
+                                v_acc: packet.v_acc,
+                            },
+                        );
+                        true
+                    }
                 }
-                self.send_output_raw(board, actuator_commands);
-                true
-            }
-            NamedTelemetryStream::Gnss => {
-                let Some(packet) = processed_sensors.gnss else {
-                    return false;
-                };
-                if !stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.gnss_us,
-                    self.telemetry_rates.gnss_hz,
-                ) {
-                    return false;
+                None => false,
+            },
+            NamedTelemetryStream::DiffPressure => match processed_sensors.pitot {
+                Some(packet) => {
+                    if !stream_due(
+                        now_us,
+                        &mut self.telemetry_rate_state.diff_pressure_us,
+                        self.telemetry_rates.diff_pressure_hz,
+                    ) {
+                        false
+                    } else {
+                        self.send_rosflight_diff_pressure(
+                            board,
+                            DiffPressureMsg {
+                                velocity: packet.indicated_airspeed,
+                                diff_pressure: packet.differential_pressure,
+                                temperature: packet.temperature,
+                            },
+                        );
+                        true
+                    }
                 }
-                self.send_rosflight_gnss(
-                    board,
-                    RosflightGnssMsg {
-                        rosflight_timestamp: packet.header.timestamp,
-                        seconds: packet.unix_seconds,
-                        nanos: packet.unix_nanos,
-                        fix_type: packet.fix_type,
-                        num_sat: packet.num_sats,
-                        lat: packet.lat,
-                        lon: packet.lon,
-                        height: packet.height,
-                        vel_n: packet.vel_n,
-                        vel_e: packet.vel_e,
-                        vel_d: packet.vel_d,
-                        s_acc: packet.s_acc,
-                        h_acc: packet.h_acc,
-                        v_acc: packet.v_acc,
-                    },
-                );
-                true
-            }
-            NamedTelemetryStream::DiffPressure => {
-                let Some(packet) = processed_sensors.pitot else {
-                    return false;
-                };
-                if !stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.diff_pressure_us,
-                    self.telemetry_rates.diff_pressure_hz,
-                ) {
-                    return false;
+                None => false,
+            },
+            NamedTelemetryStream::Baro => match processed_sensors.baro {
+                Some(packet) => {
+                    if !stream_due(
+                        now_us,
+                        &mut self.telemetry_rate_state.baro_us,
+                        self.telemetry_rates.baro_hz,
+                    ) {
+                        false
+                    } else {
+                        self.send_rosflight_small_baro(
+                            board,
+                            SmallBaroMsg {
+                                altitude: packet.altitude,
+                                pressure: packet.pressure,
+                                temperature: packet.temperature,
+                            },
+                        );
+                        true
+                    }
                 }
-                self.send_rosflight_diff_pressure(
-                    board,
-                    DiffPressureMsg {
-                        velocity: packet.indicated_airspeed,
-                        diff_pressure: packet.differential_pressure,
-                        temperature: packet.temperature,
-                    },
-                );
-                true
-            }
-            NamedTelemetryStream::Baro => {
-                let Some(packet) = processed_sensors.baro else {
-                    return false;
-                };
-                if !stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.baro_us,
-                    self.telemetry_rates.baro_hz,
-                ) {
-                    return false;
+                None => false,
+            },
+            NamedTelemetryStream::Mag => match processed_sensors.mag {
+                Some(packet) => {
+                    if !stream_due(
+                        now_us,
+                        &mut self.telemetry_rate_state.mag_us,
+                        self.telemetry_rates.mag_hz,
+                    ) {
+                        false
+                    } else {
+                        self.send_rosflight_small_mag(
+                            board,
+                            SmallMagMsg {
+                                xmag: packet.flux[0],
+                                ymag: packet.flux[1],
+                                zmag: packet.flux[2],
+                            },
+                        );
+                        true
+                    }
                 }
-                self.send_rosflight_small_baro(
-                    board,
-                    SmallBaroMsg {
-                        altitude: packet.altitude,
-                        pressure: packet.pressure,
-                        temperature: packet.temperature,
-                    },
-                );
-                true
-            }
-            NamedTelemetryStream::Mag => {
-                let Some(packet) = processed_sensors.mag else {
-                    return false;
-                };
-                if !stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.mag_us,
-                    self.telemetry_rates.mag_hz,
-                ) {
-                    return false;
+                None => false,
+            },
+            NamedTelemetryStream::Range => match processed_sensors.range {
+                Some(packet) => {
+                    if !stream_due(
+                        now_us,
+                        &mut self.telemetry_rate_state.range_us,
+                        self.telemetry_rates.range_hz,
+                    ) {
+                        false
+                    } else {
+                        self.send_rosflight_small_range(
+                            board,
+                            SmallRangeMsg {
+                                type_: match packet.range_type {
+                                    RangeType::Sonar => RosflightRangeType::RosflightRangeSonar,
+                                    RangeType::Lidar => RosflightRangeType::RosflightRangeLidar,
+                                },
+                                range: packet.range,
+                                max_range: packet.max_range,
+                                min_range: packet.min_range,
+                            },
+                        );
+                        true
+                    }
                 }
-                self.send_rosflight_small_mag(
-                    board,
-                    SmallMagMsg {
-                        xmag: packet.flux[0],
-                        ymag: packet.flux[1],
-                        zmag: packet.flux[2],
-                    },
-                );
-                true
-            }
-            NamedTelemetryStream::Range => {
-                let Some(packet) = processed_sensors.range else {
-                    return false;
-                };
-                if !stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.range_us,
-                    self.telemetry_rates.range_hz,
-                ) {
-                    return false;
+                None => false,
+            },
+            NamedTelemetryStream::Battery => match processed_sensors.battery {
+                Some(packet) => {
+                    if !stream_due(
+                        now_us,
+                        &mut self.telemetry_rate_state.battery_us,
+                        self.telemetry_rates.battery_hz,
+                    ) {
+                        false
+                    } else {
+                        self.send_rosflight_battery_status(
+                            board,
+                            BatteryStatusMsg {
+                                battery_voltage: packet.voltage,
+                                battery_current: packet.current,
+                            },
+                        );
+                        true
+                    }
                 }
-                self.send_rosflight_small_range(
-                    board,
-                    SmallRangeMsg {
-                        type_: match packet.range_type {
-                            RangeType::Sonar => RosflightRangeType::RosflightRangeSonar,
-                            RangeType::Lidar => RosflightRangeType::RosflightRangeLidar,
-                        },
-                        range: packet.range,
-                        max_range: packet.max_range,
-                        min_range: packet.min_range,
-                    },
-                );
-                true
-            }
-            NamedTelemetryStream::Battery => {
-                let Some(packet) = processed_sensors.battery else {
-                    return false;
-                };
-                if !stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.battery_us,
-                    self.telemetry_rates.battery_hz,
-                ) {
-                    return false;
-                }
-                self.send_rosflight_battery_status(
-                    board,
-                    BatteryStatusMsg {
-                        battery_voltage: packet.voltage,
-                        battery_current: packet.current,
-                    },
-                );
-                true
-            }
+                None => false,
+            },
+        };
+        #[cfg(feature = "timing-diagnostics")]
+        if sent {
+            record_telemetry_stream_sent(stream);
+        } else {
+            record_telemetry_stream_failed(stream);
         }
+        sent
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    pub fn telemetry_scheduler_diagnostic_text(&mut self) -> Option<[u8; 50]> {
+        while self.telemetry_diag_text_index < NAMED_TELEMETRY_STREAM_COUNT {
+            let index = self.telemetry_diag_text_index;
+            self.telemetry_diag_text_index += 1;
+            let Some(stream) = NamedTelemetryStream::from_index(index) else {
+                continue;
+            };
+            let due = TELEMETRY_STREAM_DUE[index].swap(0, Ordering::Relaxed);
+            let selected = TELEMETRY_STREAM_SELECTED[index].swap(0, Ordering::Relaxed);
+            let sent = TELEMETRY_STREAM_SENT[index].swap(0, Ordering::Relaxed);
+            let failed = TELEMETRY_STREAM_FAILED[index].swap(0, Ordering::Relaxed);
+            if due == 0 && selected == 0 && sent == 0 && failed == 0 {
+                continue;
+            }
+            let mut text = String::<50>::new();
+            let _ = write!(
+                text,
+                "TMS {} d{} s{} ok{} f{}",
+                stream.label(),
+                due,
+                selected,
+                sent,
+                failed
+            );
+            let mut bytes = [0_u8; 50];
+            let payload = text.as_bytes();
+            bytes[..payload.len()].copy_from_slice(payload);
+            return Some(bytes);
+        }
+        self.telemetry_diag_text_index = 0;
+        None
     }
 
     fn send_imu_if_due<R>(
