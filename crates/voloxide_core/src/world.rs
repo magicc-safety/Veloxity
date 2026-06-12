@@ -1676,7 +1676,7 @@ where
             );
         }
 
-        while let Some(text) = self.comm.telemetry_scheduler_diagnostic_text() {
+        if let Some(text) = self.comm.telemetry_scheduler_diagnostic_text() {
             self.comm_events.responses.push_or_log(
                 CommResponse::Statustext(StatustextMsg {
                     severity: Severity::Debug,

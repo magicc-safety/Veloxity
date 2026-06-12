@@ -158,12 +158,14 @@ The `timing-diagnostics` feature emits STATUSTEXT diagnostics, including:
 | --- | --- |
 | `TXQ` | Firmware writes into the telemetry TX pipe: attempts, full-frame successes, attempted bytes, accepted bytes, partial errors, and total errors. |
 | `TXD` | Async UART TX task drain/write counters: pipe reads, read bytes, UART writes, written bytes, and UART errors. |
-| `TMS` | Telemetry scheduler counters per stream: due, selected, sent, and selected-but-failed-final-gate counts. |
+| `TMS` | Rotating telemetry scheduler counters per stream: eligible during actual send attempts, selected, sent, and selected-but-failed-final-gate counts. |
 
 Latest diagnostic result: TX pipe enqueue and UART drain matched exactly with zero errors, while
 MAVLink stream rates remained at roughly 75% of configured targets. This rules out UART baud and TX
 pipe drain as the current limiter. The next diagnostic target is telemetry scheduler/gating counters
-per stream. `TMS` lines now provide the first layer of that scheduler visibility.
+per stream. `TMS` emits one stream per diagnostic interval so scheduler visibility does not flood
+the shared STATUSTEXT response queue. Readiness probes such as `named_telemetry_due()` do not update
+TMS counters; the counters describe actual realtime send attempts.
 
 ## Bring-Up Order
 

@@ -378,7 +378,7 @@ where
     where
         R: FlightFloat,
     {
-        self.select_due_named_telemetry_stream(now_us, processed_sensors)
+        self.select_due_named_telemetry_stream(now_us, processed_sensors, false)
             .is_some()
     }
 
@@ -386,29 +386,32 @@ where
         &self,
         now_us: u64,
         processed_sensors: &ProcessedSensors<R>,
+        record_diagnostics: bool,
     ) -> Option<NamedTelemetryStream>
     where
         R: FlightFloat,
     {
+        #[cfg(not(feature = "timing-diagnostics"))]
+        let _ = record_diagnostics;
         let mut selected = None;
         let mut selected_deadline = u64::MAX;
 
-        fn consider(
-            selected: &mut Option<NamedTelemetryStream>,
-            selected_deadline: &mut u64,
-            stream: NamedTelemetryStream,
-            deadline: Option<u64>,
-        ) {
+        let consider = |selected: &mut Option<NamedTelemetryStream>,
+                        selected_deadline: &mut u64,
+                        stream: NamedTelemetryStream,
+                        deadline: Option<u64>| {
             let Some(deadline) = deadline else {
                 return;
             };
             #[cfg(feature = "timing-diagnostics")]
-            record_telemetry_stream_due(stream);
+            if record_diagnostics {
+                record_telemetry_stream_due(stream);
+            }
             if selected.is_none() || deadline < *selected_deadline {
                 *selected = Some(stream);
                 *selected_deadline = deadline;
             }
-        }
+        };
 
         consider(
             &mut selected,
@@ -562,11 +565,6 @@ where
                     self.telemetry_rates.battery_hz,
                 ),
             );
-        }
-
-        #[cfg(feature = "timing-diagnostics")]
-        if let Some(stream) = selected {
-            record_telemetry_stream_selected(stream);
         }
 
         selected
@@ -859,9 +857,12 @@ where
         A: AsRef<[R]>,
         R: FlightFloat,
     {
-        let Some(stream) = self.select_due_named_telemetry_stream(now_us, processed_sensors) else {
+        let Some(stream) = self.select_due_named_telemetry_stream(now_us, processed_sensors, true)
+        else {
             return false;
         };
+        #[cfg(feature = "timing-diagnostics")]
+        record_telemetry_stream_selected(stream);
 
         let sent = match stream {
             NamedTelemetryStream::Heartbeat => {
