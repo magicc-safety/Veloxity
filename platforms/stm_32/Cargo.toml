@@ -6,9 +6,8 @@ edition = "2024"
 [dependencies]
 voloxide_core = { workspace = true }
 
-embassy-executor = { version = "0.7.0", features = [
-  "task-arena-size-32768",
-  "arch-cortex-m",
+embassy-executor = { version = "0.10.0", features = [
+  "platform-cortex-m",
   "executor-thread",
   "executor-interrupt",
 ] }

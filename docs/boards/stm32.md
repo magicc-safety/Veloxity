@@ -31,13 +31,22 @@ The STM32 boards follow the generic embedded firmware shape:
 - Embassy peripheral tasks produce packets or signal new sensor data to board-owned queues;
 - the board `BoardIo` implementation drains those queues into `voloxide_core` sensor resources;
 - the board constructs a `World` with STM32-specific board, PWM, and MAVLink transport types;
-- the firmware loop uses the ordinary `World::run_once()` scheduler shape until renewed hardware
-  work proves a need for a board-specific realtime split.
+- Pixracer Pro uses the realtime `World` scheduler entrypoints with a conservative fixed `400 Hz`
+  control update baseline;
+- Nucleo keeps the ordinary `World::run_once()` firmware loop for now, while its `BoardIo` adapter
+  exposes the same IMU/service sensor split so it stays compile-current.
 
-That differs from the active Pico 2 W path. Pico 2 W uses a measured high-rate IMU/control loop with
-`realtime_scheduler_step()`, `run_imu_control_tick()`, and service phases. STM32 has richer retained
-sensor-driver coverage in `platforms/stm_32`, but those paths have not yet gone through the same
-current-branch timing and end-to-end telemetry validation.
+That still differs from the active Pico 2 W path. Pico 2 W uses a dual-core board runtime around the
+same core scheduler. STM32 keeps its interrupt executor model: peripheral tasks produce IMU, RC, and
+other sensor packets, and one high-level firmware loop owns `World`. The first Pixracer Pro port
+does not rewrite driver tasks; it changes only how board-owned packets are presented to the core
+fast path and service path.
+
+Pixracer Pro has a `legacy-run-once` feature for A/B testing:
+
+```bash
+cargo check -p pixracerpro --target thumbv7em-none-eabihf --features legacy-run-once
+```
 
 ## Install
 

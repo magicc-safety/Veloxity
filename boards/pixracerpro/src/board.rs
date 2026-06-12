@@ -15,6 +15,96 @@ include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 
 static mut PARAM_STORE: Option<Params> = None;
 
+#[cfg(feature = "sensor-poll-diagnostics")]
+mod sensor_poll_diagnostics {
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    use voloxide_core::{errors::SensorError, math::FlightFloat};
+
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_IMU: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_IMU_ERR: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_MAG: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_MAG_ERR: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_BARO: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_BARO_ERR: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_PITOT: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_PITOT_ERR: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_RANGE: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_RANGE_ERR: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_GNSS: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_GNSS_ERR: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_RC: AtomicU32 = AtomicU32::new(0);
+    #[unsafe(no_mangle)]
+    pub static VOLOXIDE_PIXRACER_DIAG_RC_ERR: AtomicU32 = AtomicU32::new(0);
+
+    pub fn record_bus<R: FlightFloat>(sensors: &voloxide_core::sensors::SensorBus<R>) {
+        record(
+            &sensors.imu,
+            &VOLOXIDE_PIXRACER_DIAG_IMU,
+            &VOLOXIDE_PIXRACER_DIAG_IMU_ERR,
+        );
+        record(
+            &sensors.mag,
+            &VOLOXIDE_PIXRACER_DIAG_MAG,
+            &VOLOXIDE_PIXRACER_DIAG_MAG_ERR,
+        );
+        record(
+            &sensors.baro,
+            &VOLOXIDE_PIXRACER_DIAG_BARO,
+            &VOLOXIDE_PIXRACER_DIAG_BARO_ERR,
+        );
+        record(
+            &sensors.pitot,
+            &VOLOXIDE_PIXRACER_DIAG_PITOT,
+            &VOLOXIDE_PIXRACER_DIAG_PITOT_ERR,
+        );
+        record(
+            &sensors.range,
+            &VOLOXIDE_PIXRACER_DIAG_RANGE,
+            &VOLOXIDE_PIXRACER_DIAG_RANGE_ERR,
+        );
+        record(
+            &sensors.gnss,
+            &VOLOXIDE_PIXRACER_DIAG_GNSS,
+            &VOLOXIDE_PIXRACER_DIAG_GNSS_ERR,
+        );
+        record(
+            &sensors.rc,
+            &VOLOXIDE_PIXRACER_DIAG_RC,
+            &VOLOXIDE_PIXRACER_DIAG_RC_ERR,
+        );
+    }
+
+    fn record<T>(sample: &Option<Result<T, SensorError>>, count: &AtomicU32, errors: &AtomicU32) {
+        if let Some(result) = sample {
+            count.fetch_add(1, Ordering::Relaxed);
+            if result.is_err() {
+                errors.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+fn spawn_task<S: Send>(
+    spawner: &embassy_executor::SendSpawner,
+    token: Result<embassy_executor::SpawnToken<S>, embassy_executor::SpawnError>,
+) {
+    spawner.spawn(token.expect("failed to allocate Embassy task"));
+}
+
 pub struct Board {
     _probe: [Output<'static>; 3],
     pub start_time: embassy_time::Instant,
@@ -51,6 +141,8 @@ impl BoardIo for Board {
         sensors.range = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        #[cfg(feature = "sensor-poll-diagnostics")]
+        sensor_poll_diagnostics::record_bus(sensors);
         let mut delay = Delay;
 
         if sensors.imu.is_some() {
@@ -58,6 +150,37 @@ impl BoardIo for Board {
             delay.delay_us(1u32);
             self.set_test_pin_1(false);
         }
+    }
+
+    fn imu_pending(&self) -> bool {
+        peripherals::bmi08x::IMU_SIGNAL.signaled()
+    }
+
+    fn update_imu_sensor<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        sensors.clear();
+        sensors.imu = peripherals::bmi08x::IMU_SIGNAL
+            .try_take()
+            .map(|result| result.map(|packet| packet.cast()));
+        #[cfg(feature = "sensor-poll-diagnostics")]
+        sensor_poll_diagnostics::record_bus(sensors);
+        if sensors.imu.is_some() {
+            let mut delay = Delay;
+            self.set_test_pin_1(true);
+            delay.delay_us(1u32);
+            self.set_test_pin_1(false);
+        }
+    }
+
+    fn update_service_sensor_bus<R: FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+        sensors.clear();
+        sensors.mag = peripherals::ist8308::MAG_SIGNAL.try_take();
+        sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
+        sensors.pitot = peripherals::ms4525::PITOT_SIGNAL.try_take();
+        sensors.range = peripherals::llv3hp::RANGE_SIGNAL.try_take();
+        sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        #[cfg(feature = "sensor-poll-diagnostics")]
+        sensor_poll_diagnostics::record_bus(sensors);
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -367,48 +490,32 @@ impl Board {
         // P1 Priority Task for Rx Telemetry
         interrupt::SAI1.set_priority(Priority::P0);
         let spawner1 = P1_EXECUTOR.start(interrupt::SAI1);
-        spawner1
-            .spawn(peripherals::bmi08x::task(bmi08x_sensor))
-            .unwrap();
+        spawn_task(&spawner1, peripherals::bmi08x::task(bmi08x_sensor));
 
         // P2 Priority Task for Gyros
         interrupt::SAI2.set_priority(Priority::P2);
         let spawner2 = P2_EXECUTOR.start(interrupt::SAI2);
 
         // P2 VCP Task (Telemetry alternate)
-        spawner2.spawn(peripherals::vcp::task(vcp)).unwrap();
-        let _ = spawner2.spawn(peripherals::telem::task_rx(telem3_rx));
+        spawn_task(&spawner2, peripherals::vcp::task(vcp));
+        spawn_task(&spawner2, peripherals::telem::task_rx(telem3_rx));
 
         // P3 Priority Task for Polled Peripherals
         interrupt::SAI3.set_priority(Priority::P3);
         let spawner3 = P3_EXECUTOR.start(interrupt::SAI3);
-        spawner3
-            .spawn(peripherals::ist8308::task(ist8303_sensor))
-            .unwrap();
-        spawner3
-            .spawn(peripherals::ms4525::task(ms4525_sensor))
-            .unwrap();
-        spawner3
-            .spawn(peripherals::dps310::task(dps_sensor))
-            .unwrap();
-        spawner3
-            .spawn(peripherals::ublox::task(ublox_sensor))
-            .unwrap();
-        spawner3.spawn(peripherals::pps::task(pps_sensor)).unwrap();
-        spawner3.spawn(peripherals::sbus::task(sbus_rx)).unwrap();
-        spawner3
-            .spawn(peripherals::llv3hp::task(llv3hp_sensor))
-            .unwrap();
+        spawn_task(&spawner3, peripherals::ist8308::task(ist8303_sensor));
+        spawn_task(&spawner3, peripherals::ms4525::task(ms4525_sensor));
+        spawn_task(&spawner3, peripherals::dps310::task(dps_sensor));
+        spawn_task(&spawner3, peripherals::ublox::task(ublox_sensor));
+        spawn_task(&spawner3, peripherals::pps::task(pps_sensor));
+        spawn_task(&spawner3, peripherals::sbus::task(sbus_rx));
+        spawn_task(&spawner3, peripherals::llv3hp::task(llv3hp_sensor));
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);
         let spawner4 = P4_EXECUTOR.start(interrupt::SAI4);
-        spawner4
-            .spawn(peripherals::telem::task_tx(telem3_tx))
-            .unwrap();
-        spawner4
-            .spawn(peripherals::sd_card::task(usd_card))
-            .unwrap();
+        spawn_task(&spawner4, peripherals::telem::task_tx(telem3_tx));
+        spawn_task(&spawner4, peripherals::sd_card::task(usd_card));
 
         // SERVOS + TIMERS
         // There are only 7 available Servo Channels on the PixRacer Pro
