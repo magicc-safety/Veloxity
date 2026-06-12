@@ -132,6 +132,39 @@ The current compatibility update makes the ADIS16500 and BMI08x IMU packet signa
 `ImuPacket<f64>`, matching their existing `f64` sensor math and the current generic packet type in
 `voloxide_core`.
 
+## Pixracer Pro Telemetry Diagnostics
+
+Pixracer Pro telemetry timing work on `stm32-realtime-port` is board-specific. The shared
+`voloxide_core` telemetry scheduler is still the suspected limiter, but the observed under-rate
+behavior has only been reproduced on the Pixracer Pro realtime firmware path.
+
+Use this diagnostic firmware when validating the current MAVLink throughput issue:
+
+```bash
+cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide --release \
+  --features 'scope-timing-pins timing-diagnostics'
+```
+
+The `scope-timing-pins` feature maps the Pixracer Pro timing signals as follows:
+
+| Pin | Meaning |
+| --- | --- |
+| PD11 | 400 Hz control-deadline marker |
+| PD12 | Control pipeline active time |
+
+The `timing-diagnostics` feature emits STATUSTEXT diagnostics, including:
+
+| Prefix | Meaning |
+| --- | --- |
+| `TXQ` | Firmware writes into the telemetry TX pipe: attempts, full-frame successes, attempted bytes, accepted bytes, partial errors, and total errors. |
+| `TXD` | Async UART TX task drain/write counters: pipe reads, read bytes, UART writes, written bytes, and UART errors. |
+| `TMS` | Telemetry scheduler counters per stream: due, selected, sent, and selected-but-failed-final-gate counts. |
+
+Latest diagnostic result: TX pipe enqueue and UART drain matched exactly with zero errors, while
+MAVLink stream rates remained at roughly 75% of configured targets. This rules out UART baud and TX
+pipe drain as the current limiter. The next diagnostic target is telemetry scheduler/gating counters
+per stream. `TMS` lines now provide the first layer of that scheduler visibility.
+
 ## Bring-Up Order
 
 For renewed STM32 validation, use this order:

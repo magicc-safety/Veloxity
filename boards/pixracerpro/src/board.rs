@@ -22,25 +22,46 @@ mod tx_diagnostics {
 
     use heapless::String;
 
-    static TX_PIPE_WRITE_CALLS: AtomicU32 = AtomicU32::new(0);
-    static TX_PIPE_WRITE_BYTES: AtomicU32 = AtomicU32::new(0);
+    static TX_PIPE_ATTEMPTS: AtomicU32 = AtomicU32::new(0);
+    static TX_PIPE_ATTEMPT_BYTES: AtomicU32 = AtomicU32::new(0);
+    static TX_PIPE_ACCEPTED_BYTES: AtomicU32 = AtomicU32::new(0);
+    static TX_PIPE_FULL_WRITES: AtomicU32 = AtomicU32::new(0);
+    static TX_PIPE_PARTIAL_ERRORS: AtomicU32 = AtomicU32::new(0);
     static TX_PIPE_WRITE_ERRORS: AtomicU32 = AtomicU32::new(0);
 
-    pub fn record_pipe_write(len: usize) {
-        TX_PIPE_WRITE_CALLS.fetch_add(1, Ordering::Relaxed);
-        TX_PIPE_WRITE_BYTES.fetch_add(len as u32, Ordering::Relaxed);
+    pub fn record_pipe_attempt(len: usize) {
+        TX_PIPE_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+        TX_PIPE_ATTEMPT_BYTES.fetch_add(len as u32, Ordering::Relaxed);
     }
 
-    pub fn record_pipe_error() {
+    pub fn record_pipe_accepted(len: usize) {
+        TX_PIPE_ACCEPTED_BYTES.fetch_add(len as u32, Ordering::Relaxed);
+    }
+
+    pub fn record_pipe_full_write() {
+        TX_PIPE_FULL_WRITES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_pipe_error(partial: bool) {
+        if partial {
+            TX_PIPE_PARTIAL_ERRORS.fetch_add(1, Ordering::Relaxed);
+        }
         TX_PIPE_WRITE_ERRORS.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn pipe_text() -> [u8; 50] {
-        let calls = TX_PIPE_WRITE_CALLS.swap(0, Ordering::Relaxed);
-        let bytes = TX_PIPE_WRITE_BYTES.swap(0, Ordering::Relaxed);
+        let attempts = TX_PIPE_ATTEMPTS.swap(0, Ordering::Relaxed);
+        let full_writes = TX_PIPE_FULL_WRITES.swap(0, Ordering::Relaxed);
+        let attempt_bytes = TX_PIPE_ATTEMPT_BYTES.swap(0, Ordering::Relaxed);
+        let accepted_bytes = TX_PIPE_ACCEPTED_BYTES.swap(0, Ordering::Relaxed);
+        let partial_errors = TX_PIPE_PARTIAL_ERRORS.swap(0, Ordering::Relaxed);
         let errors = TX_PIPE_WRITE_ERRORS.swap(0, Ordering::Relaxed);
         let mut text = String::<50>::new();
-        let _ = write!(text, "TXQ c{} b{} e{}", calls, bytes, errors);
+        let _ = write!(
+            text,
+            "TXQ a{} ok{} ab{} wb{} p{} e{}",
+            attempts, full_writes, attempt_bytes, accepted_bytes, partial_errors, errors
+        );
         to_bytes(text)
     }
 
@@ -266,9 +287,13 @@ impl BoardIo for Board {
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         let mut n = 0;
         let len = bytes.len();
+        #[cfg(feature = "timing-diagnostics")]
+        tx_diagnostics::record_pipe_attempt(len);
         loop {
             match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
+                    #[cfg(feature = "timing-diagnostics")]
+                    tx_diagnostics::record_pipe_accepted(wrote);
                     if wrote == (len - n) {
                         break;
                     } else {
@@ -277,7 +302,7 @@ impl BoardIo for Board {
                 }
                 Err(_) => {
                     #[cfg(feature = "timing-diagnostics")]
-                    tx_diagnostics::record_pipe_error();
+                    tx_diagnostics::record_pipe_error(n > 0);
                     return Some(Err(errors::TelemError::GenericTelemError(
                         "Error Writing Telem Packet!",
                     )));
@@ -285,7 +310,7 @@ impl BoardIo for Board {
             }
         }
         #[cfg(feature = "timing-diagnostics")]
-        tx_diagnostics::record_pipe_write(len);
+        tx_diagnostics::record_pipe_full_write();
         Some(Ok(len))
     }
 
