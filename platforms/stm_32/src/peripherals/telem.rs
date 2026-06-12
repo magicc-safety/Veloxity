@@ -5,6 +5,9 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
 use embassy_time::Timer;
 
+#[cfg(feature = "timing-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use voloxide_core::comm::interface::EmbeddedComInterface;
 use voloxide_core::errors;
 
@@ -13,6 +16,28 @@ pub static RX_BUFF_SIZE: usize = 4 * 2048;
 
 pub static TELEM_TX: Pipe<CriticalSectionRawMutex, TX_BUFF_SIZE> = Pipe::new();
 pub static TELEM_RX: Pipe<CriticalSectionRawMutex, RX_BUFF_SIZE> = Pipe::new();
+
+#[cfg(feature = "timing-diagnostics")]
+static TELEM_TX_DRAIN_READS: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "timing-diagnostics")]
+static TELEM_TX_DRAIN_BYTES: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "timing-diagnostics")]
+static TELEM_TX_UART_WRITES: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "timing-diagnostics")]
+static TELEM_TX_UART_BYTES: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "timing-diagnostics")]
+static TELEM_TX_UART_ERRORS: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(feature = "timing-diagnostics")]
+pub fn take_tx_drain_diagnostics() -> (u32, u32, u32, u32, u32) {
+    (
+        TELEM_TX_DRAIN_READS.swap(0, Ordering::Relaxed),
+        TELEM_TX_DRAIN_BYTES.swap(0, Ordering::Relaxed),
+        TELEM_TX_UART_WRITES.swap(0, Ordering::Relaxed),
+        TELEM_TX_UART_BYTES.swap(0, Ordering::Relaxed),
+        TELEM_TX_UART_ERRORS.swap(0, Ordering::Relaxed),
+    )
+}
 
 pub struct BasicProcessor;
 
@@ -37,13 +62,25 @@ impl TelemTx {
             let mut buf = [0u8; TX_BUFF_SIZE]; // read up to the whole buffer
             let n = TELEM_TX.read(&mut buf).await;
             if n > 0 && n <= TX_BUFF_SIZE {
-                let _result = self
-                    .uart_tx
-                    .write(&mut buf[0..n])
-                    .await
-                    .map_err(|e| match e {
-                        _ => errors::TelemError::GenericTelemError("TelemTx Failed!"),
-                    });
+                #[cfg(feature = "timing-diagnostics")]
+                {
+                    TELEM_TX_DRAIN_READS.fetch_add(1, Ordering::Relaxed);
+                    TELEM_TX_DRAIN_BYTES.fetch_add(n as u32, Ordering::Relaxed);
+                }
+                match self.uart_tx.write(&mut buf[0..n]).await {
+                    Ok(()) => {
+                        #[cfg(feature = "timing-diagnostics")]
+                        {
+                            TELEM_TX_UART_WRITES.fetch_add(1, Ordering::Relaxed);
+                            TELEM_TX_UART_BYTES.fetch_add(n as u32, Ordering::Relaxed);
+                        }
+                    }
+                    Err(_) => {
+                        #[cfg(feature = "timing-diagnostics")]
+                        TELEM_TX_UART_ERRORS.fetch_add(1, Ordering::Relaxed);
+                        let _ = errors::TelemError::GenericTelemError("TelemTx Failed!");
+                    }
+                }
             }
         }
     }

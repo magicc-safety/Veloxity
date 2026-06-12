@@ -17,7 +17,7 @@ use voloxide_mavlink::MavlinkInterface;
 type PixracerReal = f64;
 const PIXRACER_CONTROL_LOOP_HZ: u16 = 400;
 #[cfg(not(feature = "legacy-run-once"))]
-const PIXRACER_MAX_SERVICE_DEFERRAL_US: u64 = 1_000;
+const PIXRACER_MAX_SERVICE_DEFERRAL_US: u64 = 500;
 
 type PixracerWorld<'a> = World<
     board::Board,

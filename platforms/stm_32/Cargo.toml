@@ -3,6 +3,10 @@ name = "stm_32"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+timing-diagnostics = []
+
 [dependencies]
 voloxide_core = { workspace = true }
 

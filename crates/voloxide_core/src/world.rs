@@ -49,7 +49,7 @@ use heapless::String;
 const IMU_TIMEOUT_US: u64 = 100_000;
 const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 1;
 const REALTIME_SERVICE_MIN_CONTROL_SLACK_US: u64 = 200;
-const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 120;
+const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 1_500;
 #[cfg(feature = "timing-diagnostics")]
 const TIMING_DIAGNOSTIC_INTERVAL_US: u64 = 1_000_000;
 #[cfg(feature = "timing-diagnostics")]
@@ -213,8 +213,8 @@ enum RealtimeServicePhase {
     DeferredBoard,
 }
 
-const REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 2;
-const REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 1;
+const REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 5;
+const REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 4;
 
 impl RealtimeServicePhase {
     fn next(self) -> Self {
@@ -764,7 +764,6 @@ where
         if now_us >= self.next_realtime_service_us
             && now_us.saturating_sub(self.last_realtime_control_us)
                 <= REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US
-            && self.last_realtime_service_control_us != self.last_realtime_control_us
             && self.realtime_service_has_control_slack(now_us)
         {
             RealtimeSchedulerStep::Service
