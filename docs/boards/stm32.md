@@ -48,6 +48,12 @@ Pixracer Pro has a `legacy-run-once` feature for A/B testing:
 cargo check -p pixracerpro --target thumbv7em-none-eabihf --features legacy-run-once
 ```
 
+The realtime Pixracer Pro entrypoint uses a board-specific telemetry budget on
+`stm32-realtime-port`. It keeps the shared core default intact, but asks the realtime service step
+to send more named telemetry streams per service opportunity because hardware diagnostics showed
+selected streams enqueue and drain cleanly while too few streams were selected to meet the
+configured high-rate MAVLink profile.
+
 ## Install
 
 ```bash

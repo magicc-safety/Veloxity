@@ -910,12 +910,25 @@ where
         &mut self,
         max_service_deferral_us: u64,
     ) -> WorldRunClass {
+        self.run_service_step_with_deferral_and_telemetry_budget(
+            max_service_deferral_us,
+            REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP,
+            REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE,
+        )
+    }
+
+    pub fn run_service_step_with_deferral_and_telemetry_budget(
+        &mut self,
+        max_service_deferral_us: u64,
+        telemetry_streams_per_service_step: usize,
+        telemetry_streams_per_telemetry_phase: usize,
+    ) -> WorldRunClass {
         let pass_start_us = self.board.clock_micros();
         let had_rx = self.board.serial_rx_pending();
         let phase = self.realtime_service_phase;
         self.realtime_service_phase = self.realtime_service_phase.next();
 
-        self.run_realtime_telemetry_stage_budgeted(REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP);
+        self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_service_step);
 
         match phase {
             RealtimeServicePhase::Input => self.run_service_input_stage(),
@@ -927,9 +940,7 @@ where
             RealtimeServicePhase::Telemetry0
             | RealtimeServicePhase::Telemetry1
             | RealtimeServicePhase::Telemetry2 => {
-                self.run_realtime_telemetry_stage_budgeted(
-                    REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE,
-                );
+                self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_telemetry_phase);
             }
             RealtimeServicePhase::Flush => self.board.serial_flush_budgeted(1),
             RealtimeServicePhase::DeferredBoard => self.board.run_deferred_board_actions(),

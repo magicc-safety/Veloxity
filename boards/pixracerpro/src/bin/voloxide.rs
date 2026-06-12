@@ -18,6 +18,10 @@ type PixracerReal = f64;
 const PIXRACER_CONTROL_LOOP_HZ: u16 = 400;
 #[cfg(not(feature = "legacy-run-once"))]
 const PIXRACER_MAX_SERVICE_DEFERRAL_US: u64 = 1_000;
+#[cfg(not(feature = "legacy-run-once"))]
+const PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 4;
+#[cfg(not(feature = "legacy-run-once"))]
+const PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 2;
 
 type PixracerWorld<'a> = World<
     board::Board,
@@ -84,7 +88,11 @@ fn main() -> ! {
                 let _ = world.run_control_update_tick();
             }
             RealtimeSchedulerStep::Service => {
-                let _ = world.run_service_step_with_deferral(PIXRACER_MAX_SERVICE_DEFERRAL_US);
+                let _ = world.run_service_step_with_deferral_and_telemetry_budget(
+                    PIXRACER_MAX_SERVICE_DEFERRAL_US,
+                    PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP,
+                    PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE,
+                );
             }
             RealtimeSchedulerStep::Idle => {}
         }
