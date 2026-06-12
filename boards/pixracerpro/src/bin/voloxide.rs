@@ -9,7 +9,8 @@ use voloxide_core::world::ControlLoopRates;
 #[cfg(not(feature = "legacy-run-once"))]
 use voloxide_core::world::RealtimeSchedulerStep;
 use voloxide_core::{
-    board::BoardIo, params::Params, state_machine::StateManager, vehicle::quadrotor, world::World,
+    board::BoardIo, comm::TelemetryRates, params::Params, state_machine::StateManager,
+    vehicle::quadrotor, world::World,
 };
 use voloxide_mavlink::MavlinkInterface;
 
@@ -60,6 +61,7 @@ fn main() -> ! {
     let pwm_driver = BoardPwmDriver::new(&mut servos);
 
     let mut world = init_world(board, params, pwm_driver);
+    world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
     world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(PIXRACER_CONTROL_LOOP_HZ));
 
     loop {
