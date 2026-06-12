@@ -1,3 +1,5 @@
+#[cfg(feature = "timing-diagnostics")]
+use crate::comm::ImuTelemetryReadiness;
 use crate::{
     board::BoardIo,
     comm::messages::messages::RosflightHardErrorMsg,
@@ -352,6 +354,77 @@ impl TimingDiagnostics {
     }
 }
 
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RealtimeCadenceDiagnostics {
+    control_due: u32,
+    control_due_no_sample: u32,
+    control_ran: u32,
+    control_deadline_consumed: u32,
+    imu_packet_taken: u32,
+    imu_timestamp_changed: u32,
+    priority_imu_attempt: u32,
+    priority_imu_sent: u32,
+    priority_imu_not_due: u32,
+    priority_imu_stale: u32,
+    priority_imu_no_imu: u32,
+    last_control_run_us: Option<u64>,
+    max_control_gap_us: u32,
+    last_processed_imu_timestamp: Option<u64>,
+    max_processed_imu_gap_us: u32,
+    last_imu_telemetry_timestamp: Option<u64>,
+    max_imu_telemetry_gap_us: u32,
+}
+
+#[cfg(feature = "timing-diagnostics")]
+impl RealtimeCadenceDiagnostics {
+    fn record_control_run(&mut self, now_us: u64) {
+        self.control_ran = self.control_ran.saturating_add(1);
+        if let Some(last_us) = self.last_control_run_us {
+            self.max_control_gap_us = self
+                .max_control_gap_us
+                .max(now_us.saturating_sub(last_us).min(u32::MAX as u64) as u32);
+        }
+        self.last_control_run_us = Some(now_us);
+    }
+
+    fn record_processed_imu_timestamp(&mut self, timestamp_us: u64) {
+        self.imu_timestamp_changed = self.imu_timestamp_changed.saturating_add(1);
+        if let Some(last_us) = self.last_processed_imu_timestamp {
+            self.max_processed_imu_gap_us = self
+                .max_processed_imu_gap_us
+                .max(timestamp_us.saturating_sub(last_us).min(u32::MAX as u64) as u32);
+        }
+        self.last_processed_imu_timestamp = Some(timestamp_us);
+    }
+
+    fn record_imu_telemetry_timestamp(&mut self, timestamp_us: u64) {
+        if let Some(last_us) = self.last_imu_telemetry_timestamp {
+            self.max_imu_telemetry_gap_us = self
+                .max_imu_telemetry_gap_us
+                .max(timestamp_us.saturating_sub(last_us).min(u32::MAX as u64) as u32);
+        }
+        self.last_imu_telemetry_timestamp = Some(timestamp_us);
+    }
+
+    fn reset_interval(&mut self) {
+        self.control_due = 0;
+        self.control_due_no_sample = 0;
+        self.control_ran = 0;
+        self.control_deadline_consumed = 0;
+        self.imu_packet_taken = 0;
+        self.imu_timestamp_changed = 0;
+        self.priority_imu_attempt = 0;
+        self.priority_imu_sent = 0;
+        self.priority_imu_not_due = 0;
+        self.priority_imu_stale = 0;
+        self.priority_imu_no_imu = 0;
+        self.max_control_gap_us = 0;
+        self.max_processed_imu_gap_us = 0;
+        self.max_imu_telemetry_gap_us = 0;
+    }
+}
+
 pub struct World<B, E, C, M, CI, PD, R: FlightFloat>
 where
     B: BoardIo,
@@ -399,6 +472,8 @@ where
     realtime_service_phase: RealtimeServicePhase,
     #[cfg(feature = "timing-diagnostics")]
     timing_diagnostics: TimingDiagnostics,
+    #[cfg(feature = "timing-diagnostics")]
+    realtime_cadence_diagnostics: RealtimeCadenceDiagnostics,
 }
 
 impl<B, E, C, M, CI, PD, R> World<B, E, C, M, CI, PD, R>
@@ -496,6 +571,8 @@ where
             realtime_service_phase: RealtimeServicePhase::default(),
             #[cfg(feature = "timing-diagnostics")]
             timing_diagnostics: TimingDiagnostics::new(now_us),
+            #[cfg(feature = "timing-diagnostics")]
+            realtime_cadence_diagnostics: RealtimeCadenceDiagnostics::default(),
         };
         if do_rearm_after_hardfault {
             world
@@ -803,11 +880,14 @@ where
     pub fn run_control_update_tick_classified(&mut self) -> WorldRunClass {
         let pass_start_us = self.board.clock_micros();
         let now_us = self.board.clock_micros();
+        self.record_realtime_control_gate(now_us);
         let mut control_timing = ControlPipelineTiming::default();
         let ran_control =
             self.run_control_and_mixing_stage_if_control_due_measured(now_us, &mut control_timing);
         if ran_control {
             self.last_realtime_control_us = self.board.clock_micros();
+            self.realtime_cadence_diagnostics
+                .record_control_run(self.last_realtime_control_us);
         }
 
         let class = WorldRunClass {
@@ -834,10 +914,31 @@ where
         #[cfg(feature = "pre-control-scope")]
         self.board.set_test_pin_3(true);
         let now_us = self.board.clock_micros();
+        #[cfg(feature = "timing-diagnostics")]
+        self.record_realtime_control_gate(now_us);
+        #[cfg(feature = "timing-diagnostics")]
+        let previous_processed_imu_timestamp = self
+            .processed_sensors
+            .imu
+            .map(|packet| packet.header.timestamp);
         self.board.update_imu_sensor(&mut self.raw_sensors);
         let had_raw_imu = self.raw_sensors.imu.is_some();
         let had_raw_sensor = had_raw_imu;
+        #[cfg(feature = "timing-diagnostics")]
+        if had_raw_imu {
+            self.realtime_cadence_diagnostics.imu_packet_taken = self
+                .realtime_cadence_diagnostics
+                .imu_packet_taken
+                .saturating_add(1);
+        }
         self.process_imu_sensor_after_update();
+        #[cfg(feature = "timing-diagnostics")]
+        if let Some(packet) = self.processed_sensors.imu {
+            if previous_processed_imu_timestamp != Some(packet.header.timestamp) {
+                self.realtime_cadence_diagnostics
+                    .record_processed_imu_timestamp(packet.header.timestamp);
+            }
+        }
         self.record_control_imu_candidate();
         self.update_sensor_health_and_calibration(now_us);
         let had_processed_imu = self.processed_sensors.imu.is_some();
@@ -849,6 +950,9 @@ where
             self.run_control_and_mixing_stage_if_control_due_measured(now_us, &mut control_timing);
         if ran_control {
             self.last_realtime_control_us = self.board.clock_micros();
+            #[cfg(feature = "timing-diagnostics")]
+            self.realtime_cadence_diagnostics
+                .record_control_run(self.last_realtime_control_us);
         }
         let telemetry_due = self
             .comm
@@ -1462,10 +1566,34 @@ where
         self.last_control_update_us = self
             .last_control_update_us
             .saturating_add(elapsed_intervals.saturating_mul(interval_us));
+        #[cfg(feature = "timing-diagnostics")]
+        {
+            self.realtime_cadence_diagnostics.control_deadline_consumed = self
+                .realtime_cadence_diagnostics
+                .control_deadline_consumed
+                .saturating_add(1);
+        }
     }
 
     fn control_update_can_run_at(&self, now_us: u64) -> bool {
         self.control_update_due_at(now_us) && self.control_imu_accumulator.has_samples()
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    fn record_realtime_control_gate(&mut self, now_us: u64) {
+        if !self.control_update_due_at(now_us) {
+            return;
+        }
+        self.realtime_cadence_diagnostics.control_due = self
+            .realtime_cadence_diagnostics
+            .control_due
+            .saturating_add(1);
+        if !self.control_imu_accumulator.has_samples() {
+            self.realtime_cadence_diagnostics.control_due_no_sample = self
+                .realtime_cadence_diagnostics
+                .control_due_no_sample
+                .saturating_add(1);
+        }
     }
 
     fn realtime_service_has_control_slack(&self, now_us: u64) -> bool {
@@ -1668,8 +1796,21 @@ where
 
     fn send_realtime_telemetry_stream_by_name(&mut self, stream: NamedTelemetryStream) -> bool {
         let now_us = self.board.clock_micros();
+        #[cfg(feature = "timing-diagnostics")]
+        let imu_readiness = if stream == NamedTelemetryStream::Imu {
+            self.realtime_cadence_diagnostics.priority_imu_attempt = self
+                .realtime_cadence_diagnostics
+                .priority_imu_attempt
+                .saturating_add(1);
+            Some(
+                self.comm
+                    .imu_telemetry_readiness(now_us, &self.processed_sensors),
+            )
+        } else {
+            None
+        };
         let sensor_error_count = self.board.sensors_errors_count();
-        self.comm.send_named_telemetry_stream_if_due(
+        let sent = self.comm.send_named_telemetry_stream_if_due(
             stream,
             &mut self.board,
             now_us,
@@ -1681,7 +1822,43 @@ where
             &self.control_pipeline.latest_pwm_outputs,
             sensor_error_count,
             self.control_pipeline.latest_loop_time_us,
-        )
+        );
+        #[cfg(feature = "timing-diagnostics")]
+        if let Some(readiness) = imu_readiness {
+            if sent {
+                self.realtime_cadence_diagnostics.priority_imu_sent = self
+                    .realtime_cadence_diagnostics
+                    .priority_imu_sent
+                    .saturating_add(1);
+                if let Some(packet) = self.processed_sensors.imu {
+                    self.realtime_cadence_diagnostics
+                        .record_imu_telemetry_timestamp(packet.header.timestamp);
+                }
+            } else {
+                match readiness {
+                    ImuTelemetryReadiness::Due => {}
+                    ImuTelemetryReadiness::NotDue => {
+                        self.realtime_cadence_diagnostics.priority_imu_not_due = self
+                            .realtime_cadence_diagnostics
+                            .priority_imu_not_due
+                            .saturating_add(1);
+                    }
+                    ImuTelemetryReadiness::Stale => {
+                        self.realtime_cadence_diagnostics.priority_imu_stale = self
+                            .realtime_cadence_diagnostics
+                            .priority_imu_stale
+                            .saturating_add(1);
+                    }
+                    ImuTelemetryReadiness::NoImu => {
+                        self.realtime_cadence_diagnostics.priority_imu_no_imu = self
+                            .realtime_cadence_diagnostics
+                            .priority_imu_no_imu
+                            .saturating_add(1);
+                    }
+                }
+            }
+        }
+        sent
     }
 
     #[cfg(feature = "timing-diagnostics")]
@@ -1747,6 +1924,16 @@ where
             );
         }
 
+        self.push_timing_diagnostic_text(format_realtime_control_cadence(
+            self.realtime_cadence_diagnostics,
+        ));
+        self.push_timing_diagnostic_text(format_realtime_imu_telemetry(
+            self.realtime_cadence_diagnostics,
+        ));
+        self.push_timing_diagnostic_text(format_realtime_gap_diagnostics(
+            self.realtime_cadence_diagnostics,
+        ));
+        self.realtime_cadence_diagnostics.reset_interval();
         self.timing_diagnostics.reset(now_us);
     }
 
@@ -1840,6 +2027,48 @@ fn format_timing_board_detail(label: u8, bucket: TimingBucket) -> String<50> {
         TimingBucket::avg(bucket.telemetry_enqueue_us_sum, bucket.count),
         TimingBucket::avg(bucket.tx_flush_us_sum, bucket.count),
         TimingBucket::avg(bucket.board_service_us_sum, bucket.count),
+    );
+    text
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn format_realtime_control_cadence(diag: RealtimeCadenceDiagnostics) -> String<50> {
+    let mut text = String::<50>::new();
+    let _ = write!(
+        text,
+        "RTC d{} n{} r{} c{} i{} t{}",
+        diag.control_due,
+        diag.control_due_no_sample,
+        diag.control_ran,
+        diag.control_deadline_consumed,
+        diag.imu_packet_taken,
+        diag.imu_timestamp_changed,
+    );
+    text
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn format_realtime_imu_telemetry(diag: RealtimeCadenceDiagnostics) -> String<50> {
+    let mut text = String::<50>::new();
+    let _ = write!(
+        text,
+        "RTI a{} ok{} nd{} st{} ni{}",
+        diag.priority_imu_attempt,
+        diag.priority_imu_sent,
+        diag.priority_imu_not_due,
+        diag.priority_imu_stale,
+        diag.priority_imu_no_imu,
+    );
+    text
+}
+
+#[cfg(feature = "timing-diagnostics")]
+fn format_realtime_gap_diagnostics(diag: RealtimeCadenceDiagnostics) -> String<50> {
+    let mut text = String::<50>::new();
+    let _ = write!(
+        text,
+        "RTG ig{} cg{} sg{}",
+        diag.max_processed_imu_gap_us, diag.max_control_gap_us, diag.max_imu_telemetry_gap_us,
     );
     text
 }

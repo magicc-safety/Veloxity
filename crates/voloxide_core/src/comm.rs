@@ -136,6 +136,15 @@ fn record_telemetry_stream_failed(stream: NamedTelemetryStream) {
     TELEMETRY_STREAM_FAILED[stream.index()].fetch_add(1, Ordering::Relaxed);
 }
 
+#[cfg(feature = "timing-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImuTelemetryReadiness {
+    Due,
+    NotDue,
+    Stale,
+    NoImu,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TelemetryRates {
     pub heartbeat_hz: u16,
@@ -380,6 +389,34 @@ where
     {
         self.select_due_named_telemetry_stream(now_us, processed_sensors, false)
             .is_some()
+    }
+
+    #[cfg(feature = "timing-diagnostics")]
+    pub fn imu_telemetry_readiness<R>(
+        &self,
+        now_us: u64,
+        processed_sensors: &ProcessedSensors<R>,
+    ) -> ImuTelemetryReadiness
+    where
+        R: FlightFloat,
+    {
+        let Some(imu_packet) = processed_sensors.imu else {
+            return ImuTelemetryReadiness::NoImu;
+        };
+        if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
+            return ImuTelemetryReadiness::Stale;
+        }
+        if stream_due_deadline_us(
+            now_us,
+            self.telemetry_rate_state.imu_us,
+            self.telemetry_rates.imu_hz,
+        )
+        .is_some()
+        {
+            ImuTelemetryReadiness::Due
+        } else {
+            ImuTelemetryReadiness::NotDue
+        }
     }
 
     fn select_due_named_telemetry_stream<R>(

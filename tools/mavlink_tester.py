@@ -841,6 +841,7 @@ def summarize_status_diagnostics(records, recent_limit=24):
     diagnostics = []
     latest_txq = None
     latest_txd = None
+    latest_realtime = {}
     latest_tms_by_label = {}
     tms_counts_by_label = {}
 
@@ -862,8 +863,17 @@ def summarize_status_diagnostics(records, recent_limit=24):
             latest_tms_by_label[label] = text
             tms_counts_by_label[label] = tms_counts_by_label.get(label, 0) + 1
             diagnostics.append(text)
+            continue
+        if text.startswith(("RTC ", "RTI ", "RTG ")):
+            latest_realtime[text.split()[0]] = text
+            diagnostics.append(text)
 
-    if latest_txq is None and latest_txd is None and not latest_tms_by_label:
+    if (
+        latest_txq is None
+        and latest_txd is None
+        and not latest_tms_by_label
+        and not latest_realtime
+    ):
         return
 
     print("status diagnostics:")
@@ -875,6 +885,9 @@ def summarize_status_diagnostics(records, recent_limit=24):
         for label in sorted(latest_tms_by_label):
             count = tms_counts_by_label[label]
             print(f"  latest TMS {label} ({count} frames): {latest_tms_by_label[label]}")
+    for prefix in ("RTC", "RTI", "RTG"):
+        if prefix in latest_realtime:
+            print(f"  latest {prefix}: {latest_realtime[prefix]}")
     if diagnostics:
         print(f"  recent diagnostics ({min(len(diagnostics), recent_limit)} of {len(diagnostics)}):")
         for text in diagnostics[-recent_limit:]:
