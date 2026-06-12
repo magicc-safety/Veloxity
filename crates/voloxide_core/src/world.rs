@@ -1603,11 +1603,12 @@ where
         );
     }
 
-    fn run_realtime_telemetry_stage_budgeted(&mut self, max_streams: usize) {
+    pub fn run_realtime_telemetry_stage_budgeted(&mut self, max_streams: usize) -> usize {
         let mut sent = 0;
         while sent < max_streams && self.send_realtime_telemetry_stream() {
             sent += 1;
         }
+        sent
     }
 
     fn send_realtime_telemetry_stream(&mut self) -> bool {

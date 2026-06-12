@@ -52,7 +52,9 @@ The realtime Pixracer Pro entrypoint uses a board-specific telemetry budget on
 `stm32-realtime-port`. It keeps the shared core default intact, but asks the realtime service step
 to send more named telemetry streams per service opportunity because hardware diagnostics showed
 selected streams enqueue and drain cleanly while too few streams were selected to meet the
-configured high-rate MAVLink profile.
+configured high-rate MAVLink profile. Pixracer Pro also sends a small telemetry burst immediately
+after each completed control update so high-rate streams are not limited solely by the separate
+service scheduler window.
 
 ## Install
 

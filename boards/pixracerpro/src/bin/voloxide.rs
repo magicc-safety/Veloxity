@@ -22,6 +22,8 @@ const PIXRACER_MAX_SERVICE_DEFERRAL_US: u64 = 1_000;
 const PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 4;
 #[cfg(not(feature = "legacy-run-once"))]
 const PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 2;
+#[cfg(not(feature = "legacy-run-once"))]
+const PIXRACER_POST_CONTROL_TELEMETRY_STREAMS: usize = 2;
 
 type PixracerWorld<'a> = World<
     board::Board,
@@ -77,15 +79,41 @@ fn main() -> ! {
         match world.realtime_scheduler_step() {
             RealtimeSchedulerStep::ImuControl => {
                 #[cfg(feature = "timing-diagnostics")]
-                let _ = world.run_imu_control_tick_classified();
+                {
+                    let class = world.run_imu_control_tick_classified();
+                    if class.ran_control {
+                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                            PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
+                        );
+                    }
+                }
                 #[cfg(not(feature = "timing-diagnostics"))]
-                let _ = world.run_imu_control_tick();
+                {
+                    if world.run_imu_control_tick() {
+                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                            PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
+                        );
+                    }
+                }
             }
             RealtimeSchedulerStep::ControlUpdate => {
                 #[cfg(feature = "timing-diagnostics")]
-                let _ = world.run_control_update_tick_classified();
+                {
+                    let class = world.run_control_update_tick_classified();
+                    if class.ran_control {
+                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                            PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
+                        );
+                    }
+                }
                 #[cfg(not(feature = "timing-diagnostics"))]
-                let _ = world.run_control_update_tick();
+                {
+                    if world.run_control_update_tick() {
+                        let _ = world.run_realtime_telemetry_stage_budgeted(
+                            PIXRACER_POST_CONTROL_TELEMETRY_STREAMS,
+                        );
+                    }
+                }
             }
             RealtimeSchedulerStep::Service => {
                 let _ = world.run_service_step_with_deferral_and_telemetry_budget(
