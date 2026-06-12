@@ -135,6 +135,8 @@ pub struct Board {
     params_valid: bool,
     boot_time: Instant,
     #[cfg(feature = "scope-timing-pins")]
+    deadline_scope_pin: Output<'static>,
+    #[cfg(feature = "scope-timing-pins")]
     control_scope_pin: Output<'static>,
     #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
     non_control_scope_pin: Output<'static>,
@@ -144,6 +146,7 @@ impl Board {
     pub fn new_uart(
         config: Pico2WConfig,
         gy91_baro: Option<Gy91>,
+        #[cfg(feature = "scope-timing-pins")] deadline_scope_pin: Output<'static>,
         #[cfg(feature = "scope-timing-pins")] control_scope_pin: Output<'static>,
         #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
         non_control_scope_pin: Output<'static>,
@@ -160,6 +163,8 @@ impl Board {
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
+                #[cfg(feature = "scope-timing-pins")]
+                deadline_scope_pin,
                 #[cfg(feature = "scope-timing-pins")]
                 control_scope_pin,
                 #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
@@ -243,6 +248,15 @@ impl BoardIo for Board {
 
     fn serial_rx_pending(&self) -> bool {
         self.mavlink.has_pending_rx_frame()
+    }
+
+    #[cfg(feature = "scope-timing-pins")]
+    fn set_test_pin_1(&mut self, high: bool) {
+        if high {
+            self.deadline_scope_pin.set_high();
+        } else {
+            self.deadline_scope_pin.set_low();
+        }
     }
 
     #[cfg(feature = "scope-timing-pins")]

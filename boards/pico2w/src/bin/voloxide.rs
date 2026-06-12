@@ -552,11 +552,6 @@ struct Core1Resources {
     pin22: Peri<'static, PIN_22>,
 }
 
-#[cfg(feature = "scope-timing-pins")]
-struct ScopeTimingPins {
-    imu_available: Output<'static>,
-}
-
 #[cfg(all(
     feature = "scope-timing-pins",
     not(feature = "imu-producer-scope"),
@@ -584,21 +579,6 @@ const SCOPE_GP22_MARKS_SERVICE: bool = true;
     )
 ))]
 const SCOPE_GP22_MARKS_SERVICE: bool = false;
-
-#[cfg(feature = "scope-timing-pins")]
-impl ScopeTimingPins {
-    fn new(imu_available: Output<'static>) -> Self {
-        Self { imu_available }
-    }
-
-    fn pulse_imu_available(&mut self) {
-        self.imu_available.set_high();
-        for _ in 0..8 {
-            cortex_m::asm::nop();
-        }
-        self.imu_available.set_low();
-    }
-}
 
 fn spawn_core1_services(resources: Core1Resources, mailbox: SharedMavlinkMailbox) {
     spawn_core1(
@@ -1302,7 +1282,7 @@ fn main() -> ! {
     let mailbox = SHARED_MAVLINK_MAILBOX;
 
     #[cfg(feature = "scope-timing-pins")]
-    let mut scope_timing_pins = ScopeTimingPins::new(Output::new(peripherals.PIN_18, Level::Low));
+    let deadline_scope_pin = Output::new(peripherals.PIN_18, Level::Low);
     #[cfg(feature = "scope-timing-pins")]
     let control_scope_pin = Output::new(peripherals.PIN_19, Level::Low);
     #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
@@ -1347,6 +1327,8 @@ fn main() -> ! {
         config,
         None,
         #[cfg(feature = "scope-timing-pins")]
+        deadline_scope_pin,
+        #[cfg(feature = "scope-timing-pins")]
         control_scope_pin,
         #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
         non_control_scope_pin,
@@ -1364,8 +1346,6 @@ fn main() -> ! {
     loop {
         match world.realtime_scheduler_step() {
             RealtimeSchedulerStep::ImuControl => {
-                #[cfg(feature = "scope-timing-pins")]
-                scope_timing_pins.pulse_imu_available();
                 #[cfg(feature = "release-loop-bench")]
                 {
                     let start_us = Instant::now().as_micros();

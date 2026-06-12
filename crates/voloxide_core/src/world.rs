@@ -1390,6 +1390,15 @@ where
             return false;
         }
 
+        #[cfg(feature = "scope-timing-pins")]
+        {
+            self.board.set_test_pin_1(true);
+            for _ in 0..8 {
+                core::hint::spin_loop();
+            }
+            self.board.set_test_pin_1(false);
+        }
+
         let elapsed_intervals = now_us.saturating_sub(self.last_control_update_us) / interval_us;
         self.last_control_update_us = self
             .last_control_update_us
