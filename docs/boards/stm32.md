@@ -212,6 +212,11 @@ Diagnostic decision record:
   instead of by a second telemetry due timer, which previously drifted a few microseconds out of
   phase and caused occasional `5 ms` IMU telemetry gaps even though control and sensor cadence were
   healthy.
+- The accepted `4c6c478` validation run held the configured streams for 120 seconds at `921600`
+  baud: IMU `399.4 Hz`, RC `100.0 Hz`, attitude `50.0 Hz`, output raw `50.0 Hz`, zero CRC errors,
+  zero MAVLink sequence gaps, clean `TXQ`/`TXD`, and no priority IMU due/freshness skips
+  (`RTI a400 ok400 nd0 st0 ni0`). The measured IMU telemetry timestamp max interval was `2.508 ms`,
+  with firmware loop timing avg `396.0 us`, p99 `459 us`, max `522 us`.
 
 `TMS` emits one stream per diagnostic interval so scheduler visibility does not flood the shared
 STATUSTEXT response queue. Readiness probes such as `named_telemetry_due()` do not update TMS
