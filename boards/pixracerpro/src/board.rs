@@ -111,6 +111,14 @@ pub struct Board {
     test_pin_1: Output<'static>,
     test_pin_2: Output<'static>,
     pending_reset_to_bootloader: Option<bool>,
+    #[cfg(feature = "sensor-poll-diagnostics")]
+    last_sbus_diag_ms: u32,
+    #[cfg(feature = "sensor-poll-diagnostics")]
+    sbus_rc_drains: u32,
+    #[cfg(feature = "sensor-poll-diagnostics")]
+    sbus_last_rc_status: u32,
+    #[cfg(feature = "sensor-poll-diagnostics")]
+    sbus_last_rc_lol: bool,
 }
 
 impl BoardIo for Board {
@@ -142,7 +150,11 @@ impl BoardIo for Board {
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
         #[cfg(feature = "sensor-poll-diagnostics")]
+        self.record_sbus_rc_drain(&sensors.rc);
+        #[cfg(feature = "sensor-poll-diagnostics")]
         sensor_poll_diagnostics::record_bus(sensors);
+        #[cfg(feature = "sensor-poll-diagnostics")]
+        self.log_sbus_diagnostics_if_due();
         let mut delay = Delay;
 
         if sensors.imu.is_some() {
@@ -180,7 +192,11 @@ impl BoardIo for Board {
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
         #[cfg(feature = "sensor-poll-diagnostics")]
+        self.record_sbus_rc_drain(&sensors.rc);
+        #[cfg(feature = "sensor-poll-diagnostics")]
         sensor_poll_diagnostics::record_bus(sensors);
+        #[cfg(feature = "sensor-poll-diagnostics")]
+        self.log_sbus_diagnostics_if_due();
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -611,8 +627,63 @@ impl Board {
                 test_pin_1,
                 test_pin_2,
                 pending_reset_to_bootloader: None,
+                #[cfg(feature = "sensor-poll-diagnostics")]
+                last_sbus_diag_ms: 0,
+                #[cfg(feature = "sensor-poll-diagnostics")]
+                sbus_rc_drains: 0,
+                #[cfg(feature = "sensor-poll-diagnostics")]
+                sbus_last_rc_status: 0,
+                #[cfg(feature = "sensor-poll-diagnostics")]
+                sbus_last_rc_lol: false,
             },
             servos,
         )
+    }
+
+    #[cfg(feature = "sensor-poll-diagnostics")]
+    fn record_sbus_rc_drain(
+        &mut self,
+        rc: &Option<Result<voloxide_core::packets::RcPacket, errors::SensorError>>,
+    ) {
+        if let Some(result) = rc {
+            self.sbus_rc_drains = self.sbus_rc_drains.wrapping_add(1);
+            if let Ok(packet) = result {
+                self.sbus_last_rc_status = packet.header.status as u32;
+                self.sbus_last_rc_lol = packet.lol;
+            }
+        }
+    }
+
+    #[cfg(feature = "sensor-poll-diagnostics")]
+    fn log_sbus_diagnostics_if_due(&mut self) {
+        let now_ms = self.clock_millis();
+        if now_ms.wrapping_sub(self.last_sbus_diag_ms) < 1_000 {
+            return;
+        }
+        self.last_sbus_diag_ms = now_ms;
+
+        let sbus = peripherals::sbus::diagnostics();
+        voloxide_core::log_info!(
+            "SBUS rx{} e{} sz{} n{} v{}",
+            sbus.read_ok,
+            sbus.read_err,
+            sbus.last_read_size,
+            sbus.size_25,
+            sbus.valid_frame
+        );
+        voloxide_core::log_info!(
+            "SBUS bh{} bf{} sig{} to{} dr{}",
+            sbus.bad_header,
+            sbus.bad_footer,
+            sbus.signal,
+            sbus.timeout,
+            self.sbus_rc_drains
+        );
+        voloxide_core::log_info!(
+            "SBUS st{} rst{} lol{}",
+            sbus.last_status,
+            self.sbus_last_rc_status,
+            self.sbus_last_rc_lol as u8
+        );
     }
 }

@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -16,6 +18,46 @@ pub static RC_SIGNAL: Signal<
 pub const SBUS_11_BIT_CHANNELS: usize = 16;
 pub const SBUS_BINARY_CHANNELS: usize = 2; // does not include status information
 pub const SBUS_CHANNELS: usize = SBUS_11_BIT_CHANNELS + SBUS_BINARY_CHANNELS;
+
+static SBUS_READ_OK: AtomicU32 = AtomicU32::new(0);
+static SBUS_READ_ERR: AtomicU32 = AtomicU32::new(0);
+static SBUS_LAST_READ_SIZE: AtomicU32 = AtomicU32::new(0);
+static SBUS_SIZE_25: AtomicU32 = AtomicU32::new(0);
+static SBUS_VALID_FRAME: AtomicU32 = AtomicU32::new(0);
+static SBUS_BAD_HEADER: AtomicU32 = AtomicU32::new(0);
+static SBUS_BAD_FOOTER: AtomicU32 = AtomicU32::new(0);
+static SBUS_SIGNAL: AtomicU32 = AtomicU32::new(0);
+static SBUS_TIMEOUT: AtomicU32 = AtomicU32::new(0);
+static SBUS_LAST_STATUS: AtomicU32 = AtomicU32::new(0);
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SbusDiagnostics {
+    pub read_ok: u32,
+    pub read_err: u32,
+    pub last_read_size: u32,
+    pub size_25: u32,
+    pub valid_frame: u32,
+    pub bad_header: u32,
+    pub bad_footer: u32,
+    pub signal: u32,
+    pub timeout: u32,
+    pub last_status: u32,
+}
+
+pub fn diagnostics() -> SbusDiagnostics {
+    SbusDiagnostics {
+        read_ok: SBUS_READ_OK.load(Ordering::Relaxed),
+        read_err: SBUS_READ_ERR.load(Ordering::Relaxed),
+        last_read_size: SBUS_LAST_READ_SIZE.load(Ordering::Relaxed),
+        size_25: SBUS_SIZE_25.load(Ordering::Relaxed),
+        valid_frame: SBUS_VALID_FRAME.load(Ordering::Relaxed),
+        bad_header: SBUS_BAD_HEADER.load(Ordering::Relaxed),
+        bad_footer: SBUS_BAD_FOOTER.load(Ordering::Relaxed),
+        signal: SBUS_SIGNAL.load(Ordering::Relaxed),
+        timeout: SBUS_TIMEOUT.load(Ordering::Relaxed),
+        last_status: SBUS_LAST_STATUS.load(Ordering::Relaxed),
+    }
+}
 
 pub struct SbusRC {
     pub uart: UartRx<'static, Async>,
@@ -48,16 +90,23 @@ impl SbusRC {
         loop {
             // Read a packet
             let result = self.uart.read_until_idle(&mut buffer).await;
-            if let Ok(_size) = result {
+            if let Ok(size) = result {
+                SBUS_READ_OK.fetch_add(1, Ordering::Relaxed);
+                SBUS_LAST_READ_SIZE.store(size as u32, Ordering::Relaxed);
+                if size == buffer.len() {
+                    SBUS_SIZE_25.fetch_add(1, Ordering::Relaxed);
+                }
                 timeout = Instant::now() + Duration::from_secs(1);
-                if (buffer[0] == 0x0F)
-                    && ((buffer[24] == 0x00)
-                        || (buffer[24] == 0x04)
-                        || (buffer[24] == 0x14)
-                        || (buffer[24] == 0x24)
-                        || (buffer[24] == 0x34))
-                {
+                let valid_header = buffer[0] == 0x0F;
+                let valid_footer = (buffer[24] == 0x00)
+                    || (buffer[24] == 0x04)
+                    || (buffer[24] == 0x14)
+                    || (buffer[24] == 0x24)
+                    || (buffer[24] == 0x34);
+                if valid_header && valid_footer {
+                    SBUS_VALID_FRAME.fetch_add(1, Ordering::Relaxed);
                     let dig = buffer[23] as u16;
+                    SBUS_LAST_STATUS.store(dig as u32, Ordering::Relaxed);
 
                     // get 16 servo (11-bit) channels
                     for i in 0..SBUS_11_BIT_CHANNELS {
@@ -91,13 +140,25 @@ impl SbusRC {
                         chan: rc_chan,
                         lol: (dig & 0x0C) != 0, // either bit 2 or 3 will signal a loss of link.
                     };
+                    SBUS_SIGNAL.fetch_add(1, Ordering::Relaxed);
                     RC_SIGNAL.signal(Ok(rc_packet));
+                } else {
+                    if !valid_header {
+                        SBUS_BAD_HEADER.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if valid_header && !valid_footer {
+                        SBUS_BAD_FOOTER.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
+            } else {
+                SBUS_READ_ERR.fetch_add(1, Ordering::Relaxed);
             }
 
             if Instant::now() > timeout {
                 timeout = Instant::now() + Duration::from_secs(1);
                 let dig = 0x1C; // set bitfield for timeout
+                SBUS_TIMEOUT.fetch_add(1, Ordering::Relaxed);
+                SBUS_LAST_STATUS.store(dig as u32, Ordering::Relaxed);
                 let header = packets::RosflightPacketHeader {
                     timestamp: Instant::now().as_micros(),
                     status: dig,
@@ -108,6 +169,7 @@ impl SbusRC {
                     chan: rc_chan,          // last known good values
                     lol: (dig & 0x1C) != 0, // signal a loss of link bits
                 };
+                SBUS_SIGNAL.fetch_add(1, Ordering::Relaxed);
                 RC_SIGNAL.signal(Ok(rc_packet));
             }
         }
