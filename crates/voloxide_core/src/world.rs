@@ -79,6 +79,10 @@ impl<R: FlightFloat> Default for ImuSampleAccumulator<R> {
 }
 
 impl<R: FlightFloat> ImuSampleAccumulator<R> {
+    fn has_samples(&self) -> bool {
+        self.count != 0
+    }
+
     fn push(&mut self, sample: crate::packets::ImuPacket<R>) {
         self.accel_sum[0] += sample.accel[0];
         self.accel_sum[1] += sample.accel[1];
@@ -754,7 +758,7 @@ where
             return RealtimeSchedulerStep::ImuControl;
         }
         let now_us = self.board.clock_micros();
-        if self.control_update_due_at(now_us) && self.processed_sensors.imu.is_some() {
+        if self.control_update_can_run_at(now_us) {
             return RealtimeSchedulerStep::ControlUpdate;
         }
         if now_us >= self.next_realtime_service_us
@@ -1379,17 +1383,23 @@ where
         self.run_control_and_mixing_stage_if_new_imu()
     }
 
-    fn control_update_due(&mut self, now_us: u64) -> bool {
+    fn control_update_due_at(&self, now_us: u64) -> bool {
         let rate_hz = self.control_loop_rates.control_hz;
         if rate_hz == 0 {
-            return true;
-        }
-
-        let interval_us = 1_000_000_u64 / rate_hz as u64;
-        if now_us.saturating_sub(self.last_control_update_us) < interval_us {
             return false;
         }
 
+        let interval_us = 1_000_000_u64 / rate_hz as u64;
+        now_us.saturating_sub(self.last_control_update_us) >= interval_us
+    }
+
+    fn consume_control_update_deadline(&mut self, now_us: u64) {
+        let rate_hz = self.control_loop_rates.control_hz;
+        if rate_hz == 0 {
+            return;
+        }
+
+        let interval_us = 1_000_000_u64 / rate_hz as u64;
         #[cfg(feature = "scope-timing-pins")]
         {
             self.board.set_test_pin_1(true);
@@ -1403,17 +1413,10 @@ where
         self.last_control_update_us = self
             .last_control_update_us
             .saturating_add(elapsed_intervals.saturating_mul(interval_us));
-        true
     }
 
-    fn control_update_due_at(&self, now_us: u64) -> bool {
-        let rate_hz = self.control_loop_rates.control_hz;
-        if rate_hz == 0 {
-            return false;
-        }
-
-        let interval_us = 1_000_000_u64 / rate_hz as u64;
-        now_us.saturating_sub(self.last_control_update_us) >= interval_us
+    fn control_update_can_run_at(&self, now_us: u64) -> bool {
+        self.control_update_due_at(now_us) && self.control_imu_accumulator.has_samples()
     }
 
     fn realtime_service_has_control_slack(&self, now_us: u64) -> bool {
@@ -1430,11 +1433,15 @@ where
     }
 
     fn run_control_and_mixing_stage_if_control_due(&mut self, now_us: u64) -> bool {
-        if !self.control_update_due(now_us) {
-            return false;
-        }
         if self.control_loop_rates.control_hz != 0 {
+            if !self.control_update_can_run_at(now_us) {
+                return false;
+            }
+            self.consume_control_update_deadline(now_us);
             return self.run_control_and_mixing_stage_with_accumulated_imu();
+        }
+        if self.processed_sensors.imu.is_none() {
+            return false;
         }
         self.run_control_and_mixing_stage_if_new_imu()
     }
@@ -1444,11 +1451,15 @@ where
         now_us: u64,
         timing: &mut ControlPipelineTiming,
     ) -> bool {
-        if !self.control_update_due(now_us) {
-            return false;
-        }
         if self.control_loop_rates.control_hz != 0 {
+            if !self.control_update_can_run_at(now_us) {
+                return false;
+            }
+            self.consume_control_update_deadline(now_us);
             return self.run_control_and_mixing_stage_with_accumulated_imu_measured(timing);
+        }
+        if self.processed_sensors.imu.is_none() {
+            return false;
         }
         self.run_control_and_mixing_stage_if_new_imu_measured(timing)
     }
@@ -2797,6 +2808,90 @@ mod tests {
 
         world.board.current_time_us = 5_000;
         assert!(!world.run_control_update_tick());
+    }
+
+    #[test]
+    fn fixed_control_rate_does_not_consume_deadline_without_accumulated_imu() {
+        let params = Params::new();
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard::default(),
+            params,
+            SensorStageCommLink::default(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
+
+        world.board.current_time_us = 1_000;
+        assert!(world.control_update_due_at(1_000));
+        assert!(!world.run_control_update_tick());
+        assert_eq!(world.last_control_update_us, 0);
+    }
+
+    #[test]
+    fn fixed_control_rate_late_wake_skips_missed_intervals_without_bursting() {
+        let params = Params::new();
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard::default(),
+            params,
+            SensorStageCommLink::default(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
+        world.control_imu_accumulator.push(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1_600,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        world.board.current_time_us = 1_600;
+        assert!(world.control_update_can_run_at(1_600));
+        world.consume_control_update_deadline(1_600);
+        assert_eq!(world.last_control_update_us, 1_500);
+
+        world.control_imu_accumulator.push(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1_601,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 2,
+        });
+        world.board.current_time_us = 1_601;
+        assert!(!world.control_update_can_run_at(1_601));
+        assert_eq!(world.last_control_update_us, 1_500);
     }
 
     #[test]

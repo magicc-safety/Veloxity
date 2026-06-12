@@ -49,8 +49,9 @@ probe-rs download --chip RP235x --protocol swd \
 probe-rs reset --chip RP235x
 ```
 
-The default flight target for this branch is the real ISM330DHCX at its native `3.333 kHz` ODR.
-Timing results should be collected from release builds, not debug builds.
+The default flight target for this branch is the real ISM330DHCX at the high-rate ODR feeding a
+fixed 1.5 kHz control loop. Timing results should be collected from release builds, not debug
+builds.
 
 ## Validate The Full Sensor Stack
 
@@ -115,14 +116,15 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --releas
   --features 'scope-timing-pins control-scope-controller'
 ```
 
-With `scope-timing-pins`, capture GP19 for the full control body and GP22 for the selected
-substage. For the controller-scope build above, GP22 marks the controller substage. A good current
-loaded timing run looks like the 120-second baseline: rare GP19 full-control pulses over `300 us`,
-`0` pulses over `333.333 us`, and no GP22 controller pulses over `300 us`. The bounded high-rate
-telemetry profile configures IMU at `400 Hz`, RC at `100 Hz`, attitude/output/differential-pressure
-and range at `50 Hz`, barometer/magnetometer/battery at `25 Hz`, GNSS at `10 Hz`, status at
-`10 Hz`, and heartbeat at `1 Hz`. The current high-rate link acceptance command checks the streams
-present in the current hardware setup: IMU, RC, attitude, and output raw.
+With `scope-timing-pins`, capture GP14 for raw IMU data-ready, GP18 for scheduled control deadline,
+GP19 for control pipeline execution, and GP22 for the selected diagnostic window. A good current
+loaded timing run looks like the 120-second 1.5 kHz baseline in the RP2350 guide: every measured
+control-deadline-to-pipeline-complete latency remains inside the 1.5 kHz budget while telemetry
+stays at the configured rates. The bounded high-rate telemetry profile configures IMU at `400 Hz`,
+RC at `100 Hz`, attitude/output/differential-pressure and range at `50 Hz`,
+barometer/magnetometer/battery at `25 Hz`, GNSS at `10 Hz`, status at `10 Hz`, and heartbeat at
+`1 Hz`. The current high-rate link acceptance command checks the streams present in the current
+hardware setup: IMU, RC, attitude, and output raw.
 
 ```bash
 python3 tools/mavlink_tester.py \

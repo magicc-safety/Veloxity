@@ -141,8 +141,8 @@ The current bounded high-rate telemetry profile configures IMU at `400 Hz`, RC a
 attitude/output/differential-pressure/range at `50 Hz`, barometer/magnetometer/battery at `25 Hz`,
 GNSS at `10 Hz`, status at `10 Hz`, and heartbeat at `1 Hz`. The current acceptance command checks
 the streams present in the current hardware setup: IMU, RC, attitude, and output raw. The 120-second
-Saleae result documented in the RP2350 guide had rare GP19 full-control pulses over `300 us` and
-`0` over `333.333 us`.
+Saleae result documented in the RP2350 guide validates the current 1.5 kHz fixed control baseline
+using scheduled-control-deadline to control-complete timing.
 
 Current high-rate telemetry integrity check against the ESP32C5 ground bridge:
 

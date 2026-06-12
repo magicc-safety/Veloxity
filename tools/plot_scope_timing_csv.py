@@ -156,51 +156,78 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("csv", type=Path)
     parser.add_argument("--out-dir", type=Path, default=Path("scope_plots"))
-    parser.add_argument("--gp19-channel", default="0")
-    parser.add_argument("--gp14-channel", default="1")
-    parser.add_argument("--gp18-channel", default="2")
-    parser.add_argument("--gp22-channel", default="3")
+    parser.add_argument("--control-execution-channel", "--gp19-channel", default="0")
+    parser.add_argument("--imu-drdy-channel", "--gp14-channel", default="1")
+    parser.add_argument("--control-deadline-channel", "--gp18-channel", default="2")
+    parser.add_argument("--service-slice-channel", "--gp22-channel", default="3")
     parser.add_argument("--drdy-cluster-us", type=float, default=20.0)
     args = parser.parse_args()
 
     channel_names, rows = load_rows(args.csv)
-    gp19 = resolve_channel(args.gp19_channel, channel_names)
-    gp14 = resolve_channel(args.gp14_channel, channel_names)
-    gp18 = resolve_channel(args.gp18_channel, channel_names)
-    gp22 = resolve_channel(args.gp22_channel, channel_names)
+    control_execution = resolve_channel(args.control_execution_channel, channel_names)
+    imu_drdy = resolve_channel(args.imu_drdy_channel, channel_names)
+    control_deadline = resolve_channel(args.control_deadline_channel, channel_names)
+    service_slice = resolve_channel(args.service_slice_channel, channel_names)
 
-    gp14_edges = clustered_edges(rising_edges(rows, gp14), args.drdy_cluster_us)
-    gp18_edges = rising_edges(rows, gp18)
-    gp19_high = high_intervals(rows, gp19)
-    gp19_edges = [start for start, _ in gp19_high]
-    gp22_high = high_intervals(rows, gp22)
-    gp22_edges = [start for start, _ in gp22_high]
+    imu_drdy_edges = clustered_edges(rising_edges(rows, imu_drdy), args.drdy_cluster_us)
+    control_deadline_edges = rising_edges(rows, control_deadline)
+    control_execution_high = high_intervals(rows, control_execution)
+    control_execution_edges = [start for start, _ in control_execution_high]
+    service_slice_high = high_intervals(rows, service_slice)
+    service_slice_edges = [start for start, _ in service_slice_high]
 
-    gp14_periods = periods(gp14_edges)
-    gp18_periods = periods(gp18_edges)
-    gp19_periods = periods(gp19_edges)
-    gp19_widths = [end - start for start, end in gp19_high]
-    gp22_widths = [end - start for start, end in gp22_high]
-    deadline_to_start, deadline_to_complete = matched_deadline_latencies(gp18_edges, gp19_high, 1500.0)
+    imu_drdy_periods = periods(imu_drdy_edges)
+    control_deadline_periods = periods(control_deadline_edges)
+    control_execution_periods = periods(control_execution_edges)
+    control_execution_widths = [end - start for start, end in control_execution_high]
+    service_slice_widths = [end - start for start, end in service_slice_high]
+    deadline_to_start, deadline_to_complete = matched_deadline_latencies(
+        control_deadline_edges, control_execution_high, 1500.0
+    )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     metrics = [
-        ("IMU DRDY period", "period (us)", gp14_periods),
-        ("Control deadline period", "period (us)", gp18_periods),
-        ("Control GP19 period", "period (us)", gp19_periods),
-        ("Control body width", "width (us)", gp19_widths),
-        ("Deadline to control start", "latency (us)", deadline_to_start),
-        ("Deadline to control complete", "latency (us)", deadline_to_complete),
+        ("Raw IMU data-ready interval", "interval (us)", imu_drdy_periods),
+        ("Scheduled control deadline interval", "interval (us)", control_deadline_periods),
+        ("Actual control update start interval", "interval (us)", control_execution_periods),
+        ("Control pipeline execution time", "duration (us)", control_execution_widths),
+        ("Control deadline to pipeline start", "latency (us)", deadline_to_start),
+        ("Control deadline to pipeline complete", "latency (us)", deadline_to_complete),
     ]
     save_distribution_grid(args.out_dir, metrics)
 
     series = [
-        ("IMU DRDY period over time", "period (us)", gp14_edges, gp14_periods),
-        ("Control deadline period over time", "period (us)", gp18_edges, gp18_periods),
-        ("Control GP19 period over time", "period (us)", gp19_edges, gp19_periods),
-        ("Control body width over time", "width (us)", gp19_edges, gp19_widths),
-        ("Deadline to control complete over time", "latency (us)", gp18_edges, deadline_to_complete),
-        ("Service GP22 width over time", "width (us)", gp22_edges, gp22_widths),
+        ("Raw IMU data-ready interval over time", "interval (us)", imu_drdy_edges, imu_drdy_periods),
+        (
+            "Scheduled control deadline interval over time",
+            "interval (us)",
+            control_deadline_edges,
+            control_deadline_periods,
+        ),
+        (
+            "Actual control update start interval over time",
+            "interval (us)",
+            control_execution_edges,
+            control_execution_periods,
+        ),
+        (
+            "Control pipeline execution time over time",
+            "duration (us)",
+            control_execution_edges,
+            control_execution_widths,
+        ),
+        (
+            "Control deadline to pipeline complete over time",
+            "latency (us)",
+            control_deadline_edges,
+            deadline_to_complete,
+        ),
+        (
+            "Service-slice execution time over time",
+            "duration (us)",
+            service_slice_edges,
+            service_slice_widths,
+        ),
     ]
     save_timeseries_grid(args.out_dir, series)
 
@@ -210,7 +237,7 @@ def main() -> None:
         handle.write(f"duration_s={rows[-1][0] - rows[0][0]:.6f}\n")
         for title, _, values in metrics:
             handle.write(f"{title}: {describe_us(values)}\n")
-        handle.write(f"Service GP22 width: {describe_us(gp22_widths)}\n")
+        handle.write(f"Service-slice execution time: {describe_us(service_slice_widths)}\n")
 
     print(f"wrote {args.out_dir / 'scope_timing_distributions.png'}")
     print(f"wrote {args.out_dir / 'scope_timing_timeseries.png'}")

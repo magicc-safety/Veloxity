@@ -17,5 +17,6 @@ __pycache__/
 *.bag
 *.mcap
 *.csv
+scope_plots*/
 *.params
 rosflight_memory/

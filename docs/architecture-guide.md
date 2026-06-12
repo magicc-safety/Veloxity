@@ -454,8 +454,8 @@ run_imu_control_tick
 ├── board.update_imu_sensor
 ├── sensors::ingestion::process_imu_sensor
 ├── update_sensor_health_and_calibration
-└── run_control_and_mixing_stage_if_new_imu
-    └── estimator/controller/mixer/PWM for a new IMU timestamp
+└── record_control_imu_candidate
+    └── add the processed IMU sample to the fixed-rate control accumulator
 ```
 
 This path drains only the IMU producer queue. It does not run communication, telemetry, parameter
@@ -467,14 +467,15 @@ phases:
 run_service_step_with_deferral
 ├── Input
 │   └── run_communication_and_parameter_service_stage
-├── SensorsRc
+├── Sensors
 │   ├── board.update_service_sensor_bus
 │   ├── process non-IMU sensor packets
-│   ├── update_sensor_health_and_calibration
+│   └── update_sensor_health_and_calibration
+├── RcCommand
 │   └── run_rc_command_state_stages
 ├── Responses
 │   └── drain_logs_and_send_responses_limited
-├── Telemetry
+├── Telemetry0/1/2
 │   └── run_realtime_telemetry_stage
 ├── Flush
 │   └── board.serial_flush_budgeted
@@ -487,15 +488,16 @@ sample is pending and the loop is still within the configured post-control servi
 what keeps telemetry, MAVLink command handling, RC interpretation, and board maintenance from
 starting late enough to steal time from the next IMU close-loop pass.
 
-RC command/state is deliberately in `SensorsRc`, not in `run_imu_control_tick`. CRSF packet parsing
-and queuing are board work; interpreting the newest RC packet, updating the command mux, running the
-state machine, syncing PWM output enable state, and updating LEDs are core `World` work. Keeping that
-work in a service phase preserves the expected ROSflight behavior while preventing variable RC
-packet arrivals from adding jitter to every IMU control closure.
+RC command/state is deliberately in `RcCommand`, not in `run_imu_control_tick` or
+`run_control_update_tick`. CRSF packet parsing and queuing are board work; draining the newest RC
+packet happens in `Sensors`, while interpreting it, updating the command mux, running the state
+machine, syncing PWM output enable state, and updating LEDs are core `World` work. Keeping that work
+in service phases preserves the expected ROSflight behavior while preventing variable RC packet
+arrivals from adding jitter to every control closure.
 
 On RP2350/Pico 2 W, IMU sampling, control cadence, and telemetry cadence are separate choices. The
 default firmware samples the ISM330DHCX at the high-rate ODR, runs the full control pipeline at
-`2 kHz`, and publishes bounded high-rate MAVLink telemetry. The board entry point is
+`1.5 kHz`, and publishes bounded high-rate MAVLink telemetry. The board entry point is
 `boards/pico2w/src/bin/voloxide.rs`; `imu-odr-1666hz` is the lower-rate hardware IMU override and
 `ism330dhcx-1k666` remains only as a compatibility alias. Core 1 owns transport and producer work,
 while the ISM330DHCX producer runs on an Embassy interrupt executor driven by `SIO_IRQ_BELL`. The

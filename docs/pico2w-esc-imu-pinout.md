@@ -261,9 +261,10 @@ Core 0 is the deterministic `World` side:
 
 - runs the realtime scheduler,
 - gives pending IMU samples priority over service work,
-- drains the latest queued IMU packet and closes the estimator/controller/mixer/PWM loop,
+- drains the latest queued IMU packet into the control accumulator,
+- runs the estimator/controller/mixer/PWM loop from a fixed 1.5 kHz control deadline,
 - slices slower work into service phases,
-- runs RC command/state handling from the service `SensorsRc` phase,
+- drains RC packets in the service `Sensors` phase and applies them in the `RcCommand` phase,
 - runs telemetry enqueue, response drain, serial flush, and deferred board actions outside the hot
   IMU tick.
 
@@ -289,7 +290,7 @@ code drains IMU samples from the ISM330DHCX queue and RC samples from the CRSF r
 current board does not have a production barometer installed; the earlier GY-91/BMP280 pressure path
 remains a low-rate service-side reference path until the dedicated barometer hardware is added. The
 IMU path is interrupt-driven. The default firmware samples the ISM330DHCX at the high-rate ODR but
-runs the full control update at `2 kHz`. Use `imu-odr-1666hz` only when deliberately testing the
+runs the full control update at `1.5 kHz`. Use `imu-odr-1666hz` only when deliberately testing the
 lower-rate timing-margin mode; `ism330dhcx-1k666` remains as a compatibility alias.
 
 Core 0 closes the control loop only from the latest queued IMU packet plus already-processed command

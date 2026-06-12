@@ -68,7 +68,7 @@ Current RP2350 status:
 
 - Main firmware builds and flashes with `probe-rs download`.
 - ISM330DHCX accelerometer/gyro path is validated through interrupt-driven firmware.
-- IMU is configured to the native `3.333 kHz` ODR for the current high-rate control-loop target.
+- IMU is configured at the high-rate ODR and feeds a fixed 1.5 kHz control loop.
 - GPS over PIO UART and ELRS/CRSF receiver have produced parsed MAVLink through the ESP-NOW bridge.
 - Barometer passthrough worked in earlier probes and is integrated through the board sensor path.
   The current production hardware still needs a fresh validation run after the dedicated barometer
@@ -120,40 +120,33 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
 
 ## Current End-To-End Findings
 
-- 2026-06-10 Saleae logic-analyzer captures validated the current RP2350/Pico 2 W realtime loop.
-  GPIO timing captures are now the authoritative loop-timing source; older MAVLink PERF and
-  classifier runs were useful for finding the issue but included broader scheduler work.
+- 2026-06-12 Saleae logic-analyzer and MAVLink captures validated the current RP2350/Pico 2 W
+  realtime loop at a fixed 1.5 kHz control update rate. GPIO timing captures are the authoritative
+  loop-timing source; MAVLink status loop-time is useful but broader and coarser.
 - Current realtime firmware shape:
   - core 1 owns ISM330DHCX data-ready handling, SPI read, IMU queue push, UART0 MAVLink transport,
     UART1 CRSF receive, and GPS PIO service;
   - core 0 owns `World`, the realtime scheduler, service phases, and the control pipeline;
-  - RC/state work is deferred to the `SensorsRc` service phase and is no longer run inside
-    `run_imu_control_tick`;
-  - one queued response is sent per realtime service response phase;
+  - high-rate IMU samples are accumulated and averaged for the fixed-rate control deadline;
+  - catch-up skips missed logical control intervals and never bursts back-to-back control updates;
+  - RC packet drain and RC command/state work run in service phases, not in the control update;
   - service work can run only in the early post-control window.
 - Current timing-pin meanings:
-  - `GP18` emits a short pulse when core 0 enters an IMU-control scheduler step.
-  - `GP19` is high for the complete fast-loop `run_imu_control_tick()` call.
+  - `GP14` is the raw ISM330DHCX data-ready signal;
+  - `GP18` emits a short pulse when core 0 consumes a scheduled control deadline;
+  - `GP19` is high while the control pipeline executes;
   - `GP22` is selected by the scope feature: service, IMU producer, pre-control, RC command/state,
     or one control substage.
-- Current validated 3.333 kHz close-loop timing with loaded MAVLink telemetry:
-  - GP19 full control body: `214524` samples, mean `125.119 us`, p99 `229.092 us`, p99.9
-    `257.906 us`, worst `308.382 us`;
-  - GP19 full control body over `300 us`: `3` pulses; over `312.5 us`: `0`; over `333.333 us`:
-    `0`;
-  - GP22 controller substage: mean `37.595 us`, p99 `73.820 us`, worst `117.886 us`;
-  - the three GP19 pulses over `300 us` were `308.382 us`, `301.340 us`, and `300.110 us`.
-- A longer 120-second confirmation run of the same reverted baseline with controller scope and
-  loaded telemetry produced `458796` GP19 control pulses: mean `127.588 us`, p99 `231.520 us`,
-  p99.9 `265.120 us`, worst `328.160 us`. It had `15` pulses over `300 us`, `5` over
-  `312.5 us`, and `0` over `333.333 us`. GP22 controller remained bounded: mean `38.209 us`,
-  p99 `75.040 us`, p99.9 `85.600 us`, worst `125.920 us`, and `0` pulses over `300 us`.
-- A short post-cleanup 24.4-second Saleae check after making the RP2350 baseline the default
-  produced `84107` GP19 control pulses: mean `148.784 us`, p99 `248.960 us`, p99.9 `274.560 us`,
-  worst `312.800 us`, `2` over `300 us`, `1` over `312.5 us`, and `0` over `333.333 us`. GP22
-  controller remained below `300 us`, with p99 `78.240 us` and worst `107.360 us`. Treat this as a
-  smoke check of the simplified feature surface; the 120-second capture remains the stronger timing
-  reference.
+- The latest 120-second loaded Saleae capture at 1.5 kHz produced:
+  - raw IMU data-ready interval: mean `281.67 us`, p99 `281.67 us`, worst `281.68 us`;
+  - scheduled control deadline interval: mean `666.00 us`, p99 `689.91 us`, worst `903.69 us`;
+  - actual control update start interval: mean `666.00 us`, p99 `710.72 us`, worst `909.39 us`;
+  - control pipeline execution time: mean `186.20 us`, p99 `279.23 us`, worst `367.09 us`;
+  - control deadline to pipeline complete: mean `215.28 us`, p99 `324.03 us`, worst `411.52 us`;
+  - service-slice execution time: mean `102.17 us`, p99 `258.44 us`, worst `493.83 us`.
+- At 1.5 kHz, the control budget is about `666.67 us`. The worst measured
+  control-deadline-to-pipeline-complete latency left about `255 us` margin in the latest 120-second
+  run.
 - Current configured bounded telemetry profile:
   - IMU telemetry: `400 Hz`;
   - RC telemetry: `100 Hz`;
@@ -164,23 +157,17 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
   - heartbeat: `1 Hz`.
 - Current loaded telemetry validation over the ESP32C5 link checked the streams present in the
   current hardware setup:
-  - IMU telemetry, RC telemetry, attitude quaternion, output raw, GNSS, status, and heartbeat;
-  - receiver throughput: about `29.15 kB/s`;
-  - invalid CRCs: `0`;
-  - estimated missing valid MAVLink sequence frames: `0`.
-- The 120-second timing confirmation received IMU telemetry at about `401 Hz`, RC telemetry at
-  about `100 Hz`, attitude and output raw at about `50 Hz`, GNSS at `10 Hz`, status at `10 Hz`,
-  and heartbeat at `1 Hz`, with about `29.42 kB/s` received. Use board timestamp deltas rather than
-  host inter-arrival timestamps for precise IMU telemetry-rate claims, because one UART read can
-  deliver multiple MAVLink frames with the same host timestamp. That run saw `24` invalid CRC
-  candidates and sequence-gap accounting reported estimated missing frames, so it is a timing
-  confirmation rather than the cleanest link-integrity reference.
-- The measurement series found the main problem:
-  - the IMU producer cadence was clean and not the source of the long tail;
-  - disabling CRSF and MAVLink TX made timing close to the isolated IMU case;
-  - direct RC-stage scope captures showed `run_rc_command_state_stages()` could take p99 about
-    `98.8 us` and worst about `146.9 us`;
-  - moving RC/state to the service phase cut pre-control p99 from `143.5 us` to `62.1 us`.
+  - IMU telemetry: `400.1 Hz` host, `400.0 Hz` board timestamp rate;
+  - RC telemetry: `100.0 Hz` host, `100.0 Hz` board timestamp rate;
+  - attitude and output raw: `50.0 Hz`;
+  - GNSS and status: `10.0 Hz`;
+  - heartbeat: `1.0 Hz`;
+  - receiver throughput: about `29.35 kB/s`;
+  - invalid CRC candidates: `0`;
+  - valid MAVLink sequence gaps, reordering, and duplicates: `0`.
+- Earlier measurement series remain useful historically: the IMU producer cadence was clean, CRSF
+  and MAVLink TX pressure explained much of the old long tail, and moving RC/state work out of the
+  IMU tick removed a major avoidable source of control jitter.
 - RP2350 telemetry over ESP-NOW has carried MAVLink heartbeat, RC, TIMESYNC, STATUSTEXT, PERF, IMU,
   attitude, output raw, GNSS, and pressure traffic in current branch testing. The current board has
   no flight barometer installed for production use; pressure telemetry was from the earlier
