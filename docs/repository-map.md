@@ -80,7 +80,7 @@ Board crates own physical integration:
 - sensor queues
 - serial or mailbox transport
 - PWM output driver
-- `World` instantiation
+- World instantiation
 
 They should not reimplement flight logic that belongs in `veloxity_core`.
 
