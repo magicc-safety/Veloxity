@@ -85,9 +85,9 @@ command handling; `veloxity_mavlink` parses and emits MAVLink frames.
 
 ### Simulation
 
-The simulator is a runtime adapter, or virtual board. It is not under `boards/` because it is split
-between a host Rust static library and a ROS 2 C++ package, but architecturally it plays the same
-role as a board crate: it adapts an external runtime into `veloxity_core`.
+The simulator is a runtime adapter, or virtual board. Its code is split between a host Rust static
+library and a ROS 2 C++ package, so it lives under `sim/`. Architecturally, it plays the same role as
+a board crate by adapting an external runtime into `veloxity_core`.
 
 `sim/firmware` exposes the Rust firmware through C ABI functions such as `veloxity_sim_create`,
 `veloxity_sim_set_sensors`, `veloxity_sim_run_once`, and `veloxity_sim_get_pwm`. It owns the
@@ -120,7 +120,7 @@ Current RP2350/Pico 2 W source is organized as:
 | `boards/pico2w/src/config.rs` | Board pinout, core-role, mailbox, and PIO allocation metadata. |
 | `boards/pico2w/src/board.rs` | `BoardIo` implementation, sensor queue drains, serial flush budget, and service hooks. |
 | `boards/pico2w/src/pwm.rs` | PIO PWM/DShot-facing actuator output driver implementation. |
-| `boards/pico2w/src/ism330dhcx.rs` | ISM330DHCX data-ready/SPI packet producer path. |
+| `boards/pico2w/src/ism330dhcx.rs` | ISM330DHCX packet queue, counters, and diagnostics. The current hot setup/read register transactions live in `boards/pico2w/src/bin/veloxity.rs`. |
 | `boards/pico2w/src/barometer.rs` | Barometer packet path. |
 | `boards/pico2w/src/gy91.rs` | Legacy GY-91/BMP280 support used as a low-rate pressure path. |
 | `boards/pico2w/src/gps.rs` | GPS and magnetometer path. |

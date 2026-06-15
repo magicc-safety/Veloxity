@@ -67,7 +67,8 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --releas
 Current RP2350 status:
 
 - Main firmware builds and flashes with `probe-rs download`.
-- ISM330DHCX accelerometer/gyro path is validated through interrupt-driven firmware.
+- ISM330DHCX accelerometer/gyro path runs through interrupt-driven firmware; current delay work is
+  focused on the direct SPI register path in the Pico entrypoint.
 - IMU is configured at the high-rate output data rate (ODR) and feeds a fixed 1.5 kHz control loop.
 - GPS over PIO UART and ELRS/CRSF receiver have produced parsed MAVLink through the ESP-NOW bridge.
 - Barometer passthrough worked in earlier probes and is integrated through the board sensor path.
@@ -120,9 +121,9 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
 
 ## Current End-To-End Findings
 
-- 2026-06-12 Saleae logic-analyzer and MAVLink captures validated the current RP2350/Pico 2 W
-  realtime loop at a fixed 1.5 kHz control update rate. GPIO timing captures are the authoritative
-  loop-timing source; MAVLink status loop-time is useful but broader and coarser.
+- 2026-06-12 Saleae logic-analyzer and MAVLink captures provide the current RP2350/Pico 2 W fixed
+  1.5 kHz control timing reference. GPIO timing captures are the authoritative loop-timing source;
+  MAVLink status loop-time is useful but broader and coarser.
 - Current realtime firmware shape:
   - core 1 owns ISM330DHCX data-ready handling, SPI read, IMU queue push, UART0 MAVLink transport,
     UART1 CRSF receive, and GPS PIO service;
@@ -137,7 +138,7 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
   - `GP19` is high while the control pipeline executes;
   - `GP22` is selected by the scope feature: service, IMU producer, pre-control, RC command/state,
     or one control substage.
-- The latest 120-second loaded Saleae capture at 1.5 kHz produced:
+- The June 12 120-second loaded Saleae capture at 1.5 kHz produced:
   - raw IMU data-ready interval: mean `281.67 us`, p99 `281.67 us`, worst `281.68 us`;
   - scheduled control deadline interval: mean `666.00 us`, p99 `689.91 us`, worst `903.69 us`;
   - actual control update start interval: mean `666.00 us`, p99 `710.72 us`, worst `909.39 us`;
@@ -145,7 +146,7 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
   - control deadline to pipeline complete: mean `215.28 us`, p99 `324.03 us`, worst `411.52 us`;
   - service-slice execution time: mean `102.17 us`, p99 `258.44 us`, worst `493.83 us`.
 - At 1.5 kHz, the control budget is about `666.67 us`. The worst measured
-  control-deadline-to-pipeline-complete latency left about `255 us` margin in the latest 120-second
+  control-deadline-to-pipeline-complete latency left about `255 us` margin in the June 12 120-second
   run.
 - Current configured bounded telemetry profile:
   - IMU telemetry: `400 Hz`;
@@ -168,6 +169,9 @@ The latest clean isolated ESP-NOW UART bridge test passed bidirectionally for 12
 - Earlier measurement series remain useful historically: the IMU producer cadence was clean, CRSF
   and MAVLink TX pressure explained much of the old long tail, and moving RC/state work out of the
   IMU tick removed a major avoidable source of control jitter.
+- New IMU delay observations should be checked against the data-ready wait, chip-select/SPI
+  transfer, register burst read, byte conversion, and queue-push stages in
+  `boards/pico2w/src/bin/veloxity.rs`.
 - RP2350 telemetry over ESP-NOW has carried MAVLink heartbeat, RC, TIMESYNC, STATUSTEXT, PERF, IMU,
   attitude, output raw, GNSS, and pressure traffic in current branch testing. The current board has
   no flight barometer installed for production use; pressure telemetry was from the earlier

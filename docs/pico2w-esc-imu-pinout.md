@@ -1,8 +1,9 @@
 # Pico 2 W Flight Hardware Pinout
 
-This wiring plan keeps the high-rate flight IMU deterministic while preserving the slower GY-91/BMP280
-path as barometer-only. The fast path is the Adafruit ISM330DHCX 6 DoF IMU on SPI with a data-ready
-interrupt. The GPS module provides both GNSS serial data and the co-located QMC5883L magnetometer.
+This wiring plan gives the high-rate flight IMU a short SPI/data-ready path while preserving the
+slower GY-91/BMP280 path as barometer-only. The fast path is the Adafruit ISM330DHCX 6 DoF IMU on
+SPI with a data-ready interrupt. The GPS module provides both GNSS serial data and the co-located
+QMC5883L magnetometer.
 The current GY-91 board should no longer feed accel/gyro data into the flight loop.
 
 ## Electrical Assumptions
@@ -168,7 +169,7 @@ only if a later board revision needs soft-serial because UART1 pins are unavaila
 
 ## ISM330DHCX SPI Wiring
 
-The Adafruit STEMMA QT/Qwiic connector exposes I2C, but the deterministic IMU path should use the
+The Adafruit STEMMA QT/Qwiic connector exposes I2C, but the flight IMU path should use the
 breakout's SPI pads plus the data-ready interrupt pin.
 
 | Pico 2 W | Adafruit ISM330DHCX label | Function |
@@ -258,7 +259,7 @@ used.
 
 ## Firmware Shape
 
-Core 0 is the deterministic `World` side:
+Core 0 owns the scheduled `World` side:
 
 - runs the realtime scheduler,
 - gives pending IMU samples priority over service work,

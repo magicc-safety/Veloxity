@@ -18,8 +18,8 @@ source scripts/build_and_source_ros2_shim.zsh
 ```
 
 Do not modify `rosflight_io` source, generated files, install files, or package configuration.
-`rosflight_io` must remain completely unmodified. Integration work must adapt Veloxity/Veloxity
-to the existing `rosflight_io` behavior.
+`rosflight_io` must remain completely unmodified. Integration work must adapt Veloxity to the
+existing `rosflight_io` behavior.
 
 ROSflight nodes may be sourced and run for testing.
 

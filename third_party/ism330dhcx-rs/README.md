@@ -1,4 +1,11 @@
 # ism330dhcx-rs
+
+> Veloxity note: this is upstream driver documentation kept with the vendored dependency. Veloxity's
+> local patch only changes the manifest so `half` builds without its default `std` feature on Pico.
+> The current Pico flight firmware performs its high-rate ISM330DHCX setup and sample reads through
+> board-local SPI register transactions in `boards/pico2w/src/bin/veloxity.rs`; these examples
+> describe the driver's public API rather than the current hot IMU path.
+
 [![Crates.io][crates-badge]][crates-url]
 [![BSD 3-Clause licensed][bsd-badge]][bsd-url]
 

@@ -118,11 +118,11 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --releas
 ```
 
 With `scope-timing-pins`, capture GP14 for raw IMU data-ready, GP18 for scheduled control deadline,
-GP19 for control pipeline execution, and GP22 for the selected diagnostic window. A good current
-loaded timing run looks like the 120-second 1.5 kHz baseline in the RP2350 guide: every measured
-control-deadline-to-pipeline-complete latency remains inside the 1.5 kHz budget while telemetry
-stays at the configured rates. The bounded high-rate telemetry profile configures IMU at `400 Hz`,
-RC at `100 Hz`, attitude/output/differential-pressure and range at `50 Hz`,
+GP19 for control pipeline execution, and GP22 for the selected diagnostic window. The 120-second
+1.5 kHz run in the RP2350 guide is the current timing reference for scheduled-control-deadline to
+pipeline-complete latency. For non-consistent IMU delay, measure the Pico board-local SPI register
+path called out in the RP2350 guide. The bounded high-rate telemetry profile configures IMU at
+`400 Hz`, RC at `100 Hz`, attitude/output/differential-pressure and range at `50 Hz`,
 barometer/magnetometer/battery at `25 Hz`, GNSS at `10 Hz`, status at `10 Hz`, and heartbeat at
 `1 Hz`. The current high-rate link acceptance command checks the streams present in the current
 hardware setup: IMU, RC, attitude, and output raw.

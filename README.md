@@ -27,7 +27,7 @@ Read these in order if you are new to the repository:
 | --- | --- |
 | ROSflight multirotor simulator with Rust firmware | Actively tested in this branch |
 | ROScopter waypoint/autonomy stack on top of Veloxity SIL | Actively tested in this branch |
-| RP2350/Pico 2 W hardware path | Active hardware bring-up path; high-rate ISM330DHCX intake with a stable 1.5 kHz fixed control loop validated under loaded telemetry |
+| RP2350/Pico 2 W hardware path | Active hardware bring-up path; high-rate ISM330DHCX intake, fixed 1.5 kHz control timing measurements, and ongoing IMU delay investigation |
 | ESP32C5 ESP-NOW UART bridge | Tested as an isolated UART-over-air link |
 | Nucleo-H753ZI | Retained and compile-current; needs renewed sensor bring-up |
 | Pixracer Pro / STM32H7 | Active STM32 hardware validation path; clean 400 Hz control timing and high-rate MAVLink telemetry validated on Pixracer Pro |
@@ -48,9 +48,10 @@ cargo xtask check-board pixracerpro
 The current RP2350/Pico 2 W hardware path uses the ISM330DHCX data-ready interrupt for high-rate
 IMU intake and runs the full estimator/controller/mixer/PWM pipeline at a fixed 1.5 kHz. The hot
 path is IMU-only and reuses the latest command/sensor state; RC, barometer, magnetometer,
-telemetry, parameters, and transport work run in bounded service phases. The default `pico2w`
-release build selects this baseline. See
-[RP2350 / Pico 2 W](docs/boards/rp2350-pico2w.md) for the measured timing and flash commands.
+telemetry, parameters, and transport work run in bounded service phases. Recent IMU delay work
+should focus on the board-local SPI register path in the Pico firmware entrypoint. See
+[RP2350 / Pico 2 W](docs/boards/rp2350-pico2w.md) for timing notes, current caveats, and flash
+commands.
 
 The current Pixracer Pro / STM32H7 path runs a fixed `400 Hz` control loop with board-specific
 post-control telemetry scheduling. Hardware tests at `921600` baud show clean `400 Hz`-class IMU

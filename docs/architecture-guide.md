@@ -204,8 +204,8 @@ PwmDriver
 └── flush
 ```
 
-The core scheduler does not branch on "am I sim or hardware?" Instead, it calls the contract. The
-concrete implementation decides what that means.
+The core scheduler calls the board contract without checking whether the runtime is simulation or
+hardware. The concrete implementation decides what that means.
 
 ## Resources In `World`
 

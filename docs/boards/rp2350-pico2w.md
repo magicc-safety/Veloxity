@@ -33,9 +33,9 @@ The intended runtime split is:
 - `BoardIo::update_sensor_bus()` drains the newest board-local sensor packets into core resources
 
 The IMU intake path is data-ready driven, while the full control pipeline runs from an independent
-fixed-rate control deadline. The current stable baseline samples the ISM330DHCX at the high-rate
-output data rate (ODR) and runs estimator/controller/mixer/PWM at 1.5 kHz using the accumulated IMU
-samples since the previous control update.
+fixed-rate control deadline. The current firmware samples the ISM330DHCX at the high-rate output
+data rate (ODR) and runs estimator/controller/mixer/PWM at 1.5 kHz using the accumulated IMU samples
+since the previous control update.
 
 ## Install
 
@@ -67,7 +67,7 @@ opt-in features should be treated as measurement, fallback, or bring-up tools:
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `ism330dhcx-driver` | Enables the real ISM330DHCX hardware IMU driver. This is part of the default baseline. | Yes; default. |
+| `ism330dhcx-driver` | Enables the real ISM330DHCX SPI/data-ready IMU path and keeps the optional `ism330dhcx-rs` dependency in the build graph. The current hot setup/read path uses board-local register transactions. | Yes; default. |
 | `imu-producer-interrupt-executor` | Runs the IMU producer on the core 1 Embassy interrupt executor driven by `SIO_IRQ_BELL`. This is part of the default baseline. | Yes; default. |
 | `imu-odr-1666hz` | Runs the ISM330DHCX at the lower `1.666 kHz` ODR for timing-margin comparisons. | No; default is the high-rate ODR. |
 | `ism330dhcx-1k666` | Compatibility alias for `imu-odr-1666hz`. | No; prefer the clearer `imu-odr-1666hz` name. |
@@ -321,15 +321,15 @@ can obscure the exact scope-edge timing.
 
 ### Current Timing Measurements
 
-The current validated capture set uses the real ISM330DHCX with full core 1 transport enabled and
-loaded MAVLink telemetry over the ESP32C5 bridge. The stable default baseline is:
+The current timing reference uses the real ISM330DHCX with full core 1 transport enabled and loaded
+MAVLink telemetry over the ESP32C5 bridge. That capture measured:
 
 - raw IMU data-ready: about `3.55 kHz` (`281.67 us` period)
 - fixed control update: `1.5 kHz` (`666.67 us` budget)
 - IMU telemetry: `400 Hz`
 - RC telemetry/input: `100 Hz`
 
-Latest 120-second loaded Saleae capture:
+June 12 120-second loaded Saleae capture:
 
 | Measurement | Samples | Mean | p95 | p99 | Worst |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -364,7 +364,7 @@ Configured bounded high-rate telemetry profile:
 | Status | `10 Hz` |
 | Heartbeat | `1 Hz` |
 
-Loaded telemetry validated during the same timing campaign:
+Loaded telemetry measured during the same timing campaign:
 
 | Stream | Acceptance expectation | Current result |
 | --- | ---: | --- |
@@ -391,6 +391,8 @@ Interpretation:
 
 - The meaningful fixed-rate control claim is scheduled control deadline to control-complete, not raw
   IMU data-ready to control-complete. The raw IMU ODR is intentionally faster than the control loop.
+- New IMU delay investigations should measure the board-local SPI register path separately from the
+  fixed-control timing reference.
 - The native high-rate ODR did not pass when the control pipeline ran every IMU sample, and 2 kHz
   worked with much tighter margin.
 - The current default architecture therefore samples the IMU at the high-rate ODR but runs the full
@@ -518,8 +520,10 @@ low-rate path and can be polled outside the critical control pass.
 - The RP2350 firmware path is designed to keep communication work out of the measured control pass.
 - The default firmware samples the ISM330DHCX at high-rate ODR and runs the full control pipeline at
   a fixed 1.5 kHz.
-- The latest 120-second loaded timing run kept every measured control-deadline-to-complete latency
-  inside the 1.5 kHz budget while maintaining expected MAVLink telemetry rates.
+- The June 12 loaded timing run kept every measured control-deadline-to-complete latency inside the
+  1.5 kHz budget while maintaining expected MAVLink telemetry rates.
+- Current IMU delay work belongs in the direct SPI register path before changing the scheduler timing
+  claims.
 - Runtime telemetry and diagnostics should be tested in release mode when evaluating timing.
 
 Use [hardware bring-up notes](../hardware-bringup-notes.md) for the concise latest runbook.

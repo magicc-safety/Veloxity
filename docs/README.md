@@ -23,11 +23,10 @@
 5. [STM32 board guide](boards/stm32.md)
 
 The current RP2350/Pico 2 W firmware target uses high-rate ISM330DHCX data-ready intake with a
-fixed 1.5 kHz control loop and bounded service phases. The latest 120-second loaded Saleae and
-MAVLink confirmation kept every measured control-deadline-to-complete latency inside the 1.5 kHz
-budget while maintaining IMU, RC, attitude, output, GNSS, status, and heartbeat telemetry rates.
-Measured hardware status, Saleae scope-pin meanings, and exact build/test commands live in the
-RP2350 guide and hardware bring-up notes.
+fixed 1.5 kHz control loop and bounded service phases. The June 12 loaded Saleae and MAVLink run
+recorded the timing table used by the current docs, while newer IMU delay observations are tracked
+against the Pico board-local SPI register path. Hardware status, Saleae scope-pin meanings, and
+exact build/test commands live in the RP2350 guide and hardware bring-up notes.
 
 The current Pixracer Pro / STM32H7 firmware target uses a fixed 400 Hz control loop with
 board-specific post-control telemetry scheduling. The latest 120-second hardware validation held
