@@ -50,7 +50,7 @@ fn main() -> ! {
     let sda_in = Input::new(peripherals.PIN_20, Pull::Up);
     let mut scl_out = Output::new(peripherals.PIN_21, Level::High);
 
-    let _ = writeln!(writer, "voloxide pico2w qmc5883l recovery probe");
+    let _ = writeln!(writer, "veloxity pico2w qmc5883l recovery probe");
     let _ = writeln!(writer, "i2c recovery sda=gp20 scl=gp21");
     let _ = writeln!(
         writer,

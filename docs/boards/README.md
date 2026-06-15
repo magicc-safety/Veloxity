@@ -1,6 +1,6 @@
 # Board Bring-Up Guide
 
-Voloxide has two actively exercised hardware paths on this branch and one retained STM32 path that
+Veloxity has two actively exercised hardware paths on this branch and one retained STM32 path that
 is kept compile-current.
 
 | Board | Crate | Target | Status |
@@ -28,7 +28,7 @@ The board crate chooses the concrete types for:
 - PWM driver
 - floating-point type where the board uses the explicit generic form
 
-The generic core loop lives in `crates/voloxide_core/src/world.rs`; board crates should not
+The generic core loop lives in `crates/veloxity_core/src/world.rs`; board crates should not
 duplicate flight logic. Pico 2 W and Pixracer Pro both use the finer-grained realtime scheduler:
 `realtime_scheduler_step()` chooses between `run_imu_control_tick()` for fresh IMU samples and
 bounded service phases for slower work. Nucleo remains on the ordinary `world.run_once()` shape

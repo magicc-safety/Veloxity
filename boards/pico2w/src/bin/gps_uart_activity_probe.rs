@@ -61,7 +61,7 @@ fn main() -> ! {
     let gp8 = Input::new(peripherals.PIN_8, Pull::Down);
     let gp9 = Input::new(peripherals.PIN_9, Pull::Down);
 
-    let _ = writeln!(writer, "voloxide pico2w gps uart activity probe");
+    let _ = writeln!(writer, "veloxity pico2w gps uart activity probe");
     let _ = writeln!(writer, "activity on gp8/gp9, pulldown=internal");
 
     loop {

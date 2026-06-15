@@ -151,7 +151,7 @@ fn main() -> ! {
         UartConfig::default(),
     );
     let mut writer = UartWriter(&mut uart);
-    let _ = writeln!(writer, "voloxide pico2w bmp280 i2c probe");
+    let _ = writeln!(writer, "veloxity pico2w bmp280 i2c probe");
     let _ = writeln!(writer, "i2c0 sda=gp20 scl=gp21");
 
     let mut i2c_config = I2cConfig::default();

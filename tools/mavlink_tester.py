@@ -165,7 +165,7 @@ def valid_crc(frame):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Receive, decode, and time Voloxide Pico 2 W MAVLink telemetry."
+        description="Receive, decode, and time Veloxity Pico 2 W MAVLink telemetry."
     )
     parser.add_argument(
         "--transport",
@@ -179,7 +179,7 @@ def parse_args():
     parser.add_argument("--board-port", type=int, default=14550)
     parser.add_argument("--bind", default="0.0.0.0")
     parser.add_argument("--bind-port", type=int, default=14551)
-    parser.add_argument("--hello", default="voloxide-host-hello")
+    parser.add_argument("--hello", default="veloxity-host-hello")
     parser.add_argument("--samples", type=int, default=1000)
     parser.add_argument("--duration-s", type=float, default=0.0)
     parser.add_argument("--show", type=int, default=5)

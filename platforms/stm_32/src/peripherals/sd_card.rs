@@ -7,8 +7,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 
-use voloxide_core::errors;
-use voloxide_core::packets;
+use veloxity_core::errors;
+use veloxity_core::packets;
 
 pub static SD_WRITE_SIGNAL: Signal<
     CriticalSectionRawMutex,

@@ -11,7 +11,7 @@ MAGIC = b"VXL1"
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Measure Voloxide Pico 2 W UDP echo round-trip latency."
+        description="Measure Veloxity Pico 2 W UDP echo round-trip latency."
     )
     parser.add_argument("board", help="Pico 2 W IPv4 address")
     parser.add_argument("--board-port", type=int, default=14550)

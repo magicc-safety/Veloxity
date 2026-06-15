@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot Saleae timing distributions for Voloxide scope-timing captures."""
+"""Plot Saleae timing distributions for Veloxity scope-timing captures."""
 
 from __future__ import annotations
 

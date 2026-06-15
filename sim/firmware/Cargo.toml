@@ -5,14 +5,14 @@ edition = "2024"
 
 [features]
 default = []
-timing-diagnostics = ["voloxide_core/timing-diagnostics"]
+timing-diagnostics = ["veloxity_core/timing-diagnostics"]
 
 [lib]
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-voloxide_core = { workspace = true }
-voloxide_mavlink = { workspace = true }
+veloxity_core = { workspace = true }
+veloxity_mavlink = { workspace = true }
 
 chrono = { version = "0.4" }
 critical-section = { version = "1.2.0", features = ["std"] }

@@ -114,7 +114,7 @@ fn main() -> ! {
     let mut cs15 = Output::new(peripherals.PIN_15, Level::High);
     let _imu_cs = Output::new(peripherals.PIN_13, Level::High);
 
-    let _ = writeln!(writer, "voloxide pico2w bmp280 bitbang spi scan");
+    let _ = writeln!(writer, "veloxity pico2w bmp280 bitbang spi scan");
     let _ = writeln!(writer, "sck=gp10 mosi=gp11 miso=gp12 cs=gp14/gp15");
 
     loop {

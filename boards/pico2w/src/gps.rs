@@ -4,7 +4,7 @@ use core::{
 };
 
 use critical_section::Mutex;
-use voloxide_core::{
+use veloxity_core::{
     errors,
     packets::{GNSSFixType, GNSSPacket, RosflightPacketHeader},
 };

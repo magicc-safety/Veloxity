@@ -5,10 +5,10 @@ use panic_halt as _;
 use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
 use stm_32::*;
-use voloxide_core::world::ControlLoopRates;
+use veloxity_core::world::ControlLoopRates;
 #[cfg(not(feature = "legacy-run-once"))]
-use voloxide_core::world::RealtimeSchedulerStep;
-use voloxide_core::{
+use veloxity_core::world::RealtimeSchedulerStep;
+use veloxity_core::{
     board::BoardIo,
     comm::{
         NamedTelemetryStream, RealtimeTelemetryPriority, RealtimeTelemetryPriorityGate,
@@ -19,7 +19,7 @@ use voloxide_core::{
     vehicle::quadrotor,
     world::World,
 };
-use voloxide_mavlink::MavlinkInterface;
+use veloxity_mavlink::MavlinkInterface;
 
 type PixracerReal = f64;
 const PIXRACER_CONTROL_LOOP_HZ: u16 = 400;

@@ -6,14 +6,14 @@ edition = "2024"
 [features]
 default = []
 legacy-run-once = []
-timing-diagnostics = ["stm_32/timing-diagnostics", "voloxide_core/timing-diagnostics"]
-scope-timing-pins = ["voloxide_core/scope-timing-pins"]
+timing-diagnostics = ["stm_32/timing-diagnostics", "veloxity_core/timing-diagnostics"]
+scope-timing-pins = ["veloxity_core/scope-timing-pins"]
 sensor-poll-diagnostics = []
 
 [dependencies]
 stm_32 = { workspace = true }
-voloxide_core = { workspace = true }
-voloxide_mavlink = { workspace = true }
+veloxity_core = { workspace = true }
+veloxity_mavlink = { workspace = true }
 heapless = { version = "0.8.0", default-features = false }
 
 panic-halt = "1.0.0"
@@ -22,6 +22,6 @@ panic-halt = "1.0.0"
 workspace = true
 
 [[bin]]
-name = "voloxide"
+name = "veloxity"
 test = false
 bench = false

@@ -1,5 +1,5 @@
 use crate::config::MAX_PWM_OUTPUTS;
-use voloxide_core::{
+use veloxity_core::{
     board::BoardIo,
     pwm::{PwmDriver, PwmError},
 };

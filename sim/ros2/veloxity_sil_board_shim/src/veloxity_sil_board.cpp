@@ -18,9 +18,9 @@
 #include <sensor_msgs/msg/temperature.hpp>
 #include <std_srvs/srv/trigger.hpp>
 
-#include "voloxide_sil_board_shim/voloxide_ffi.h"
+#include "veloxity_sil_board_shim/veloxity_ffi.h"
 
-namespace voloxide_sil_board_shim
+namespace veloxity_sil_board_shim
 {
 namespace
 {
@@ -32,17 +32,17 @@ constexpr auto kExpectedSilRunPeriod = std::chrono::microseconds{2500};
 constexpr auto kWarnSilRunGap = std::chrono::milliseconds{10};
 constexpr auto kWarnSilRunDuration = std::chrono::milliseconds{4};
 
-VoloxideFfiVector3 vector_to_ffi(const geometry_msgs::msg::Vector3 & vector)
+VeloxityFfiVector3 vector_to_ffi(const geometry_msgs::msg::Vector3 & vector)
 {
-  return VoloxideFfiVector3{vector.x, vector.y, vector.z};
+  return VeloxityFfiVector3{vector.x, vector.y, vector.z};
 }
 }
 
-class VoloxideSilBoard final : public rclcpp::Node
+class VeloxitySilBoard final : public rclcpp::Node
 {
 public:
-  VoloxideSilBoard()
-  : rclcpp::Node("voloxide_sil_board")
+  VeloxitySilBoard()
+  : rclcpp::Node("veloxity_sil_board")
   {
     declare_parameter<std::string>("simulation_host", "localhost");
     declare_parameter<int>("simulation_port", 14525);
@@ -51,11 +51,11 @@ public:
     declare_parameter<int64_t>("serial_delay_ns", 6000000);
 
     pwm_outputs_.fill(kDisabledPwmMicros);
-    firmware_.reset(voloxide_sim_create());
+    firmware_.reset(veloxity_sim_create());
     if (!firmware_) {
       RCLCPP_ERROR(
         get_logger(),
-        "failed to initialize Voloxide FFI; check VOLOXIDE_SIM_PARAM_DIR and MAVLink UDP port availability");
+        "failed to initialize Veloxity FFI; check VELOXITY_SIM_PARAM_DIR and MAVLink UDP port availability");
     }
 
     initialize_default_rc();
@@ -66,8 +66,8 @@ public:
         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
         (void)request;
         response->success = run_once();
-        response->message = response->success ? "Voloxide SIL iteration completed" :
-          "Voloxide SIL iteration failed";
+        response->message = response->success ? "Veloxity SIL iteration completed" :
+          "Veloxity SIL iteration failed";
       });
 
     pwm_publisher_ = create_publisher<rosflight_msgs::msg::PwmOutput>("sim/pwm_output", 1);
@@ -137,15 +137,15 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "voloxide_sil_board ready: service=sil_board/run, pwm=sim/pwm_output");
+      "veloxity_sil_board ready: service=sil_board/run, pwm=sim/pwm_output");
   }
 
 private:
   struct FirmwareDeleter
   {
-    void operator()(VoloxideFfiHandle * handle) const
+    void operator()(VeloxityFfiHandle * handle) const
     {
-      voloxide_sim_destroy(handle);
+      veloxity_sim_destroy(handle);
     }
   };
 
@@ -172,23 +172,23 @@ private:
     last_run_start_ = run_start;
 
     auto snapshot = build_sensor_snapshot();
-    if (!voloxide_sim_set_sensors(firmware_.get(), &snapshot)) {
-      RCLCPP_WARN(get_logger(), "failed to pass sensor snapshot to Voloxide");
+    if (!veloxity_sim_set_sensors(firmware_.get(), &snapshot)) {
+      RCLCPP_WARN(get_logger(), "failed to pass sensor snapshot to Veloxity");
       return false;
     }
 
     for (int iteration = 0; iteration < 2; ++iteration) {
-      if (!voloxide_sim_run_once(firmware_.get())) {
-        RCLCPP_WARN(get_logger(), "Voloxide firmware iteration %d failed", iteration + 1);
+      if (!veloxity_sim_run_once(firmware_.get())) {
+        RCLCPP_WARN(get_logger(), "Veloxity firmware iteration %d failed", iteration + 1);
         return false;
       }
     }
 
     std::array<uint16_t, kPwmChannelCount> outputs{};
     outputs.fill(kDisabledPwmMicros);
-    const auto copied = voloxide_sim_get_pwm(firmware_.get(), outputs.data(), outputs.size());
+    const auto copied = veloxity_sim_get_pwm(firmware_.get(), outputs.data(), outputs.size());
     if (copied != outputs.size()) {
-      RCLCPP_WARN(get_logger(), "Voloxide returned %zu PWM channels", copied);
+      RCLCPP_WARN(get_logger(), "Veloxity returned %zu PWM channels", copied);
     }
     pwm_outputs_ = outputs;
     publish_pwm();
@@ -204,9 +204,9 @@ private:
     return true;
   }
 
-  VoloxideFfiSensorSnapshot build_sensor_snapshot()
+  VeloxityFfiSensorSnapshot build_sensor_snapshot()
   {
-    VoloxideFfiSensorSnapshot snapshot{};
+    VeloxityFfiSensorSnapshot snapshot{};
     const auto timestamp_us = fcu_clock_micros();
 
     snapshot.has_imu = imu_seen_;
@@ -354,16 +354,16 @@ private:
   bool rc_available_{false};
 
   std::array<uint16_t, kPwmChannelCount> pwm_outputs_{};
-  std::unique_ptr<VoloxideFfiHandle, FirmwareDeleter> firmware_;
+  std::unique_ptr<VeloxityFfiHandle, FirmwareDeleter> firmware_;
   std::chrono::steady_clock::time_point boot_time_{std::chrono::steady_clock::now()};
   std::optional<std::chrono::steady_clock::time_point> last_run_start_;
 };
-}  // namespace voloxide_sil_board_shim
+}  // namespace veloxity_sil_board_shim
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<voloxide_sil_board_shim::VoloxideSilBoard>());
+  rclcpp::spin(std::make_shared<veloxity_sil_board_shim::VeloxitySilBoard>());
   rclcpp::shutdown();
   return 0;
 }

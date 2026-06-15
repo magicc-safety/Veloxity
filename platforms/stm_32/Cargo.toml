@@ -8,7 +8,7 @@ default = []
 timing-diagnostics = []
 
 [dependencies]
-voloxide_core = { workspace = true }
+veloxity_core = { workspace = true }
 
 embassy-executor = { version = "0.10.0", features = [
   "platform-cortex-m",

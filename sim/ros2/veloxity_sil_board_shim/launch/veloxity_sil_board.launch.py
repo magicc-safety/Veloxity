@@ -6,9 +6,9 @@ def generate_launch_description():
     return LaunchDescription(
         [
             Node(
-                package="voloxide_sil_board_shim",
-                executable="voloxide_sil_board",
-                name="voloxide_sil_board",
+                package="veloxity_sil_board_shim",
+                executable="veloxity_sil_board",
+                name="veloxity_sil_board",
                 output="screen",
             ),
         ]

@@ -7,7 +7,7 @@ The Pico 2 W is the active hardware bring-up board for this branch. The firmware
 
 | Path | Purpose |
 | --- | --- |
-| `boards/pico2w/src/bin/voloxide.rs` | Main firmware entry point, Embassy tasks, core split, and `World` construction. |
+| `boards/pico2w/src/bin/veloxity.rs` | Main firmware entry point, Embassy tasks, core split, and `World` construction. |
 | `boards/pico2w/src/board.rs` | Pico implementation of the `BoardIo` contract. |
 | `boards/pico2w/src/comms_core.rs` | Shared MAVLink mailbox between transport tasks and the flight core. |
 | `boards/pico2w/src/pwm.rs` | PIO PWM/DShot-facing driver implementation. |
@@ -24,7 +24,7 @@ The Pico 2 W is the active hardware bring-up board for this branch. The firmware
 
 The intended runtime split is:
 
-- core 0 runs the Voloxide flight-control `World`
+- core 0 runs the Veloxity flight-control `World`
 - core 1 owns communication services that can jitter without blocking the flight loop
 - PIO owns timing-sensitive output/input work
 - `BoardIo::update_sensor_bus()` drains the newest board-local sensor packets into core resources
@@ -51,7 +51,7 @@ cargo xtask build-board pico2w
 Release build:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release
 ```
 
 The default `pico2w` feature set is the current hardware baseline: real ISM330DHCX data-ready
@@ -79,14 +79,14 @@ opt-in features should be treated as measurement, fallback, or bring-up tools:
 Logic-analyzer timing build:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release \
   --features 'scope-timing-pins control-scope-controller'
 ```
 
 Timing diagnostics build:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release \
   --features 'timing-diagnostics'
 ```
 
@@ -99,7 +99,7 @@ With a debug probe attached:
 
 ```bash
 probe-rs download --chip RP235x --protocol swd \
-  target/thumbv8m.main-none-eabihf/release/voloxide
+  target/thumbv8m.main-none-eabihf/release/veloxity
 
 probe-rs reset --chip RP235x
 ```
@@ -112,7 +112,7 @@ Example from current bring-up notes:
 probe-rs download --probe 2e8a:000c-0:E6647C7403301534 \
   --chip RP235x \
   --protocol swd \
-  target/thumbv8m.main-none-eabihf/release/voloxide
+  target/thumbv8m.main-none-eabihf/release/veloxity
 
 probe-rs reset --chip RP235x
 ```
@@ -191,7 +191,7 @@ before the next data-ready event.
 
 The IMU sample rate, control update rate, and telemetry rates are intentionally separate:
 
-- IMU ODR is a board hardware choice in `boards/pico2w/src/bin/voloxide.rs`. The default high-rate
+- IMU ODR is a board hardware choice in `boards/pico2w/src/bin/veloxity.rs`. The default high-rate
   ODR uses the ISM330DHCX `0x9*` ODR register settings; `imu-odr-1666hz` selects the lower `0x8*`
   settings.
 - Control cadence is configured through `World::set_control_loop_rates`. The current Pico 2 W
@@ -255,7 +255,7 @@ Flash the logic-analyzer build:
 
 ```bash
 probe-rs download --chip RP235x --protocol swd \
-  target/thumbv8m.main-none-eabihf/release/voloxide
+  target/thumbv8m.main-none-eabihf/release/veloxity
 
 probe-rs reset --chip RP235x
 ```
@@ -266,7 +266,7 @@ If using the current debug probe from bring-up:
 probe-rs download --probe 2e8a:000c-0:E6647C7403301534 \
   --chip RP235x \
   --protocol swd \
-  target/thumbv8m.main-none-eabihf/release/voloxide
+  target/thumbv8m.main-none-eabihf/release/veloxity
 
 probe-rs reset --probe 2e8a:000c-0:E6647C7403301534 --chip RP235x
 ```
@@ -276,21 +276,21 @@ probe-rs reset --probe 2e8a:000c-0:E6647C7403301534 --chip RP235x
 Common full-system producer timing build:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release \
   --features 'scope-timing-pins imu-producer-scope'
 ```
 
 Pre-control timing build:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release \
   --features 'scope-timing-pins pre-control-scope'
 ```
 
 RC command/state timing build:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release \
   --features 'scope-timing-pins rc-command-scope'
 ```
 

@@ -3,7 +3,7 @@ use rp2350_platform::hal::{
     peripherals::SPI1,
     spi::{Blocking, Spi},
 };
-use voloxide_core::{
+use veloxity_core::{
     errors::SensorError,
     packets::{BaroPacket, ImuPacket, RosflightPacketHeader},
 };

@@ -2,7 +2,7 @@ use core::cell::RefCell;
 use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use critical_section::Mutex;
-use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
+use veloxity_core::packets::{ImuPacket, RosflightPacketHeader};
 
 #[cfg(feature = "ism330dhcx-driver")]
 pub use ism330dhcx_rs::asynchronous as st_driver;

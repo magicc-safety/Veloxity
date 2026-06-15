@@ -66,13 +66,13 @@ use rp2350_platform::hal::{
 };
 use static_cell::StaticCell;
 #[cfg(feature = "release-loop-bench")]
-use voloxide_core::board::SerialTxPriority;
+use veloxity_core::board::SerialTxPriority;
 #[cfg(any(all(feature = "ism330dhcx-driver")))]
-use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
-use voloxide_core::world::RealtimeSchedulerStep;
+use veloxity_core::packets::{ImuPacket, RosflightPacketHeader};
+use veloxity_core::world::RealtimeSchedulerStep;
 #[cfg(feature = "release-loop-classifier")]
-use voloxide_core::world::WorldRunClass;
-use voloxide_core::{
+use veloxity_core::world::WorldRunClass;
+use veloxity_core::{
     board::{BoardIo, SerialRxPriority},
     comm::TelemetryRates,
     params::Params,
@@ -80,7 +80,7 @@ use voloxide_core::{
     vehicle::quadrotor,
     world::{ControlLoopRates, World},
 };
-use voloxide_mavlink::{MavlinkFrameEncoder, MavlinkInterface, parser::MavlinkParser};
+use veloxity_mavlink::{MavlinkFrameEncoder, MavlinkInterface, parser::MavlinkParser};
 
 type PicoReal = f32;
 

@@ -51,7 +51,7 @@ fn main() -> ! {
         crsf_config,
     );
 
-    let _ = writeln!(writer, "voloxide pico2w crsf probe");
+    let _ = writeln!(writer, "veloxity pico2w crsf probe");
     let _ = writeln!(
         writer,
         "uart1 tx=gp8 rx=gp9 baud={} expect receiver tx -> gp9 rx -> gp8",

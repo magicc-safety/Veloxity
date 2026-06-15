@@ -58,7 +58,7 @@ fn main() -> ! {
         peripherals.PIN_1,
         UartConfig::default(),
     );
-    trace(&mut uart, b"voloxide pico2w gy-91 spi bench\r\n");
+    trace(&mut uart, b"veloxity pico2w gy-91 spi bench\r\n");
 
     let mut spi_config = SpiConfig::default();
     spi_config.frequency = 1_000_000;

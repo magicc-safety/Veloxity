@@ -1,9 +1,9 @@
 use nalgebra::SVector as Vector;
-use voloxide_core::controller::quad::ControllerOutput;
-use voloxide_core::mixer::matrix::{MatrixMixer, sync_reflected_mixer_params};
-use voloxide_core::mixer::{Mixer, MixerCtx, MixerStatus};
-use voloxide_core::params::{ParamId, ParamValue, Params};
-use voloxide_core::state_machine::{Event, StateManager};
+use veloxity_core::controller::quad::ControllerOutput;
+use veloxity_core::mixer::matrix::{MatrixMixer, sync_reflected_mixer_params};
+use veloxity_core::mixer::{Mixer, MixerCtx, MixerStatus};
+use veloxity_core::params::{ParamId, ParamValue, Params};
+use veloxity_core::state_machine::{Event, StateManager};
 
 fn test_params() -> Params {
     let mut params = Params::default();
@@ -31,7 +31,7 @@ fn create_test_mixer() -> MatrixMixer<f64> {
     MatrixMixer::new(&params)
 }
 
-fn output_types(mixer: &MatrixMixer<f64>) -> &[voloxide_core::mixer::MixerOutputType] {
+fn output_types(mixer: &MatrixMixer<f64>) -> &[veloxity_core::mixer::MixerOutputType] {
     <MatrixMixer<f64> as Mixer<f64>>::output_types(mixer)
 }
 
@@ -107,12 +107,12 @@ fn test_quad_emits_rosflight_ten_output_shape() {
     assert!(
         output_types(&mixer)[0..4]
             .iter()
-            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Motor)
+            .all(|kind| *kind == veloxity_core::mixer::MixerOutputType::Motor)
     );
     assert!(
         output_types(&mixer)[4..10]
             .iter()
-            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Aux)
+            .all(|kind| *kind == veloxity_core::mixer::MixerOutputType::Aux)
     );
     assert_eq!(&outputs[4..10], &[0.0; 6]);
 }
@@ -171,11 +171,11 @@ fn test_custom_mixer_loads_rosflight_parameter_matrix_and_output_types() {
 
     assert_eq!(
         output_types(&mixer)[0],
-        voloxide_core::mixer::MixerOutputType::Motor
+        veloxity_core::mixer::MixerOutputType::Motor
     );
     assert_eq!(
         output_types(&mixer)[1],
-        voloxide_core::mixer::MixerOutputType::Aux
+        veloxity_core::mixer::MixerOutputType::Aux
     );
     assert_eq!(default_pwm_rates(&mixer)[0], 490.0);
     assert!((outputs[0] - 0.2).abs() < 1e-6);
@@ -196,7 +196,7 @@ fn test_invalid_primary_mixer_reports_status_without_mutating_state() {
     assert!(
         !state
             .get_errors()
-            .contains(voloxide_core::state_machine::ErrorFlag::INVALID_MIXER)
+            .contains(veloxity_core::state_machine::ErrorFlag::INVALID_MIXER)
     );
 }
 
@@ -233,12 +233,12 @@ fn test_canned_hex_x_selection_uses_rosflight_output_ownership() {
     assert!(
         output_types(&mixer)[0..6]
             .iter()
-            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Motor)
+            .all(|kind| *kind == veloxity_core::mixer::MixerOutputType::Motor)
     );
     assert!(
         output_types(&mixer)[6..10]
             .iter()
-            .all(|kind| *kind == voloxide_core::mixer::MixerOutputType::Aux)
+            .all(|kind| *kind == veloxity_core::mixer::MixerOutputType::Aux)
     );
     assert_eq!(default_pwm_rates(&mixer)[0], 490.0);
     assert_eq!(default_pwm_rates(&mixer)[8], 50.0);
@@ -264,11 +264,11 @@ fn test_fixedwing_mixer_applies_reversal_params_before_mixing() {
 
     assert_eq!(
         output_types(&mixer)[0],
-        voloxide_core::mixer::MixerOutputType::Servo
+        veloxity_core::mixer::MixerOutputType::Servo
     );
     assert_eq!(
         output_types(&mixer)[4],
-        voloxide_core::mixer::MixerOutputType::Motor
+        veloxity_core::mixer::MixerOutputType::Motor
     );
     assert!((outputs[0] + 0.4).abs() < 1e-6);
     assert!((outputs[1] - 0.5).abs() < 1e-6);

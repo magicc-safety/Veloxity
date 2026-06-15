@@ -13,7 +13,7 @@ fn main() -> ExitCode {
 
     let status = match command.as_str() {
         "check-host" => cargo(["check"]),
-        "test-host" => cargo(["test", "-p", "voloxide_core"])
+        "test-host" => cargo(["test", "-p", "veloxity_core"])
             .and_then(|_| cargo(["test", "-p", "sim", "--lib"])),
         "check-board" => {
             let Some(board) = args.next() else {
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
                 "--target",
                 target,
                 "--bin",
-                "voloxide",
+                "veloxity",
             ])
         }
         "flash-board" => {
@@ -61,7 +61,7 @@ fn main() -> ExitCode {
                 "--target",
                 target,
                 "--bin",
-                "voloxide",
+                "veloxity",
             ])
         }
         "build-sim-lib" => cargo(["build", "-p", "sim", "--lib"]),

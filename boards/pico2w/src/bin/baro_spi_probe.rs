@@ -175,7 +175,7 @@ fn main() -> ! {
         UartConfig::default(),
     );
     let mut writer = UartWriter(&mut uart);
-    let _ = writeln!(writer, "voloxide pico2w bmp280 spi probe");
+    let _ = writeln!(writer, "veloxity pico2w bmp280 spi probe");
     let _ = writeln!(
         writer,
         "spi1 sck=gp10 mosi=gp11 miso=gp12 bmp_cs=gp15 imu_cs=gp13 high"

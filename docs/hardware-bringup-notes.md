@@ -1,7 +1,7 @@
 # Hardware Bring-Up Runbook
 
 This file records the current hardware state that is useful for cloning, wiring, flashing, and
-repeating the latest tested Voloxide hardware workflows. Historical diagnostic branches, failed
+repeating the latest tested Veloxity hardware workflows. Historical diagnostic branches, failed
 build-directory names, and one-off experiments live in Git history rather than in current docs.
 
 ## Current Hardware
@@ -48,19 +48,19 @@ cargo xtask build-board pico2w
 Release flashing through the debug probe:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release
 probe-rs download --probe 2e8a:000c-0:E6647C7403301534 \
   --chip RP235x \
   --protocol swd \
-  target/thumbv8m.main-none-eabihf/release/voloxide
+  target/thumbv8m.main-none-eabihf/release/veloxity
 ```
 
 Useful feature sets from current testing:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release
 
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release \
   --features 'scope-timing-pins control-scope-controller'
 ```
 

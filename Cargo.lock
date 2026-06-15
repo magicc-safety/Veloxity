@@ -1414,8 +1414,8 @@ version = "0.1.0"
 dependencies = [
  "panic-halt",
  "stm_32",
- "voloxide_core",
- "voloxide_mavlink",
+ "veloxity_core",
+ "veloxity_mavlink",
 ]
 
 [[package]]
@@ -1572,8 +1572,8 @@ dependencies = [
  "pio",
  "rp2350_platform",
  "static_cell",
- "voloxide_core",
- "voloxide_mavlink",
+ "veloxity_core",
+ "veloxity_mavlink",
 ]
 
 [[package]]
@@ -1643,8 +1643,8 @@ dependencies = [
  "heapless 0.8.0",
  "panic-halt",
  "stm_32",
- "voloxide_core",
- "voloxide_mavlink",
+ "veloxity_core",
+ "veloxity_mavlink",
 ]
 
 [[package]]
@@ -1997,8 +1997,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "critical-section",
- "voloxide_core",
- "voloxide_mavlink",
+ "veloxity_core",
+ "veloxity_mavlink",
 ]
 
 [[package]]
@@ -2168,7 +2168,7 @@ dependencies = [
  "embedded-hal-nb",
  "embedded-io-async",
  "static_cell",
- "voloxide_core",
+ "veloxity_core",
 ]
 
 [[package]]
@@ -2506,6 +2506,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77439c1b53d2303b20d9459b1ade71a83c716e3f9c34f3228c00e6f185d6c002"
 
 [[package]]
+name = "veloxity_core"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "critical-section",
+ "heapless 0.8.0",
+ "nalgebra",
+ "num-traits",
+]
+
+[[package]]
+name = "veloxity_mavlink"
+version = "0.1.0"
+dependencies = [
+ "mavio",
+ "mavspec",
+ "veloxity_core",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2524,26 +2544,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de437e2a6208b014ab52972a27e59b33fa2920d3e00fe05026167a1c509d19cc"
 dependencies = [
  "vcell",
-]
-
-[[package]]
-name = "voloxide_core"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "critical-section",
- "heapless 0.8.0",
- "nalgebra",
- "num-traits",
-]
-
-[[package]]
-name = "voloxide_mavlink"
-version = "0.1.0"
-dependencies = [
- "mavio",
- "mavspec",
- "voloxide_core",
 ]
 
 [[package]]

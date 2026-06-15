@@ -1,8 +1,8 @@
-use voloxide_core::board::BoardIo;
-use voloxide_core::errors;
-use voloxide_core::math::FlightFloat;
-use voloxide_core::params::Params;
-use voloxide_core::sensors::SensorBus;
+use veloxity_core::board::BoardIo;
+use veloxity_core::errors;
+use veloxity_core::math::FlightFloat;
+use veloxity_core::params::Params;
+use veloxity_core::sensors::SensorBus;
 
 use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
@@ -89,72 +89,72 @@ mod tx_diagnostics {
 mod sensor_poll_diagnostics {
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use voloxide_core::{errors::SensorError, math::FlightFloat};
+    use veloxity_core::{errors::SensorError, math::FlightFloat};
 
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_IMU: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_IMU: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_IMU_ERR: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_IMU_ERR: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_MAG: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_MAG: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_MAG_ERR: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_MAG_ERR: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_BARO: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_BARO: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_BARO_ERR: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_BARO_ERR: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_PITOT: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_PITOT: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_PITOT_ERR: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_PITOT_ERR: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_RANGE: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_RANGE: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_RANGE_ERR: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_RANGE_ERR: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_GNSS: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_GNSS: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_GNSS_ERR: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_GNSS_ERR: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_RC: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_RC: AtomicU32 = AtomicU32::new(0);
     #[unsafe(no_mangle)]
-    pub static VOLOXIDE_PIXRACER_DIAG_RC_ERR: AtomicU32 = AtomicU32::new(0);
+    pub static VELOXITY_PIXRACER_DIAG_RC_ERR: AtomicU32 = AtomicU32::new(0);
 
-    pub fn record_bus<R: FlightFloat>(sensors: &voloxide_core::sensors::SensorBus<R>) {
+    pub fn record_bus<R: FlightFloat>(sensors: &veloxity_core::sensors::SensorBus<R>) {
         record(
             &sensors.imu,
-            &VOLOXIDE_PIXRACER_DIAG_IMU,
-            &VOLOXIDE_PIXRACER_DIAG_IMU_ERR,
+            &VELOXITY_PIXRACER_DIAG_IMU,
+            &VELOXITY_PIXRACER_DIAG_IMU_ERR,
         );
         record(
             &sensors.mag,
-            &VOLOXIDE_PIXRACER_DIAG_MAG,
-            &VOLOXIDE_PIXRACER_DIAG_MAG_ERR,
+            &VELOXITY_PIXRACER_DIAG_MAG,
+            &VELOXITY_PIXRACER_DIAG_MAG_ERR,
         );
         record(
             &sensors.baro,
-            &VOLOXIDE_PIXRACER_DIAG_BARO,
-            &VOLOXIDE_PIXRACER_DIAG_BARO_ERR,
+            &VELOXITY_PIXRACER_DIAG_BARO,
+            &VELOXITY_PIXRACER_DIAG_BARO_ERR,
         );
         record(
             &sensors.pitot,
-            &VOLOXIDE_PIXRACER_DIAG_PITOT,
-            &VOLOXIDE_PIXRACER_DIAG_PITOT_ERR,
+            &VELOXITY_PIXRACER_DIAG_PITOT,
+            &VELOXITY_PIXRACER_DIAG_PITOT_ERR,
         );
         record(
             &sensors.range,
-            &VOLOXIDE_PIXRACER_DIAG_RANGE,
-            &VOLOXIDE_PIXRACER_DIAG_RANGE_ERR,
+            &VELOXITY_PIXRACER_DIAG_RANGE,
+            &VELOXITY_PIXRACER_DIAG_RANGE_ERR,
         );
         record(
             &sensors.gnss,
-            &VOLOXIDE_PIXRACER_DIAG_GNSS,
-            &VOLOXIDE_PIXRACER_DIAG_GNSS_ERR,
+            &VELOXITY_PIXRACER_DIAG_GNSS,
+            &VELOXITY_PIXRACER_DIAG_GNSS_ERR,
         );
         record(
             &sensors.rc,
-            &VOLOXIDE_PIXRACER_DIAG_RC,
-            &VOLOXIDE_PIXRACER_DIAG_RC_ERR,
+            &VELOXITY_PIXRACER_DIAG_RC,
+            &VELOXITY_PIXRACER_DIAG_RC_ERR,
         );
     }
 
@@ -742,7 +742,7 @@ impl Board {
     #[cfg(feature = "sensor-poll-diagnostics")]
     fn record_sbus_rc_drain(
         &mut self,
-        rc: &Option<Result<voloxide_core::packets::RcPacket, errors::SensorError>>,
+        rc: &Option<Result<veloxity_core::packets::RcPacket, errors::SensorError>>,
     ) {
         if let Some(result) = rc {
             self.sbus_rc_drains = self.sbus_rc_drains.wrapping_add(1);
@@ -762,7 +762,7 @@ impl Board {
         self.last_sbus_diag_ms = now_ms;
 
         let sbus = peripherals::sbus::diagnostics();
-        voloxide_core::log_info!(
+        veloxity_core::log_info!(
             "SBUS rx{} e{} sz{} n{} v{}",
             sbus.read_ok,
             sbus.read_err,
@@ -770,7 +770,7 @@ impl Board {
             sbus.size_25,
             sbus.valid_frame
         );
-        voloxide_core::log_info!(
+        veloxity_core::log_info!(
             "SBUS bh{} bf{} sig{} to{} dr{}",
             sbus.bad_header,
             sbus.bad_footer,
@@ -778,7 +778,7 @@ impl Board {
             sbus.timeout,
             self.sbus_rc_drains
         );
-        voloxide_core::log_info!(
+        veloxity_core::log_info!(
             "SBUS st{} rst{} lol{}",
             sbus.last_status,
             self.sbus_last_rc_status,

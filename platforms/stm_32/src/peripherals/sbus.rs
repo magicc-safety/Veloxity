@@ -7,8 +7,8 @@ use embassy_sync::signal::Signal;
 use embassy_time::Duration;
 use embassy_time::Instant;
 
-use voloxide_core::errors;
-use voloxide_core::packets;
+use veloxity_core::errors;
+use veloxity_core::packets;
 
 pub static RC_SIGNAL: Signal<
     CriticalSectionRawMutex,

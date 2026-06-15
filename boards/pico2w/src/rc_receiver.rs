@@ -2,7 +2,7 @@ use core::cell::RefCell;
 
 use critical_section::Mutex;
 use crsf::{Packet, PacketParser, RcChannels};
-use voloxide_core::packets::{RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader};
+use veloxity_core::packets::{RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader};
 
 pub const CRSF_BAUDRATE: u32 = 420_000;
 pub const CRSF_MAX_CHANNELS: usize = 16;

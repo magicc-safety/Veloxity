@@ -1,9 +1,9 @@
-use voloxide_core::board::BoardIo;
-use voloxide_core::errors;
-use voloxide_core::math::FlightFloat;
-use voloxide_core::params::Params;
-use voloxide_core::pwm::{PwmDriver, PwmError};
-use voloxide_core::sensors::SensorBus;
+use veloxity_core::board::BoardIo;
+use veloxity_core::errors;
+use veloxity_core::math::FlightFloat;
+use veloxity_core::params::Params;
+use veloxity_core::pwm::{PwmDriver, PwmError};
+use veloxity_core::sensors::SensorBus;
 
 use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
@@ -100,9 +100,9 @@ impl PwmDriver<f64> for BoardPwmDriver {
             .map_err(timer_error_to_pwm_error)
     }
 
-    fn flush<B: voloxide_core::board::BoardIo>(&mut self, _board: &mut B) {}
+    fn flush<B: veloxity_core::board::BoardIo>(&mut self, _board: &mut B) {}
 
-    fn send_commands<B: voloxide_core::board::BoardIo>(
+    fn send_commands<B: veloxity_core::board::BoardIo>(
         &mut self,
         board: &mut B,
         commands: &[f64],

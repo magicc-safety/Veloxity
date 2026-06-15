@@ -1,10 +1,10 @@
 [package]
-name = "voloxide_mavlink"
+name = "veloxity_mavlink"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-voloxide_core = { workspace = true }
+veloxity_core = { workspace = true }
 mavio = { version = "0.5.5", default-features = false, features = [
   "embedded-io",
 ] }

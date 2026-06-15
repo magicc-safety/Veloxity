@@ -7,8 +7,8 @@ use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 use embassy_time::Timer;
 
-use voloxide_core::errors;
-use voloxide_core::packets;
+use veloxity_core::errors;
+use veloxity_core::packets;
 
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embedded_hal_async::spi::SpiDevice as _;

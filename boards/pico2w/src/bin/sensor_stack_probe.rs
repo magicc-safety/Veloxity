@@ -285,7 +285,7 @@ async fn main(spawner: Spawner) -> ! {
         spi_config,
     );
 
-    let _ = writeln!(writer, "voloxide pico2w sensor stack probe");
+    let _ = writeln!(writer, "veloxity pico2w sensor stack probe");
     let _ = writeln!(
         writer,
         "spi1 gp10/11/12 imu_cs=gp13 baro_cs=gp15 crsf uart1 gp8/gp9 gps pio_rx=gp7"

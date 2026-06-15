@@ -57,7 +57,7 @@ async fn main(_spawner: Spawner) -> ! {
         &rx_program,
     );
 
-    let _ = writeln!(writer, "voloxide pico2w gps pio rx probe");
+    let _ = writeln!(writer, "veloxity pico2w gps pio rx probe");
     let _ = writeln!(
         writer,
         "pio0 sm0 gps_rx=gp7 baud=115200 expect m100 tx -> gp7"

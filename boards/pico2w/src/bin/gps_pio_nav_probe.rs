@@ -64,7 +64,7 @@ async fn main(_spawner: Spawner) -> ! {
         &tx_program,
     );
 
-    let _ = writeln!(writer, "voloxide pico2w gps pio nav probe");
+    let _ = writeln!(writer, "veloxity pico2w gps pio nav probe");
     let _ = writeln!(writer, "gps rx=gp7 tx=gp6 baud=115200");
 
     configure_nav_pvt(&mut gps_tx).await;

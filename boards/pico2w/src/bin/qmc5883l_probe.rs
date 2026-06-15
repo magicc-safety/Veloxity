@@ -72,7 +72,7 @@ fn main() -> ! {
         i2c_config,
     );
 
-    let _ = writeln!(writer, "voloxide pico2w qmc5883l probe");
+    let _ = writeln!(writer, "veloxity pico2w qmc5883l probe");
     let _ = writeln!(writer, "i2c0 sda=gp20 scl=gp21 addr=0x0d");
 
     let mut status = [0_u8; 1];

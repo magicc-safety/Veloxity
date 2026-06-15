@@ -6,10 +6,10 @@ use core::{
 use critical_section::Mutex;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pipe::Pipe};
 use heapless::Deque;
-use voloxide_core::board::{
+use veloxity_core::board::{
     SERIAL_RX_FRAME_MAX_BYTES, SerialRxFrame, SerialRxPriority, SerialTxPriority,
 };
-use voloxide_core::comm::messages::messages::DownlinkMessage;
+use veloxity_core::comm::messages::messages::DownlinkMessage;
 
 const MAVLINK_V1_MAX_FRAME_BYTES: usize = 263;
 const TX_FRAME_CAPACITY: usize = 64;
@@ -646,11 +646,11 @@ fn priority_min(current: u8, value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use voloxide_core::comm::messages::enums::{OffboardControlIgnore, OffboardControlMode};
-    use voloxide_core::comm::messages::messages::{
+    use veloxity_core::comm::messages::enums::{OffboardControlIgnore, OffboardControlMode};
+    use veloxity_core::comm::messages::messages::{
         AttitudeQuaternionMsg, RosflightStatusMsg, SmallImuMsg,
     };
-    use voloxide_core::state_machine::ErrorFlag;
+    use veloxity_core::state_machine::ErrorFlag;
 
     #[test]
     fn tx_frames_pop_in_priority_order() {

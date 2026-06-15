@@ -45,7 +45,7 @@ fn main() -> ! {
     );
     let mut writer = UartWriter(&mut uart);
 
-    let _ = writeln!(writer, "voloxide pico2w uart0 text probe");
+    let _ = writeln!(writer, "veloxity pico2w uart0 text probe");
     let _ = writeln!(writer, "uart0 tx=gp0 rx=gp1 baud={}", UART_BAUD);
 
     let mut count = 0_u32;

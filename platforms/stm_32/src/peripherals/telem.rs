@@ -8,8 +8,8 @@ use embassy_time::Timer;
 #[cfg(feature = "timing-diagnostics")]
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use voloxide_core::comm::interface::EmbeddedComInterface;
-use voloxide_core::errors;
+use veloxity_core::comm::interface::EmbeddedComInterface;
+use veloxity_core::errors;
 
 pub static TX_BUFF_SIZE: usize = 4 * 2048;
 pub static RX_BUFF_SIZE: usize = 4 * 2048;

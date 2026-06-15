@@ -4,10 +4,10 @@ use cortex_m_rt::entry;
 use nucleo::*;
 use panic_halt as _;
 use stm_32::*;
-use voloxide_core::{
+use veloxity_core::{
     board::BoardIo, params::Params, state_machine::StateManager, vehicle::quadrotor, world::World,
 };
-use voloxide_mavlink::MavlinkInterface;
+use veloxity_mavlink::MavlinkInterface;
 
 type NucleoReal = f64;
 

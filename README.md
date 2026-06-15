@@ -1,8 +1,8 @@
-<img src="assets/voloxide-logo.svg" alt="Voloxide logo" width="180" height="180">
+<img src="assets/veloxity-logo.svg" alt="Veloxity logo" width="180" height="180">
 
-# Voloxide
+# Veloxity
 
-Voloxide is a Rust firmware implementation for the ROSflight ecosystem. The current branch focuses
+Veloxity is a Rust firmware implementation for the ROSflight ecosystem. The current branch focuses
 on making the Rust firmware interchangeable with the upstream ROSflight C firmware in the ROSflight
 multirotor simulator, while keeping embedded firmware paths for RP2350/Pico 2 W, Nucleo-H753ZI, and
 Pixracer Pro/STM32H7.
@@ -18,7 +18,7 @@ Read these in order if you are new to the repository:
 2. [Repository map](docs/repository-map.md)
 3. [Build and tool commands](docs/build-and-tools.md)
 4. [Core architecture](docs/architecture-guide.md)
-5. [ROSflight simulator setup](docs/tutorials/voloxide-roscopter-sim-end-to-end.md)
+5. [ROSflight simulator setup](docs/tutorials/veloxity-roscopter-sim-end-to-end.md)
 6. [Board bring-up guide](docs/boards/README.md)
 
 ## Current Support Status
@@ -26,7 +26,7 @@ Read these in order if you are new to the repository:
 | Area | Status |
 | --- | --- |
 | ROSflight multirotor simulator with Rust firmware | Actively tested in this branch |
-| ROScopter waypoint/autonomy stack on top of Voloxide SIL | Actively tested in this branch |
+| ROScopter waypoint/autonomy stack on top of Veloxity SIL | Actively tested in this branch |
 | RP2350/Pico 2 W hardware path | Active hardware bring-up path; high-rate ISM330DHCX intake with a stable 1.5 kHz fixed control loop validated under loaded telemetry |
 | ESP32C5 ESP-NOW UART bridge | Tested as an isolated UART-over-air link |
 | Nucleo-H753ZI | Retained and compile-current; needs renewed sensor bring-up |
@@ -62,13 +62,13 @@ For ROSflight simulation, source ROS 2 and the ROSflight workspace first, then b
 
 ```bash
 source scripts/build_and_source_ros2_shim.zsh
-ros2 launch voloxide_sil_board_shim multirotor_standalone_sil.launch.py use_rviz:=true
+ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py use_rviz:=true
 ```
 
 The script builds:
 
 - `target/debug/libsim.a`
-- `workspace/install/voloxide_sil_board_shim`
+- `workspace/install/veloxity_sil_board_shim`
 
 Generated local artifacts can be removed with:
 
@@ -78,9 +78,9 @@ cargo xtask clean-generated
 
 ## Repository Rules
 
-- Do not modify `rosflight_io` to make Voloxide work. Voloxide adapts to the existing ROSflight
+- Do not modify `rosflight_io` to make Veloxity work. Veloxity adapts to the existing ROSflight
   ROS 2 stack.
-- Voloxide scripts assume ROS 2 and the ROSflight workspace are already sourced by the caller.
+- Veloxity scripts assume ROS 2 and the ROSflight workspace are already sourced by the caller.
 - Keep generated artifacts out of Git: `target/`, `workspace/`, ESP-IDF build directories, and
   runtime parameter stores are disposable.
 - Prefer adding documentation under `docs/` and linking it from [docs/README.md](docs/README.md)
@@ -92,6 +92,6 @@ This project is licensed under the [NO IDEA](LICENSE).
 
 ## Upstream Context
 
-Voloxide is built to interoperate with [ROSflight](https://github.com/rosflight/rosflight). See the
+Veloxity is built to interoperate with [ROSflight](https://github.com/rosflight/rosflight). See the
 [ROSflight docs](https://docs.rosflight.org/latest/) for system-level ROSflight concepts and
 message/service behavior.

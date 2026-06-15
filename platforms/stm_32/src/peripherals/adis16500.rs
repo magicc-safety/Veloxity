@@ -8,8 +8,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Instant, Timer};
 use embedded_hal_async::spi::SpiDevice as _;
-use voloxide_core::errors;
-use voloxide_core::packets::{ImuPacket, RosflightPacketHeader};
+use veloxity_core::errors;
+use veloxity_core::packets::{ImuPacket, RosflightPacketHeader};
 
 // Device dependent
 const SPI_READ: u8 = 0x00;

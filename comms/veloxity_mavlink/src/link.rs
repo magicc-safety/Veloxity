@@ -2,9 +2,9 @@ use crate::generated::dialects::rosflight::{Rosflight, messages as mav_messages}
 use crate::parser;
 use mavio::Frame;
 use mavio::prelude::*;
-use voloxide_core::board::{self, SerialTxPriority};
-use voloxide_core::comm::interface::CommInterface;
-use voloxide_core::comm::messages::{
+use veloxity_core::board::{self, SerialTxPriority};
+use veloxity_core::comm::interface::CommInterface;
+use veloxity_core::comm::messages::{
     Messages, Store,
     messages::{self as core_messages, DownlinkMessage},
 };
@@ -687,7 +687,7 @@ impl<B: board::BoardIo> CommInterface<B> for MavlinkInterface {
 mod tests {
     use super::*;
     use crate::generated::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
-    use voloxide_core::{
+    use veloxity_core::{
         board::{BoardIo, SerialRxFrame, SerialTxPriority},
         comm::interface::CommInterface,
         errors,
@@ -734,7 +734,7 @@ mod tests {
     }
 
     impl BoardIo for FramedBoard {
-        fn update_sensor_bus<R: voloxide_core::math::FlightFloat>(
+        fn update_sensor_bus<R: veloxity_core::math::FlightFloat>(
             &mut self,
             sensors: &mut SensorBus<R>,
         ) {
@@ -772,7 +772,7 @@ mod tests {
     }
 
     impl BoardIo for TxCaptureBoard {
-        fn update_sensor_bus<R: voloxide_core::math::FlightFloat>(
+        fn update_sensor_bus<R: veloxity_core::math::FlightFloat>(
             &mut self,
             sensors: &mut SensorBus<R>,
         ) {
@@ -805,7 +805,7 @@ mod tests {
     }
 
     impl BoardIo for DownlinkCaptureBoard {
-        fn update_sensor_bus<R: voloxide_core::math::FlightFloat>(
+        fn update_sensor_bus<R: veloxity_core::math::FlightFloat>(
             &mut self,
             sensors: &mut SensorBus<R>,
         ) {

@@ -159,7 +159,7 @@ fn main() -> ! {
     release(&mut sda);
     release(&mut scl);
 
-    let _ = writeln!(writer, "voloxide pico2w qmc5883l bitbang probe");
+    let _ = writeln!(writer, "veloxity pico2w qmc5883l bitbang probe");
     let _ = writeln!(writer, "bitbang i2c sda=gp20 scl=gp21 addr=0x0d");
     let _ = writeln!(
         writer,

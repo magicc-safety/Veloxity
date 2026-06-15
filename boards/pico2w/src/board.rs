@@ -17,7 +17,7 @@ use crate::{
 use embassy_time::Instant;
 #[cfg(feature = "scope-timing-pins")]
 use rp2350_platform::hal::gpio::Output;
-use voloxide_core::{
+use veloxity_core::{
     board::{BoardIo, SerialRxFrame, SerialTxPriority},
     comm::messages::messages::DownlinkMessage,
     errors,
@@ -63,12 +63,12 @@ impl PicoSensorProducer {
         }
     }
 
-    fn drain_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+    fn drain_into<R: veloxity_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         self.drain_imu_into(sensors);
         self.drain_service_into(sensors);
     }
 
-    fn drain_service_into<R: voloxide_core::math::FlightFloat>(
+    fn drain_service_into<R: veloxity_core::math::FlightFloat>(
         &mut self,
         sensors: &mut SensorBus<R>,
     ) {
@@ -90,7 +90,7 @@ impl PicoSensorProducer {
         self.ism330dhcx_imu.has_pending()
     }
 
-    fn drain_imu_into<R: voloxide_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
+    fn drain_imu_into<R: veloxity_core::math::FlightFloat>(&mut self, sensors: &mut SensorBus<R>) {
         let Some(imu) = self.ism330dhcx_imu.take_latest() else {
             return;
         };
@@ -184,7 +184,7 @@ impl Board {
 }
 
 impl BoardIo for Board {
-    fn update_sensor_bus<R: voloxide_core::math::FlightFloat>(
+    fn update_sensor_bus<R: veloxity_core::math::FlightFloat>(
         &mut self,
         sensors: &mut SensorBus<R>,
     ) {
@@ -196,7 +196,7 @@ impl BoardIo for Board {
         self.sensors.imu_pending()
     }
 
-    fn update_imu_sensor<R: voloxide_core::math::FlightFloat>(
+    fn update_imu_sensor<R: veloxity_core::math::FlightFloat>(
         &mut self,
         sensors: &mut SensorBus<R>,
     ) {
@@ -204,7 +204,7 @@ impl BoardIo for Board {
         self.sensors.drain_imu_into(sensors);
     }
 
-    fn update_service_sensor_bus<R: voloxide_core::math::FlightFloat>(
+    fn update_service_sensor_bus<R: veloxity_core::math::FlightFloat>(
         &mut self,
         sensors: &mut SensorBus<R>,
     ) {

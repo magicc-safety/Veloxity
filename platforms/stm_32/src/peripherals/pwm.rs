@@ -5,7 +5,7 @@ use embassy_stm32::peripherals::{
 };
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
-use voloxide_core::pwm::{
+use veloxity_core::pwm::{
     DshotCommand, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
 };
 

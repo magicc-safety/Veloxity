@@ -98,21 +98,21 @@ probe-rs reset --chip RP235x
 Build a release firmware image with the current IMU feature set:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release
 ```
 
 Flash:
 
 ```bash
 probe-rs download --chip RP235x --protocol swd \
-  target/thumbv8m.main-none-eabihf/release/voloxide
+  target/thumbv8m.main-none-eabihf/release/veloxity
 probe-rs reset --chip RP235x
 ```
 
 For GPIO timing capture:
 
 ```bash
-cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin voloxide --release \
+cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --release \
   --features 'scope-timing-pins control-scope-controller'
 ```
 

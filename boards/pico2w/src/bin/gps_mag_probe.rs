@@ -127,7 +127,7 @@ fn main() -> ! {
         i2c_config,
     );
 
-    let _ = writeln!(writer, "voloxide pico2w gps+mag probe");
+    let _ = writeln!(writer, "veloxity pico2w gps+mag probe");
     let _ = writeln!(writer, "gps uart1 tx=gp4 rx=gp5 baud=115200");
     let _ = writeln!(writer, "mag i2c0 sda=gp20 scl=gp21");
 

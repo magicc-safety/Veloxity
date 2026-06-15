@@ -4,7 +4,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 
-use voloxide_core::packets;
+use veloxity_core::packets;
 
 pub static PPS_SIGNAL: Signal<CriticalSectionRawMutex, packets::PpsPacket> =
     Signal::<CriticalSectionRawMutex, packets::PpsPacket>::new();

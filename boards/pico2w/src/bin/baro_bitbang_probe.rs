@@ -216,7 +216,7 @@ fn main() -> ! {
     let mut bmp_cs = Output::new(peripherals.PIN_16, Level::High);
     let _imu_cs = Output::new(peripherals.PIN_13, Level::High);
 
-    let _ = writeln!(writer, "voloxide pico2w bmp280 bitbang probe");
+    let _ = writeln!(writer, "veloxity pico2w bmp280 bitbang probe");
     let _ = writeln!(
         writer,
         "sck=gp10 mosi=gp11 bmp_miso=gp17 bmp_cs=gp16 imu_cs=gp13 high"

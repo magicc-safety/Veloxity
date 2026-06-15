@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>voloxide_sil_board_shim</name>
+  <name>veloxity_sil_board_shim</name>
   <version>0.1.0</version>
-  <description>ROS 2 rclcpp shim for running Voloxide as a ROSflight SIL board replacement.</description>
-  <maintainer email="dev@example.com">Voloxide Developers</maintainer>
+  <description>ROS 2 rclcpp shim for running Veloxity as a ROSflight SIL board replacement.</description>
+  <maintainer email="dev@example.com">Veloxity Developers</maintainer>
   <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

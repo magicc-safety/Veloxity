@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chrono::{Datelike, TimeZone, Timelike, Utc};
-use voloxide_core::{
+use veloxity_core::{
     board::BoardIo,
     controller::quad::QuadController,
     errors,
@@ -22,17 +22,17 @@ use voloxide_core::{
     state_machine::StateManager,
     world::World,
 };
-use voloxide_mavlink::MavlinkInterface;
+use veloxity_mavlink::MavlinkInterface;
 
 const NUM_PWM_CHANNELS: usize = 14;
 const DEFAULT_MAVLINK_BIND: &str = "127.0.0.1:14525";
 const DEFAULT_MAVLINK_REMOTE: &str = "127.0.0.1:14520";
-const PARAM_DIR_ENV: &str = "VOLOXIDE_SIM_PARAM_DIR";
-const PARAM_STORE_FILE: &str = "voloxide_sim.params";
+const PARAM_DIR_ENV: &str = "VELOXITY_SIM_PARAM_DIR";
+const PARAM_STORE_FILE: &str = "veloxity_sim.params";
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiVector3 {
+pub struct VeloxityFfiVector3 {
     pub x: f64,
     pub y: f64,
     pub z: f64,
@@ -40,23 +40,23 @@ pub struct VoloxideFfiVector3 {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiImu {
+pub struct VeloxityFfiImu {
     pub timestamp_us: u64,
-    pub angular_velocity: VoloxideFfiVector3,
-    pub linear_acceleration: VoloxideFfiVector3,
+    pub angular_velocity: VeloxityFfiVector3,
+    pub linear_acceleration: VeloxityFfiVector3,
     pub temperature_kelvin: f32,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiMag {
+pub struct VeloxityFfiMag {
     pub timestamp_us: u64,
-    pub magnetic_field: VoloxideFfiVector3,
+    pub magnetic_field: VeloxityFfiVector3,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiBaro {
+pub struct VeloxityFfiBaro {
     pub timestamp_us: u64,
     pub altitude: f32,
     pub pressure: f32,
@@ -65,7 +65,7 @@ pub struct VoloxideFfiBaro {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiGnss {
+pub struct VeloxityFfiGnss {
     pub timestamp_us: u64,
     pub fix_type: u8,
     pub num_sat: u8,
@@ -84,7 +84,7 @@ pub struct VoloxideFfiGnss {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiAirspeed {
+pub struct VeloxityFfiAirspeed {
     pub timestamp_us: u64,
     pub differential_pressure: f32,
     pub temperature_kelvin: f32,
@@ -93,7 +93,7 @@ pub struct VoloxideFfiAirspeed {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiRange {
+pub struct VeloxityFfiRange {
     pub timestamp_us: u64,
     pub range: f32,
     pub min_range: f32,
@@ -102,7 +102,7 @@ pub struct VoloxideFfiRange {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiBattery {
+pub struct VeloxityFfiBattery {
     pub timestamp_us: u64,
     pub voltage: f32,
     pub current: f32,
@@ -110,12 +110,12 @@ pub struct VoloxideFfiBattery {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct VoloxideFfiRc {
+pub struct VeloxityFfiRc {
     pub timestamp_us: u64,
     pub values: [u16; 8],
 }
 
-impl Default for VoloxideFfiRc {
+impl Default for VeloxityFfiRc {
     fn default() -> Self {
         Self {
             timestamp_us: 0,
@@ -126,28 +126,28 @@ impl Default for VoloxideFfiRc {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VoloxideFfiSensorSnapshot {
+pub struct VeloxityFfiSensorSnapshot {
     pub has_imu: bool,
-    pub imu: VoloxideFfiImu,
+    pub imu: VeloxityFfiImu,
     pub has_mag: bool,
-    pub mag: VoloxideFfiMag,
+    pub mag: VeloxityFfiMag,
     pub has_baro: bool,
-    pub baro: VoloxideFfiBaro,
+    pub baro: VeloxityFfiBaro,
     pub has_gnss: bool,
-    pub gnss: VoloxideFfiGnss,
+    pub gnss: VeloxityFfiGnss,
     pub has_airspeed: bool,
-    pub airspeed: VoloxideFfiAirspeed,
+    pub airspeed: VeloxityFfiAirspeed,
     pub has_range: bool,
-    pub range: VoloxideFfiRange,
+    pub range: VeloxityFfiRange,
     pub has_battery: bool,
-    pub battery: VoloxideFfiBattery,
+    pub battery: VeloxityFfiBattery,
     pub has_rc: bool,
-    pub rc: VoloxideFfiRc,
+    pub rc: VeloxityFfiRc,
 }
 
 #[derive(Default)]
 struct SharedSensors {
-    snapshot: VoloxideFfiSensorSnapshot,
+    snapshot: VeloxityFfiSensorSnapshot,
 }
 
 #[derive(Clone)]
@@ -257,11 +257,11 @@ struct FfiBoard {
 
 impl FfiBoard {
     fn new(sensors: Arc<Mutex<SharedSensors>>) -> io::Result<Self> {
-        let bind_addr: SocketAddr = std::env::var("VOLOXIDE_MAVLINK_BIND")
+        let bind_addr: SocketAddr = std::env::var("VELOXITY_MAVLINK_BIND")
             .unwrap_or_else(|_| DEFAULT_MAVLINK_BIND.into())
             .parse()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
-        let remote_addr: SocketAddr = std::env::var("VOLOXIDE_MAVLINK_REMOTE")
+        let remote_addr: SocketAddr = std::env::var("VELOXITY_MAVLINK_REMOTE")
             .unwrap_or_else(|_| DEFAULT_MAVLINK_REMOTE.into())
             .parse()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
@@ -514,14 +514,14 @@ type FfiWorld = World<
     f64,
 >;
 
-pub struct VoloxideFfiHandle {
+pub struct VeloxityFfiHandle {
     sensors: Arc<Mutex<SharedSensors>>,
     outputs: Arc<Mutex<[u16; NUM_PWM_CHANNELS]>>,
     world: FfiWorld,
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn voloxide_sim_create() -> *mut VoloxideFfiHandle {
+pub extern "C" fn veloxity_sim_create() -> *mut VeloxityFfiHandle {
     let sensors = Arc::new(Mutex::new(SharedSensors::default()));
     let outputs = Arc::new(Mutex::new([1000; NUM_PWM_CHANNELS]));
 
@@ -542,7 +542,7 @@ pub extern "C" fn voloxide_sim_create() -> *mut VoloxideFfiHandle {
         board, params, mavlink, state, estimator, controller, mixer, pwm,
     );
 
-    Box::into_raw(Box::new(VoloxideFfiHandle {
+    Box::into_raw(Box::new(VeloxityFfiHandle {
         sensors,
         outputs,
         world,
@@ -550,16 +550,16 @@ pub extern "C" fn voloxide_sim_create() -> *mut VoloxideFfiHandle {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn voloxide_sim_destroy(handle: *mut VoloxideFfiHandle) {
+pub unsafe extern "C" fn veloxity_sim_destroy(handle: *mut VeloxityFfiHandle) {
     if !handle.is_null() {
         drop(unsafe { Box::from_raw(handle) });
     }
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn voloxide_sim_set_sensors(
-    handle: *mut VoloxideFfiHandle,
-    snapshot: *const VoloxideFfiSensorSnapshot,
+pub unsafe extern "C" fn veloxity_sim_set_sensors(
+    handle: *mut VeloxityFfiHandle,
+    snapshot: *const VeloxityFfiSensorSnapshot,
 ) -> bool {
     if handle.is_null() || snapshot.is_null() {
         return false;
@@ -574,7 +574,7 @@ pub unsafe extern "C" fn voloxide_sim_set_sensors(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn voloxide_sim_run_once(handle: *mut VoloxideFfiHandle) -> bool {
+pub unsafe extern "C" fn veloxity_sim_run_once(handle: *mut VeloxityFfiHandle) -> bool {
     if handle.is_null() {
         return false;
     }
@@ -584,8 +584,8 @@ pub unsafe extern "C" fn voloxide_sim_run_once(handle: *mut VoloxideFfiHandle) -
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn voloxide_sim_get_pwm(
-    handle: *const VoloxideFfiHandle,
+pub unsafe extern "C" fn veloxity_sim_get_pwm(
+    handle: *const VeloxityFfiHandle,
     output: *mut u16,
     output_len: usize,
 ) -> usize {
@@ -608,7 +608,7 @@ fn param_store_path() -> io::Result<PathBuf> {
     let Some(dir) = std::env::var_os(PARAM_DIR_ENV) else {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "VOLOXIDE_SIM_PARAM_DIR must point to a writable runtime parameter directory",
+            "VELOXITY_SIM_PARAM_DIR must point to a writable runtime parameter directory",
         ));
     };
     let dir = PathBuf::from(dir);

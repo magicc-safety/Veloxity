@@ -7,8 +7,8 @@ use embassy_time::Instant;
 use embassy_time::with_timeout;
 
 use super::pps;
-use voloxide_core::errors;
-use voloxide_core::packets;
+use veloxity_core::errors;
+use veloxity_core::packets;
 
 const BUFFER_LEN: usize = 512;
 

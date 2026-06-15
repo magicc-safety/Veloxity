@@ -67,7 +67,7 @@ fn main() -> ! {
         gps_config,
     );
 
-    let _ = writeln!(writer, "voloxide pico2w gps uart probe");
+    let _ = writeln!(writer, "veloxity pico2w gps uart probe");
     let _ = writeln!(writer, "gps uart1 tx=gp8 rx=gp9 baud=115200");
     let _ = writeln!(writer, "expect m100 tx -> gp9, m100 rx -> gp8");
 

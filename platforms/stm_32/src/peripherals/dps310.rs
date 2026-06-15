@@ -11,8 +11,8 @@ use embassy_time::with_timeout;
 use embedded_hal_async::spi::SpiDevice as _;
 
 use crate::synch_at;
-use voloxide_core::errors;
-use voloxide_core::packets;
+use veloxity_core::errors;
+use veloxity_core::packets;
 
 // Device dependent
 const SPI_READ: u8 = 0x80;

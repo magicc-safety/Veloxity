@@ -21,17 +21,17 @@ def generate_launch_description():
     use_vimfly = LaunchConfiguration("use_vimfly")
     use_builtin_rc = LaunchConfiguration("use_builtin_rc")
     use_rviz = LaunchConfiguration("use_rviz")
-    voloxide_param_dir = LaunchConfiguration("voloxide_param_dir")
+    veloxity_param_dir = LaunchConfiguration("veloxity_param_dir")
 
     is_c = PythonExpression(["'", firmware, "' == 'c'"])
-    is_voloxide = PythonExpression(["'", firmware, "' == 'voloxide'"])
+    is_veloxity = PythonExpression(["'", firmware, "' == 'veloxity'"])
 
     return LaunchDescription([
         DeclareLaunchArgument(
             "firmware",
-            default_value="voloxide",
-            choices=["c", "voloxide"],
-            description="Firmware endpoint to run: upstream ROSflight C++ or Voloxide FFI.",
+            default_value="veloxity",
+            choices=["c", "veloxity"],
+            description="Firmware endpoint to run: upstream ROSflight C++ or Veloxity FFI.",
         ),
         DeclareLaunchArgument("use_sim_time", default_value="false"),
         DeclareLaunchArgument("use_vimfly", default_value="false"),
@@ -46,17 +46,17 @@ def generate_launch_description():
             description="Open the standalone RViz visualizer.",
         ),
         DeclareLaunchArgument(
-            "voloxide_param_dir",
+            "veloxity_param_dir",
             default_value=EnvironmentVariable(
-                "VOLOXIDE_SIM_PARAM_DIR",
-                default_value="/tmp/voloxide-sim-params/multirotor",
+                "VELOXITY_SIM_PARAM_DIR",
+                default_value="/tmp/veloxity-sim-params/multirotor",
             ),
-            description="Writable runtime parameter directory for the Voloxide FFI firmware.",
+            description="Writable runtime parameter directory for the Veloxity FFI firmware.",
         ),
         SetEnvironmentVariable(
-            "VOLOXIDE_SIM_PARAM_DIR",
-            voloxide_param_dir,
-            condition=IfCondition(is_voloxide),
+            "VELOXITY_SIM_PARAM_DIR",
+            veloxity_param_dir,
+            condition=IfCondition(is_veloxity),
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -88,11 +88,11 @@ def generate_launch_description():
             parameters=[{"use_sim_time": use_sim_time}],
         ),
         Node(
-            package="voloxide_sil_board_shim",
-            executable="voloxide_sil_board",
-            name="voloxide_sil_board",
+            package="veloxity_sil_board_shim",
+            executable="veloxity_sil_board",
+            name="veloxity_sil_board",
             output="screen",
-            condition=IfCondition(is_voloxide),
+            condition=IfCondition(is_veloxity),
             parameters=[{"use_sim_time": use_sim_time}],
         ),
         Node(

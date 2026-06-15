@@ -1,8 +1,8 @@
-# Voloxide Architecture Guide
+# Veloxity Architecture Guide
 
-This guide defines the vocabulary used in the current Voloxide codebase and then walks the
+This guide defines the vocabulary used in the current Veloxity codebase and then walks the
 architecture in the same order a reader would encounter it from `sim/`, through the ROS 2 shim,
-through the Rust FFI boundary, into `voloxide_core::World`, and back out through MAVLink and PWM.
+through the Rust FFI boundary, into `veloxity_core::World`, and back out through MAVLink and PWM.
 
 The architecture is static ECS-style Rust:
 
@@ -19,7 +19,7 @@ subsystem directly.
 
 Use these terms consistently when reading or editing this codebase.
 
-| Term | Meaning in Voloxide | Concrete examples |
+| Term | Meaning in Veloxity | Concrete examples |
 | --- | --- | --- |
 | Contract | A trait that defines replaceable behavior. Contracts let core depend on capability rather than a concrete runtime. | `BoardIo`, `CommInterface`, `Estimator`, `Controller`, `Mixer`, `PwmDriver` |
 | Resource | Long-lived state owned by `World` or by a runtime boundary. Resources are the ECS-style singleton data for the flight stack. | `Params`, `SensorBus`, `ProcessedSensors`, `Rc`, `CommandManager`, `StateManager`, `PwmOutputState` |
@@ -35,17 +35,17 @@ Use these terms consistently when reading or editing this codebase.
 | Receiver | Code that drains or reads events and applies the requested work. | `params::service`, `command::service`, `companion`, `params::reactions` |
 | Scheduler | Code that owns ordering. In core, this is `World::run_once` and the stage methods it calls. | `run_communication_and_parameter_service_stage`, `run_sensor_ingestion_and_health_stage` |
 | Stage | A named scheduler section grouping related systems in order. | communication/parameter service, sensor ingestion/health, RC/state, control/mixing, telemetry |
-| Adapter | Code outside `voloxide_core` that connects core contracts to a concrete runtime or protocol. | `voloxide_mavlink`, `sim`, `pico2w`, `pixracerpro`, `nucleo`, ROS 2 shim |
+| Adapter | Code outside `veloxity_core` that connects core contracts to a concrete runtime or protocol. | `veloxity_mavlink`, `sim`, `pico2w`, `pixracerpro`, `nucleo`, ROS 2 shim |
 | Boundary | A place where one layer hands data to another layer through an explicit API. | ROS 2 C++ shim to Rust FFI, `CommInterface`, `BoardIo`, `PwmDriver` |
-| Wire message | Protocol-shaped data at a communication boundary. Core keeps protocol-neutral message structs; MAVLink encoding lives in `voloxide_mavlink`. | `ParamValueMsg`, `RosflightCmdMsg`, `StatustextMsg` |
-| Packet | Sensor or actuator data in Voloxide's firmware-facing representation. | `ImuPacket`, `RcPacket`, `BaroPacket`, `BatteryPacket` |
+| Wire message | Protocol-shaped data at a communication boundary. Core keeps protocol-neutral message structs; MAVLink encoding lives in `veloxity_mavlink`. | `ParamValueMsg`, `RosflightCmdMsg`, `StatustextMsg` |
+| Packet | Sensor or actuator data in Veloxity's firmware-facing representation. | `ImuPacket`, `RcPacket`, `BaroPacket`, `BatteryPacket` |
 
 ## Repository Tree
 
 ```text
-Voloxide/
+Veloxity/
 ├── crates/
-│   └── voloxide_core/
+│   └── veloxity_core/
 │       └── src/
 │           ├── lib.rs
 │           ├── world.rs
@@ -91,7 +91,7 @@ Voloxide/
 │           ├── errors.rs
 │           └── vehicle.rs
 ├── comms/
-│   └── voloxide_mavlink/
+│   └── veloxity_mavlink/
 │       └── src/
 │           ├── link.rs
 │           ├── conversions.rs
@@ -112,9 +112,9 @@ Voloxide/
 │   │       ├── board.rs
 │   │       ├── pwm.rs
 │   │       └── bin/
-│   │           └── voloxide.rs
+│   │           └── veloxity.rs
 │   └── ros2/
-│       └── voloxide_sil_board_shim/
+│       └── veloxity_sil_board_shim/
 │           ├── src/
 │           ├── include/
 │           └── launch/
@@ -128,27 +128,27 @@ Voloxide/
 The intended dependency direction is:
 
 ```text
-voloxide_core
+veloxity_core
 ├── has contracts
 ├── has resources
 ├── has systems
 ├── has scheduler
 └── does not know MAVLink, ROS 2, or board startup
 
-voloxide_mavlink
-├── depends on voloxide_core
+veloxity_mavlink
+├── depends on veloxity_core
 ├── implements CommInterface
 ├── parses MAVLink frames
 ├── builds MAVLink frames
 └── converts between MAVLink wire types and core comm messages
 
 sim
-├── depends on voloxide_core
-├── depends on voloxide_mavlink
+├── depends on veloxity_core
+├── depends on veloxity_mavlink
 ├── provides FFI board/PWM adapters for ROS 2 shim
 └── exposes the simulator firmware through the ROS 2 shim FFI path
 
-sim/ros2/voloxide_sil_board_shim
+sim/ros2/veloxity_sil_board_shim
 ├── is a ROS 2 rclcpp package in this repo
 ├── subscribes/publishes ROSflight simulator topics
 ├── exposes sil_board/run
@@ -160,7 +160,7 @@ pico2w / pixracerpro / nucleo
 └── use platform crates for chip-family support where useful
 ```
 
-Core should never depend outward on `sim`, `voloxide_mavlink`, ROS 2 packages, or board crates.
+Core should never depend outward on `sim`, `veloxity_mavlink`, ROS 2 packages, or board crates.
 
 ## Contracts
 
@@ -245,7 +245,7 @@ Those fields are not handed wholesale to systems. `World` creates contexts from 
 
 ## Events And Ports
 
-Events are declared in `crates/voloxide_core/src/events.rs`.
+Events are declared in `crates/veloxity_core/src/events.rs`.
 
 ```text
 ParamEventQueues
@@ -531,7 +531,7 @@ arrivals from adding jitter to every control closure.
 On RP2350/Pico 2 W, IMU sampling, control cadence, and telemetry cadence are separate choices. The
 default firmware samples the ISM330DHCX at the high-rate ODR, runs the full control pipeline at
 `1.5 kHz`, and publishes bounded high-rate MAVLink telemetry. The board entry point is
-`boards/pico2w/src/bin/voloxide.rs`; `imu-odr-1666hz` is the lower-rate hardware IMU override and
+`boards/pico2w/src/bin/veloxity.rs`; `imu-odr-1666hz` is the lower-rate hardware IMU override and
 `ism330dhcx-1k666` remains only as a compatibility alias. Core 1 owns transport and producer work,
 while the ISM330DHCX producer runs on an Embassy interrupt executor driven by `SIO_IRQ_BELL`. The
 `scope-timing-pins` family exposes GP19 for control timing plus GP22 for the selected substage.
@@ -562,14 +562,14 @@ rosflight_sim standalone multirotor
 ├── calls sil_board/run through rosflight_sil_manager
 └── consumes sim/pwm_output
 
-sim/ros2/voloxide_sil_board_shim
+sim/ros2/veloxity_sil_board_shim
 ├── subscribes simulator sensor topics
 ├── subscribes sim/RC
 ├── exposes sil_board/run
-├── builds VoloxideFfiSensorSnapshot
-├── calls voloxide_sim_set_sensors
-├── calls voloxide_sim_run_once
-├── calls voloxide_sim_get_pwm
+├── builds VeloxityFfiSensorSnapshot
+├── calls veloxity_sim_set_sensors
+├── calls veloxity_sim_run_once
+├── calls veloxity_sim_get_pwm
 └── publishes sim/pwm_output
 
 sim/firmware/src/ffi.rs
@@ -580,7 +580,7 @@ sim/firmware/src/ffi.rs
 ├── maps PwmDriver commands into shared PWM outputs
 └── owns UDP MAVLink socket for rosflight_io
 
-voloxide_core::World
+veloxity_core::World
 ├── runs scheduler
 ├── consumes BoardIo sensors
 ├── processes MAVLink through CommInterface
@@ -588,7 +588,7 @@ voloxide_core::World
 ├── writes PWM through PwmDriver
 └── queues telemetry responses
 
-voloxide_mavlink
+veloxity_mavlink
 ├── parses incoming MAVLink from rosflight_io
 ├── fills core Messages
 ├── serializes outgoing core comm messages
@@ -607,32 +607,32 @@ unmodified rosflight_io
 ```text
 sim/firmware/src/ffi.rs
 ├── FFI data structs
-│   ├── VoloxideFfiImu
-│   ├── VoloxideFfiMag
-│   ├── VoloxideFfiBaro
-│   ├── VoloxideFfiGnss
-│   ├── VoloxideFfiAirspeed
-│   ├── VoloxideFfiRange
-│   ├── VoloxideFfiBattery
-│   ├── VoloxideFfiRc
-│   └── VoloxideFfiSensorSnapshot
+│   ├── VeloxityFfiImu
+│   ├── VeloxityFfiMag
+│   ├── VeloxityFfiBaro
+│   ├── VeloxityFfiGnss
+│   ├── VeloxityFfiAirspeed
+│   ├── VeloxityFfiRange
+│   ├── VeloxityFfiBattery
+│   ├── VeloxityFfiRc
+│   └── VeloxityFfiSensorSnapshot
 ├── FfiPwmDriver
 │   └── implements PwmDriver
 ├── FfiBoard
 │   └── implements BoardIo
 ├── FfiWorld type alias
-├── VoloxideFfiHandle
-├── voloxide_sim_create
-├── voloxide_sim_destroy
-├── voloxide_sim_set_sensors
-├── voloxide_sim_run_once
-└── voloxide_sim_get_pwm
+├── VeloxityFfiHandle
+├── veloxity_sim_create
+├── veloxity_sim_destroy
+├── veloxity_sim_set_sensors
+├── veloxity_sim_run_once
+└── veloxity_sim_get_pwm
 ```
 
 The FFI snapshot is the input boundary from C++ into Rust:
 
 ```text
-VoloxideFfiSensorSnapshot
+VeloxityFfiSensorSnapshot
 ├── has_imu + imu
 ├── has_mag + mag
 ├── has_baro + baro
@@ -646,7 +646,7 @@ VoloxideFfiSensorSnapshot
 `FfiBoard::update_sensor_bus` maps the latest snapshot into firmware packets:
 
 ```text
-VoloxideFfiSensorSnapshot
+VeloxityFfiSensorSnapshot
 └── FfiBoard::update_sensor_bus
     ├── ImuPacket
     ├── MagPacket
@@ -678,16 +678,16 @@ World/control/pwm system
         └── outputs: Arc<Mutex<[u16; 14]>>
 ```
 
-The C++ shim later calls `voloxide_sim_get_pwm` and publishes those values as ROS 2
+The C++ shim later calls `veloxity_sim_get_pwm` and publishes those values as ROS 2
 `sim/pwm_output`.
 
-## Reading `sim/ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp`
+## Reading `sim/ros2/veloxity_sil_board_shim/src/veloxity_sil_board.cpp`
 
 The C++ shim is the ROS 2 node boundary. It does not implement flight logic.
 
 ```text
-VoloxideSilBoard node
-├── node name: voloxide_sil_board
+VeloxitySilBoard node
+├── node name: veloxity_sil_board
 ├── service: sil_board/run
 ├── publisher: sim/pwm_output
 ├── subscriptions
@@ -700,7 +700,7 @@ VoloxideSilBoard node
 │   ├── sim/sensors/range
 │   ├── sim/sensors/battery
 │   └── sim/RC
-└── firmware_: VoloxideFfiHandle
+└── firmware_: VeloxityFfiHandle
 ```
 
 Each subscription stores the latest ROS message and marks it available:
@@ -724,9 +724,9 @@ When `rosflight_sil_manager` calls `sil_board/run`, the shim executes:
 ```text
 run_once
 ├── build_sensor_snapshot
-├── voloxide_sim_set_sensors
-├── voloxide_sim_run_once
-├── voloxide_sim_get_pwm
+├── veloxity_sim_set_sensors
+├── veloxity_sim_run_once
+├── veloxity_sim_get_pwm
 └── publish_pwm
 ```
 
@@ -743,9 +743,9 @@ The shim also logs diagnostic warnings if `sil_board/run` itself is not being ca
 10 ms or if a firmware service step takes more than 4 ms. These warnings are meant to separate SIL
 service-cadence problems from downstream `rosflight_io` or ROScopter estimator behavior.
 
-The FFI simulator requires `VOLOXIDE_SIM_PARAM_DIR` to point at a writable runtime directory before
-`voloxide_sim_create` is called. The multirotor standalone launch defaults this to
-`/tmp/voloxide-sim-params/multirotor`, and the launch argument `voloxide_param_dir:=...` can move it
+The FFI simulator requires `VELOXITY_SIM_PARAM_DIR` to point at a writable runtime directory before
+`veloxity_sim_create` is called. The multirotor standalone launch defaults this to
+`/tmp/veloxity-sim-params/multirotor`, and the launch argument `veloxity_param_dir:=...` can move it
 to a persistent path.
 
 ## Simulator Integration Boundary
@@ -756,9 +756,9 @@ has one supported ROSflight SIL path:
 
 ```text
 ROSflight simulator topics
-└── sim/ros2/voloxide_sil_board_shim
+└── sim/ros2/veloxity_sil_board_shim
     └── sim/firmware/src/ffi.rs
-        └── voloxide_core::World
+        └── veloxity_core::World
 ```
 
 `rmw_zenoh_cpp` may still be used as the ROS 2 middleware for the surrounding ROS graph, but the
@@ -771,7 +771,7 @@ This is the clearest example of events and contexts.
 ```text
 rosflight_io
 └── sends PARAM_SET over MAVLink
-    └── voloxide_mavlink parses frame
+    └── veloxity_mavlink parses frame
         └── CommManager has msgs.param_set
             └── CommManager::act_on_messages
                 └── emits ParamSetRequested
@@ -787,7 +787,7 @@ rosflight_io
                                         └── World::drain_logs_and_send_responses
                                             └── CommManager::send_comm_responses
                                                 └── CommInterface::send_named_value
-                                                    └── voloxide_mavlink writes MAVLink bytes
+                                                    └── veloxity_mavlink writes MAVLink bytes
 ```
 
 Ownership is split:
@@ -836,7 +836,7 @@ not through a second command ACK.
 ROS /sim/RC
 └── C++ shim latest_rc_
     └── build_sensor_snapshot
-        └── VoloxideFfiRc
+        └── VeloxityFfiRc
             └── FfiBoard::update_sensor_bus
                 └── RcPacket in SensorBus
                     └── sensors::ingestion::process_sensor_bus
@@ -934,7 +934,7 @@ Scheduler branch
 └── should stay explicit
 ```
 
-Do not add runtime-specific branches to `voloxide_core` when a contract can express the same thing.
+Do not add runtime-specific branches to `veloxity_core` when a contract can express the same thing.
 
 ## Adding A New System
 
@@ -1046,14 +1046,14 @@ world.rs
 Use this order when stepping through the simulator integration:
 
 ```text
-1. sim/ros2/voloxide_sil_board_shim/src/voloxide_sil_board.cpp
+1. sim/ros2/veloxity_sil_board_shim/src/veloxity_sil_board.cpp
    ├── node construction
    ├── ROS subscriptions
    ├── sil_board/run service
    ├── build_sensor_snapshot
    └── publish_pwm
 
-2. sim/ros2/voloxide_sil_board_shim/include/voloxide_sil_board_shim/voloxide_ffi.h
+2. sim/ros2/veloxity_sil_board_shim/include/veloxity_sil_board_shim/veloxity_ffi.h
    └── C ABI declarations
 
 3. sim/firmware/src/ffi.rs
@@ -1061,35 +1061,35 @@ Use this order when stepping through the simulator integration:
    ├── FfiBoard::update_sensor_bus
    ├── FfiBoard serial_rx_read / serial_tx_write
    ├── FfiPwmDriver
-   ├── voloxide_sim_create
-   ├── voloxide_sim_set_sensors
-   ├── voloxide_sim_run_once
-   └── voloxide_sim_get_pwm
+   ├── veloxity_sim_create
+   ├── veloxity_sim_set_sensors
+   ├── veloxity_sim_run_once
+   └── veloxity_sim_get_pwm
 
-4. crates/voloxide_core/src/world.rs
+4. crates/veloxity_core/src/world.rs
    ├── World resources
    ├── run_once
    └── stage methods
 
-5. crates/voloxide_core/src/comm.rs
+5. crates/veloxity_core/src/comm.rs
    ├── process_incoming_messages
    ├── act_on_messages
    └── send_comm_responses
 
-6. crates/voloxide_core/src/sensors/
+6. crates/veloxity_core/src/sensors/
    ├── ingestion.rs
    ├── processors.rs
    └── health.rs
 
-7. crates/voloxide_core/src/rc/
+7. crates/veloxity_core/src/rc/
    └── system.rs
 
-8. crates/voloxide_core/src/control.rs
+8. crates/veloxity_core/src/control.rs
 
-9. crates/voloxide_core/src/pwm/
+9. crates/veloxity_core/src/pwm/
    └── system.rs
 
-10. comms/voloxide_mavlink/src/
+10. comms/veloxity_mavlink/src/
     ├── parser.rs
     ├── conversions.rs
     └── link.rs
@@ -1102,7 +1102,7 @@ That path follows one simulator tick from ROS sensor input to firmware update to
 Use this order when stepping through the active RP2350/Pico 2 W firmware:
 
 ```text
-1. boards/pico2w/src/bin/voloxide.rs
+1. boards/pico2w/src/bin/veloxity.rs
    ├── default feature-driven hardware setup
    ├── core 0 realtime scheduler loop
    ├── core 1 Embassy executor tasks
@@ -1125,7 +1125,7 @@ Use this order when stepping through the active RP2350/Pico 2 W firmware:
 5. boards/pico2w/src/gps.rs
    └── GPS PIO UART and magnetometer-facing path
 
-6. crates/voloxide_core/src/world.rs
+6. crates/veloxity_core/src/world.rs
    ├── realtime_scheduler_step
    ├── run_imu_control_tick
    └── run_service_step_with_deferral
@@ -1139,13 +1139,13 @@ timing results, and flash commands.
 Use this order when renewing Nucleo-H753ZI or Pixracer Pro validation:
 
 ```text
-1. boards/nucleo/src/bin/voloxide.rs
+1. boards/nucleo/src/bin/veloxity.rs
    └── Nucleo World construction and firmware loop
 
 2. boards/nucleo/src/board.rs
    └── Nucleo BoardIo and board setup
 
-3. boards/pixracerpro/src/bin/voloxide.rs
+3. boards/pixracerpro/src/bin/veloxity.rs
    └── Pixracer Pro World construction and firmware loop
 
 4. boards/pixracerpro/src/board.rs
@@ -1157,7 +1157,7 @@ Use this order when renewing Nucleo-H753ZI or Pixracer Pro validation:
    ├── serial/RC drivers
    └── Embassy signal tasks
 
-6. crates/voloxide_core/src/world.rs
+6. crates/veloxity_core/src/world.rs
    └── generic run_once scheduler and stage methods
 ```
 

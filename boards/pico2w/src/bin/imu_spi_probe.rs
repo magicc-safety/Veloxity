@@ -60,7 +60,7 @@ fn main() -> ! {
         UartConfig::default(),
     );
 
-    trace(&mut uart, b"voloxide pico2w gy-91 spi probe\r\n");
+    trace(&mut uart, b"veloxity pico2w gy-91 spi probe\r\n");
 
     let mpu_cs = Output::new(peripherals.PIN_13, Level::High);
     let bmp_cs = Output::new(peripherals.PIN_14, Level::High);

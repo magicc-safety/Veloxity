@@ -1,6 +1,6 @@
 use crate::generated::dialects::rosflight::{enums as mav_enums, messages as mav_messages};
-use voloxide_core::comm::messages::{enums as comm_enums, messages as core_messages};
-use voloxide_core::packets;
+use veloxity_core::comm::messages::{enums as comm_enums, messages as core_messages};
+use veloxity_core::packets;
 
 impl From<mav_enums::RosflightAuxCmdType> for comm_enums::RosflightAuxCmdType {
     fn from(val: mav_enums::RosflightAuxCmdType) -> Self {
@@ -154,7 +154,7 @@ impl From<mav_messages::ParamRequestList> for core_messages::ParamRequestListMsg
 impl From<mav_messages::ParamSet> for core_messages::ParamSetMsg {
     fn from(msg: mav_messages::ParamSet) -> Self {
         use mav_enums::MavParamType::*;
-        use voloxide_core::params::ParamValue;
+        use veloxity_core::params::ParamValue;
         Self {
             target_system: msg.target_system,
             target_component: msg.target_component,
@@ -365,7 +365,7 @@ impl From<core_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
 impl From<core_messages::ParamValueMsg> for mav_messages::ParamValue {
     fn from(msg: core_messages::ParamValueMsg) -> Self {
         use mav_enums::MavParamType;
-        use voloxide_core::params::ParamValue as CommParamValue;
+        use veloxity_core::params::ParamValue as CommParamValue;
         let (value_f32, value_type) = match msg.param_value {
             // Should the ParamValue type be updated to support smaller types?
             CommParamValue::Float(f) => (f, MavParamType::Real32),

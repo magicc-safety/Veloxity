@@ -1,7 +1,7 @@
-# Voloxide ROScopter Sim End-to-End
+# Veloxity ROScopter Sim End-to-End
 
 > [!summary]
-> This guide runs the Voloxide Rust firmware inside the ROSflight standalone multirotor simulator,
+> This guide runs the Veloxity Rust firmware inside the ROSflight standalone multirotor simulator,
 > initializes that firmware through `rosflight_io`, then starts ROScopter autonomy and loads a
 > waypoint mission.
 
@@ -9,7 +9,7 @@
 > The words below are intentionally specific:
 >
 > - **Build the shim** means compile the Rust simulator library and the C++ ROS 2 bridge.
-> - **Start the simulator** means launch ROSflight standalone sim, `rosflight_io`, and the Voloxide
+> - **Start the simulator** means launch ROSflight standalone sim, `rosflight_io`, and the Veloxity
 >   Rust firmware endpoint.
 > - **Initialize the running firmware** means load firmware params, calibrate IMU/baro, and write
 >   params through `rosflight_io` services.
@@ -17,7 +17,7 @@
 
 > [!note]
 > These commands assume ROS 2 and the ROSflight workspace have already been sourced by your shell.
-> Voloxide scripts use the caller's environment; they do not source external ROSflight helper
+> Veloxity scripts use the caller's environment; they do not source external ROSflight helper
 > scripts.
 
 ## Terminal Layout
@@ -26,7 +26,7 @@ Use separate terminals so long-running nodes stay visible.
 
 | Terminal | Purpose |
 |---|---|
-| Terminal 1 | Build the shim, then keep the Voloxide simulator running |
+| Terminal 1 | Build the shim, then keep the Veloxity simulator running |
 | Terminal 2 | Initialize the running firmware |
 | Terminal 3 | Launch ROScopter autonomy |
 | Terminal 4 | Load missions, publish waypoints, arm, monitor |
@@ -36,14 +36,14 @@ Use separate terminals so long-running nodes stay visible.
 **Terminal 1**
 
 ```bash
-cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Voloxide
+cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Veloxity
 source scripts/build_and_source_ros2_shim.zsh
 ```
 
 This builds:
 
 - `target/debug/libsim.a`: Rust sim firmware static library
-- `voloxide_sil_board_shim`: ROS 2 C++ FFI bridge
+- `veloxity_sil_board_shim`: ROS 2 C++ FFI bridge
 
 Optional compile-only check:
 
@@ -61,22 +61,22 @@ zsh scripts/build_and_source_ros2_shim.zsh
 **Terminal 1**
 
 ```bash
-export ROS_LOG_DIR=/tmp/voloxide-ros-log
+export ROS_LOG_DIR=/tmp/veloxity-ros-log
 
-ros2 launch voloxide_sil_board_shim multirotor_standalone_sil.launch.py \
+ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
   use_rviz:=true
 ```
 
 The launch defaults to:
 
 ```bash
-firmware:=voloxide
+firmware:=veloxity
 ```
 
 That means the simulator uses the Rust firmware endpoint:
 
 ```text
-/voloxide_sil_board
+/veloxity_sil_board
 ```
 
 instead of upstream C firmware:
@@ -90,7 +90,7 @@ Both provide the `sil_board/run` service expected by `rosflight_sil_manager`.
 Expected startup lines:
 
 ```text
-voloxide_sil_board ready: service=sil_board/run, pwm=sim/pwm_output
+veloxity_sil_board ready: service=sil_board/run, pwm=sim/pwm_output
 rosflight_io: Connecting over UDP to "localhost:14525", from "localhost:14520"
 rosflight_io: Got HEARTBEAT, connected.
 rosflight_io: Received all parameters
@@ -104,13 +104,13 @@ rosflight_io: Received all parameters
 Use this only when you specifically want the upstream ROSflight C firmware endpoint:
 
 ```bash
-ros2 launch voloxide_sil_board_shim multirotor_standalone_sil.launch.py \
+ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
   firmware:=c \
   use_rviz:=true
 ```
 
 Run the same firmware init, mission load, arm, and override sequence for both endpoints when
-checking parity. The Voloxide FFI shim is expected to present the same ROSflight SIL boundary as
+checking parity. The Veloxity FFI shim is expected to present the same ROSflight SIL boundary as
 the C firmware: `rosflight_sil_manager` calls `sil_board/run`, sensor data enters through the
 standalone sim topics, MAVLink goes through unmodified `rosflight_io`, and motor output is published
 on `sim/pwm_output`.
@@ -121,7 +121,7 @@ ROScopter IMU silence warnings caused by phase drift between the 400 Hz IMU publ
 400 Hz `sil_board/run` service timer. Lower-rate sensors remain availability-gated.
 
 Brief `Autopilot ERROR: Unhealthy estimator` messages can occur around computer-control and mode
-transitions with both the Voloxide endpoint and upstream C endpoint. Treat those as ROSflight/C
+transitions with both the Veloxity endpoint and upstream C endpoint. Treat those as ROSflight/C
 parity behavior unless they are paired with persistent ROScopter sensor silence warnings.
 
 ## Phase 3: Initialize The Running Firmware
@@ -132,7 +132,7 @@ The firmware process is already running in Terminal 1. This phase sends setup co
 **Terminal 2**
 
 ```bash
-cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Voloxide
+cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Veloxity
 source workspace/install/setup.zsh
 ```
 
@@ -146,15 +146,15 @@ You should see at least:
 
 ```text
 /rosflight_io
-/voloxide_sil_board
+/veloxity_sil_board
 ```
 
-### Recommended: Voloxide Convenience Init
+### Recommended: Veloxity Convenience Init
 
 Run:
 
 ```bash
-ros2 launch voloxide_sil_board_shim voloxide_multirotor_init_firmware.launch.py
+ros2 launch veloxity_sil_board_shim veloxity_multirotor_init_firmware.launch.py
 ```
 
 This sends the following service calls in order:
@@ -165,13 +165,13 @@ This sends the following service calls in order:
 4. `/param_write`
 
 > [!note]
-> This is the Voloxide version of the ROSflight tutorial's convenience script. It adds barometer
+> This is the Veloxity version of the ROSflight tutorial's convenience script. It adds barometer
 > calibration, which the upstream ROSflight convenience launch does not perform.
 
 Optional arguments:
 
 ```bash
-ros2 launch voloxide_sil_board_shim voloxide_multirotor_init_firmware.launch.py \
+ros2 launch veloxity_sil_board_shim veloxity_multirotor_init_firmware.launch.py \
   param_file:=/path/to/multirotor_combined.yaml \
   write_delay_s:=10
 ```
@@ -194,21 +194,21 @@ ros2 service call /param_write std_srvs/srv/Trigger
 Watch Terminal 1 during init. You should see parameter traffic and the startup calibration errors
 recover.
 
-### Persistent Voloxide Params
+### Persistent Veloxity Params
 
-Voloxide FFI sim parameters are saved through `VOLOXIDE_SIM_PARAM_DIR`.
+Veloxity FFI sim parameters are saved through `VELOXITY_SIM_PARAM_DIR`.
 
 The multirotor standalone launch defaults to:
 
 ```text
-/tmp/voloxide-sim-params/multirotor
+/tmp/veloxity-sim-params/multirotor
 ```
 
 Use a persistent path if you want params to survive cleanup of `/tmp`:
 
 ```bash
-ros2 launch voloxide_sil_board_shim multirotor_standalone_sil.launch.py \
-  voloxide_param_dir:=/some/persistent/path
+ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
+  veloxity_param_dir:=/some/persistent/path
 ```
 
 ## Phase 4: Launch ROScopter Autonomy
@@ -226,7 +226,7 @@ Keep Terminal 1 running.
 **Terminal 3**
 
 ```bash
-cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Voloxide
+cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Veloxity
 source workspace/install/setup.zsh
 
 ros2 launch roscopter_sim sim.launch.py
@@ -255,7 +255,7 @@ ros2 node list
 **Terminal 4**
 
 ```bash
-cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Voloxide
+cd /home/skink/projects/ROSflight/.distrobox-home/ROSflight/Veloxity
 source workspace/install/setup.zsh
 ```
 

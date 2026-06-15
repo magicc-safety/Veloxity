@@ -1,12 +1,12 @@
 use core::cell::RefCell;
 
 use critical_section::Mutex;
-use voloxide_core::{errors::SensorError, packets::BaroPacket};
+use veloxity_core::{errors::SensorError, packets::BaroPacket};
 
 const BARO_QUEUE_CAPACITY: usize = 4;
 
 const EMPTY_BARO_PACKET: Result<BaroPacket, SensorError> = Ok(BaroPacket {
-    header: voloxide_core::packets::RosflightPacketHeader {
+    header: veloxity_core::packets::RosflightPacketHeader {
         timestamp: 0,
         status: 0,
     },

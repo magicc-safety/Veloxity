@@ -9,8 +9,8 @@ members. Generated build outputs live in `target/` and `workspace/` and should n
 | --- | --- | --- |
 | `assets/` | Yes | Static project assets used by documentation. |
 | `boards/` | Yes | Board applications. Each board crate chooses pins, peripherals, board I/O, PWM driver, and the concrete `World` type. |
-| `comms/` | Yes | Communication adapters. `voloxide_mavlink` implements ROSflight MAVLink transport for the core firmware. |
-| `crates/` | Yes | Firmware libraries. `voloxide_core` is the board-independent flight stack. |
+| `comms/` | Yes | Communication adapters. `veloxity_mavlink` implements ROSflight MAVLink transport for the core firmware. |
+| `crates/` | Yes | Firmware libraries. `veloxity_core` is the board-independent flight stack. |
 | `docs/` | Yes | Current branch documentation. This should describe tested workflows and retained implementation paths. |
 | `platforms/` | Yes | Reusable platform support shared by board crates. |
 | `scripts/` | Yes | Repository helper scripts that orchestrate local builds. |
@@ -28,8 +28,8 @@ The workspace is declared in `Cargo.toml`.
 
 | Member | Role |
 | --- | --- |
-| `crates/voloxide_core` | `no_std` flight stack: params, state machine, sensors, estimator, controller, mixer, PWM, telemetry scheduling, and the `World` scheduler. |
-| `comms/voloxide_mavlink` | MAVLink parser and ROSflight MAVLink adapter implementing `CommInterface`. |
+| `crates/veloxity_core` | `no_std` flight stack: params, state machine, sensors, estimator, controller, mixer, PWM, telemetry scheduling, and the `World` scheduler. |
+| `comms/veloxity_mavlink` | MAVLink parser and ROSflight MAVLink adapter implementing `CommInterface`. |
 | `sim/firmware` | Host-side Rust firmware static library and FFI boundary for the ROS 2 shim. |
 | `boards/pico2w` | RP2350/Pico 2 W board firmware and hardware probes. |
 | `boards/nucleo` | Nucleo-H753ZI board firmware. |
@@ -41,8 +41,8 @@ The workspace is declared in `Cargo.toml`.
 Root `cargo build` uses workspace `default-members`, which are host-compatible:
 
 ```text
-comms/voloxide_mavlink
-crates/voloxide_core
+comms/veloxity_mavlink
+crates/veloxity_core
 sim/firmware
 xtask
 ```
@@ -54,21 +54,21 @@ Embedded board crates are built explicitly with `cargo xtask check-board ...` or
 
 ### Core
 
-`crates/voloxide_core` must stay board-independent. It defines traits such as `BoardIo`,
+`crates/veloxity_core` must stay board-independent. It defines traits such as `BoardIo`,
 `CommInterface`, `Estimator`, `Controller`, `Mixer`, and `PwmDriver`. Board crates and sim crates
 provide concrete implementations.
 
 ### Communication
 
-`comms/voloxide_mavlink` is the protocol adapter. Core owns protocol-neutral message structs and
-command handling; `voloxide_mavlink` parses and emits MAVLink frames.
+`comms/veloxity_mavlink` is the protocol adapter. Core owns protocol-neutral message structs and
+command handling; `veloxity_mavlink` parses and emits MAVLink frames.
 
 ### Simulation
 
-`sim/firmware` exposes the Rust firmware through C ABI functions such as `voloxide_sim_create`,
-`voloxide_sim_set_sensors`, `voloxide_sim_run_once`, and `voloxide_sim_get_pwm`.
+`sim/firmware` exposes the Rust firmware through C ABI functions such as `veloxity_sim_create`,
+`veloxity_sim_set_sensors`, `veloxity_sim_run_once`, and `veloxity_sim_get_pwm`.
 
-`sim/ros2/voloxide_sil_board_shim` is a ROS 2 package. It links `target/debug/libsim.a` and presents
+`sim/ros2/veloxity_sil_board_shim` is a ROS 2 package. It links `target/debug/libsim.a` and presents
 the Rust firmware as the SIL board endpoint expected by ROSflight.
 
 ### Board Crates
@@ -82,13 +82,13 @@ Board crates own physical integration:
 - PWM output driver
 - `World` instantiation
 
-They should not reimplement flight logic that belongs in `voloxide_core`.
+They should not reimplement flight logic that belongs in `veloxity_core`.
 
 Current RP2350/Pico 2 W work is concentrated in:
 
 | Path | Purpose |
 | --- | --- |
-| `boards/pico2w/src/bin/voloxide.rs` | Main RP2350 firmware entry point, Embassy task setup, core split, and IMU ODR feature selection. |
+| `boards/pico2w/src/bin/veloxity.rs` | Main RP2350 firmware entry point, Embassy task setup, core split, and IMU ODR feature selection. |
 | `boards/pico2w/src/board.rs` | `BoardIo` implementation, sensor queue drains, serial flush budget, and service hooks. |
 | `boards/pico2w/src/ism330dhcx.rs` | ISM330DHCX data-ready/SPI packet producer path. |
 | `boards/pico2w/src/rc_receiver.rs` | CRSF receiver path feeding service-side RC state. |
@@ -100,9 +100,9 @@ Current retained STM32 work is concentrated in:
 
 | Path | Purpose |
 | --- | --- |
-| `boards/nucleo/src/bin/voloxide.rs` | Nucleo-H753ZI firmware entry point and `World` construction. |
+| `boards/nucleo/src/bin/veloxity.rs` | Nucleo-H753ZI firmware entry point and `World` construction. |
 | `boards/nucleo/src/board.rs` | Nucleo `BoardIo` and board setup. |
-| `boards/pixracerpro/src/bin/voloxide.rs` | Pixracer Pro firmware entry point and `World` construction. |
+| `boards/pixracerpro/src/bin/veloxity.rs` | Pixracer Pro firmware entry point and `World` construction. |
 | `boards/pixracerpro/src/board.rs` | Pixracer Pro `BoardIo` and board setup. |
 | `boards/pixracerpro/src/pwm.rs` | Pixracer Pro PWM driver. |
 | `platforms/stm_32/src/peripherals/` | Shared STM32 sensor, serial, and signal-task drivers. |

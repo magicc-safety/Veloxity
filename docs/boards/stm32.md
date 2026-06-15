@@ -14,9 +14,9 @@ and should still be treated as awaiting renewed hardware validation.
 
 | Path | Purpose |
 | --- | --- |
-| `boards/nucleo/src/bin/voloxide.rs` | Nucleo firmware entry point and `World` construction. |
+| `boards/nucleo/src/bin/veloxity.rs` | Nucleo firmware entry point and `World` construction. |
 | `boards/nucleo/src/board.rs` | Nucleo implementation of board setup and `BoardIo`. |
-| `boards/pixracerpro/src/bin/voloxide.rs` | Pixracer Pro firmware entry point and `World` construction. |
+| `boards/pixracerpro/src/bin/veloxity.rs` | Pixracer Pro firmware entry point and `World` construction. |
 | `boards/pixracerpro/src/board.rs` | Pixracer Pro implementation of board setup and `BoardIo`. |
 | `boards/pixracerpro/src/pwm.rs` | Pixracer Pro PWM driver. |
 | `platforms/stm_32/stm32h7x3_common.rs` | Shared STM32H7 configuration. |
@@ -28,7 +28,7 @@ The STM32 boards follow the generic embedded firmware shape:
 
 - the board crate initializes chip clocks, pins, serial transports, sensor peripherals, and PWM;
 - Embassy peripheral tasks produce packets or signal new sensor data to board-owned queues;
-- the board `BoardIo` implementation drains those queues into `voloxide_core` sensor resources;
+- the board `BoardIo` implementation drains those queues into `veloxity_core` sensor resources;
 - the board constructs a `World` with STM32-specific board, PWM, and MAVLink transport types;
 - Pixracer Pro uses the realtime `World` scheduler entrypoints with a fixed `400 Hz` control update
   baseline and board-specific post-control telemetry scheduling;
@@ -89,8 +89,8 @@ cargo xtask build-board pixracerpro
 Direct equivalents:
 
 ```bash
-cargo build -p nucleo --target thumbv7em-none-eabihf --bin voloxide
-cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
+cargo build -p nucleo --target thumbv7em-none-eabihf --bin veloxity
+cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity
 ```
 
 ## Flash Or Run
@@ -106,8 +106,8 @@ Direct `cargo run` is also valid when the board crate runner and probe selection
 hardware:
 
 ```bash
-cargo run -p nucleo --target thumbv7em-none-eabihf --bin voloxide
-cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide
+cargo run -p nucleo --target thumbv7em-none-eabihf --bin veloxity
+cargo run -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity
 ```
 
 Treat flashing as the start of renewed validation, not proof of readiness. The exact probe
@@ -140,7 +140,7 @@ driver files include:
 
 The current compatibility update makes the ADIS16500 and BMI08x IMU packet signals explicit as
 `ImuPacket<f64>`, matching their existing `f64` sensor math and the current generic packet type in
-`voloxide_core`.
+`veloxity_core`.
 
 ## Pixracer Pro Timing And Telemetry Validation
 
@@ -170,7 +170,7 @@ show PD12 control-active pulses completing well before the next PD11 `400 Hz` de
 Use this diagnostic firmware when validating the current MAVLink throughput issue:
 
 ```bash
-cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin voloxide --release \
+cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity --release \
   --features 'scope-timing-pins timing-diagnostics'
 ```
 

@@ -44,7 +44,7 @@ fn main() -> ! {
     let sda = Input::new(peripherals.PIN_20, Pull::Up);
     let scl = Input::new(peripherals.PIN_21, Pull::Up);
 
-    let _ = writeln!(writer, "voloxide pico2w i2c line probe");
+    let _ = writeln!(writer, "veloxity pico2w i2c line probe");
     let _ = writeln!(writer, "gp20=sda gp21=scl pullup=internal");
 
     loop {

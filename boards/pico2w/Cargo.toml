@@ -6,32 +6,32 @@ build = "build.rs"
 
 [features]
 default = ["ism330dhcx-driver", "imu-producer-interrupt-executor"]
-timing-diagnostics = ["voloxide_core/timing-diagnostics"]
+timing-diagnostics = ["veloxity_core/timing-diagnostics"]
 imu-400hz = []
 ism330dhcx-driver = ["dep:ism330dhcx-rs"]
 imu-odr-1666hz = ["ism330dhcx-driver"]
 ism330dhcx-1k666 = ["imu-odr-1666hz"]
 release-loop-bench = []
 release-loop-classifier = ["release-loop-bench"]
-scope-timing-pins = ["voloxide_core/scope-timing-pins"]
+scope-timing-pins = ["veloxity_core/scope-timing-pins"]
 imu-producer-scope = ["scope-timing-pins"]
-pre-control-scope = ["scope-timing-pins", "voloxide_core/pre-control-scope"]
-rc-command-scope = ["scope-timing-pins", "voloxide_core/rc-command-scope"]
+pre-control-scope = ["scope-timing-pins", "veloxity_core/pre-control-scope"]
+rc-command-scope = ["scope-timing-pins", "veloxity_core/rc-command-scope"]
 imu-producer-interrupt-executor = []
 core1-disable-heartbeat = []
 core1-disable-mavlink-tx = []
 core1-disable-mavlink-rx = []
 core1-disable-crsf = []
 core1-disable-gps = []
-control-scope-estimator = ["voloxide_core/control-scope-estimator"]
-control-scope-controller = ["voloxide_core/control-scope-controller"]
-control-scope-mixer = ["voloxide_core/control-scope-mixer"]
-control-scope-pwm = ["voloxide_core/control-scope-pwm"]
+control-scope-estimator = ["veloxity_core/control-scope-estimator"]
+control-scope-controller = ["veloxity_core/control-scope-controller"]
+control-scope-mixer = ["veloxity_core/control-scope-mixer"]
+control-scope-pwm = ["veloxity_core/control-scope-pwm"]
 
 [dependencies]
 rp2350_platform = { workspace = true }
-voloxide_core = { workspace = true }
-voloxide_mavlink = { workspace = true }
+veloxity_core = { workspace = true }
+veloxity_mavlink = { workspace = true }
 
 cortex-m = "0.7.7"
 cortex-m-rt = { version = "0.7.0" }
@@ -53,6 +53,6 @@ static_cell = "2.1"
 workspace = true
 
 [[bin]]
-name = "voloxide"
+name = "veloxity"
 test = false
 bench = false

@@ -6,8 +6,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
 use embassy_usb::Builder;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-use voloxide_core::comm::interface::EmbeddedComInterface;
-use voloxide_core::errors::SensorError;
+use veloxity_core::comm::interface::EmbeddedComInterface;
+use veloxity_core::errors::SensorError;
 
 pub const VCP_TX_BUFF_SIZE: usize = 2048;
 pub const VCP_RX_BUFF_SIZE: usize = 2048;

@@ -30,7 +30,7 @@ class RcPhase:
 
 class RcTakeoverProfile(Node):
     def __init__(self, args: argparse.Namespace) -> None:
-        super().__init__("voloxide_rc_override_takeover_profile")
+        super().__init__("veloxity_rc_override_takeover_profile")
         self.args = args
         self.pub = self.create_publisher(RCRaw, args.rc_topic, 1)
         self.status_sub = self.create_subscription(Status, "/status", self._status_cb, 10)
@@ -177,7 +177,7 @@ def call_param_load(node: Node, service_name: str, filename: str, timeout_s: flo
 
 
 def initialize_firmware(args: argparse.Namespace) -> bool:
-    node = Node("voloxide_rc_takeover_firmware_init")
+    node = Node("veloxity_rc_takeover_firmware_init")
     try:
         ok = call_param_load(node, "/param_load_from_file", args.param_file, args.service_timeout_s)
         ok = call_trigger(node, "/calibrate_imu", args.service_timeout_s) and ok
