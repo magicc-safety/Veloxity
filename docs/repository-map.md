@@ -22,6 +22,26 @@ members. Generated build outputs live in `target/` and `workspace/` and should n
 | `workspace/` | Generated | Local colcon workspace used to build the ROS 2 shim overlay. Remove with `cargo xtask clean-generated`. |
 | `rosflight_memory/` | Generated | Local runtime parameter/state artifact path from older runs. Remove with `cargo xtask clean-generated`. |
 
+## Vocabulary
+
+| Term | Meaning |
+| --- | --- |
+| Cargo package/crate | A Rust build unit with its own `Cargo.toml`. In this repo, `pico2w`, `veloxity_core`, `sim`, and `xtask` are packages. |
+| `build.rs` | A Cargo build script. Cargo runs it before compiling that package. For `boards/pico2w`, it points the linker at `memory.x`, the RP2350 memory layout file. |
+| Feature flag | A compile-time switch enabled with `--features`. Features can include optional dependencies, select alternate hardware behavior, or enable diagnostics. See [Feature flags](features.md). |
+| Board crate | A package that adapts real hardware to `veloxity_core`, such as `boards/pico2w` or `boards/pixracerpro`. |
+| Virtual board / runtime adapter | A non-physical board boundary. `sim/firmware` adapts ROSflight simulator data into the same core firmware contracts used by hardware boards. |
+| `BoardIo` | The core trait a board/runtime implements to provide sensors, outputs, service hooks, and board status to `World`. |
+| Sensor bus | Core-owned sensor resources containing the latest raw or processed packets handed in by a board/runtime. |
+| Service sensor bus/path | The slower sensor/service side of the realtime scheduler. It handles non-IMU sensors, RC packet drain, command handling, telemetry, and board service work outside the fast IMU/control path. |
+| PWM | Actuator output command path. In this repo the core owns generic PWM/output concepts; a board driver may implement PWM-like or DShot-facing physical output. |
+| DShot | A digital ESC command protocol. Pico 2 W configuration includes DShot-oriented ESC pinout, while the core output layer stays protocol-neutral. |
+| MAVLink frame | A complete MAVLink wire packet with header, payload, checksum, and sequence number. |
+| MAVLink message | The decoded semantic payload inside a frame, such as heartbeat, RC channels, or ROSflight status. |
+| Downlink | Vehicle-to-ground-station traffic emitted by Veloxity. |
+| Sequence number | MAVLink packet counter used by receivers/test tools to detect gaps or dropped frames. |
+| ODR | Output data rate: the hardware sample production rate of a sensor, especially the IMU. |
+
 ## Rust Workspace Members
 
 The workspace is declared in `Cargo.toml`.
@@ -34,7 +54,7 @@ The workspace is declared in `Cargo.toml`.
 | `boards/pico2w` | RP2350/Pico 2 W board firmware and hardware probes. |
 | `boards/nucleo` | Nucleo-H753ZI board firmware. |
 | `boards/pixracerpro` | Pixracer Pro board firmware. |
-| `platforms/rp2350` | Reusable RP2350 metadata for multicore and PIO allocation. |
+| `platforms/rp2350` | Thin RP2350 platform crate. It re-exports the Embassy RP HAL as `rp2350_platform::hal` and holds early shared metadata for multicore and PIO allocation. |
 | `platforms/stm_32` | Shared STM32/Embassy peripheral drivers. |
 | `xtask` | Local command runner invoked as `cargo xtask ...`. |
 
@@ -65,8 +85,13 @@ command handling; `veloxity_mavlink` parses and emits MAVLink frames.
 
 ### Simulation
 
+The simulator is a runtime adapter, or virtual board. It is not under `boards/` because it is split
+between a host Rust static library and a ROS 2 C++ package, but architecturally it plays the same
+role as a board crate: it adapts an external runtime into `veloxity_core`.
+
 `sim/firmware` exposes the Rust firmware through C ABI functions such as `veloxity_sim_create`,
-`veloxity_sim_set_sensors`, `veloxity_sim_run_once`, and `veloxity_sim_get_pwm`.
+`veloxity_sim_set_sensors`, `veloxity_sim_run_once`, and `veloxity_sim_get_pwm`. It owns the
+simulator-side `BoardIo` implementation.
 
 `sim/ros2/veloxity_sil_board_shim` is a ROS 2 package. It links `target/debug/libsim.a` and presents
 the Rust firmware as the SIL board endpoint expected by ROSflight.
@@ -84,17 +109,28 @@ Board crates own physical integration:
 
 They should not reimplement flight logic that belongs in `veloxity_core`.
 
-Current RP2350/Pico 2 W work is concentrated in:
+Current RP2350/Pico 2 W source is organized as:
 
 | Path | Purpose |
 | --- | --- |
-| `boards/pico2w/src/bin/veloxity.rs` | Main RP2350 firmware entry point, Embassy task setup, core split, and IMU ODR feature selection. |
+| `boards/pico2w/build.rs` | Cargo build script that adds the board crate directory to the linker search path so `memory.x` is found. |
+| `boards/pico2w/memory.x` | RP2350 memory layout consumed by the embedded linker. |
+| `boards/pico2w/src/bin/veloxity.rs` | Main RP2350 firmware entry point, Embassy task setup, core split, and IMU output-data-rate feature selection. |
+| `boards/pico2w/src/lib.rs` | Library module declarations for the Pico board crate. |
+| `boards/pico2w/src/config.rs` | Board pinout, core-role, mailbox, and PIO allocation metadata. |
 | `boards/pico2w/src/board.rs` | `BoardIo` implementation, sensor queue drains, serial flush budget, and service hooks. |
+| `boards/pico2w/src/pwm.rs` | PIO PWM/DShot-facing actuator output driver implementation. |
 | `boards/pico2w/src/ism330dhcx.rs` | ISM330DHCX data-ready/SPI packet producer path. |
+| `boards/pico2w/src/barometer.rs` | Barometer packet path. |
+| `boards/pico2w/src/gy91.rs` | Legacy GY-91/BMP280 support used as a low-rate pressure path. |
+| `boards/pico2w/src/gps.rs` | GPS and magnetometer path. |
 | `boards/pico2w/src/rc_receiver.rs` | CRSF receiver path feeding service-side RC state. |
 | `boards/pico2w/src/comms_core.rs` | Core-to-transport MAVLink mailbox used by UART/ESP-NOW testing. |
-| `platforms/rp2350/src/multicore.rs` | RP2350 core-role metadata. |
-| `platforms/rp2350/src/pio.rs` | Shared PIO allocation metadata. |
+| `boards/pico2w/src/pio_uart_dma.rs` | PIO UART helper used by Pico serial paths. |
+| `boards/pico2w/src/bin/*_probe.rs` | Hardware bring-up probes for individual buses, sensors, and serial paths. |
+| `platforms/rp2350/src/lib.rs` | Re-exports Embassy RP as `rp2350_platform::hal`. Pico code imports the HAL through this crate. |
+| `platforms/rp2350/src/multicore.rs` | Early shared RP2350 core-role metadata used by Pico config. |
+| `platforms/rp2350/src/pio.rs` | Early shared PIO allocation metadata used by Pico config. |
 
 Current retained STM32 work is concentrated in:
 
@@ -112,6 +148,27 @@ Current retained STM32 work is concentrated in:
 
 Platform crates own reusable chip-family code. Board crates depend on them when a concept applies
 to more than one board.
+
+`platforms/rp2350` is intentionally thin today. It is not a complete hardware abstraction layer of
+Veloxity's own; it primarily centralizes the Embassy RP HAL import and a small amount of RP2350
+metadata. Keep that dependency only while Pico code imports through `rp2350_platform::hal` or uses
+the shared metadata types. If future Pico code stops using it, remove the dependency instead of
+leaving an unused placeholder.
+
+## Vendored Dependency Patches
+
+The root `Cargo.toml` contains:
+
+```toml
+[patch.crates-io]
+ism330dhcx-rs = { path = "third_party/ism330dhcx-rs" }
+```
+
+This is a deliberate Cargo patch. Any dependency that asks for `ism330dhcx-rs` is resolved to the
+checked-in `third_party/ism330dhcx-rs` directory instead of the version from crates.io. Treat that
+directory as a vendored external driver plus local patch surface, not as Veloxity-owned flight
+logic. If the patch is no longer needed, remove the `[patch.crates-io]` entry and verify the Pico
+IMU path against the published crate.
 
 ## Generated Files
 

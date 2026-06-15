@@ -6,7 +6,8 @@
 
 1. [Repository map](repository-map.md)
 2. [Build and tool commands](build-and-tools.md)
-3. [Core architecture](architecture-guide.md)
+3. [Feature flags](features.md)
+4. [Core architecture](architecture-guide.md)
 
 ### I Want To Run The Simulator
 
@@ -37,12 +38,13 @@ validation notes live in the STM32 board guide.
 ### I Want To Modify Firmware Logic
 
 1. [Core architecture](architecture-guide.md)
-2. `crates/veloxity_core/src/world.rs`
-3. `crates/veloxity_core/src/control.rs`
-4. `crates/veloxity_core/src/estimator/quad.rs`
-5. `crates/veloxity_core/src/controller/quad.rs`
-6. `crates/veloxity_core/src/mixer/matrix.rs`
-7. `comms/veloxity_mavlink/src/link.rs`
+2. [Feature flags](features.md)
+3. `crates/veloxity_core/src/world.rs`
+4. `crates/veloxity_core/src/control.rs`
+5. `crates/veloxity_core/src/estimator/quad.rs`
+6. `crates/veloxity_core/src/controller/quad.rs`
+7. `crates/veloxity_core/src/mixer/matrix.rs`
+8. `comms/veloxity_mavlink/src/link.rs`
 
 ## Maintained Tutorials
 

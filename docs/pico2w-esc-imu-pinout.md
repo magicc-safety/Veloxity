@@ -289,7 +289,8 @@ The current RP2350 firmware path is designed around the ISM330DHCX as the flight
 code drains IMU samples from the ISM330DHCX queue and RC samples from the CRSF receiver queue. The
 current board does not have a production barometer installed; the earlier GY-91/BMP280 pressure path
 remains a low-rate service-side reference path until the dedicated barometer hardware is added. The
-IMU path is interrupt-driven. The default firmware samples the ISM330DHCX at the high-rate ODR but
+IMU path is interrupt-driven. The default firmware samples the ISM330DHCX at the high-rate output
+data rate (ODR) but
 runs the full control update at `1.5 kHz`. Use `imu-odr-1666hz` only when deliberately testing the
 lower-rate timing-margin mode; `ism330dhcx-1k666` remains as a compatibility alias.
 

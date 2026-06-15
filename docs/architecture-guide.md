@@ -529,7 +529,8 @@ in service phases preserves the expected ROSflight behavior while preventing var
 arrivals from adding jitter to every control closure.
 
 On RP2350/Pico 2 W, IMU sampling, control cadence, and telemetry cadence are separate choices. The
-default firmware samples the ISM330DHCX at the high-rate ODR, runs the full control pipeline at
+default firmware samples the ISM330DHCX at the high-rate output data rate (ODR), runs the full
+control pipeline at
 `1.5 kHz`, and publishes bounded high-rate MAVLink telemetry. The board entry point is
 `boards/pico2w/src/bin/veloxity.rs`; `imu-odr-1666hz` is the lower-rate hardware IMU override and
 `ism330dhcx-1k666` remains only as a compatibility alias. Core 1 owns transport and producer work,

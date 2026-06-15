@@ -68,7 +68,7 @@ Current RP2350 status:
 
 - Main firmware builds and flashes with `probe-rs download`.
 - ISM330DHCX accelerometer/gyro path is validated through interrupt-driven firmware.
-- IMU is configured at the high-rate ODR and feeds a fixed 1.5 kHz control loop.
+- IMU is configured at the high-rate output data rate (ODR) and feeds a fixed 1.5 kHz control loop.
 - GPS over PIO UART and ELRS/CRSF receiver have produced parsed MAVLink through the ESP-NOW bridge.
 - Barometer passthrough worked in earlier probes and is integrated through the board sensor path.
   The current production hardware still needs a fresh validation run after the dedicated barometer

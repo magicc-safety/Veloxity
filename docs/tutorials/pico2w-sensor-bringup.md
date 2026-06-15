@@ -49,7 +49,8 @@ probe-rs download --chip RP235x --protocol swd \
 probe-rs reset --chip RP235x
 ```
 
-The default flight target for this branch is the real ISM330DHCX at the high-rate ODR feeding a
+The default flight target for this branch is the real ISM330DHCX at the high-rate output data rate
+(ODR) feeding a
 fixed 1.5 kHz control loop. Timing results should be collected from release builds, not debug
 builds.
 

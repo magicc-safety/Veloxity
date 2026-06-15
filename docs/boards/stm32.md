@@ -75,8 +75,8 @@ cargo xtask check-board pixracerpro
 Direct equivalents:
 
 ```bash
-cargo check -p nucleo --target thumbv7em-none-eabihf
-cargo check -p pixracerpro --target thumbv7em-none-eabihf
+cargo check -p nucleo --target thumbv7em-none-eabihf --bin veloxity
+cargo check -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity
 ```
 
 ## Build

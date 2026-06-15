@@ -1,7 +1,9 @@
 # RP2350 / Pico 2 W
 
 The Pico 2 W is the active hardware bring-up board for this branch. The firmware crate is
-`boards/pico2w`; reusable RP2350 metadata lives in `platforms/rp2350`.
+`boards/pico2w`. The `platforms/rp2350` crate is intentionally thin: Pico code imports the Embassy
+RP HAL through `rp2350_platform::hal`, and the crate also holds early shared metadata for core roles
+and PIO allocation.
 
 ## Source Layout
 
@@ -17,6 +19,7 @@ The Pico 2 W is the active hardware bring-up board for this branch. The firmware
 | `boards/pico2w/src/gps.rs` | GPS and magnetometer path. |
 | `boards/pico2w/src/rc_receiver.rs` | CRSF RC receiver path. |
 | `boards/pico2w/src/bin/*probe.rs` | Hardware probes for individual buses and sensors. |
+| `platforms/rp2350/src/lib.rs` | Re-exports Embassy RP as `rp2350_platform::hal`. |
 | `platforms/rp2350/src/multicore.rs` | Shared RP2350 core-role metadata. |
 | `platforms/rp2350/src/pio.rs` | Shared RP2350 PIO allocation metadata. |
 
@@ -31,8 +34,8 @@ The intended runtime split is:
 
 The IMU intake path is data-ready driven, while the full control pipeline runs from an independent
 fixed-rate control deadline. The current stable baseline samples the ISM330DHCX at the high-rate
-ODR and runs estimator/controller/mixer/PWM at 1.5 kHz using the accumulated IMU samples since the
-previous control update.
+output data rate (ODR) and runs estimator/controller/mixer/PWM at 1.5 kHz using the accumulated IMU
+samples since the previous control update.
 
 ## Install
 

@@ -95,9 +95,9 @@ cargo xtask check-board pixracerpro
 Direct equivalents:
 
 ```bash
-cargo check -p pico2w --target thumbv8m.main-none-eabihf
-cargo check -p nucleo --target thumbv7em-none-eabihf
-cargo check -p pixracerpro --target thumbv7em-none-eabihf
+cargo check -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity
+cargo check -p nucleo --target thumbv7em-none-eabihf --bin veloxity
+cargo check -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity
 ```
 
 ## Board Builds And Flashing
@@ -257,3 +257,7 @@ sdkconfig.test-pattern.defaults
 See the bridge guide:
 
 [ESP32C5 ESP-NOW UART bridge](../tools/espnow_uart_bridge/README.md)
+
+For the rest of the standalone helper scripts, see the tools index:
+
+[Tools README](../tools/README.md)
