@@ -1,7 +1,5 @@
 # Veloxity Documentation
 
-This directory is the source of truth for the current branch.
-
 ## Reader Paths
 
 ### I Want To Understand The Repository
