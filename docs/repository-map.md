@@ -165,10 +165,27 @@ ism330dhcx-rs = { path = "third_party/ism330dhcx-rs" }
 ```
 
 This is a deliberate Cargo patch. Any dependency that asks for `ism330dhcx-rs` is resolved to the
-checked-in `third_party/ism330dhcx-rs` directory instead of the version from crates.io. Treat that
-directory as a vendored external driver plus local patch surface, not as Veloxity-owned flight
-logic. If the patch is no longer needed, remove the `[patch.crates-io]` entry and verify the Pico
-IMU path against the published crate.
+checked-in `third_party/ism330dhcx-rs` directory instead of the version from crates.io.
+
+The reason for the patch is `no_std` firmware compatibility. The published `ism330dhcx-rs 2.0.0`
+manifest depends on `half = "2.7.1"`. The `half` crate enables its `std` feature by default, which
+is not appropriate for the Pico 2 W firmware target. The vendored manifest changes that dependency
+to:
+
+```toml
+half = { version = "2.7.1", default-features = false }
+```
+
+The driver source is otherwise kept aligned with the published crate. Treat
+`third_party/ism330dhcx-rs` as a vendored external driver plus this local manifest patch, not as
+Veloxity-owned flight logic.
+
+The current Pico flight path still performs the high-rate IMU setup and sample reads with
+board-local register transactions in `boards/pico2w/src/bin/veloxity.rs`; the optional
+`ism330dhcx-driver` dependency remains part of the ISM330DHCX feature surface and must stay
+`no_std`-clean when that feature is enabled. If upstream changes `ism330dhcx-rs` to disable `half`
+default features itself, remove the `[patch.crates-io]` entry and verify the Pico IMU build against
+the published crate.
 
 ## Generated Files
 
