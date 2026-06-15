@@ -24,7 +24,15 @@ fn main() -> ExitCode {
                 eprintln!("unknown board `{board}`: expected `nucleo`, `pixracerpro`, or `pico2w`");
                 return ExitCode::from(2);
             };
-            cargo(["check", "-p", board.as_str(), "--target", target])
+            cargo([
+                "check",
+                "-p",
+                board.as_str(),
+                "--target",
+                target,
+                "--bin",
+                "veloxity",
+            ])
         }
         "build-board" => {
             let Some(board) = args.next() else {
