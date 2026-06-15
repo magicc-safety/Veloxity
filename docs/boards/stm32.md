@@ -49,14 +49,17 @@ cargo check -p pixracerpro --target thumbv7em-none-eabihf --features legacy-run-
 ```
 
 The realtime Pixracer Pro entrypoint uses a board-specific telemetry policy. It keeps the shared
-core defaults intact, but asks the realtime service step to send more named telemetry streams per
-service opportunity and sends up to four telemetry streams immediately after each completed control
-update. The post-control burst uses a Pixracer Pro-owned priority list with IMU first, so
-control-rate IMU telemetry gets the first due/freshness-checked opportunity before the remaining
-budget falls back to the normal scheduler. Hardware diagnostics showed that UART baud, TX pipe
-drain, and final send gating were not the limiter; telemetry needed more scheduling opportunities
-in the measured post-control slack. The post-control burst is intentionally Pixracer Pro-specific
-until RP2350/Pico 2 W is retested for consistency.
+core defaults intact, but uses a Pixracer-owned realtime service policy that attempts prioritized
+service work back-to-back while the control-slack guard remains satisfied. Fresh RC gets handled
+immediately after the service sensor drain instead of waiting for a later circular service phase.
+The policy also asks each service opportunity to send more named telemetry streams and sends up to
+four telemetry streams immediately after each completed control update. The post-control burst uses
+a Pixracer Pro-owned priority list with IMU first, so control-rate IMU telemetry gets the first
+due/freshness-checked opportunity before the remaining budget falls back to the normal scheduler.
+Hardware diagnostics showed that UART baud, TX pipe drain, and final send gating were not the
+limiter; telemetry needed more scheduling opportunities in the measured post-control slack. The
+post-control burst and all-available service policy are intentionally Pixracer Pro-specific until
+RP2350/Pico 2 W is retested for consistency.
 
 ## Install
 

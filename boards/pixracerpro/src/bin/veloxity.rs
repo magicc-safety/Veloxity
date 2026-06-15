@@ -17,14 +17,12 @@ use veloxity_core::{
     params::Params,
     state_machine::StateManager,
     vehicle::quadrotor,
-    world::World,
+    world::{RealtimeServicePolicy, World},
 };
 use veloxity_mavlink::MavlinkInterface;
 
 type PixracerReal = f64;
 const PIXRACER_CONTROL_LOOP_HZ: u16 = 400;
-#[cfg(not(feature = "legacy-run-once"))]
-const PIXRACER_MAX_SERVICE_DEFERRAL_US: u64 = 1_000;
 #[cfg(not(feature = "legacy-run-once"))]
 const PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 4;
 #[cfg(not(feature = "legacy-run-once"))]
@@ -133,10 +131,11 @@ fn main() -> ! {
                 }
             }
             RealtimeSchedulerStep::Service => {
-                let _ = world.run_service_step_with_deferral_and_telemetry_budget(
-                    PIXRACER_MAX_SERVICE_DEFERRAL_US,
-                    PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP,
-                    PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE,
+                let _ = world.run_prioritized_service_steps_with_policy(
+                    RealtimeServicePolicy::all_available(
+                        PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_STEP,
+                        PIXRACER_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE,
+                    ),
                 );
             }
             RealtimeSchedulerStep::Idle => {}

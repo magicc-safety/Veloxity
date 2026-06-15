@@ -52,6 +52,7 @@ const IMU_TIMEOUT_US: u64 = 100_000;
 const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 1;
 const REALTIME_SERVICE_MIN_CONTROL_SLACK_US: u64 = 200;
 const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 120;
+const REALTIME_SERVICE_ALL_AVAILABLE_FAILSAFE_STEPS: usize = 64;
 #[cfg(feature = "timing-diagnostics")]
 const TIMING_DIAGNOSTIC_INTERVAL_US: u64 = 1_000_000;
 #[cfg(feature = "timing-diagnostics")]
@@ -170,12 +171,85 @@ pub struct WorldRunClass {
     pub pwm_us: u16,
 }
 
+impl WorldRunClass {
+    fn merge_from(&mut self, other: Self) {
+        self.had_rx |= other.had_rx;
+        self.had_raw_sensor |= other.had_raw_sensor;
+        self.had_raw_imu |= other.had_raw_imu;
+        self.had_raw_baro |= other.had_raw_baro;
+        self.had_raw_rc |= other.had_raw_rc;
+        self.had_processed_imu |= other.had_processed_imu;
+        self.had_processed_baro |= other.had_processed_baro;
+        self.had_processed_rc |= other.had_processed_rc;
+        self.telemetry_due |= other.telemetry_due;
+        self.telemetry_deferred |= other.telemetry_deferred;
+        self.ran_control |= other.ran_control;
+        self.elapsed_after_control_us = self
+            .elapsed_after_control_us
+            .saturating_add(other.elapsed_after_control_us);
+        self.estimator_us = self.estimator_us.saturating_add(other.estimator_us);
+        self.controller_us = self.controller_us.saturating_add(other.controller_us);
+        self.mixer_us = self.mixer_us.saturating_add(other.mixer_us);
+        self.pwm_us = self.pwm_us.saturating_add(other.pwm_us);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RealtimeSchedulerStep {
     ImuControl,
     ControlUpdate,
     Service,
     Idle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RealtimeServiceRunLimit {
+    Count(usize),
+    AllAvailable,
+}
+
+impl RealtimeServiceRunLimit {
+    fn max_steps(self) -> usize {
+        match self {
+            Self::Count(count) => count,
+            Self::AllAvailable => REALTIME_SERVICE_ALL_AVAILABLE_FAILSAFE_STEPS,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RealtimeServicePolicy {
+    pub run_limit: RealtimeServiceRunLimit,
+    pub min_spacing_us: u64,
+    pub telemetry_streams_per_service_step: usize,
+    pub telemetry_streams_per_telemetry_phase: usize,
+}
+
+impl RealtimeServicePolicy {
+    pub const fn one_step_with_spacing(
+        min_spacing_us: u64,
+        telemetry_streams_per_service_step: usize,
+        telemetry_streams_per_telemetry_phase: usize,
+    ) -> Self {
+        Self {
+            run_limit: RealtimeServiceRunLimit::Count(1),
+            min_spacing_us,
+            telemetry_streams_per_service_step,
+            telemetry_streams_per_telemetry_phase,
+        }
+    }
+
+    pub const fn all_available(
+        telemetry_streams_per_service_step: usize,
+        telemetry_streams_per_telemetry_phase: usize,
+    ) -> Self {
+        Self {
+            run_limit: RealtimeServiceRunLimit::AllAvailable,
+            min_spacing_us: 0,
+            telemetry_streams_per_service_step,
+            telemetry_streams_per_telemetry_phase,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1036,7 +1110,9 @@ where
 
         match phase {
             RealtimeServicePhase::Input => self.run_service_input_stage(),
-            RealtimeServicePhase::Sensors => self.run_service_sensor_stage(),
+            RealtimeServicePhase::Sensors => {
+                let _ = self.run_service_sensor_stage();
+            }
             RealtimeServicePhase::RcCommand => self.run_rc_command_state_stages(),
             RealtimeServicePhase::Responses => {
                 self.drain_logs_and_send_responses_limited(REALTIME_SERVICE_RESPONSE_BUDGET);
@@ -1068,16 +1144,101 @@ where
         class
     }
 
+    pub fn run_prioritized_service_steps_with_policy(
+        &mut self,
+        policy: RealtimeServicePolicy,
+    ) -> WorldRunClass {
+        let pass_start_us = self.board.clock_micros();
+        let mut class = WorldRunClass {
+            had_rx: self.board.serial_rx_pending(),
+            ..WorldRunClass::default()
+        };
+
+        let max_steps = policy.run_limit.max_steps();
+        let mut steps = 0;
+        while steps < max_steps && self.realtime_service_can_continue() {
+            let step_class = self.run_prioritized_service_step(policy);
+            let had_service_activity = step_class.had_rx
+                || step_class.had_raw_sensor
+                || step_class.telemetry_due
+                || step_class.telemetry_deferred;
+            class.merge_from(step_class);
+            steps += 1;
+
+            if policy.min_spacing_us != 0 {
+                break;
+            }
+            if policy.run_limit == RealtimeServiceRunLimit::AllAvailable && !had_service_activity {
+                break;
+            }
+        }
+
+        self.next_realtime_service_us = self
+            .board
+            .clock_micros()
+            .saturating_add(policy.min_spacing_us);
+        self.last_realtime_service_control_us = self.last_realtime_control_us;
+        class.elapsed_after_control_us = self
+            .board
+            .clock_micros()
+            .saturating_sub(pass_start_us)
+            .min(u32::MAX as u64) as u32;
+        class
+    }
+
+    fn run_prioritized_service_step(&mut self, policy: RealtimeServicePolicy) -> WorldRunClass {
+        let mut class = WorldRunClass::default();
+
+        let sensor_class = self.run_service_sensor_stage();
+        class.merge_from(sensor_class);
+
+        if sensor_class.had_raw_rc && self.realtime_service_can_continue() {
+            self.run_rc_command_state_stages();
+            class.had_processed_rc = self.processed_sensors.rc.is_some();
+        }
+
+        if self.realtime_service_can_continue() {
+            class.had_rx |= self.board.serial_rx_pending();
+            self.run_service_input_stage();
+        }
+
+        if self.realtime_service_can_continue() {
+            self.drain_logs_and_send_responses_limited(REALTIME_SERVICE_RESPONSE_BUDGET);
+        }
+
+        if self.realtime_service_can_continue() {
+            class.telemetry_due |= self
+                .run_realtime_telemetry_stage_budgeted(policy.telemetry_streams_per_service_step)
+                != 0;
+        }
+
+        if self.realtime_service_can_continue() {
+            class.telemetry_due |= self.run_realtime_telemetry_stage_budgeted(
+                policy.telemetry_streams_per_telemetry_phase,
+            ) != 0;
+        }
+
+        if self.realtime_service_can_continue() {
+            self.board.serial_flush_budgeted(1);
+        }
+
+        if self.realtime_service_can_continue() {
+            self.board.run_deferred_board_actions();
+        }
+
+        class
+    }
+
     fn run_service_input_stage(&mut self) {
         self.run_communication_and_parameter_service_stage();
     }
 
     fn run_service_sensor_and_rc_stage(&mut self) {
-        self.run_service_sensor_stage();
+        let _ = self.run_service_sensor_stage();
         self.run_rc_command_state_stages();
     }
 
-    fn run_service_sensor_stage(&mut self) {
+    fn run_service_sensor_stage(&mut self) -> WorldRunClass {
         let now_us = self.board.clock_micros();
         let latest_imu = self.processed_sensors.imu;
         let latest_mag = self.processed_sensors.mag;
@@ -1130,6 +1291,24 @@ where
         }
 
         self.update_sensor_health_and_calibration(now_us);
+        WorldRunClass {
+            had_raw_sensor: had_raw_imu
+                || had_raw_mag
+                || had_raw_baro
+                || had_raw_pitot
+                || had_raw_range
+                || had_raw_gnss
+                || had_raw_battery
+                || had_raw_rc
+                || had_raw_attitude,
+            had_raw_imu,
+            had_raw_baro,
+            had_raw_rc,
+            had_processed_imu: self.processed_sensors.imu.is_some(),
+            had_processed_baro: self.processed_sensors.baro.is_some(),
+            had_processed_rc: self.processed_sensors.rc.is_some(),
+            ..WorldRunClass::default()
+        }
     }
 
     pub fn run_communication_and_parameter_service_stage(&mut self) {
@@ -1607,6 +1786,14 @@ where
         elapsed_us
             .checked_add(REALTIME_SERVICE_MIN_CONTROL_SLACK_US)
             .is_some_and(|required_us| required_us < interval_us)
+    }
+
+    fn realtime_service_can_continue(&self) -> bool {
+        if self.imu_pending() {
+            return false;
+        }
+        let now_us = self.board.clock_micros();
+        !self.control_update_can_run_at(now_us) && self.realtime_service_has_control_slack(now_us)
     }
 
     fn run_control_and_mixing_stage_if_control_due(&mut self, now_us: u64) -> bool {
@@ -3104,6 +3291,59 @@ mod tests {
 
         world.run_service_step_with_deferral(0);
         assert_eq!(world.board.deferred_board_action_count, 1);
+    }
+
+    #[test]
+    fn prioritized_service_applies_fresh_rc_in_one_service_opportunity() {
+        let params = Params::new();
+        let mixer = quadrotor::mixer::<f64>(&params);
+        let mut world = World::<
+            SensorStageBoard,
+            quadrotor::Estimator<f64>,
+            quadrotor::Controller<f64>,
+            quadrotor::Mixer<f64>,
+            SensorStageCommLink,
+            TestPwm,
+            f64,
+        >::init(
+            SensorStageBoard {
+                current_time_us: 1_100_000,
+                rc: Some(RcPacket {
+                    header: RosflightPacketHeader {
+                        timestamp: 1_100_000,
+                        status: 0,
+                    },
+                    n_chan: 1,
+                    chan: [0.5; RC_PACKET_CHANNELS],
+                    lol: false,
+                }),
+                ..Default::default()
+            },
+            params,
+            SensorStageCommLink::default(),
+            StateManager::new(),
+            Default::default(),
+            Default::default(),
+            mixer,
+            TestPwm::new(),
+        );
+        world.processed_sensors.imu = Some(ImuPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1_100_000,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.0, 0.0, 0.0],
+            temperature: 25.0,
+            seq: 1,
+        });
+
+        let class = world
+            .run_prioritized_service_steps_with_policy(RealtimeServicePolicy::all_available(0, 0));
+
+        assert_eq!(world.board.update_count, 2);
+        assert!(class.had_raw_rc);
+        assert_eq!(world.processed_sensors.rc.map(|rc| rc.n_chan), Some(1));
     }
 
     #[test]
