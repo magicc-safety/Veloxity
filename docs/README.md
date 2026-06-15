@@ -1,7 +1,6 @@
 # Veloxity Documentation
 
-This directory is the source of truth for the current branch. Older experiment notes and untested
-flows should not be reintroduced unless they are retested and updated against the current code.
+This directory is the source of truth for the current branch.
 
 ## Reader Paths
 
@@ -30,6 +29,12 @@ MAVLink confirmation kept every measured control-deadline-to-complete latency in
 budget while maintaining IMU, RC, attitude, output, GNSS, status, and heartbeat telemetry rates.
 Measured hardware status, Saleae scope-pin meanings, and exact build/test commands live in the
 RP2350 guide and hardware bring-up notes.
+
+The current Pixracer Pro / STM32H7 firmware target uses a fixed 400 Hz control loop with
+board-specific post-control telemetry scheduling. The latest 120-second hardware validation held
+the configured high-rate MAVLink streams with zero CRC errors and zero sequence gaps while keeping
+control timing comfortably inside the 2.5 ms period. Pixracer Pro setup, timing diagnostics, and
+validation notes live in the STM32 board guide.
 
 ### I Want To Modify Firmware Logic
 
