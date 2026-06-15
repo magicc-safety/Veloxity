@@ -14,10 +14,11 @@ The current GY-91 board should no longer feed accel/gyro data into the flight lo
   flight hardware testing.
 - Power: the ESC has no BEC. Do not power the Pico 2 W from the ESC signal harness unless an
   external regulator is added. The Pico 2 W and ESC must share ground.
-- IMU: Adafruit ISM330DHCX breakout over SPI. The intended driver is ST's `ism330dhcx-rs`
-  embedded-hal async driver with Embassy/RP SPI and GPIO interrupt plumbing. The repository patches
-  version 2.0.0 locally under `third_party/ism330dhcx-rs` only to disable `half`'s default `std`
-  feature; the driver source is unchanged and remains `no_std` for the Pico target.
+- IMU: Adafruit ISM330DHCX breakout over SPI. The current flight firmware does not use the
+  high-level `ism330dhcx-rs` API for the hot IMU path; it configures and samples the IMU through
+  board-local SPI register transactions in `boards/pico2w/src/bin/veloxity.rs`. The repository still
+  patches `ism330dhcx-rs` version 2.0.0 locally under `third_party/ism330dhcx-rs` to disable
+  `half`'s default `std` feature so the optional dependency remains `no_std`-clean for Pico builds.
 - Barometer: the existing GY-91/BMP280 path is retained as a low-rate pressure/temperature source.
   The board code treats it as barometer-only; MPU accel/gyro samples from that board are ignored by
   the flight path.
@@ -272,7 +273,7 @@ Core 1 owns hardware producers and transports that can jitter without directly b
 pipeline:
 
 - receives ISM330DHCX data-ready notifications,
-- samples the ISM330DHCX over SPI through the Embassy-supported `ism330dhcx-rs` driver,
+- samples the ISM330DHCX over SPI using board-local register transactions,
 - pushes completed IMU packets into a board-local queue,
 - receives CRSF frames on UART1 and pushes completed RC packets into a board-local queue,
 - receives GPS serial data through the PIO UART and GPS PPS through a GPIO interrupt when wired,
@@ -290,9 +291,15 @@ code drains IMU samples from the ISM330DHCX queue and RC samples from the CRSF r
 current board does not have a production barometer installed; the earlier GY-91/BMP280 pressure path
 remains a low-rate service-side reference path until the dedicated barometer hardware is added. The
 IMU path is interrupt-driven. The default firmware samples the ISM330DHCX at the high-rate output
-data rate (ODR) but
-runs the full control update at `1.5 kHz`. Use `imu-odr-1666hz` only when deliberately testing the
-lower-rate timing-margin mode; `ism330dhcx-1k666` remains as a compatibility alias.
+data rate (ODR) but runs the full control update at `1.5 kHz`. Use `imu-odr-1666hz` only when
+deliberately testing the lower-rate timing-margin mode; `ism330dhcx-1k666` remains as a
+compatibility alias.
+
+Important timing note: because the flight path bypasses the `ism330dhcx-rs` high-level API, any
+non-consistent IMU timing delay should be investigated at the board-local data-ready wait,
+chip-select handling, SPI transfer, register burst read, byte conversion, and queue-push stages in
+`boards/pico2w/src/bin/veloxity.rs`. Do not assume the vendored driver is controlling the current
+hot IMU timing path.
 
 Core 0 closes the control loop only from the latest queued IMU packet plus already-processed command
 state. RC interpretation, barometer, magnetometer, GPS, telemetry, and parameter work run in bounded

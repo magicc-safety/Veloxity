@@ -13,7 +13,7 @@ and PIO allocation.
 | `boards/pico2w/src/board.rs` | Pico implementation of the `BoardIo` contract. |
 | `boards/pico2w/src/comms_core.rs` | Shared MAVLink mailbox between transport tasks and the flight core. |
 | `boards/pico2w/src/pwm.rs` | PIO PWM/DShot-facing driver implementation. |
-| `boards/pico2w/src/ism330dhcx.rs` | ISM330DHCX IMU packet path. |
+| `boards/pico2w/src/ism330dhcx.rs` | ISM330DHCX IMU queue and diagnostics. The hot IMU register transactions currently live in `src/bin/veloxity.rs`. |
 | `boards/pico2w/src/barometer.rs` | Barometer packet path. |
 | `boards/pico2w/src/gy91.rs` | Legacy GY-91/BMP280 support used as low-rate pressure path. |
 | `boards/pico2w/src/gps.rs` | GPS and magnetometer path. |
@@ -58,9 +58,9 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --releas
 ```
 
 The default `pico2w` feature set is the current hardware baseline: real ISM330DHCX data-ready
-input, native high-rate IMU ODR, a fixed `1.5 kHz` control update rate, the core 1
-interrupt-executor IMU producer, bounded high-rate telemetry, CRSF RC input, GPS PIO service, and
-the UART MAVLink bridge.
+input, board-local SPI register reads for the hot IMU path, native high-rate IMU ODR, a fixed
+`1.5 kHz` control update rate, the core 1 interrupt-executor IMU producer, bounded high-rate
+telemetry, CRSF RC input, GPS PIO service, and the UART MAVLink bridge.
 
 The default feature set is `ism330dhcx-driver` plus `imu-producer-interrupt-executor`. Remaining
 opt-in features should be treated as measurement, fallback, or bring-up tools:
@@ -78,6 +78,24 @@ opt-in features should be treated as measurement, fallback, or bring-up tools:
 | `timing-diagnostics` | Emits coarse MAVLink STATUSTEXT timing diagnostics from measured world paths. | No; useful when a logic analyzer is unavailable. |
 | `release-loop-bench`, `release-loop-classifier` | Legacy onboard release-mode loop timing summaries. | No; prefer Saleae captures for final timing claims. |
 | `core1-disable-heartbeat`, `core1-disable-mavlink-tx`, `core1-disable-mavlink-rx`, `core1-disable-crsf`, `core1-disable-gps` | Core 1 transport isolation gates used to identify interference from individual producer/transport tasks. | No; diagnostic-only. |
+
+### ISM330DHCX Driver Status
+
+The current flight IMU path is not using the high-level `ism330dhcx-rs` driver API for setup or
+sample reads. The `ism330dhcx-driver` feature enables the ISM330DHCX flight path and keeps the
+optional dependency in the build graph, but the hot path in `boards/pico2w/src/bin/veloxity.rs`
+currently:
+
+- waits for the data-ready GPIO edge,
+- writes the small set of setup registers directly,
+- reads the raw temperature/gyro/accel register block with one SPI transaction,
+- converts the raw bytes into `ImuPacket<f32>`,
+- pushes that packet into the board-local IMU queue.
+
+This matters for timing work. If IMU delay is non-consistent, inspect the direct register path
+first: data-ready wait timing, chip-select toggling, SPI transfer duration, register burst read,
+byte conversion, and queue push. The vendored `ism330dhcx-rs` patch only keeps the optional driver
+dependency `no_std`-compatible; it does not control the current hot IMU timing path.
 
 Logic-analyzer timing build:
 

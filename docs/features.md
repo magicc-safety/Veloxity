@@ -28,7 +28,7 @@ The default Pico feature set is `ism330dhcx-driver` plus `imu-producer-interrupt
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `ism330dhcx-driver` | Enables the real ISM330DHCX SPI/data-ready IMU driver dependency. | Yes; default. |
+| `ism330dhcx-driver` | Enables the real ISM330DHCX SPI/data-ready IMU path and keeps the optional `ism330dhcx-rs` dependency in the build graph. The current hot IMU setup/read path uses board-local register transactions, not the driver's high-level API. | Yes; default. |
 | `imu-producer-interrupt-executor` | Runs the IMU producer on the core 1 Embassy interrupt executor. | Yes; default. |
 | `imu-odr-1666hz` | Selects the lower `1.666 kHz` ISM330DHCX output data rate. ODR means output data rate: the hardware sample production rate. | No; comparison/bring-up. |
 | `ism330dhcx-1k666` | Backward-compatible alias for `imu-odr-1666hz`. | No; prefer `imu-odr-1666hz`. |

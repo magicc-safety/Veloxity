@@ -181,11 +181,13 @@ The driver source is otherwise kept aligned with the published crate. Treat
 Veloxity-owned flight logic.
 
 The current Pico flight path still performs the high-rate IMU setup and sample reads with
-board-local register transactions in `boards/pico2w/src/bin/veloxity.rs`; the optional
-`ism330dhcx-driver` dependency remains part of the ISM330DHCX feature surface and must stay
-`no_std`-clean when that feature is enabled. If upstream changes `ism330dhcx-rs` to disable `half`
-default features itself, remove the `[patch.crates-io]` entry and verify the Pico IMU build against
-the published crate.
+board-local register transactions in `boards/pico2w/src/bin/veloxity.rs`; it does not use the
+driver's high-level API for the hot IMU timing path. That distinction matters when investigating
+non-consistent IMU delay: inspect the board-local data-ready wait, chip-select/SPI transfer,
+register burst read, byte conversion, and queue-push stages first. The optional `ism330dhcx-driver`
+dependency remains part of the ISM330DHCX feature surface and must stay `no_std`-clean when that
+feature is enabled. If upstream changes `ism330dhcx-rs` to disable `half` default features itself,
+remove the `[patch.crates-io]` entry and verify the Pico IMU build against the published crate.
 
 ## Generated Files
 
