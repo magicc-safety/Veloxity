@@ -695,7 +695,7 @@ mod tests {
         let mut rc = Rc::new();
         let mut state = crate::state_machine::StateManager::new();
         state.update(Event::INITIALIZED, &params);
-        rc.init(&mut (), &params);
+        rc.init(&params);
         let mut channels = [0.5; crate::packets::RC_PACKET_CHANNELS];
         channels[0] = 0.55;
         channels[1] = 0.45;

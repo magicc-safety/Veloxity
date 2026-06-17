@@ -584,7 +584,7 @@ where
         state.update(Event::INITIALIZED, &params);
 
         let mut rc = Rc::new();
-        rc.init(&mut board, &params);
+        rc.init(&params);
 
         let mut command = CommandManager::new();
         command.init(&params, &mut state);

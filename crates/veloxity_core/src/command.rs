@@ -664,15 +664,11 @@ impl From<ControlType> for OffboardControlMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        packets::{RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
-        test_support::TestBoard,
-    };
+    use crate::packets::{RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader};
 
     fn initialized_rc(params: &Params) -> Rc {
         let mut rc = Rc::new();
-        let mut board = TestBoard::default();
-        rc.init(&mut board, params);
+        rc.init(params);
         rc
     }
 

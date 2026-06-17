@@ -104,13 +104,13 @@ impl Rc {
         }
     }
 
-    /// Initializes RC hardware and internal mappings
-    pub fn init<B>(&mut self, board: &mut B, params: &Params) {
-        self.init_rc(board, params);
+    /// Initializes RC internal mappings from parameters.
+    pub fn init(&mut self, params: &Params) {
+        self.init_rc(params);
         self.new_command = false;
     }
 
-    fn init_rc<B>(&mut self, _board: &mut B, params: &Params) {
+    fn init_rc(&mut self, params: &Params) {
         self.init_sticks(params);
         self.update_switch_mappings(params);
     }
