@@ -315,7 +315,7 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
                 let value = if self.output_types[output] == MixerOutputType::Motor {
                     self.mix_motor_parameter_output(output, &commands, ctx.rc_override, &ctx)
                 } else {
-                    self.matrix_output_selected(output, &commands, ctx.rc_override)
+                    self.mix_single_output_with_selected_rows(output, &commands, ctx.rc_override)
                 };
                 outputs[output] = value;
 
@@ -324,7 +324,7 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
                 }
             }
         } else {
-            self.matrix_outputs_selected(&commands, ctx.rc_override, &mut outputs);
+            self.mix_outputs_with_selected_rows(&commands, ctx.rc_override, &mut outputs);
             for (output, value) in outputs.iter().enumerate() {
                 if self.output_types[output] == MixerOutputType::Motor && value.abs() > max_output {
                     max_output = value.abs();
@@ -375,6 +375,12 @@ impl<R: FlightFloat> Mixer<R> for MatrixMixer<R> {
         } else {
             None
         }
+    }
+
+    fn refresh_params(&mut self, params: &Params) -> Option<MixerStatus> {
+        self.status = self.refresh_mixer_config(params);
+        self.refresh_runtime_params(params);
+        Some(self.status)
     }
 }
 
@@ -459,7 +465,7 @@ impl<R: FlightFloat> MatrixMixer<R> {
         ctx: &MixerCtx<'_, R>,
     ) -> R {
         let omega_squared = self
-            .matrix_output_selected(output, commands, rc_override)
+            .mix_single_output_with_selected_rows(output, commands, rc_override)
             .max(<R as FlightFloat>::from_f32(0.0));
         let k_q = param_float(ctx.params, ParamId::PARAM_MOTOR_KV);
         if k_q < <R as FlightFloat>::from_f32(0.0000001) {
@@ -493,7 +499,7 @@ impl<R: FlightFloat> MatrixMixer<R> {
         voltage / battery_voltage
     }
 
-    fn matrix_output_selected(
+    fn mix_single_output_with_selected_rows(
         &self,
         output: usize,
         commands: &ControllerOutput<R>,
@@ -505,17 +511,13 @@ impl<R: FlightFloat> MatrixMixer<R> {
             if command == <R as FlightFloat>::from_f32(0.0) {
                 continue;
             }
-            let row = if self.use_primary_row_for_override(input, rc_override) {
-                &self.primary_mixer[input]
-            } else {
-                &self.secondary_mixer[input]
-            };
+            let row = self.selected_mixer_row(input, rc_override);
             value += command * row[output];
         }
         value
     }
 
-    fn matrix_outputs_selected(
+    fn mix_outputs_with_selected_rows(
         &self,
         commands: &ControllerOutput<R>,
         rc_override: u16,
@@ -526,16 +528,21 @@ impl<R: FlightFloat> MatrixMixer<R> {
             if command == <R as FlightFloat>::from_f32(0.0) {
                 continue;
             }
-            let row = if self.use_primary_row_for_override(input, rc_override) {
-                &self.primary_mixer[input]
-            } else {
-                &self.secondary_mixer[input]
-            };
+            let row = self.selected_mixer_row(input, rc_override);
             for output in 0..NUM_MIXER_OUTPUTS {
                 if self.output_types[output] != MixerOutputType::Aux {
                     outputs[output] += command * row[output];
                 }
             }
+        }
+    }
+
+    #[inline(always)]
+    fn selected_mixer_row(&self, input: usize, rc_override: u16) -> &[R; NUM_MIXER_OUTPUTS] {
+        if self.use_primary_row_for_override(input, rc_override) {
+            &self.primary_mixer[input]
+        } else {
+            &self.secondary_mixer[input]
         }
     }
 

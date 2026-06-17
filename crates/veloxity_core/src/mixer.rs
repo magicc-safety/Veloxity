@@ -53,4 +53,8 @@ pub trait Mixer<R: FlightFloat> {
     fn on_param_changed(&mut self, _params: &Params, _id: ParamId) -> Option<MixerStatus> {
         None
     }
+
+    fn refresh_params(&mut self, _params: &Params) -> Option<MixerStatus> {
+        None
+    }
 }

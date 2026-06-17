@@ -71,7 +71,7 @@ use veloxity_core::board::SerialTxPriority;
 use veloxity_core::packets::{ImuPacket, RosflightPacketHeader};
 use veloxity_core::world::RealtimeSchedulerStep;
 #[cfg(feature = "release-loop-classifier")]
-use veloxity_core::world::WorldRunClass;
+use veloxity_core::world::WorldReport;
 use veloxity_core::{
     board::{BoardIo, SerialRxPriority},
     comm::TelemetryRates,
@@ -907,42 +907,42 @@ impl LoopBench {
     }
 
     #[cfg(feature = "release-loop-classifier")]
-    fn record(&mut self, elapsed_us: u32, now_us: u64, class: WorldRunClass) {
+    fn record(&mut self, elapsed_us: u32, now_us: u64, report: WorldReport) {
         self.count = self.count.wrapping_add(1);
         self.sum_us = self.sum_us.saturating_add(elapsed_us as u64);
         self.max_us = self.max_us.max(elapsed_us);
         #[cfg(feature = "release-loop-classifier")]
-        self.record_loop_closure_class(elapsed_us, class.ran_control);
+        self.record_loop_closure_class(elapsed_us, report.ran_control);
         if elapsed_us > LOOP_BENCH_BUDGET_US {
             self.missed_250us = self.missed_250us.wrapping_add(1);
-            self.slow_rx = self.slow_rx.wrapping_add(class.had_rx as u32);
-            self.slow_raw_imu = self.slow_raw_imu.wrapping_add(class.had_raw_imu as u32);
-            self.slow_raw_baro = self.slow_raw_baro.wrapping_add(class.had_raw_baro as u32);
-            self.slow_raw_rc = self.slow_raw_rc.wrapping_add(class.had_raw_rc as u32);
+            self.slow_rx = self.slow_rx.wrapping_add(report.had_rx as u32);
+            self.slow_raw_imu = self.slow_raw_imu.wrapping_add(report.had_raw_imu as u32);
+            self.slow_raw_baro = self.slow_raw_baro.wrapping_add(report.had_raw_baro as u32);
+            self.slow_raw_rc = self.slow_raw_rc.wrapping_add(report.had_raw_rc as u32);
             self.slow_telemetry_due = self
                 .slow_telemetry_due
-                .wrapping_add(class.telemetry_due as u32);
+                .wrapping_add(report.telemetry_due as u32);
             self.slow_telemetry_deferred = self
                 .slow_telemetry_deferred
-                .wrapping_add(class.telemetry_deferred as u32);
+                .wrapping_add(report.telemetry_deferred as u32);
             self.slow_after_control_over_budget = self
                 .slow_after_control_over_budget
-                .wrapping_add((class.elapsed_after_control_us > LOOP_BENCH_BUDGET_US) as u32);
-            self.slow_control = self.slow_control.wrapping_add(class.ran_control as u32);
+                .wrapping_add((report.elapsed_after_control_us > LOOP_BENCH_BUDGET_US) as u32);
+            self.slow_control = self.slow_control.wrapping_add(report.ran_control as u32);
             #[cfg(feature = "release-loop-classifier")]
             {
                 self.sum_estimator_us = self
                     .sum_estimator_us
-                    .wrapping_add(class.estimator_us as u32);
+                    .wrapping_add(report.estimator_us as u32);
                 self.sum_controller_us = self
                     .sum_controller_us
-                    .wrapping_add(class.controller_us as u32);
-                self.sum_mixer_us = self.sum_mixer_us.wrapping_add(class.mixer_us as u32);
-                self.sum_pwm_us = self.sum_pwm_us.wrapping_add(class.pwm_us as u32);
-                self.max_estimator_us = self.max_estimator_us.max(class.estimator_us);
-                self.max_controller_us = self.max_controller_us.max(class.controller_us);
-                self.max_mixer_us = self.max_mixer_us.max(class.mixer_us);
-                self.max_pwm_us = self.max_pwm_us.max(class.pwm_us);
+                    .wrapping_add(report.controller_us as u32);
+                self.sum_mixer_us = self.sum_mixer_us.wrapping_add(report.mixer_us as u32);
+                self.sum_pwm_us = self.sum_pwm_us.wrapping_add(report.pwm_us as u32);
+                self.max_estimator_us = self.max_estimator_us.max(report.estimator_us);
+                self.max_controller_us = self.max_controller_us.max(report.controller_us);
+                self.max_mixer_us = self.max_mixer_us.max(report.mixer_us);
+                self.max_pwm_us = self.max_pwm_us.max(report.pwm_us);
             }
         }
 
@@ -1350,7 +1350,7 @@ fn main() -> ! {
                 {
                     let start_us = Instant::now().as_micros();
                     #[cfg(feature = "release-loop-classifier")]
-                    let class = world.run_imu_control_tick_classified();
+                    let report = world.run_imu_control_tick_classified();
                     #[cfg(not(feature = "release-loop-classifier"))]
                     let _ = world.run_imu_control_tick();
                     let end_us = Instant::now().as_micros();
@@ -1358,7 +1358,7 @@ fn main() -> ! {
                     loop_bench.record(
                         end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
                         end_us,
-                        class,
+                        report,
                     );
                     #[cfg(not(feature = "release-loop-classifier"))]
                     loop_bench.record(
@@ -1381,7 +1381,7 @@ fn main() -> ! {
                 {
                     let start_us = Instant::now().as_micros();
                     #[cfg(feature = "release-loop-classifier")]
-                    let class =
+                    let report =
                         world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
                     #[cfg(not(feature = "release-loop-classifier"))]
                     let _ = world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
@@ -1390,7 +1390,7 @@ fn main() -> ! {
                     loop_bench.record(
                         end_us.saturating_sub(start_us).min(u32::MAX as u64) as u32,
                         end_us,
-                        class,
+                        report,
                     );
                     #[cfg(not(feature = "release-loop-classifier"))]
                     loop_bench.record(

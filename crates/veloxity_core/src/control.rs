@@ -3,7 +3,7 @@ use crate::{
     command::CommandManager,
     companion::{AuxCommandState, ExternalAttitudeState},
     controller::{Controller, ControllerCtx, RcTrimCalibrator},
-    estimator::{AttitudeEstimate, Estimator},
+    estimator::{AttitudeEstimate, Estimator, EstimatorCtx},
     math::FlightFloat,
     mixer::{Mixer, MixerCtx, MixerStatus},
     params::Params,
@@ -178,7 +178,7 @@ where
         return false;
     }
 
-    if current_time < last_imu_time {
+    if current_time <= last_imu_time {
         ctx.state
             .set_error_flag(ErrorFlag::TIME_GOING_BACKWARDS, true, ctx.params);
         return false;
@@ -195,12 +195,12 @@ where
     let external_attitude = ctx.external_attitude.latest.take();
     let estimator_start_us = ctx.timing.is_some().then(|| ctx.board.clock_micros());
     control_scope_estimator(ctx.board, true);
-    let state = ctx.estimator.estimate_with_external_attitude_cached_params(
-        ctx.sensors,
-        ctx.params,
+    let state = ctx.estimator.estimate(EstimatorCtx {
+        sensors: ctx.sensors,
+        params: ctx.params,
         dt,
         external_attitude,
-    );
+    });
     control_scope_estimator(ctx.board, false);
     if let Some(estimator_start_us) = estimator_start_us {
         let elapsed_us = elapsed_u16(estimator_start_us, ctx.board.clock_micros());

@@ -184,6 +184,7 @@ pub struct ParamEventQueues {
     pub read_requests: EventQueue<ParamReadRequested, PARAM_READ_REQUEST_QUEUE_CAPACITY>,
     pub list_requests: EventQueue<ParamListRequested, PARAM_LIST_REQUEST_QUEUE_CAPACITY>,
     pub changes: EventQueue<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>,
+    pub full_refresh: bool,
 }
 
 #[derive(Default)]
@@ -221,6 +222,7 @@ impl ParamEventQueues {
             && self.read_requests.is_empty()
             && self.list_requests.is_empty()
             && self.changes.is_empty()
+            && !self.full_refresh
     }
 
     pub fn clear_loop_events(&mut self) {
@@ -228,6 +230,7 @@ impl ParamEventQueues {
         self.read_requests.clear();
         self.list_requests.clear();
         self.changes.clear();
+        self.full_refresh = false;
     }
 }
 

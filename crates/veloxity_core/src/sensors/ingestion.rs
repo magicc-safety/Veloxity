@@ -86,7 +86,29 @@ where
     }
 }
 
-pub fn process_sensor_bus<
+pub trait SensorProcessorAccess<R: FlightFloat> {
+    type Imu: SensorPacketProcessor<ImuPacket<R>>;
+    type Mag: SensorPacketProcessor<MagPacket>;
+    type Baro: SensorPacketProcessor<BaroPacket>;
+    type Pitot: SensorPacketProcessor<PitotPacket>;
+    type Range: SensorPacketProcessor<RangePacket>;
+    type Gnss: SensorPacketProcessor<GNSSPacket>;
+    type Battery: SensorPacketProcessor<BatteryPacket>;
+    type Rc: SensorPacketProcessor<RcPacket>;
+    type Attitude: SensorPacketProcessor<AttitudePacket>;
+
+    fn imu(&mut self) -> &mut Self::Imu;
+    fn mag(&mut self) -> &mut Self::Mag;
+    fn baro(&mut self) -> &mut Self::Baro;
+    fn pitot(&mut self) -> &mut Self::Pitot;
+    fn range(&mut self) -> &mut Self::Range;
+    fn gnss(&mut self) -> &mut Self::Gnss;
+    fn battery(&mut self) -> &mut Self::Battery;
+    fn rc(&mut self) -> &mut Self::Rc;
+    fn attitude(&mut self) -> &mut Self::Attitude;
+}
+
+impl<
     R,
     ImuProc,
     MagProc,
@@ -97,10 +119,8 @@ pub fn process_sensor_bus<
     BatteryProc,
     RcProc,
     AttitudeProc,
->(
-    raw: &mut SensorBus<R>,
-    processed: &mut ProcessedSensors<R>,
-    processors: &mut SensorProcessorSet<
+> SensorProcessorAccess<R>
+    for SensorProcessorSet<
         R,
         ImuProc,
         MagProc,
@@ -111,10 +131,8 @@ pub fn process_sensor_bus<
         BatteryProc,
         RcProc,
         AttitudeProc,
-    >,
-    flags: &mut CalibrationFlags,
-    params: &mut Params,
-) where
+    >
+where
     R: FlightFloat,
     ImuProc: SensorPacketProcessor<ImuPacket<R>>,
     MagProc: SensorPacketProcessor<MagPacket>,
@@ -126,65 +144,138 @@ pub fn process_sensor_bus<
     RcProc: SensorPacketProcessor<RcPacket>,
     AttitudeProc: SensorPacketProcessor<AttitudePacket>,
 {
+    type Imu = ImuProc;
+    type Mag = MagProc;
+    type Baro = BaroProc;
+    type Pitot = PitotProc;
+    type Range = RangeProc;
+    type Gnss = GnssProc;
+    type Battery = BatteryProc;
+    type Rc = RcProc;
+    type Attitude = AttitudeProc;
+
+    fn imu(&mut self) -> &mut Self::Imu {
+        &mut self.imu
+    }
+
+    fn mag(&mut self) -> &mut Self::Mag {
+        &mut self.mag
+    }
+
+    fn baro(&mut self) -> &mut Self::Baro {
+        &mut self.baro
+    }
+
+    fn pitot(&mut self) -> &mut Self::Pitot {
+        &mut self.pitot
+    }
+
+    fn range(&mut self) -> &mut Self::Range {
+        &mut self.range
+    }
+
+    fn gnss(&mut self) -> &mut Self::Gnss {
+        &mut self.gnss
+    }
+
+    fn battery(&mut self) -> &mut Self::Battery {
+        &mut self.battery
+    }
+
+    fn rc(&mut self) -> &mut Self::Rc {
+        &mut self.rc
+    }
+
+    fn attitude(&mut self) -> &mut Self::Attitude {
+        &mut self.attitude
+    }
+}
+
+pub struct SensorIngestionCtx<'a, R: FlightFloat, Processors = SensorProcessorSet<R>> {
+    pub raw: &'a mut SensorBus<R>,
+    pub processed: &'a mut ProcessedSensors<R>,
+    pub processors: &'a mut Processors,
+    pub flags: &'a mut CalibrationFlags,
+    pub params: &'a mut Params,
+}
+
+pub fn process_sensor_bus<R, Processors>(ctx: SensorIngestionCtx<'_, R, Processors>)
+where
+    R: FlightFloat,
+    Processors: SensorProcessorAccess<R>,
+{
+    let SensorIngestionCtx {
+        raw,
+        processed,
+        processors,
+        flags,
+        params,
+    } = ctx;
+
     if raw.imu.is_some() {
-        processed.imu = processors.imu.process(&mut raw.imu, flags, params);
+        processed.imu = processors.imu().process(&mut raw.imu, flags, params);
     } else {
         processed.imu = None;
     }
     if raw.mag.is_some() {
-        processed.mag = processors.mag.process(&mut raw.mag, flags, params);
+        processed.mag = processors.mag().process(&mut raw.mag, flags, params);
     } else {
         processed.mag = None;
     }
     if raw.baro.is_some() {
-        processed.baro = processors.baro.process(&mut raw.baro, flags, params);
+        processed.baro = processors.baro().process(&mut raw.baro, flags, params);
     } else {
         processed.baro = None;
     }
     if raw.pitot.is_some() {
-        processed.pitot = processors.pitot.process(&mut raw.pitot, flags, params);
+        processed.pitot = processors.pitot().process(&mut raw.pitot, flags, params);
     } else {
         processed.pitot = None;
     }
     if raw.range.is_some() {
-        processed.range = processors.range.process(&mut raw.range, flags, params);
+        processed.range = processors.range().process(&mut raw.range, flags, params);
     } else {
         processed.range = None;
     }
     if raw.gnss.is_some() {
-        processed.gnss = processors.gnss.process(&mut raw.gnss, flags, params);
+        processed.gnss = processors.gnss().process(&mut raw.gnss, flags, params);
     } else {
         processed.gnss = None;
     }
     if raw.battery.is_some() {
-        processed.battery = processors.battery.process(&mut raw.battery, flags, params);
+        processed.battery = processors
+            .battery()
+            .process(&mut raw.battery, flags, params);
     }
     if raw.rc.is_some() {
-        processed.rc = processors.rc.process(&mut raw.rc, flags, params);
+        processed.rc = processors.rc().process(&mut raw.rc, flags, params);
     } else {
         processed.rc = None;
     }
     if raw.attitude.is_some() {
         processed.attitude = processors
-            .attitude
+            .attitude()
             .process(&mut raw.attitude, flags, params);
     } else {
         processed.attitude = None;
     }
 }
 
-pub fn process_imu_sensor<R, ImuProc>(
-    raw: &mut SensorBus<R>,
-    processed: &mut ProcessedSensors<R>,
-    imu_processor: &mut ImuProc,
-    flags: &mut CalibrationFlags,
-    params: &mut Params,
-) where
+pub fn process_imu_sensor<R, Processors>(ctx: SensorIngestionCtx<'_, R, Processors>)
+where
     R: FlightFloat,
-    ImuProc: SensorPacketProcessor<ImuPacket<R>>,
+    Processors: SensorProcessorAccess<R>,
 {
+    let SensorIngestionCtx {
+        raw,
+        processed,
+        processors,
+        flags,
+        params,
+    } = ctx;
+
     if raw.imu.is_some() {
-        processed.imu = imu_processor.process(&mut raw.imu, flags, params);
+        processed.imu = processors.imu().process(&mut raw.imu, flags, params);
     } else {
         processed.imu = None;
     }
@@ -230,13 +321,13 @@ mod tests {
             lol: false,
         }));
 
-        process_sensor_bus(
-            &mut raw,
-            &mut processed,
-            &mut processors,
-            &mut flags,
-            &mut params,
-        );
+        process_sensor_bus(SensorIngestionCtx {
+            raw: &mut raw,
+            processed: &mut processed,
+            processors: &mut processors,
+            flags: &mut flags,
+            params: &mut params,
+        });
 
         assert!(raw.rc.is_none());
         assert_eq!(processed.rc.unwrap().header.timestamp, 123);
@@ -279,13 +370,13 @@ mod tests {
         let mut flags = CalibrationFlags::empty();
         let mut params = Params::new();
 
-        process_sensor_bus(
-            &mut raw,
-            &mut processed,
-            &mut processors,
-            &mut flags,
-            &mut params,
-        );
+        process_sensor_bus(SensorIngestionCtx {
+            raw: &mut raw,
+            processed: &mut processed,
+            processors: &mut processors,
+            flags: &mut flags,
+            params: &mut params,
+        });
 
         assert!(processed.imu.is_none());
         assert!(processed.rc.is_none());
@@ -306,7 +397,18 @@ mod tests {
             }),
             ..Default::default()
         };
-        let mut processor = PassthroughImuProcessor;
+        let mut processors = SensorProcessorSet::<
+            f64,
+            PassthroughImuProcessor,
+            PassthroughMagProcessor,
+            PassthroughBaroProcessor,
+            PassthroughPitotProcessor,
+            PassthroughRangeProcessor,
+            PassthroughGNSSProcessor,
+            PassthroughBatteryProcessor,
+            PassthroughRcProcessor,
+            PassthroughAttitudeProcessor,
+        >::default();
         let mut flags = CalibrationFlags::empty();
         let mut params = Params::new();
 
@@ -318,13 +420,13 @@ mod tests {
             ..Default::default()
         }));
 
-        process_imu_sensor(
-            &mut raw,
-            &mut processed,
-            &mut processor,
-            &mut flags,
-            &mut params,
-        );
+        process_imu_sensor(SensorIngestionCtx {
+            raw: &mut raw,
+            processed: &mut processed,
+            processors: &mut processors,
+            flags: &mut flags,
+            params: &mut params,
+        });
 
         assert!(raw.imu.is_none());
         assert_eq!(processed.imu.unwrap().header.timestamp, 200);

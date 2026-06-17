@@ -3,15 +3,14 @@ use crate::comm::ImuTelemetryReadiness;
 use crate::{
     board::BoardIo,
     comm::messages::messages::RosflightHardErrorMsg,
-    comm::{CommManager, RealtimeTelemetryPriority, TelemetryRates, interface::CommInterface},
-    command::CommandManager,
-    command::service::{
-        self as command_service, BoardCommandCtx, CalibrationRequestCtx, ConfigInfoCtx,
-        OffboardControlCtx, ParamDefaultsCtx, ResetOriginCtx, VersionRequestCtx,
+    comm::{
+        CommManager, RealtimeTelemetryPriority, TelemetryCtx, TelemetryRates,
+        interface::CommInterface,
     },
+    command::CommandManager,
+    command::service::{self as command_service, CommandRequestCtx},
     companion::{
-        self, AuxCommandCtx, AuxCommandState, CompanionHeartbeatCtx, CompanionLinkState,
-        ExternalAttitudeCtx, ExternalAttitudeState,
+        self, AuxCommandState, CompanionInputCtx, CompanionLinkState, ExternalAttitudeState,
     },
     control::{
         ControlPipelineCtx, ControlPipelineResource, ControlPipelineTiming,
@@ -22,21 +21,21 @@ use crate::{
     events::{CommEventQueues, CommandEventQueues, CompanionEventQueues, ParamEventQueues},
     log::drain::{self as log_drain, LogDrainCtx},
     math::FlightFloat,
-    params::reactions::{self, CommandParamChangedCtx, RcParamChangedCtx},
-    params::service::{
-        self as param_service, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx,
-    },
+    params::reactions::{self, ParamReactionCtx},
+    params::service::{self as param_service, ParamListState, ParamServiceCtx},
     params::{ParamId, ParamValue, Params},
-    ports::{EventDrainPort, EventEmitPort, EventReadPort, ParamsReadPort, ParamsWritePort},
+    ports::EventEmitPort,
     pwm::PwmDriver,
     pwm::system::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
     rc::system::{RcCommandStateCtx, run_rc_command_state},
     sensors::health::{SensorHealthCtx, update_sensor_health},
-    sensors::ingestion::{SensorProcessorSet, process_imu_sensor, process_sensor_bus},
+    sensors::ingestion::{
+        SensorIngestionCtx, SensorProcessorSet, process_imu_sensor, process_sensor_bus,
+    },
     sensors::processors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
-    state_machine::{ErrorFlag, Event, StateManager},
+    state_machine::{Event, StateManager},
 };
 #[cfg(feature = "timing-diagnostics")]
 use crate::{
@@ -52,7 +51,6 @@ const IMU_TIMEOUT_US: u64 = 100_000;
 const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 1;
 const REALTIME_SERVICE_MIN_CONTROL_SLACK_US: u64 = 200;
 const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 120;
-const REALTIME_SERVICE_ALL_AVAILABLE_FAILSAFE_STEPS: usize = 64;
 #[cfg(feature = "timing-diagnostics")]
 const TIMING_DIAGNOSTIC_INTERVAL_US: u64 = 1_000_000;
 #[cfg(feature = "timing-diagnostics")]
@@ -152,7 +150,7 @@ pub struct WorldRunStats {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct WorldRunClass {
+pub struct WorldReport {
     pub had_rx: bool,
     pub had_raw_sensor: bool,
     pub had_raw_imu: bool,
@@ -171,7 +169,7 @@ pub struct WorldRunClass {
     pub pwm_us: u16,
 }
 
-impl WorldRunClass {
+impl WorldReport {
     fn merge_from(&mut self, other: Self) {
         self.had_rx |= other.had_rx;
         self.had_raw_sensor |= other.had_raw_sensor;
@@ -203,51 +201,23 @@ pub enum RealtimeSchedulerStep {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RealtimeServiceRunLimit {
-    Count(usize),
-    AllAvailable,
-}
-
-impl RealtimeServiceRunLimit {
-    fn max_steps(self) -> usize {
-        match self {
-            Self::Count(count) => count,
-            Self::AllAvailable => REALTIME_SERVICE_ALL_AVAILABLE_FAILSAFE_STEPS,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RealtimeServicePolicy {
-    pub run_limit: RealtimeServiceRunLimit,
     pub min_spacing_us: u64,
-    pub telemetry_streams_per_service_step: usize,
-    pub telemetry_streams_per_telemetry_phase: usize,
+    pub telemetry_streams_per_phase: usize,
 }
 
 impl RealtimeServicePolicy {
-    pub const fn one_step_with_spacing(
-        min_spacing_us: u64,
-        telemetry_streams_per_service_step: usize,
-        telemetry_streams_per_telemetry_phase: usize,
-    ) -> Self {
+    pub const fn with_spacing(min_spacing_us: u64, telemetry_streams_per_phase: usize) -> Self {
         Self {
-            run_limit: RealtimeServiceRunLimit::Count(1),
             min_spacing_us,
-            telemetry_streams_per_service_step,
-            telemetry_streams_per_telemetry_phase,
+            telemetry_streams_per_phase,
         }
     }
 
-    pub const fn all_available(
-        telemetry_streams_per_service_step: usize,
-        telemetry_streams_per_telemetry_phase: usize,
-    ) -> Self {
+    pub const fn continuous(telemetry_streams_per_phase: usize) -> Self {
         Self {
-            run_limit: RealtimeServiceRunLimit::AllAvailable,
             min_spacing_us: 0,
-            telemetry_streams_per_service_step,
-            telemetry_streams_per_telemetry_phase,
+            telemetry_streams_per_phase,
         }
     }
 }
@@ -289,8 +259,7 @@ enum RealtimeServicePhase {
     DeferredBoard,
 }
 
-const REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP: usize = 2;
-const REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE: usize = 1;
+const REALTIME_TELEMETRY_STREAMS_PER_SERVICE_PHASE: usize = 2;
 
 impl RealtimeServicePhase {
     fn next(self) -> Self {
@@ -541,7 +510,6 @@ where
     control_loop_rates: ControlLoopRates,
     last_control_update_us: u64,
     last_realtime_control_us: u64,
-    last_realtime_service_control_us: u64,
     next_realtime_service_us: u64,
     realtime_service_phase: RealtimeServicePhase,
     #[cfg(feature = "timing-diagnostics")]
@@ -640,7 +608,6 @@ where
             control_loop_rates: ControlLoopRates::default(),
             last_control_update_us: now_us,
             last_realtime_control_us: now_us,
-            last_realtime_service_control_us: 0,
             next_realtime_service_us: now_us,
             realtime_service_phase: RealtimeServicePhase::default(),
             #[cfg(feature = "timing-diagnostics")]
@@ -679,12 +646,12 @@ where
     }
 
     #[cfg(not(feature = "timing-diagnostics"))]
-    pub fn run_once_classified(&mut self) -> WorldRunClass {
+    pub fn run_once_classified(&mut self) -> WorldReport {
         self.run_once_budgeted_classified()
     }
 
     #[cfg(not(feature = "timing-diagnostics"))]
-    pub fn run_once_spike_counted(&mut self) -> WorldRunClass {
+    pub fn run_once_spike_counted(&mut self) -> WorldReport {
         let pass_start_us = self.board.clock_micros();
         let had_rx = self.board.serial_rx_pending();
         self.run_communication_and_parameter_service_stage();
@@ -717,7 +684,7 @@ where
         self.board.serial_flush();
         self.board.run_deferred_board_actions();
 
-        WorldRunClass {
+        WorldReport {
             had_rx,
             had_raw_sensor,
             had_raw_imu,
@@ -738,7 +705,7 @@ where
     }
 
     #[cfg(not(feature = "timing-diagnostics"))]
-    pub fn run_once_budgeted_classified(&mut self) -> WorldRunClass {
+    pub fn run_once_budgeted_classified(&mut self) -> WorldReport {
         let pass_start_us = self.board.clock_micros();
         let had_rx = self.board.serial_rx_pending();
         self.run_communication_and_parameter_service_stage();
@@ -772,7 +739,7 @@ where
         self.board.serial_flush();
         self.board.run_deferred_board_actions();
 
-        WorldRunClass {
+        WorldReport {
             had_rx,
             had_raw_sensor,
             had_raw_imu,
@@ -793,9 +760,9 @@ where
     }
 
     #[cfg(feature = "timing-diagnostics")]
-    pub fn run_once_classified(&mut self) -> WorldRunClass {
+    pub fn run_once_classified(&mut self) -> WorldReport {
         let stats = self.run_once_measured();
-        WorldRunClass {
+        WorldReport {
             had_rx: stats.had_rx,
             had_raw_sensor: stats.had_sensor,
             had_raw_imu: stats.had_imu,
@@ -915,7 +882,6 @@ where
         if now_us >= self.next_realtime_service_us
             && now_us.saturating_sub(self.last_realtime_control_us)
                 <= REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US
-            && self.last_realtime_service_control_us != self.last_realtime_control_us
             && self.realtime_service_has_control_slack(now_us)
         {
             RealtimeSchedulerStep::Service
@@ -951,7 +917,7 @@ where
     }
 
     #[cfg(feature = "timing-diagnostics")]
-    pub fn run_control_update_tick_classified(&mut self) -> WorldRunClass {
+    pub fn run_control_update_tick_classified(&mut self) -> WorldReport {
         let pass_start_us = self.board.clock_micros();
         let now_us = self.board.clock_micros();
         self.record_realtime_control_gate(now_us);
@@ -964,7 +930,7 @@ where
                 .record_control_run(self.last_realtime_control_us);
         }
 
-        let class = WorldRunClass {
+        let result = WorldReport {
             ran_control,
             elapsed_after_control_us: self
                 .board
@@ -975,15 +941,15 @@ where
             controller_us: control_timing.controller_us,
             mixer_us: control_timing.mixer_us,
             pwm_us: control_timing.pwm_us,
-            ..WorldRunClass::default()
+            ..WorldReport::default()
         };
-        if class.ran_control {
-            self.record_timing_diagnostics(stats_from_realtime_class(class));
+        if result.ran_control {
+            self.record_timing_diagnostics(stats_from_realtime_result(result));
         }
-        class
+        result
     }
 
-    pub fn run_imu_control_tick_classified(&mut self) -> WorldRunClass {
+    pub fn run_imu_control_tick_classified(&mut self) -> WorldReport {
         let pass_start_us = self.board.clock_micros();
         #[cfg(feature = "pre-control-scope")]
         self.board.set_test_pin_3(true);
@@ -1033,7 +999,7 @@ where
             .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
             || !self.comm_events.is_empty();
 
-        let class = WorldRunClass {
+        let result = WorldReport {
             had_raw_sensor,
             had_raw_imu,
             had_processed_imu,
@@ -1050,16 +1016,16 @@ where
             controller_us: control_timing.controller_us,
             mixer_us: control_timing.mixer_us,
             pwm_us: control_timing.pwm_us,
-            ..WorldRunClass::default()
+            ..WorldReport::default()
         };
         #[cfg(feature = "timing-diagnostics")]
-        if class.ran_control {
-            self.record_timing_diagnostics(stats_from_realtime_class(class));
+        if result.ran_control {
+            self.record_timing_diagnostics(stats_from_realtime_result(result));
         }
-        class
+        result
     }
 
-    pub fn run_service_step(&mut self) -> WorldRunClass {
+    pub fn run_service_step(&mut self) -> WorldReport {
         let pass_start_us = self.board.clock_micros();
         let had_rx = self.board.serial_rx_pending();
         self.run_service_input_stage();
@@ -1069,7 +1035,7 @@ where
         self.board.serial_flush();
         self.board.run_deferred_board_actions();
 
-        WorldRunClass {
+        WorldReport {
             had_rx,
             telemetry_due: self
                 .comm
@@ -1080,33 +1046,28 @@ where
                 .clock_micros()
                 .saturating_sub(pass_start_us)
                 .min(u32::MAX as u64) as u32,
-            ..WorldRunClass::default()
+            ..WorldReport::default()
         }
     }
 
-    pub fn run_service_step_with_deferral(
-        &mut self,
-        max_service_deferral_us: u64,
-    ) -> WorldRunClass {
+    pub fn run_service_step_with_deferral(&mut self, max_service_deferral_us: u64) -> WorldReport {
         self.run_service_step_with_deferral_and_telemetry_budget(
             max_service_deferral_us,
-            REALTIME_TELEMETRY_STREAMS_PER_SERVICE_STEP,
-            REALTIME_TELEMETRY_STREAMS_PER_TELEMETRY_PHASE,
+            REALTIME_TELEMETRY_STREAMS_PER_SERVICE_PHASE,
         )
     }
 
     pub fn run_service_step_with_deferral_and_telemetry_budget(
         &mut self,
         max_service_deferral_us: u64,
-        telemetry_streams_per_service_step: usize,
-        telemetry_streams_per_telemetry_phase: usize,
-    ) -> WorldRunClass {
+        telemetry_streams_per_phase: usize,
+    ) -> WorldReport {
         let pass_start_us = self.board.clock_micros();
         let had_rx = self.board.serial_rx_pending();
         let phase = self.realtime_service_phase;
         self.realtime_service_phase = self.realtime_service_phase.next();
 
-        self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_service_step);
+        self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_phase);
 
         match phase {
             RealtimeServicePhase::Input => self.run_service_input_stage(),
@@ -1120,7 +1081,7 @@ where
             RealtimeServicePhase::Telemetry0
             | RealtimeServicePhase::Telemetry1
             | RealtimeServicePhase::Telemetry2 => {
-                self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_telemetry_phase);
+                self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_phase);
             }
             RealtimeServicePhase::Flush => self.board.serial_flush_budgeted(1),
             RealtimeServicePhase::DeferredBoard => self.board.run_deferred_board_actions(),
@@ -1130,45 +1091,41 @@ where
             .board
             .clock_micros()
             .saturating_add(max_service_deferral_us);
-        self.last_realtime_service_control_us = self.last_realtime_control_us;
 
-        let class = WorldRunClass {
+        let result = WorldReport {
             had_rx,
             elapsed_after_control_us: self
                 .board
                 .clock_micros()
                 .saturating_sub(pass_start_us)
                 .min(u32::MAX as u64) as u32,
-            ..WorldRunClass::default()
+            ..WorldReport::default()
         };
-        class
+        result
     }
 
     pub fn run_prioritized_service_steps_with_policy(
         &mut self,
         policy: RealtimeServicePolicy,
-    ) -> WorldRunClass {
+    ) -> WorldReport {
         let pass_start_us = self.board.clock_micros();
-        let mut class = WorldRunClass {
+        let mut result = WorldReport {
             had_rx: self.board.serial_rx_pending(),
-            ..WorldRunClass::default()
+            ..WorldReport::default()
         };
 
-        let max_steps = policy.run_limit.max_steps();
-        let mut steps = 0;
-        while steps < max_steps && self.realtime_service_can_continue() {
-            let step_class = self.run_prioritized_service_step(policy);
-            let had_service_activity = step_class.had_rx
-                || step_class.had_raw_sensor
-                || step_class.telemetry_due
-                || step_class.telemetry_deferred;
-            class.merge_from(step_class);
-            steps += 1;
+        while self.realtime_service_can_continue() {
+            let step_result = self.run_prioritized_service_step(policy);
+            let had_service_activity = step_result.had_rx
+                || step_result.had_raw_sensor
+                || step_result.telemetry_due
+                || step_result.telemetry_deferred;
+            result.merge_from(step_result);
 
             if policy.min_spacing_us != 0 {
                 break;
             }
-            if policy.run_limit == RealtimeServiceRunLimit::AllAvailable && !had_service_activity {
+            if !had_service_activity {
                 break;
             }
         }
@@ -1177,28 +1134,27 @@ where
             .board
             .clock_micros()
             .saturating_add(policy.min_spacing_us);
-        self.last_realtime_service_control_us = self.last_realtime_control_us;
-        class.elapsed_after_control_us = self
+        result.elapsed_after_control_us = self
             .board
             .clock_micros()
             .saturating_sub(pass_start_us)
             .min(u32::MAX as u64) as u32;
-        class
+        result
     }
 
-    fn run_prioritized_service_step(&mut self, policy: RealtimeServicePolicy) -> WorldRunClass {
-        let mut class = WorldRunClass::default();
+    fn run_prioritized_service_step(&mut self, policy: RealtimeServicePolicy) -> WorldReport {
+        let mut result = WorldReport::default();
 
-        let sensor_class = self.run_service_sensor_stage();
-        class.merge_from(sensor_class);
+        let sensor_result = self.run_service_sensor_stage();
+        result.merge_from(sensor_result);
 
-        if sensor_class.had_raw_rc && self.realtime_service_can_continue() {
+        if sensor_result.had_raw_rc && self.realtime_service_can_continue() {
             self.run_rc_command_state_stages();
-            class.had_processed_rc = self.processed_sensors.rc.is_some();
+            result.had_processed_rc = self.processed_sensors.rc.is_some();
         }
 
         if self.realtime_service_can_continue() {
-            class.had_rx |= self.board.serial_rx_pending();
+            result.had_rx |= self.board.serial_rx_pending();
             self.run_service_input_stage();
         }
 
@@ -1207,15 +1163,8 @@ where
         }
 
         if self.realtime_service_can_continue() {
-            class.telemetry_due |= self
-                .run_realtime_telemetry_stage_budgeted(policy.telemetry_streams_per_service_step)
-                != 0;
-        }
-
-        if self.realtime_service_can_continue() {
-            class.telemetry_due |= self.run_realtime_telemetry_stage_budgeted(
-                policy.telemetry_streams_per_telemetry_phase,
-            ) != 0;
+            result.telemetry_due |=
+                self.run_realtime_telemetry_stage_budgeted(policy.telemetry_streams_per_phase) != 0;
         }
 
         if self.realtime_service_can_continue() {
@@ -1226,7 +1175,7 @@ where
             self.board.run_deferred_board_actions();
         }
 
-        class
+        result
     }
 
     fn run_service_input_stage(&mut self) {
@@ -1238,7 +1187,7 @@ where
         self.run_rc_command_state_stages();
     }
 
-    fn run_service_sensor_stage(&mut self) -> WorldRunClass {
+    fn run_service_sensor_stage(&mut self) -> WorldReport {
         let now_us = self.board.clock_micros();
         let latest_imu = self.processed_sensors.imu;
         let latest_mag = self.processed_sensors.mag;
@@ -1291,7 +1240,7 @@ where
         }
 
         self.update_sensor_health_and_calibration(now_us);
-        WorldRunClass {
+        WorldReport {
             had_raw_sensor: had_raw_imu
                 || had_raw_mag
                 || had_raw_baro
@@ -1307,7 +1256,7 @@ where
             had_processed_imu: self.processed_sensors.imu.is_some(),
             had_processed_baro: self.processed_sensors.baro.is_some(),
             had_processed_rc: self.processed_sensors.rc.is_some(),
-            ..WorldRunClass::default()
+            ..WorldReport::default()
         }
     }
 
@@ -1322,10 +1271,10 @@ where
         if self.has_pending_param_work() {
             self.service_param_events();
         }
-        if !self.param_events.changes.is_empty() {
+        self.request_gyro_calibration_if_needed();
+        if self.param_events.full_refresh || !self.param_events.changes.is_empty() {
             self.apply_param_reactions();
         }
-        self.request_gyro_calibration_if_needed();
     }
 
     pub fn run_sensor_ingestion_and_health_stage(&mut self) {
@@ -1407,155 +1356,74 @@ where
     }
 
     fn apply_companion_events(&mut self) {
-        companion::apply_companion_heartbeats(CompanionHeartbeatCtx {
-            requests: EventDrainPort::new(&mut self.companion_events.heartbeats),
-            state: &mut self.companion_link,
-        });
-        if self.companion_link.connected {
-            if let Some(msg) = self.pending_hard_error.take() {
-                self.comm_events
-                    .responses
-                    .push_or_log(crate::events::CommResponse::HardError(msg), "hard error");
-            }
-        }
-        companion::apply_aux_commands(AuxCommandCtx {
-            requests: EventDrainPort::new(&mut self.companion_events.aux_commands),
-            state: &mut self.aux_commands,
-        });
-        companion::apply_external_attitudes(ExternalAttitudeCtx {
-            requests: EventDrainPort::new(&mut self.companion_events.external_attitudes),
-            state: &mut self.external_attitude,
+        companion::apply_companion_inputs(&mut CompanionInputCtx {
+            events: &mut self.companion_events,
+            comm_events: &mut self.comm_events,
+            link: &mut self.companion_link,
+            aux_commands: &mut self.aux_commands,
+            external_attitude: &mut self.external_attitude,
+            pending_hard_error: &mut self.pending_hard_error,
         });
     }
 
     fn apply_command_events(&mut self) {
-        command_service::apply_calibration_requests(CalibrationRequestCtx {
-            requests: EventDrainPort::new(&mut self.command_events.calibration_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
+        command_service::apply_command_requests(&mut CommandRequestCtx {
+            requests: &mut self.command_events,
+            param_events: &mut self.param_events,
+            comm_events: &mut self.comm_events,
             state: &self.state,
+            command: &mut self.command,
+            controller: &mut self.controller,
+            board: &mut self.board,
             flags: &mut self.cal_flags,
             params: &mut self.params,
-        });
-        command_service::apply_offboard_control_requests(OffboardControlCtx {
-            requests: EventDrainPort::new(&mut self.command_events.offboard_control_requests),
-            command: &mut self.command,
-            params: &self.params,
-        });
-        command_service::apply_param_defaults_requests(ParamDefaultsCtx {
-            requests: EventDrainPort::new(&mut self.command_events.param_defaults_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-            state: &self.state,
-            params: &mut self.params,
-        });
-
-        command_service::apply_rc_trim_calibration_requests(
-            command_service::RcTrimCalibrationCtx {
-                requests: EventDrainPort::new(
-                    &mut self.command_events.rc_trim_calibration_requests,
-                ),
-                responses: EventEmitPort::new(&mut self.comm_events.responses),
-                state: &self.state,
-                command: &self.command,
-                controller: &mut self.controller,
-                params: &mut self.params,
-            },
-        );
-
-        command_service::apply_board_command_requests(BoardCommandCtx {
-            requests: EventDrainPort::new(&mut self.command_events.board_command_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-            state: &self.state,
-            board: &mut self.board,
-            params: &mut self.params,
-        });
-
-        command_service::apply_version_requests(VersionRequestCtx {
-            requests: EventDrainPort::new(&mut self.command_events.version_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-            state: &self.state,
-        });
-
-        command_service::apply_reset_origin_requests(ResetOriginCtx {
-            requests: EventDrainPort::new(&mut self.command_events.reset_origin_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-        });
-
-        command_service::apply_config_info_requests(ConfigInfoCtx {
-            requests: EventDrainPort::new(&mut self.command_events.config_info_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
         });
     }
 
     fn service_param_events(&mut self) {
-        param_service::service_param_read_requests(ParamReadCtx {
-            params: ParamsReadPort::new(&self.params),
-            requests: EventDrainPort::new(&mut self.param_events.read_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-        });
-
-        param_service::service_param_list_requests(ParamListCtx {
-            params: ParamsReadPort::new(&self.params),
+        param_service::service_param_events(&mut ParamServiceCtx {
+            params: &mut self.params,
             state: &mut self.param_list_state,
-            requests: EventDrainPort::new(&mut self.param_events.list_requests),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
-        });
-
-        param_service::apply_param_requests(ParamApplyCtx {
-            params: ParamsWritePort::new(&mut self.params),
-            requests: EventDrainPort::new(&mut self.param_events.set_requests),
-            changes: EventEmitPort::new(&mut self.param_events.changes),
-            responses: EventEmitPort::new(&mut self.comm_events.responses),
+            events: &mut self.param_events,
+            comm_events: &mut self.comm_events,
         });
     }
 
     fn apply_param_reactions(&mut self) {
-        let has_param_changes = self.param_events.changes.iter().next().is_some();
-        for change in self.param_events.changes.iter() {
-            let Some(status) = self.mixer.on_param_changed(&self.params, change.id) else {
-                continue;
-            };
-            self.control_pipeline.invalidate_pwm_rates();
-            match status {
-                crate::mixer::MixerStatus::Healthy => self
-                    .state
-                    .update(Event::ERROR_CLEARED(ErrorFlag::INVALID_MIXER), &self.params),
-                crate::mixer::MixerStatus::InvalidMixer => self.state.update(
-                    Event::ERROR_OCCURRED(ErrorFlag::INVALID_MIXER),
-                    &self.params,
-                ),
-            }
-        }
-
-        reactions::rc_on_param_changed(RcParamChangedCtx {
+        reactions::apply_param_reactions(&mut ParamReactionCtx {
+            events: &mut self.param_events,
+            params: &self.params,
             rc: &mut self.rc,
-            params: ParamsReadPort::new(&self.params),
-            changes: EventReadPort::new(&self.param_events.changes),
-        });
-
-        reactions::command_on_param_changed(CommandParamChangedCtx {
             command: &mut self.command,
             state: &mut self.state,
-            params: ParamsReadPort::new(&self.params),
-            changes: EventReadPort::new(&self.param_events.changes),
+            estimator: &mut self.estimator,
+            controller: &mut self.controller,
+            mixer: &mut self.mixer,
+            control_pipeline: &mut self.control_pipeline,
         });
-
-        if has_param_changes {
-            self.estimator.update_params(&self.params);
-            self.controller.update_gains(&self.params);
-        }
-
-        self.param_events.changes.clear();
     }
 
     fn request_gyro_calibration_if_needed(&mut self) {
         if self.state.is_calibrating() && !self.cal_flags.contains(CalibrationFlags::GYRO) {
             self.cal_flags.remove(CalibrationFlags::GYRO_FAILED);
-            self.params
-                .set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.0));
-            self.params
-                .set_by_id(ParamId::PARAM_GYRO_Y_BIAS, ParamValue::Float(0.0));
-            self.params
-                .set_by_id(ParamId::PARAM_GYRO_Z_BIAS, ParamValue::Float(0.0));
+            param_service::set_param_and_emit_change(
+                &mut self.params,
+                &mut self.param_events.changes,
+                ParamId::PARAM_GYRO_X_BIAS,
+                ParamValue::Float(0.0),
+            );
+            param_service::set_param_and_emit_change(
+                &mut self.params,
+                &mut self.param_events.changes,
+                ParamId::PARAM_GYRO_Y_BIAS,
+                ParamValue::Float(0.0),
+            );
+            param_service::set_param_and_emit_change(
+                &mut self.params,
+                &mut self.param_events.changes,
+                ParamId::PARAM_GYRO_Z_BIAS,
+                ParamValue::Float(0.0),
+            );
             self.cal_flags.insert(CalibrationFlags::GYRO);
         }
     }
@@ -1573,13 +1441,13 @@ where
 
     fn process_sensor_bus_after_update(&mut self) {
         let calibration_flags_before = self.cal_flags;
-        process_sensor_bus(
-            &mut self.raw_sensors,
-            &mut self.processed_sensors,
-            &mut self.sensor_processors,
-            &mut self.cal_flags,
-            &mut self.params,
-        );
+        process_sensor_bus(SensorIngestionCtx {
+            raw: &mut self.raw_sensors,
+            processed: &mut self.processed_sensors,
+            processors: &mut self.sensor_processors,
+            flags: &mut self.cal_flags,
+            params: &mut self.params,
+        });
         if calibration_flags_before.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)
@@ -1597,13 +1465,13 @@ where
 
     fn process_imu_sensor_after_update(&mut self) {
         let calibration_flags_before = self.cal_flags;
-        process_imu_sensor(
-            &mut self.raw_sensors,
-            &mut self.processed_sensors,
-            &mut self.sensor_processors.imu,
-            &mut self.cal_flags,
-            &mut self.params,
-        );
+        process_imu_sensor(SensorIngestionCtx {
+            raw: &mut self.raw_sensors,
+            processed: &mut self.processed_sensors,
+            processors: &mut self.sensor_processors,
+            flags: &mut self.cal_flags,
+            params: &mut self.params,
+        });
         if calibration_flags_before.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)
@@ -1854,27 +1722,19 @@ where
     }
 
     pub fn run_control_and_mixing_stage_if_new_imu(&mut self) -> bool {
-        run_control_pipeline_if_new_imu(ControlPipelineCtx {
-            board: &mut self.board,
-            params: &self.params,
-            sensors: &self.processed_sensors,
-            external_attitude: &mut self.external_attitude,
-            aux_commands: &self.aux_commands,
-            command: &self.command,
-            state: &mut self.state,
-            estimator: &mut self.estimator,
-            controller: &mut self.controller,
-            mixer: &mut self.mixer,
-            control_pipeline: &mut self.control_pipeline,
-            pwm_output: &self.pwm_output,
-            pwm: &mut self.pwm,
-            timing: None,
-        })
+        self.run_control_and_mixing_stage_if_new_imu_with_timing(None)
     }
 
     fn run_control_and_mixing_stage_if_new_imu_measured(
         &mut self,
         timing: &mut ControlPipelineTiming,
+    ) -> bool {
+        self.run_control_and_mixing_stage_if_new_imu_with_timing(Some(timing))
+    }
+
+    fn run_control_and_mixing_stage_if_new_imu_with_timing(
+        &mut self,
+        timing: Option<&mut ControlPipelineTiming>,
     ) -> bool {
         run_control_pipeline_if_new_imu(ControlPipelineCtx {
             board: &mut self.board,
@@ -1890,7 +1750,7 @@ where
             control_pipeline: &mut self.control_pipeline,
             pwm_output: &self.pwm_output,
             pwm: &mut self.pwm,
-            timing: Some(timing),
+            timing,
         })
     }
 
@@ -1904,18 +1764,18 @@ where
         }
 
         let sensor_error_count = self.board.sensors_errors_count();
-        self.comm.send_named_telemetry_streams(
-            &mut self.board,
+        self.comm.send_named_telemetry_streams(TelemetryCtx {
+            board: &mut self.board,
             now_us,
-            &self.state,
-            &self.command,
-            &self.params,
-            &self.control_pipeline.latest_estimator_state,
-            &self.processed_sensors,
-            &self.control_pipeline.latest_pwm_outputs,
+            state: &self.state,
+            command: &self.command,
+            params: &self.params,
+            estimator_state: &self.control_pipeline.latest_estimator_state,
+            sensors: &self.processed_sensors,
+            actuator_commands: &self.control_pipeline.latest_pwm_outputs,
             sensor_error_count,
-            self.control_pipeline.latest_loop_time_us,
-        );
+            loop_time_us: self.control_pipeline.latest_loop_time_us,
+        });
     }
 
     /// Sends up to `max_streams` currently due named telemetry streams.
@@ -1959,26 +1819,19 @@ where
 
     fn send_realtime_telemetry_stream(&mut self) -> bool {
         let now_us = self.board.clock_micros();
-        if !self
-            .comm
-            .named_telemetry_due(now_us, &self.processed_sensors)
-        {
-            return false;
-        }
-
         let sensor_error_count = self.board.sensors_errors_count();
-        self.comm.send_one_named_telemetry_stream(
-            &mut self.board,
+        self.comm.send_one_named_telemetry_stream(TelemetryCtx {
+            board: &mut self.board,
             now_us,
-            &self.state,
-            &self.command,
-            &self.params,
-            &self.control_pipeline.latest_estimator_state,
-            &self.processed_sensors,
-            &self.control_pipeline.latest_pwm_outputs,
+            state: &self.state,
+            command: &self.command,
+            params: &self.params,
+            estimator_state: &self.control_pipeline.latest_estimator_state,
+            sensors: &self.processed_sensors,
+            actuator_commands: &self.control_pipeline.latest_pwm_outputs,
             sensor_error_count,
-            self.control_pipeline.latest_loop_time_us,
-        )
+            loop_time_us: self.control_pipeline.latest_loop_time_us,
+        })
     }
 
     fn send_realtime_telemetry_stream_by_priority(
@@ -2003,16 +1856,18 @@ where
         let sensor_error_count = self.board.sensors_errors_count();
         let sent = self.comm.send_named_telemetry_stream_with_gate(
             priority,
-            &mut self.board,
-            now_us,
-            &self.state,
-            &self.command,
-            &self.params,
-            &self.control_pipeline.latest_estimator_state,
-            &self.processed_sensors,
-            &self.control_pipeline.latest_pwm_outputs,
-            sensor_error_count,
-            self.control_pipeline.latest_loop_time_us,
+            TelemetryCtx {
+                board: &mut self.board,
+                now_us,
+                state: &self.state,
+                command: &self.command,
+                params: &self.params,
+                estimator_state: &self.control_pipeline.latest_estimator_state,
+                sensors: &self.processed_sensors,
+                actuator_commands: &self.control_pipeline.latest_pwm_outputs,
+                sensor_error_count,
+                loop_time_us: self.control_pipeline.latest_loop_time_us,
+            },
         );
         #[cfg(feature = "timing-diagnostics")]
         if let Some(readiness) = imu_readiness {
@@ -2292,22 +2147,22 @@ fn timing_class_index(stats: WorldRunStats) -> usize {
 }
 
 #[cfg(feature = "timing-diagnostics")]
-fn stats_from_realtime_class(class: WorldRunClass) -> WorldRunStats {
+fn stats_from_realtime_result(result: WorldReport) -> WorldRunStats {
     WorldRunStats {
-        total_us: class.elapsed_after_control_us.min(u16::MAX as u32) as u16,
-        control_us: if class.ran_control {
-            class.elapsed_after_control_us.min(u16::MAX as u32) as u16
+        total_us: result.elapsed_after_control_us.min(u16::MAX as u32) as u16,
+        control_us: if result.ran_control {
+            result.elapsed_after_control_us.min(u16::MAX as u32) as u16
         } else {
             0
         },
-        estimator_us: class.estimator_us,
-        controller_us: class.controller_us,
-        mixer_us: class.mixer_us,
-        pwm_us: class.pwm_us,
-        had_rx: class.had_rx,
-        had_sensor: class.had_raw_sensor,
-        had_imu: class.had_raw_imu || class.had_processed_imu,
-        ran_control: class.ran_control,
+        estimator_us: result.estimator_us,
+        controller_us: result.controller_us,
+        mixer_us: result.mixer_us,
+        pwm_us: result.pwm_us,
+        had_rx: result.had_rx,
+        had_sensor: result.had_raw_sensor,
+        had_imu: result.had_raw_imu || result.had_processed_imu,
+        ran_control: result.ran_control,
         ..WorldRunStats::default()
     }
 }
@@ -3204,7 +3059,6 @@ mod tests {
         world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
         world.last_control_update_us = 10_000;
         world.last_realtime_control_us = 10_200;
-        world.last_realtime_service_control_us = 0;
         world.next_realtime_service_us = 0;
         world.processed_sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
@@ -3338,11 +3192,11 @@ mod tests {
             seq: 1,
         });
 
-        let class = world
-            .run_prioritized_service_steps_with_policy(RealtimeServicePolicy::all_available(0, 0));
+        let result =
+            world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::continuous(0));
 
         assert_eq!(world.board.update_count, 2);
-        assert!(class.had_raw_rc);
+        assert!(result.had_raw_rc);
         assert_eq!(world.processed_sensors.rc.map(|rc| rc.n_chan), Some(1));
     }
 
@@ -3784,8 +3638,14 @@ mod tests {
         assert_eq!(output_raw.values[4], 0.25);
         assert!((output_raw.values[5] - 0.2).abs() < 1e-6);
 
-        assert!(world.run_control_stages_if_new_imu());
-        assert_eq!(world.pwm.send_count, 2);
+        assert!(!world.run_control_stages_if_new_imu());
+        assert_eq!(world.pwm.send_count, 1);
+        assert!(
+            world
+                .state
+                .get_errors()
+                .contains(ErrorFlag::TIME_GOING_BACKWARDS)
+        );
         assert_eq!(world.comm.comm_link().output_raw_count, 1);
 
         world
@@ -3797,7 +3657,13 @@ mod tests {
             .timestamp = 3;
 
         assert!(world.run_control_stages_if_new_imu());
-        assert_eq!(world.pwm.send_count, 3);
+        assert_eq!(world.pwm.send_count, 2);
+        assert!(
+            !world
+                .state
+                .get_errors()
+                .contains(ErrorFlag::TIME_GOING_BACKWARDS)
+        );
         assert_eq!(world.comm.comm_link().output_raw_count, 1);
     }
 

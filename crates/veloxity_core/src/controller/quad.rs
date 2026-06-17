@@ -7,7 +7,7 @@ use crate::params::{ParamId, ParamValue, Params};
 use nalgebra::Quaternion;
 use nalgebra::SVector as Vector;
 
-/// Clamps a value between a lower and upper bound.
+/// Clamps a value between a lower and upper bound. Needed because controller is generic over R, so can run f32 or f64 and won't automatically treat 0.01 as generic type R so we have to help it
 fn r<R: FlightFloat>(value: f32) -> R {
     <R as FlightFloat>::from_f32(value)
 }
@@ -258,7 +258,6 @@ pub struct QuadController<R: FlightFloat> {
     rc_max_throttle: R,
     use_motor_parameters: bool,
     motor_thrust_model: MotorThrustModel<R>,
-    gains_current: bool,
 }
 
 impl<R: FlightFloat> Default for QuadController<R> {
@@ -273,7 +272,6 @@ impl<R: FlightFloat> Default for QuadController<R> {
             rc_max_throttle: r::<R>(1.0),
             use_motor_parameters: false,
             motor_thrust_model: MotorThrustModel::default(),
-            gains_current: false,
         }
     }
 }
@@ -296,7 +294,6 @@ impl<R: FlightFloat> QuadController<R> {
             rc_max_throttle: r::<R>(1.0),
             use_motor_parameters: false,
             motor_thrust_model: MotorThrustModel::default(),
-            gains_current: true,
         }
     }
 
@@ -525,14 +522,9 @@ impl<R: FlightFloat> Controller<R> for QuadController<R> {
             <R as FlightFloat>::from_f32(param_float(params, ParamId::PARAM_RC_MAX_THROTTLE));
         self.use_motor_parameters = param_int(params, ParamId::PARAM_USE_MOTOR_PARAMETERS) != 0;
         self.motor_thrust_model = MotorThrustModel::from_params(params);
-        self.gains_current = true;
     }
 
     fn control(&mut self, state: &Self::State, ctx: ControllerCtx<'_, R>) -> Self::ControlOutput {
-        if !self.gains_current {
-            self.update_gains(ctx.params);
-        }
-
         let update_integrators = ctx.state_manager.is_armed()
             && controller_should_update_integrators(ctx.command, ctx.dt);
         self.run_pid_control(
@@ -669,6 +661,7 @@ mod tests {
         dt: f64,
         air_density: f64,
     ) -> ControllerOutput<f64> {
+        controller.update_gains(params);
         controller.control(
             state,
             ControllerCtx {

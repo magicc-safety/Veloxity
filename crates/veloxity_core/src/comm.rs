@@ -1,7 +1,7 @@
 pub mod interface;
 pub mod messages;
 
-use crate::board;
+use crate::board::{self, BoardIo};
 use crate::comm::messages::{Messages, Store, enums::*, messages::*};
 use crate::command::CommandManager;
 use crate::estimator::AttitudeEstimate;
@@ -57,6 +57,23 @@ pub enum RealtimeTelemetryPriorityGate {
 pub struct RealtimeTelemetryPriority {
     pub stream: NamedTelemetryStream,
     pub gate: RealtimeTelemetryPriorityGate,
+}
+
+pub struct TelemetryCtx<'a, B, S, A, R>
+where
+    B: BoardIo,
+    R: FlightFloat,
+{
+    pub board: &'a mut B,
+    pub now_us: u64,
+    pub state: &'a StateManager,
+    pub command: &'a CommandManager,
+    pub params: &'a Params,
+    pub estimator_state: &'a S,
+    pub sensors: &'a ProcessedSensors<R>,
+    pub actuator_commands: &'a A,
+    pub sensor_error_count: u16,
+    pub loop_time_us: u16,
 }
 
 #[cfg(feature = "timing-diagnostics")]
@@ -683,23 +700,25 @@ where
         target_system == self.sysid
     }
 
-    pub fn send_named_telemetry_streams<S, A, R>(
-        &mut self,
-        board: &mut B,
-        now_us: u64,
-        state_manager: &StateManager,
-        command_manager: &CommandManager,
-        params: &Params,
-        estimator_state: &S,
-        processed_sensors: &ProcessedSensors<R>,
-        actuator_commands: &A,
-        sensor_error_count: u16,
-        loop_time_us: u16,
-    ) where
+    pub fn send_named_telemetry_streams<S, A, R>(&mut self, ctx: TelemetryCtx<'_, B, S, A, R>)
+    where
         S: AttitudeEstimate,
         A: AsRef<[R]>,
         R: FlightFloat,
     {
+        let TelemetryCtx {
+            board,
+            now_us,
+            state: state_manager,
+            command: command_manager,
+            params,
+            estimator_state,
+            sensors: processed_sensors,
+            actuator_commands,
+            sensor_error_count,
+            loop_time_us,
+        } = ctx;
+
         if fixed_rate_due(
             now_us,
             self.last_heartbeat_us,
@@ -950,57 +969,27 @@ where
 
     pub fn send_one_named_telemetry_stream<S, A, R>(
         &mut self,
-        board: &mut B,
-        now_us: u64,
-        state_manager: &StateManager,
-        command_manager: &CommandManager,
-        params: &Params,
-        estimator_state: &S,
-        processed_sensors: &ProcessedSensors<R>,
-        actuator_commands: &A,
-        sensor_error_count: u16,
-        loop_time_us: u16,
+        mut ctx: TelemetryCtx<'_, B, S, A, R>,
     ) -> bool
     where
         S: AttitudeEstimate,
         A: AsRef<[R]>,
         R: FlightFloat,
     {
-        let Some(stream) = self.select_due_named_telemetry_stream(now_us, processed_sensors, true)
+        let Some(stream) = self.select_due_named_telemetry_stream(ctx.now_us, ctx.sensors, true)
         else {
             return false;
         };
         #[cfg(feature = "timing-diagnostics")]
         record_telemetry_stream_selected(stream);
 
-        self.send_selected_named_telemetry_stream(
-            stream,
-            board,
-            now_us,
-            state_manager,
-            command_manager,
-            params,
-            estimator_state,
-            processed_sensors,
-            actuator_commands,
-            sensor_error_count,
-            loop_time_us,
-        )
+        self.send_selected_named_telemetry_stream(stream, &mut ctx)
     }
 
     pub fn send_named_telemetry_stream_if_due<S, A, R>(
         &mut self,
         stream: NamedTelemetryStream,
-        board: &mut B,
-        now_us: u64,
-        state_manager: &StateManager,
-        command_manager: &CommandManager,
-        params: &Params,
-        estimator_state: &S,
-        processed_sensors: &ProcessedSensors<R>,
-        actuator_commands: &A,
-        sensor_error_count: u16,
-        loop_time_us: u16,
+        mut ctx: TelemetryCtx<'_, B, S, A, R>,
     ) -> bool
     where
         S: AttitudeEstimate,
@@ -1008,7 +997,7 @@ where
         R: FlightFloat,
     {
         if self
-            .named_telemetry_stream_deadline(stream, now_us, processed_sensors)
+            .named_telemetry_stream_deadline(stream, ctx.now_us, ctx.sensors)
             .is_none()
         {
             return false;
@@ -1019,34 +1008,13 @@ where
             record_telemetry_stream_selected(stream);
         }
 
-        self.send_selected_named_telemetry_stream(
-            stream,
-            board,
-            now_us,
-            state_manager,
-            command_manager,
-            params,
-            estimator_state,
-            processed_sensors,
-            actuator_commands,
-            sensor_error_count,
-            loop_time_us,
-        )
+        self.send_selected_named_telemetry_stream(stream, &mut ctx)
     }
 
     pub fn send_named_telemetry_stream_with_gate<S, A, R>(
         &mut self,
         priority: RealtimeTelemetryPriority,
-        board: &mut B,
-        now_us: u64,
-        state_manager: &StateManager,
-        command_manager: &CommandManager,
-        params: &Params,
-        estimator_state: &S,
-        processed_sensors: &ProcessedSensors<R>,
-        actuator_commands: &A,
-        sensor_error_count: u16,
-        loop_time_us: u16,
+        mut ctx: TelemetryCtx<'_, B, S, A, R>,
     ) -> bool
     where
         S: AttitudeEstimate,
@@ -1054,34 +1022,12 @@ where
         R: FlightFloat,
     {
         match priority.gate {
-            RealtimeTelemetryPriorityGate::DueDeadline => self.send_named_telemetry_stream_if_due(
-                priority.stream,
-                board,
-                now_us,
-                state_manager,
-                command_manager,
-                params,
-                estimator_state,
-                processed_sensors,
-                actuator_commands,
-                sensor_error_count,
-                loop_time_us,
-            ),
+            RealtimeTelemetryPriorityGate::DueDeadline => {
+                self.send_named_telemetry_stream_if_due(priority.stream, ctx)
+            }
             RealtimeTelemetryPriorityGate::FreshSample => {
                 if priority.stream != NamedTelemetryStream::Imu {
-                    return self.send_named_telemetry_stream_if_due(
-                        priority.stream,
-                        board,
-                        now_us,
-                        state_manager,
-                        command_manager,
-                        params,
-                        estimator_state,
-                        processed_sensors,
-                        actuator_commands,
-                        sensor_error_count,
-                        loop_time_us,
-                    );
+                    return self.send_named_telemetry_stream_if_due(priority.stream, ctx);
                 }
                 #[cfg(feature = "timing-diagnostics")]
                 {
@@ -1091,16 +1037,7 @@ where
                 self.send_selected_named_telemetry_stream_with_gate(
                     priority.stream,
                     priority.gate,
-                    board,
-                    now_us,
-                    state_manager,
-                    command_manager,
-                    params,
-                    estimator_state,
-                    processed_sensors,
-                    actuator_commands,
-                    sensor_error_count,
-                    loop_time_us,
+                    &mut ctx,
                 )
             }
         }
@@ -1109,16 +1046,7 @@ where
     fn send_selected_named_telemetry_stream<S, A, R>(
         &mut self,
         stream: NamedTelemetryStream,
-        board: &mut B,
-        now_us: u64,
-        state_manager: &StateManager,
-        command_manager: &CommandManager,
-        params: &Params,
-        estimator_state: &S,
-        processed_sensors: &ProcessedSensors<R>,
-        actuator_commands: &A,
-        sensor_error_count: u16,
-        loop_time_us: u16,
+        ctx: &mut TelemetryCtx<'_, B, S, A, R>,
     ) -> bool
     where
         S: AttitudeEstimate,
@@ -1128,16 +1056,7 @@ where
         self.send_selected_named_telemetry_stream_with_gate(
             stream,
             RealtimeTelemetryPriorityGate::DueDeadline,
-            board,
-            now_us,
-            state_manager,
-            command_manager,
-            params,
-            estimator_state,
-            processed_sensors,
-            actuator_commands,
-            sensor_error_count,
-            loop_time_us,
+            ctx,
         )
     }
 
@@ -1145,16 +1064,7 @@ where
         &mut self,
         stream: NamedTelemetryStream,
         gate: RealtimeTelemetryPriorityGate,
-        board: &mut B,
-        now_us: u64,
-        state_manager: &StateManager,
-        command_manager: &CommandManager,
-        params: &Params,
-        estimator_state: &S,
-        processed_sensors: &ProcessedSensors<R>,
-        actuator_commands: &A,
-        sensor_error_count: u16,
-        loop_time_us: u16,
+        ctx: &mut TelemetryCtx<'_, B, S, A, R>,
     ) -> bool
     where
         S: AttitudeEstimate,
@@ -1164,60 +1074,60 @@ where
         let sent = match stream {
             NamedTelemetryStream::Heartbeat => {
                 self.send_rosflight_heartbeat(
-                    board,
+                    ctx.board,
                     HeartbeatMsg {
                         autopilot: 0,
                         base_mode: 0,
                         custom_mode: 0,
                         mavlink_version: 0,
                         system_status: 0,
-                        type_: if param_int(params, ParamId::PARAM_FIXED_WING) != 0 {
+                        type_: if param_int(ctx.params, ParamId::PARAM_FIXED_WING) != 0 {
                             MAV_TYPE_FIXED_WING
                         } else {
                             MAV_TYPE_QUADROTOR
                         },
                     },
                 );
-                self.last_heartbeat_us = now_us;
+                self.last_heartbeat_us = ctx.now_us;
                 true
             }
             NamedTelemetryStream::Status => {
                 self.send_rosflight_status(
-                    board,
+                    ctx.board,
                     RosflightStatusMsg {
-                        armed: state_manager.is_armed() as u8,
-                        failsafe: state_manager.is_in_failsafe() as u8,
-                        rc_override: command_manager.get_rc_override(),
-                        offboard: command_manager.is_offboard_active() as u8,
-                        error_code: state_manager.get_errors(),
-                        control_mode: command_manager.get_control_mode().into(),
-                        num_errors: sensor_error_count as i16,
-                        loop_time_us: loop_time_us as i16,
+                        armed: ctx.state.is_armed() as u8,
+                        failsafe: ctx.state.is_in_failsafe() as u8,
+                        rc_override: ctx.command.get_rc_override(),
+                        offboard: ctx.command.is_offboard_active() as u8,
+                        error_code: ctx.state.get_errors(),
+                        control_mode: ctx.command.get_control_mode().into(),
+                        num_errors: ctx.sensor_error_count as i16,
+                        loop_time_us: ctx.loop_time_us as i16,
                     },
                 );
-                self.last_status_send_us = now_us;
+                self.last_status_send_us = ctx.now_us;
                 true
             }
             NamedTelemetryStream::Imu => match gate {
                 RealtimeTelemetryPriorityGate::DueDeadline => {
-                    self.send_imu_if_due(board, now_us, processed_sensors)
+                    self.send_imu_if_due(ctx.board, ctx.now_us, ctx.sensors)
                 }
                 RealtimeTelemetryPriorityGate::FreshSample => {
-                    self.send_imu_if_fresh(board, now_us, processed_sensors)
+                    self.send_imu_if_fresh(ctx.board, ctx.now_us, ctx.sensors)
                 }
             },
-            NamedTelemetryStream::Rc => self.send_rc_if_due(board, now_us, processed_sensors),
-            NamedTelemetryStream::Attitude => match processed_sensors.imu {
+            NamedTelemetryStream::Rc => self.send_rc_if_due(ctx.board, ctx.now_us, ctx.sensors),
+            NamedTelemetryStream::Attitude => match ctx.sensors.imu {
                 Some(imu_packet) => {
                     if !stream_due(
-                        now_us,
+                        ctx.now_us,
                         &mut self.telemetry_rate_state.attitude_us,
                         self.telemetry_rates.attitude_hz,
                     ) {
                         false
                     } else {
-                        let q = estimator_state.q();
-                        let qd = estimator_state.q_dot();
+                        let q = ctx.estimator_state.q();
+                        let qd = ctx.estimator_state.q_dot();
                         let rollspeed =
                             2.0 * (q[0] * qd[1] - q[1] * qd[0] - q[2] * qd[3] + q[3] * qd[2]);
                         let pitchspeed =
@@ -1225,7 +1135,7 @@ where
                         let yawspeed =
                             2.0 * (q[0] * qd[3] - q[1] * qd[2] - q[2] * qd[1] + q[3] * qd[0]);
                         self.send_rosflight_attitude_quaternion(
-                            board,
+                            ctx.board,
                             AttitudeQuaternionMsg {
                                 time_boot_ms: (imu_packet.header.timestamp / 1000) as u32,
                                 q1: q[0],
@@ -1243,7 +1153,7 @@ where
                 None => false,
             },
             NamedTelemetryStream::OutputRaw => {
-                if processed_sensors.imu.is_none() {
+                if ctx.sensors.imu.is_none() {
                     false
                 } else {
                     let output_raw_due = if self.telemetry_rates.output_raw_hz == 0 {
@@ -1253,7 +1163,7 @@ where
                                 == 0
                     } else {
                         stream_due(
-                            now_us,
+                            ctx.now_us,
                             &mut self.telemetry_rate_state.output_raw_us,
                             self.telemetry_rates.output_raw_hz,
                         )
@@ -1262,22 +1172,22 @@ where
                     if !output_raw_due {
                         false
                     } else {
-                        self.send_output_raw(board, actuator_commands);
+                        self.send_output_raw(ctx.board, ctx.actuator_commands);
                         true
                     }
                 }
             }
-            NamedTelemetryStream::Gnss => match processed_sensors.gnss {
+            NamedTelemetryStream::Gnss => match ctx.sensors.gnss {
                 Some(packet) => {
                     if !stream_due(
-                        now_us,
+                        ctx.now_us,
                         &mut self.telemetry_rate_state.gnss_us,
                         self.telemetry_rates.gnss_hz,
                     ) {
                         false
                     } else {
                         self.send_rosflight_gnss(
-                            board,
+                            ctx.board,
                             RosflightGnssMsg {
                                 rosflight_timestamp: packet.header.timestamp,
                                 seconds: packet.unix_seconds,
@@ -1300,17 +1210,17 @@ where
                 }
                 None => false,
             },
-            NamedTelemetryStream::DiffPressure => match processed_sensors.pitot {
+            NamedTelemetryStream::DiffPressure => match ctx.sensors.pitot {
                 Some(packet) => {
                     if !stream_due(
-                        now_us,
+                        ctx.now_us,
                         &mut self.telemetry_rate_state.diff_pressure_us,
                         self.telemetry_rates.diff_pressure_hz,
                     ) {
                         false
                     } else {
                         self.send_rosflight_diff_pressure(
-                            board,
+                            ctx.board,
                             DiffPressureMsg {
                                 velocity: packet.indicated_airspeed,
                                 diff_pressure: packet.differential_pressure,
@@ -1322,17 +1232,17 @@ where
                 }
                 None => false,
             },
-            NamedTelemetryStream::Baro => match processed_sensors.baro {
+            NamedTelemetryStream::Baro => match ctx.sensors.baro {
                 Some(packet) => {
                     if !stream_due(
-                        now_us,
+                        ctx.now_us,
                         &mut self.telemetry_rate_state.baro_us,
                         self.telemetry_rates.baro_hz,
                     ) {
                         false
                     } else {
                         self.send_rosflight_small_baro(
-                            board,
+                            ctx.board,
                             SmallBaroMsg {
                                 altitude: packet.altitude,
                                 pressure: packet.pressure,
@@ -1344,17 +1254,17 @@ where
                 }
                 None => false,
             },
-            NamedTelemetryStream::Mag => match processed_sensors.mag {
+            NamedTelemetryStream::Mag => match ctx.sensors.mag {
                 Some(packet) => {
                     if !stream_due(
-                        now_us,
+                        ctx.now_us,
                         &mut self.telemetry_rate_state.mag_us,
                         self.telemetry_rates.mag_hz,
                     ) {
                         false
                     } else {
                         self.send_rosflight_small_mag(
-                            board,
+                            ctx.board,
                             SmallMagMsg {
                                 xmag: packet.flux[0],
                                 ymag: packet.flux[1],
@@ -1366,17 +1276,17 @@ where
                 }
                 None => false,
             },
-            NamedTelemetryStream::Range => match processed_sensors.range {
+            NamedTelemetryStream::Range => match ctx.sensors.range {
                 Some(packet) => {
                     if !stream_due(
-                        now_us,
+                        ctx.now_us,
                         &mut self.telemetry_rate_state.range_us,
                         self.telemetry_rates.range_hz,
                     ) {
                         false
                     } else {
                         self.send_rosflight_small_range(
-                            board,
+                            ctx.board,
                             SmallRangeMsg {
                                 type_: match packet.range_type {
                                     RangeType::Sonar => RosflightRangeType::RosflightRangeSonar,
@@ -1392,17 +1302,17 @@ where
                 }
                 None => false,
             },
-            NamedTelemetryStream::Battery => match processed_sensors.battery {
+            NamedTelemetryStream::Battery => match ctx.sensors.battery {
                 Some(packet) => {
                     if !stream_due(
-                        now_us,
+                        ctx.now_us,
                         &mut self.telemetry_rate_state.battery_us,
                         self.telemetry_rates.battery_hz,
                     ) {
                         false
                     } else {
                         self.send_rosflight_battery_status(
-                            board,
+                            ctx.board,
                             BatteryStatusMsg {
                                 battery_voltage: packet.voltage,
                                 battery_current: packet.current,
@@ -1929,16 +1839,14 @@ mod tests {
             },
         },
         command::CommandManager,
-        command::service::{self as command_service, CalibrationRequestCtx},
+        command::service::{self as command_service, CommandRequestCtx},
+        controller::quad::QuadController,
         events::{
             CommEventQueues, CommResponse, CommandEventQueues, CompanionEventQueues,
             ParamEventQueues,
         },
-        params::service::{
-            self as param_service, ParamApplyCtx, ParamListCtx, ParamListState, ParamReadCtx,
-        },
+        params::service::{self as param_service, ParamListState, ParamServiceCtx},
         params::{ParamId, ParamValue, Params},
-        ports::{EventDrainPort, EventEmitPort, ParamsReadPort, ParamsWritePort},
         sensors::ProcessedSensors,
         sensors::processors::CalibrationFlags,
         state_machine::{Event, StateManager},
@@ -1950,6 +1858,71 @@ mod tests {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
         state
+    }
+
+    fn apply_test_command_requests(
+        command_events: &mut CommandEventQueues,
+        comm_events: &mut CommEventQueues,
+        board: &mut TestBoard,
+        params: &mut Params,
+        flags: &mut CalibrationFlags,
+    ) {
+        let state = initialized_state();
+        let mut command = CommandManager::new();
+        let mut controller = QuadController::<f64>::default();
+        let mut param_events = ParamEventQueues::default();
+        command_service::apply_command_requests(&mut CommandRequestCtx {
+            requests: command_events,
+            param_events: &mut param_events,
+            comm_events,
+            state: &state,
+            command: &mut command,
+            controller: &mut controller,
+            board,
+            flags,
+            params,
+        });
+    }
+
+    fn apply_test_param_service(
+        params: &mut Params,
+        param_list_state: &mut ParamListState,
+        param_events: &mut ParamEventQueues,
+        comm_events: &mut CommEventQueues,
+    ) {
+        param_service::service_param_events(&mut ParamServiceCtx {
+            params,
+            state: param_list_state,
+            events: param_events,
+            comm_events,
+        });
+    }
+
+    fn telemetry_ctx<'a, S, A, R>(
+        board: &'a mut TestBoard,
+        now_us: u64,
+        state: &'a StateManager,
+        command: &'a CommandManager,
+        params: &'a Params,
+        estimator_state: &'a S,
+        sensors: &'a ProcessedSensors<R>,
+        actuator_commands: &'a A,
+    ) -> TelemetryCtx<'a, TestBoard, S, A, R>
+    where
+        R: FlightFloat,
+    {
+        TelemetryCtx {
+            board,
+            now_us,
+            state,
+            command,
+            params,
+            estimator_state,
+            sensors,
+            actuator_commands,
+            sensor_error_count: 0,
+            loop_time_us: 0,
+        }
     }
 
     fn companion_events() -> CompanionEventQueues {
@@ -2111,7 +2084,7 @@ mod tests {
     fn param_request_list_emits_request_without_streaming_from_comms() {
         let mut board = TestBoard::default();
         let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
-        let params = Params::new();
+        let mut params = Params::new();
         let mut param_list_state = ParamListState::default();
         let mut param_events = ParamEventQueues::default();
         let mut comm_events = CommEventQueues::default();
@@ -2133,12 +2106,12 @@ mod tests {
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
         assert_eq!(param_events.list_requests.len(), 1);
 
-        param_service::service_param_list_requests(ParamListCtx {
-            params: ParamsReadPort::new(&params),
-            state: &mut param_list_state,
-            requests: EventDrainPort::new(&mut param_events.list_requests),
-            responses: EventEmitPort::new(&mut comm_events.responses),
-        });
+        apply_test_param_service(
+            &mut params,
+            &mut param_list_state,
+            &mut param_events,
+            &mut comm_events,
+        );
 
         manager.send_comm_responses(&mut board, &mut comm_events);
 
@@ -2175,11 +2148,13 @@ mod tests {
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
         assert_eq!(param_events.read_requests.len(), 1);
 
-        param_service::service_param_read_requests(ParamReadCtx {
-            params: ParamsReadPort::new(&params),
-            requests: EventDrainPort::new(&mut param_events.read_requests),
-            responses: EventEmitPort::new(&mut comm_events.responses),
-        });
+        let mut param_list_state = ParamListState::default();
+        apply_test_param_service(
+            &mut params,
+            &mut param_list_state,
+            &mut param_events,
+            &mut comm_events,
+        );
 
         manager.send_comm_responses(&mut board, &mut comm_events);
 
@@ -2278,11 +2253,15 @@ mod tests {
         assert!(comm_events.responses.is_empty());
         assert_eq!(command_events.version_requests.len(), 1);
 
-        command_service::apply_version_requests(command_service::VersionRequestCtx {
-            requests: EventDrainPort::new(&mut command_events.version_requests),
-            responses: EventEmitPort::new(&mut comm_events.responses),
-            state: &initialized_state(),
-        });
+        let mut params = Params::new();
+        let mut cal_flags = CalibrationFlags::empty();
+        apply_test_command_requests(
+            &mut command_events,
+            &mut comm_events,
+            &mut board,
+            &mut params,
+            &mut cal_flags,
+        );
         manager.send_comm_responses(&mut board, &mut comm_events);
 
         assert_eq!(manager.comm_link().version_count, 1);
@@ -2323,12 +2302,13 @@ mod tests {
         );
         assert_eq!(manager.comm_link.sent_param_value_count, 0);
 
-        param_service::apply_param_requests(ParamApplyCtx {
-            params: ParamsWritePort::new(&mut params),
-            requests: EventDrainPort::new(&mut param_events.set_requests),
-            changes: EventEmitPort::new(&mut param_events.changes),
-            responses: EventEmitPort::new(&mut comm_events.responses),
-        });
+        let mut param_list_state = ParamListState::default();
+        apply_test_param_service(
+            &mut params,
+            &mut param_list_state,
+            &mut param_events,
+            &mut comm_events,
+        );
 
         assert_eq!(
             params.get_by_id(ParamId::PARAM_SYSTEM_ID),
@@ -2404,7 +2384,7 @@ mod tests {
 
         let now_us = board.clock_micros();
 
-        manager.send_named_telemetry_streams(
+        manager.send_named_telemetry_streams(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2413,9 +2393,7 @@ mod tests {
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
-            0,
-            0,
-        );
+        ));
 
         assert_eq!(manager.comm_link().heartbeat_count, 1);
         assert_eq!(manager.comm_link().status_count, 1);
@@ -2484,7 +2462,7 @@ mod tests {
         });
 
         let now_us = board.clock_micros();
-        assert!(manager.send_one_named_telemetry_stream(
+        assert!(manager.send_one_named_telemetry_stream(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2493,15 +2471,13 @@ mod tests {
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
-            0,
-            0,
-        ));
+        )));
         assert_eq!(manager.comm_link().imu_count, 1);
         assert_eq!(manager.comm_link().attitude_count, 0);
         assert_eq!(manager.comm_link().output_raw_count, 0);
         assert_eq!(manager.comm_link().baro_count, 0);
 
-        assert!(manager.send_one_named_telemetry_stream(
+        assert!(manager.send_one_named_telemetry_stream(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2510,15 +2486,13 @@ mod tests {
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
-            0,
-            0,
-        ));
+        )));
         assert_eq!(manager.comm_link().imu_count, 1);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().output_raw_count, 0);
         assert_eq!(manager.comm_link().baro_count, 0);
 
-        assert!(manager.send_one_named_telemetry_stream(
+        assert!(manager.send_one_named_telemetry_stream(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2527,13 +2501,11 @@ mod tests {
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
-            0,
-            0,
-        ));
+        )));
         assert_eq!(manager.comm_link().output_raw_count, 1);
         assert_eq!(manager.comm_link().baro_count, 0);
 
-        assert!(manager.send_one_named_telemetry_stream(
+        assert!(manager.send_one_named_telemetry_stream(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2542,9 +2514,7 @@ mod tests {
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
-            0,
-            0,
-        ));
+        )));
         assert_eq!(manager.comm_link().output_raw_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
     }
@@ -2592,36 +2562,36 @@ mod tests {
 
         assert!(manager.send_named_telemetry_stream_if_due(
             NamedTelemetryStream::Imu,
-            &mut board,
-            now_us,
-            &state_manager,
-            &command_manager,
-            &params,
-            &estimator_state,
-            &processed_sensors,
-            &actuator_commands,
-            0,
-            0,
+            telemetry_ctx(
+                &mut board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &processed_sensors,
+                &actuator_commands,
+            ),
         ));
         assert_eq!(manager.comm_link().imu_count, 1);
         assert_eq!(manager.comm_link().rc_channels_count, 0);
 
         assert!(!manager.send_named_telemetry_stream_if_due(
             NamedTelemetryStream::Imu,
-            &mut board,
-            now_us,
-            &state_manager,
-            &command_manager,
-            &params,
-            &estimator_state,
-            &processed_sensors,
-            &actuator_commands,
-            0,
-            0,
+            telemetry_ctx(
+                &mut board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &processed_sensors,
+                &actuator_commands,
+            ),
         ));
         assert_eq!(manager.comm_link().imu_count, 1);
 
-        assert!(manager.send_one_named_telemetry_stream(
+        assert!(manager.send_one_named_telemetry_stream(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2630,9 +2600,7 @@ mod tests {
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
-            0,
-            0,
-        ));
+        )));
         assert_eq!(manager.comm_link().imu_count, 1);
     }
 
@@ -2669,16 +2637,16 @@ mod tests {
 
         assert!(!manager.send_named_telemetry_stream_if_due(
             NamedTelemetryStream::Imu,
-            &mut board,
-            now_us,
-            &state_manager,
-            &command_manager,
-            &params,
-            &estimator_state,
-            &processed_sensors,
-            &actuator_commands,
-            0,
-            0,
+            telemetry_ctx(
+                &mut board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &processed_sensors,
+                &actuator_commands,
+            ),
         ));
         assert_eq!(manager.comm_link().imu_count, 0);
 
@@ -2687,16 +2655,16 @@ mod tests {
                 stream: NamedTelemetryStream::Imu,
                 gate: RealtimeTelemetryPriorityGate::FreshSample,
             },
-            &mut board,
-            now_us,
-            &state_manager,
-            &command_manager,
-            &params,
-            &estimator_state,
-            &processed_sensors,
-            &actuator_commands,
-            0,
-            0,
+            telemetry_ctx(
+                &mut board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &processed_sensors,
+                &actuator_commands,
+            ),
         ));
         assert_eq!(manager.comm_link().imu_count, 1);
 
@@ -2705,16 +2673,16 @@ mod tests {
                 stream: NamedTelemetryStream::Imu,
                 gate: RealtimeTelemetryPriorityGate::FreshSample,
             },
-            &mut board,
-            now_us,
-            &state_manager,
-            &command_manager,
-            &params,
-            &estimator_state,
-            &processed_sensors,
-            &actuator_commands,
-            0,
-            0,
+            telemetry_ctx(
+                &mut board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &processed_sensors,
+                &actuator_commands,
+            ),
         ));
         assert_eq!(manager.comm_link().imu_count, 1);
     }
@@ -2733,11 +2701,12 @@ mod tests {
         let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
         let mut processed_sensors = ProcessedSensors::<f64>::default();
         processed_sensors.imu = Some(crate::packets::ImuPacket::default());
+        let actuator_commands = [0.0; 4];
 
         for i in 0..8 {
             board.current_time_us = 1_100_000 + i;
             let now_us = board.clock_micros();
-            manager.send_named_telemetry_streams(
+            manager.send_named_telemetry_streams(telemetry_ctx(
                 &mut board,
                 now_us,
                 &state_manager,
@@ -2745,10 +2714,8 @@ mod tests {
                 &params,
                 &estimator_state,
                 &processed_sensors,
-                &[0.0; 4],
-                0,
-                0,
-            );
+                &actuator_commands,
+            ));
         }
 
         assert_eq!(manager.comm_link().imu_count, 8);
@@ -2757,7 +2724,7 @@ mod tests {
 
         board.current_time_us += 1;
         let now_us = board.clock_micros();
-        manager.send_named_telemetry_streams(
+        manager.send_named_telemetry_streams(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2765,10 +2732,8 @@ mod tests {
             &params,
             &estimator_state,
             &processed_sensors,
-            &[0.0; 4],
-            0,
-            0,
-        );
+            &actuator_commands,
+        ));
 
         assert_eq!(manager.comm_link().output_raw_count, 2);
     }
@@ -2789,12 +2754,13 @@ mod tests {
         let mut processed_sensors = ProcessedSensors::<f64>::default();
         processed_sensors.imu = Some(crate::packets::ImuPacket::default());
         processed_sensors.baro = Some(crate::packets::BaroPacket::default());
+        let actuator_commands = [0.0; 4];
 
         let send_at = |manager: &mut CommManager<TestBoard, RecordingCommLink>,
                        board: &mut TestBoard,
                        now_us: u64| {
             board.current_time_us = now_us;
-            manager.send_named_telemetry_streams(
+            manager.send_named_telemetry_streams(telemetry_ctx(
                 board,
                 now_us,
                 &state_manager,
@@ -2802,10 +2768,8 @@ mod tests {
                 &params,
                 &estimator_state,
                 &processed_sensors,
-                &[0.0; 4],
-                0,
-                0,
-            );
+                &actuator_commands,
+            ));
         };
 
         send_at(&mut manager, &mut board, 1_000);
@@ -2867,8 +2831,9 @@ mod tests {
         rc_packet.chan[..test_channels.len()].copy_from_slice(&test_channels);
         processed_sensors.rc = Some(rc_packet);
         let now_us = board.clock_micros();
+        let actuator_commands = [0.0; 4];
 
-        manager.send_named_telemetry_streams(
+        manager.send_named_telemetry_streams(telemetry_ctx(
             &mut board,
             now_us,
             &state_manager,
@@ -2876,10 +2841,8 @@ mod tests {
             &params,
             &estimator_state,
             &processed_sensors,
-            &[0.0; 4],
-            0,
-            0,
-        );
+            &actuator_commands,
+        ));
 
         let msg = manager.comm_link().last_rc_channels.unwrap();
         assert_eq!(manager.comm_link().rc_channels_count, 1);
@@ -2924,7 +2887,7 @@ mod tests {
             &params,
         );
 
-        manager.send_named_telemetry_streams(
+        manager.send_named_telemetry_streams(telemetry_ctx(
             &mut board,
             1_100_000,
             &state_manager,
@@ -2933,9 +2896,7 @@ mod tests {
             &estimator_state,
             &processed_sensors,
             &actuator_commands,
-            0,
-            0,
-        );
+        ));
 
         let status = manager.comm_link().last_status.unwrap();
         assert_eq!(status.offboard, 1);
@@ -2965,13 +2926,13 @@ mod tests {
         );
 
         assert!(cal_flags.is_empty());
-        command_service::apply_calibration_requests(CalibrationRequestCtx {
-            requests: EventDrainPort::new(&mut command_events.calibration_requests),
-            responses: EventEmitPort::new(&mut comm_events.responses),
-            state: &initialized_state(),
-            flags: &mut cal_flags,
-            params: &mut params,
-        });
+        apply_test_command_requests(
+            &mut command_events,
+            &mut comm_events,
+            &mut board,
+            &mut params,
+            &mut cal_flags,
+        );
 
         assert!(cal_flags.contains(CalibrationFlags::GYRO));
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
@@ -3155,12 +3116,14 @@ mod tests {
         );
         assert_eq!(manager.comm_link().cmd_ack_count, 0);
 
-        command_service::apply_param_defaults_requests(command_service::ParamDefaultsCtx {
-            requests: EventDrainPort::new(&mut command_events.param_defaults_requests),
-            responses: EventEmitPort::new(&mut comm_events.responses),
-            state: &initialized_state(),
-            params: &mut params,
-        });
+        let mut cal_flags = CalibrationFlags::empty();
+        apply_test_command_requests(
+            &mut command_events,
+            &mut comm_events,
+            &mut board,
+            &mut params,
+            &mut cal_flags,
+        );
 
         assert_eq!(
             params.get_by_id(ParamId::PARAM_SYSTEM_ID),

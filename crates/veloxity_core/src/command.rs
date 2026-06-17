@@ -208,6 +208,10 @@ impl CommandManager {
     ) -> bool {
         let now_us = now_ms as u64 * 1000;
 
+        if !rc.check_rc_health(now_us, params) {
+            state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
+        }
+
         // --- 1. Failsafe Action (C++ lines 240-243) ---
         // This is the highest priority. If in failsafe, override all commands.
         if state_manager.is_in_failsafe() {
@@ -224,39 +228,40 @@ impl CommandManager {
         }
 
         // --- 2. RC Update (C++ line 244) ---
-        // If not in failsafe, check for new RC commands and run muxing
+        // Fresh RC packets update the RC input command. Combined command resolution runs below
+        // even without fresh RC so offboard updates and timeouts are not gated by RC cadence.
         if rc.new_command() {
-            // Port of interpret_rc()
             self.interpret_rc(rc, params);
-
-            // --- 3. Offboard Timeout "Fail-over" (C++ lines 246-252) ---
-            let timeout_ms = match params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) {
-                ParamValue::Int(val) => val as u32,
-                _ => {
-                    100 // Use the C++ default as a safe fallback
-                }
-            };
-
-            // Use the microsecond timer for more precision
-            if now_us > self.last_offboard_command_us + (timeout_ms as u64 * 1000) {
-                // Timeout occurred! Deactivate offboard control.
-                // This will cause the muxer to "fail-over" to RC.
-                self.offboard_command.qx.active = false;
-                self.offboard_command.qy.active = false;
-                self.offboard_command.qz.active = false;
-                self.offboard_command.fx.active = false;
-                self.offboard_command.fy.active = false;
-                self.offboard_command.fz.active = false;
-                for channel in &mut self.offboard_command.passthrough {
-                    channel.active = false;
-                }
-            }
-
-            // --- 4. Muxing (C++ lines 253-256) ---
-            self.do_muxing(params, rc, now_ms);
         }
 
+        // --- 3. Offboard Timeout "Fail-over" (C++ lines 246-252) ---
+        self.update_offboard_timeout(now_us, params);
+
+        // --- 4. Muxing (C++ lines 253-256) ---
+        self.do_muxing(params, rc, now_ms);
+
         true
+    }
+
+    fn update_offboard_timeout(&mut self, now_us: u64, params: &Params) {
+        let timeout_ms = match params.get_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT) {
+            ParamValue::Int(val) => val as u32,
+            _ => 100,
+        };
+
+        if now_us <= self.last_offboard_command_us + (timeout_ms as u64 * 1000) {
+            return;
+        }
+
+        self.offboard_command.qx.active = false;
+        self.offboard_command.qy.active = false;
+        self.offboard_command.qz.active = false;
+        self.offboard_command.fx.active = false;
+        self.offboard_command.fy.active = false;
+        self.offboard_command.fz.active = false;
+        for channel in &mut self.offboard_command.passthrough {
+            channel.active = false;
+        }
     }
 
     /// Receives a new offboard control command.
@@ -754,6 +759,90 @@ mod tests {
             OVERRIDE_OFFBOARD_Y_INACTIVE | OVERRIDE_OFFBOARD_T_INACTIVE
         );
         assert!(command.rc_override_active());
+    }
+
+    #[test]
+    fn offboard_update_resolves_combined_command_without_new_rc_packet() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        command.run(100, &params, &mut rc, &mut state);
+
+        command.set_new_offboard_command(
+            110_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.25,
+                qy: -0.5,
+                qz: 0.75,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.4,
+                passthrough: [0.0; 4],
+            },
+            &params,
+        );
+
+        command.run(110, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(combined.qx.control_type, ControlType::Rate);
+        assert_eq!(combined.qx.value, 0.25);
+        assert_eq!(combined.qy.value, -0.5);
+        assert_eq!(combined.qz.value, 0.75);
+        assert_eq!(combined.fz.value, 0.4);
+        assert_eq!(command.get_rc_override(), OVERRIDE_NO_OVERRIDE);
+    }
+
+    #[test]
+    fn offboard_timeout_resolves_back_to_rc_without_new_rc_packet() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OFFBOARD_TIMEOUT, ParamValue::Int(100));
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        command.run(100, &params, &mut rc, &mut state);
+        let rc_qx = command.rc_control().qx.value;
+        let rc_fz = command.rc_control().fz.value;
+
+        command.set_new_offboard_command(
+            110_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::empty(),
+                qx: -0.25,
+                qy: 0.5,
+                qz: -0.75,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.4,
+                passthrough: [0.0; 4],
+            },
+            &params,
+        );
+        command.run(110, &params, &mut rc, &mut state);
+        assert_eq!(command.combined_control().qx.value, -0.25);
+
+        command.run(211, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(combined.qx.value, rc_qx);
+        assert_eq!(combined.fz.value, rc_fz);
+        assert_eq!(
+            command.get_rc_override(),
+            OVERRIDE_OFFBOARD_X_INACTIVE
+                | OVERRIDE_OFFBOARD_Y_INACTIVE
+                | OVERRIDE_OFFBOARD_Z_INACTIVE
+                | OVERRIDE_OFFBOARD_T_INACTIVE
+        );
     }
 
     #[test]

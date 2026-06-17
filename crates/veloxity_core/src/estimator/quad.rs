@@ -1,10 +1,10 @@
 use super::AttitudeEstimate;
 use super::Estimator;
+use super::EstimatorCtx;
 use crate::comm::messages::messages::ExternalAttitudeMsg;
 use crate::math::FlightFloat;
 use crate::packets;
 use crate::params::{ParamId, ParamValue, Params};
-use crate::sensors::ProcessedSensors;
 
 use nalgebra::{Quaternion, SVector as Vector};
 
@@ -442,22 +442,15 @@ impl<R: FlightFloat> QuadEstimator<R> {
 impl<R: FlightFloat> Estimator<R> for QuadEstimator<R> {
     type State = AttitudeState<R>;
 
-    fn estimate(&mut self, sensors: &ProcessedSensors<R>, params: &Params, dt: R) -> Self::State {
-        self.update_params(params);
-        self.estimate_packets(sensors.imu, sensors.mag, params, dt)
+    fn estimate(&mut self, ctx: EstimatorCtx<'_, R>) -> Self::State {
+        if let Some(external_attitude) = ctx.external_attitude {
+            self.set_external_attitude_update(external_attitude);
+        }
+        self.estimate_packets(ctx.sensors.imu, ctx.sensors.mag, ctx.params, ctx.dt)
     }
 
     fn update_params(&mut self, params: &Params) {
         QuadEstimator::update_params(self, params);
-    }
-
-    fn estimate_with_cached_params(
-        &mut self,
-        sensors: &ProcessedSensors<R>,
-        params: &Params,
-        dt: R,
-    ) -> Self::State {
-        self.estimate_packets(sensors.imu, sensors.mag, params, dt)
     }
 
     fn reset(&mut self) {
@@ -466,30 +459,6 @@ impl<R: FlightFloat> Estimator<R> for QuadEstimator<R> {
 
     fn reset_adaptive_bias(&mut self) {
         QuadEstimator::reset_adaptive_bias(self);
-    }
-
-    fn estimate_with_external_attitude(
-        &mut self,
-        sensors: &ProcessedSensors<R>,
-        params: &Params,
-        dt: R,
-        external_attitude: Option<ExternalAttitudeMsg>,
-    ) -> Self::State {
-        self.update_params(params);
-        self.estimate_with_external_attitude_cached_params(sensors, params, dt, external_attitude)
-    }
-
-    fn estimate_with_external_attitude_cached_params(
-        &mut self,
-        sensors: &ProcessedSensors<R>,
-        params: &Params,
-        dt: R,
-        external_attitude: Option<ExternalAttitudeMsg>,
-    ) -> Self::State {
-        if let Some(external_attitude) = external_attitude {
-            self.set_external_attitude_update(external_attitude);
-        }
-        self.estimate_packets(sensors.imu, sensors.mag, params, dt)
     }
 }
 
@@ -601,7 +570,39 @@ mod tests {
         comm::messages::messages::ExternalAttitudeMsg,
         estimator::Estimator,
         packets::{ImuPacket, RosflightPacketHeader},
+        sensors::ProcessedSensors,
     };
+
+    fn estimate(
+        estimator: &mut QuadEstimator<f64>,
+        sensors: &ProcessedSensors<f64>,
+        params: &Params,
+        dt: f64,
+    ) -> AttitudeState<f64> {
+        estimator.update_params(params);
+        estimator.estimate(EstimatorCtx {
+            sensors,
+            params,
+            dt,
+            external_attitude: None,
+        })
+    }
+
+    fn estimate_with_external_attitude(
+        estimator: &mut QuadEstimator<f64>,
+        sensors: &ProcessedSensors<f64>,
+        params: &Params,
+        dt: f64,
+        external_attitude: ExternalAttitudeMsg,
+    ) -> AttitudeState<f64> {
+        estimator.update_params(params);
+        estimator.estimate(EstimatorCtx {
+            sensors,
+            params,
+            dt,
+            external_attitude: Some(external_attitude),
+        })
+    }
 
     #[test]
     fn estimator_applies_external_attitude_as_correction_not_replacement() {
@@ -624,18 +625,19 @@ mod tests {
         });
 
         let mut estimator = QuadEstimator::default();
-        let _ = estimator.estimate(&sensors, &params, 1.0 / 400.0);
+        let _ = estimate(&mut estimator, &sensors, &params, 1.0 / 400.0);
         sensors.imu.as_mut().unwrap().header.timestamp = 3_000;
-        let state = estimator.estimate_with_external_attitude(
+        let state = estimate_with_external_attitude(
+            &mut estimator,
             &sensors,
             &params,
             1.0 / 400.0,
-            Some(ExternalAttitudeMsg {
+            ExternalAttitudeMsg {
                 qw: core::f32::consts::FRAC_1_SQRT_2,
                 qx: core::f32::consts::FRAC_1_SQRT_2,
                 qy: 0.0,
                 qz: 0.0,
-            }),
+            },
         );
 
         assert_ne!(state.q(), [0.0, 1.0, 0.0, 0.0]);
@@ -662,7 +664,7 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate(&sensors, &params, 0.002);
+        let _ = estimate(&mut estimator, &sensors, &params, 0.002);
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 601_001,
@@ -673,7 +675,7 @@ mod tests {
             ..Default::default()
         });
 
-        let state = estimator.estimate(&sensors, &params, 0.002);
+        let state = estimate(&mut estimator, &sensors, &params, 0.002);
 
         assert!(!state.is_healthy());
     }
@@ -696,7 +698,7 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate(&sensors, &params, 0.002);
+        let _ = estimate(&mut estimator, &sensors, &params, 0.002);
         sensors.imu = Some(ImuPacket {
             header: RosflightPacketHeader {
                 timestamp: 601_001,
@@ -707,7 +709,7 @@ mod tests {
             ..Default::default()
         });
 
-        let state = estimator.estimate(&sensors, &params, 0.002);
+        let state = estimate(&mut estimator, &sensors, &params, 0.002);
 
         assert!(state.is_healthy());
     }
@@ -732,14 +734,14 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate(&sensors, &params, 0.1);
+        let _ = estimate(&mut estimator, &sensors, &params, 0.1);
         sensors.imu.as_mut().unwrap().header.timestamp = 101_000;
-        let drifted = estimator.estimate(&sensors, &params, 0.1);
+        let drifted = estimate(&mut estimator, &sensors, &params, 0.1);
         assert!(drifted.q()[3] > 0.0);
 
         estimator.reset();
         sensors.imu.as_mut().unwrap().header.timestamp = 201_000;
-        let reset = estimator.estimate(&sensors, &params, 0.1);
+        let reset = estimate(&mut estimator, &sensors, &params, 0.1);
 
         assert_eq!(reset.q(), [1.0, 0.0, 0.0, 0.0]);
         assert!(reset.is_healthy());
@@ -764,9 +766,9 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate(&sensors, &params, 0.002);
+        let _ = estimate(&mut estimator, &sensors, &params, 0.002);
         sensors.imu.as_mut().unwrap().header.timestamp = 3_000;
-        let state = estimator.estimate(&sensors, &params, 0.002);
+        let state = estimate(&mut estimator, &sensors, &params, 0.002);
 
         assert!(state.q()[3] > 0.0);
         assert!(state.q()[3] < 0.001);
@@ -792,9 +794,9 @@ mod tests {
             ..Default::default()
         });
 
-        let _ = estimator.estimate(&sensors, &params, 0.1);
+        let _ = estimate(&mut estimator, &sensors, &params, 0.1);
         sensors.imu.as_mut().unwrap().header.timestamp = 101_000;
-        let state = estimator.estimate(&sensors, &params, 0.1);
+        let state = estimate(&mut estimator, &sensors, &params, 0.1);
 
         assert!((state.q()[0] as f64 - 0.05_f64.cos()).abs() < 1e-6);
         assert!((state.q()[3] as f64 - 0.05_f64.sin()).abs() < 1e-6);
