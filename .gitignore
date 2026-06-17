@@ -24,3 +24,12 @@ rosflight_memory/
 # Local walkthrough notes
 2026-06-17-veloxity-world-walkthrough.md
 .local/
+
+# Documentation build artifacts
+site/
+
+# Python virtual environment
+/.venv/
+/venv/
+/env/
+/ENV/

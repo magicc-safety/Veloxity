@@ -1,0 +1,79 @@
+/* Custom Aerospace Blue & Orange Styling for Veloxity Docs */
+:root {
+  --md-primary-fg-color: #0f172a; /* Slate Dark */
+  --md-primary-fg-color--dark: #020617; /* Slate Extra Dark */
+  --md-accent-fg-color: #ea580c; /* ROSflight Aerospace Orange */
+  --md-accent-fg-color--transparent: rgba(234, 88, 12, 0.1);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #1e293b; /* Slate Dark for Dark Mode */
+  --md-primary-fg-color--dark: #0f172a;
+  --md-accent-fg-color: #f97316; /* Lighter Orange for dark background */
+}
+
+/* Header & Navigation adjustments */
+.md-header {
+  border-bottom: 2px solid var(--md-accent-fg-color);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.md-header__button.md-logo img {
+  filter: drop-shadow(0 0 4px var(--md-accent-fg-color));
+}
+
+.md-nav__link--active {
+  color: var(--md-accent-fg-color) !important;
+  font-weight: bold;
+}
+
+/* Link transitions */
+.md-typeset a {
+  color: #38bdf8; /* Soft blue link color */
+  transition: color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: underline dotted;
+}
+
+.md-typeset a:hover {
+  color: var(--md-accent-fg-color);
+  text-decoration: underline solid;
+}
+
+/* MathJax (LaTeX) Equation Blocks styling */
+.arithmatex {
+  overflow-x: auto;
+  margin: 1.5em 0;
+  padding: 1.2em;
+  background-color: rgba(30, 41, 59, 0.4);
+  border-left: 4px solid var(--md-accent-fg-color);
+  border-radius: 0 8px 8px 0;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: background-color 0.3s ease;
+}
+
+.arithmatex:hover {
+  background-color: rgba(30, 41, 59, 0.6);
+}
+
+/* Custom Admonitions Styling with Hover Effects */
+.md-typeset .admonition {
+  border-radius: 6px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.md-typeset .admonition:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 20px -8px rgba(0, 0, 0, 0.3);
+}
+
+/* Custom logo icon pulse animation */
+@keyframes logo-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.md-header__button.md-logo:hover img {
+  animation: logo-pulse 1s ease-in-out infinite;
+}

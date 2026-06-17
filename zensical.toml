@@ -1,0 +1,62 @@
+[project]
+site_name = "Veloxity Documentation"
+site_description = "High-level guides and low-level API documentation for the Veloxity firmware."
+site_url = "https://magicc-safety.github.io/veloxity/"
+
+nav = [
+    { "Welcome" = "README.md" },
+    # { "Architecture" = "architecture.md" },
+    # { "API Reference" = "api/index.md" }
+]
+
+extra_css = [
+    "stylesheets/extra.css"
+]
+
+extra_javascript = [
+    "javascript/mathjax.js",
+    "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"
+]
+
+[project.theme]
+name = "material"
+logo = "assets/veloxity-logo.svg"
+features = [
+    "navigation.tabs",
+    "navigation.sections",
+    "navigation.top",
+    "search.suggest",
+    "search.highlight",
+    "content.code.copy"
+]
+palette = [
+    # Light mode
+    { media = "(prefers-color-scheme: light)", scheme = "default", primary = "blue", accent = "orange", toggle = { icon = "material/brightness-7", name = "Switch to dark mode" } },
+    # Dark mode
+    { media = "(prefers-color-scheme: dark)", scheme = "slate", primary = "blue", accent = "orange", toggle = { icon = "material/brightness-4", name = "Switch to light mode" } }
+]
+
+[project.markdown_extensions]
+admonition = {}
+def_list = {}
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.arithmatex]
+generic = true
+
+[project.markdown_extensions.pymdownx.superfences]
+preserve_tabs = true
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
+]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.snippets]
+[project.markdown_extensions.pymdownx.details]
