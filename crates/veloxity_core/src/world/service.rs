@@ -33,7 +33,7 @@ where
             if policy.min_spacing_us != 0 {
                 break;
             }
-            if !had_service_activity {
+            if !had_service_activity && !policy.continue_when_idle {
                 break;
             }
         }

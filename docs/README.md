@@ -29,9 +29,9 @@ against the Pico board-local SPI register path. Hardware status, Saleae scope-pi
 exact build/test commands live in the RP2350 guide and hardware bring-up notes.
 
 The current Pixracer Pro / STM32H7 firmware target uses a fixed 400 Hz control loop with
-board-specific post-control telemetry scheduling. The latest 120-second hardware validation held
-the configured high-rate MAVLink streams with zero CRC errors and zero sequence gaps while keeping
-control timing comfortably inside the 2.5 ms period. Pixracer Pro setup, scope timing, and
+board-specific continuous service polling. The latest UART hardware validation held 400 Hz-class IMU
+MAVLink telemetry with zero CRC errors and zero sequence gaps while scope captures showed clean
+400 Hz BMI08x production and foreground consumption. Pixracer Pro setup, scope timing, and
 validation notes live in the STM32 board guide.
 
 ### I Want To Modify Firmware Logic

@@ -54,9 +54,9 @@ should focus on the board-local SPI register path in the Pico firmware entrypoin
 commands.
 
 The current Pixracer Pro / STM32H7 path runs a fixed `400 Hz` control loop with board-specific
-post-control telemetry scheduling. Hardware tests at `921600` baud show clean `400 Hz`-class IMU
-telemetry, exact `100 Hz` RC and `50 Hz` attitude/output streams, zero CRC errors or MAVLink
-sequence gaps, and roughly `1.9 ms` of control-period slack at the observed worst case. See
+continuous service polling. Hardware tests at `921600` baud show `399.5 Hz` host / `399.4 Hz`
+board-timestamp IMU telemetry, zero CRC errors or MAVLink sequence gaps, and sub-`100 us`
+producer-to-consumer IMU handoff latency in scope captures. See
 [STM32 boards](docs/boards/stm32.md) for the Pixracer Pro timing decisions and diagnostics.
 
 For ROSflight simulation, source ROS 2 and the ROSflight workspace first, then build the shim:

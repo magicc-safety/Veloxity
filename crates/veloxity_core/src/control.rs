@@ -186,6 +186,7 @@ where
     ctx.control_pipeline.set_last_imu_time(current_time);
     ctx.state
         .set_error_flag(ErrorFlag::TIME_GOING_BACKWARDS, false, ctx.params);
+    #[cfg(not(feature = "scope-timing-pins"))]
     ctx.board.set_test_pin_2(true);
 
     let dt = <R as FlightFloat>::from_u64(current_time.saturating_sub(last_imu_time))
@@ -309,6 +310,7 @@ where
         .min(u16::MAX as u64) as u16;
     ctx.control_pipeline
         .set_latest(state, actuator_commands, pwm_outputs, loop_time_us);
+    #[cfg(not(feature = "scope-timing-pins"))]
     ctx.board.set_test_pin_2(false);
     true
 }

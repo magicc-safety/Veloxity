@@ -39,7 +39,6 @@ use crate::{
 const IMU_TIMEOUT_US: u64 = 100_000;
 const REALTIME_SERVICE_RESPONSE_BUDGET: usize = 1;
 const REALTIME_SERVICE_MIN_CONTROL_SLACK_US: u64 = 200;
-const REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US: u64 = 120;
 
 #[derive(Clone, Copy, Debug)]
 struct ImuSampleAccumulator<R: FlightFloat> {
@@ -163,6 +162,7 @@ pub enum RealtimeSchedulerStep {
 pub struct RealtimeServicePolicy {
     pub min_spacing_us: u64,
     pub telemetry_streams_per_phase: usize,
+    pub continue_when_idle: bool,
 }
 
 impl RealtimeServicePolicy {
@@ -170,6 +170,7 @@ impl RealtimeServicePolicy {
         Self {
             min_spacing_us,
             telemetry_streams_per_phase,
+            continue_when_idle: false,
         }
     }
 
@@ -177,6 +178,15 @@ impl RealtimeServicePolicy {
         Self {
             min_spacing_us: 0,
             telemetry_streams_per_phase,
+            continue_when_idle: false,
+        }
+    }
+
+    pub const fn continuous_polling(telemetry_streams_per_phase: usize) -> Self {
+        Self {
+            min_spacing_us: 0,
+            telemetry_streams_per_phase,
+            continue_when_idle: true,
         }
     }
 }

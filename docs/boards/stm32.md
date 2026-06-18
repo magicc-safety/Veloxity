@@ -31,7 +31,7 @@ The STM32 boards follow the generic embedded firmware shape:
 - the board `BoardIo` implementation drains those queues into `veloxity_core` sensor resources;
 - the board constructs a `World` with STM32-specific board, PWM, and MAVLink transport types;
 - Pixracer Pro uses the realtime `World` scheduler entrypoints with a fixed `400 Hz` control update
-  baseline and board-specific post-control telemetry scheduling;
+  baseline and board-specific continuous service polling;
 - Nucleo keeps the ordinary `World::run_once()` firmware loop for now, while its `BoardIo` adapter
   exposes the same IMU/service sensor split so it stays compile-current.
 
@@ -41,18 +41,16 @@ other sensor packets, and one high-level firmware loop owns `World`. The first P
 does not rewrite driver tasks; it changes only how board-owned packets are presented to the core
 fast path and service path.
 
-The realtime Pixracer Pro entrypoint uses a board-specific telemetry policy. It keeps the shared
-core defaults intact, but uses a Pixracer-owned realtime service policy that attempts prioritized
+The realtime Pixracer Pro entrypoint uses a board-specific service policy. It keeps the shared
+core defaults intact, but uses a Pixracer-owned continuous polling policy that attempts prioritized
 service work back-to-back while the control-slack guard remains satisfied. Fresh RC gets handled
 immediately after the service sensor drain instead of waiting for a later circular service phase.
-The policy also asks each service opportunity to send more named telemetry streams and sends up to
-four telemetry streams immediately after each completed control update. The post-control burst uses
-a Pixracer Pro-owned priority list with IMU first, so control-rate IMU telemetry gets the first
-due/freshness-checked opportunity before the remaining budget falls back to the normal scheduler.
-Hardware diagnostics showed that UART baud, TX pipe drain, and final send gating were not the
-limiter; telemetry needed more scheduling opportunities in the measured post-control slack. The
-post-control burst and all-available service policy are intentionally Pixracer Pro-specific until
-RP2350/Pico 2 W is retested for consistency.
+The control-slack guard intentionally allows service when a fixed-rate control deadline is overdue
+but no accumulated IMU sample is available; otherwise stale deadline bookkeeping can block service
+for hundreds of milliseconds to protect a control update that cannot run. Hardware diagnostics
+showed that UART baud, TX pipe drain, and final send gating were not the limiter; telemetry needed
+regular service opportunities in the measured control slack. The continuous service policy is
+Pixracer Pro-specific until RP2350/Pico 2 W is retested for consistency.
 
 ## Install
 
@@ -144,24 +142,23 @@ Pixracer Pro has been validated on hardware with the bounded high-rate MAVLink p
 
 | Stream | Configured rate | Observed result |
 | --- | --- | --- |
-| IMU | `400 Hz` | About `398 Hz` in the latest 120-second burst-4 run. |
+| IMU | `400 Hz` | `399.5 Hz` host rate, `399.4 Hz` board timestamp rate in the latest UART acceptance run. |
 | RC | `100 Hz` | `100.0 Hz`. |
 | Attitude | `50 Hz` | `50.0 Hz`. |
 | Output raw | `50 Hz` | `50.0 Hz`. |
 | Status | `10 Hz` | `10.0 Hz`. |
 | Heartbeat | `1 Hz` | `1.0 Hz`. |
 
-The latest 120-second bidirectional MAVLink load at `921600` baud passed acceptance with zero CRC
-errors, zero MAVLink sequence gaps, and about `29.7 kB/s` RX throughput. TX enqueue and UART drain
-matched exactly with no partial writes or errors. The run injected ground-station MAVLink heartbeat
-and TIMESYNC frames plus version and parameter requests, so it exercises telemetry, parser, and
-response paths. It is not a substitute for a full flight-command profile; offboard/setpoint/RC
-override traffic should be tested separately if those are part of the mission.
+The latest 10-second UART MAVLink acceptance run at `921600` baud passed with zero CRC errors and
+zero MAVLink sequence gaps. The run injected ground-station heartbeat and TIMESYNC frames plus
+version and parameter requests, so it exercises telemetry, parser, and response paths. It is not a
+substitute for a full flight-command profile; offboard/setpoint/RC override traffic should be tested
+separately if those are part of the mission.
 
-Control timing stayed well inside the `2.5 ms` period. The latest burst-4 run reported firmware
-loop timing around `406 us` average, `471 us` p99, and `534 us` max, with control perf max around
-`598 us`. That leaves roughly `1.9 ms` of slack in the worst observed control pass. Saleae captures
-show PD12 control-active pulses completing well before the next PD11 `400 Hz` deadline marker.
+Control timing stayed well inside the `2.5 ms` period. The latest acceptance run reported firmware
+loop timing around `406 us` average and `468 us` max. Saleae captures showed the BMI08x producer,
+foreground IMU consumption, and control pipeline cadence all staying inside the `400 Hz` timing
+budget.
 
 Use this diagnostic firmware when validating the current MAVLink throughput issue:
 
@@ -170,16 +167,10 @@ cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity --relea
   --features 'scope-timing-pins'
 ```
 
-The `scope-timing-pins` feature maps the Pixracer Pro timing signals as follows:
-
-| Pin | Meaning |
-| --- | --- |
-| PD11 | 400 Hz control-deadline marker |
-| PD12 | Control pipeline active time |
-
-PD11 should pulse every `2.5 ms`. PD12 should remain well shorter than that period and should not
-overlap the next PD11 marker. The post-control telemetry burst is outside the measured control
-pipeline active pulse; use the MAVLink tester to assess emitted stream rates and packet health.
+The `scope-timing-pins` feature keeps the GPIO timing path buildable for targeted Saleae captures,
+but the branch does not assign a permanent meaning to Pixracer Pro test pins. Place short-lived
+test-pin calls around the producer, consumer, service, or control section being measured, then use
+the MAVLink tester to assess emitted stream rates and packet health.
 
 Diagnostic decision record:
 
@@ -189,22 +180,18 @@ Diagnostic decision record:
   rates.
 - Historical TX queue/drain counters matched exactly with zero partial writes or errors, ruling
   out UART baud, TX pipe capacity, and async drain as the limiter.
-- Historical telemetry scheduler counters showed selected streams sent successfully, so the missing
-  frames were caused by too few scheduling opportunities, not final send gating.
-- Adding a small post-control telemetry burst fixed the rates. Burst `3` hit the target streams;
-  burst `4` is the current Pixracer Pro value for extra scheduling margin and still keeps the
-  `400 Hz` control loop comfortably inside budget.
-- The current burst tries IMU first with
-  `RealtimeTelemetryPriorityGate::FreshSample`, then spends the remaining budget through the
-  ordinary due-deadline scheduler. This keeps the IMU telemetry paced by fresh control-rate samples
-  instead of by a second telemetry due timer, which previously drifted a few microseconds out of
-  phase and caused occasional `5 ms` IMU telemetry gaps even though control and sensor cadence were
-  healthy.
-- The accepted `4c6c478` validation run held the configured streams for 120 seconds at `921600`
-  baud: IMU `399.4 Hz`, RC `100.0 Hz`, attitude `50.0 Hz`, output raw `50.0 Hz`, zero CRC errors,
-  zero MAVLink sequence gaps, clean telemetry queue/drain diagnostics, and no priority IMU
-  due/freshness skips. The measured IMU telemetry timestamp max interval was `2.508 ms`,
-  with firmware loop timing avg `396.0 us`, p99 `459 us`, max `522 us`.
+- Scope captures showed the foreground scheduler could stop entering service for about `500 ms`
+  while control remained healthy. The root cause was the service slack guard using stale fixed-rate
+  deadline state when no accumulated IMU sample was available, so it blocked service to protect a
+  control update that could not run.
+- The scheduler now allows service in that stale-deadline/no-IMU case. Post-fix service-off gaps
+  stayed below `1 ms` in the validation capture.
+- Producer/consumer scope validation showed a clean `400 Hz` BMI08x producer cadence, matching
+  foreground IMU consumption count, and producer-to-consumer latency below `100 us`.
+- The accepted UART validation run held IMU telemetry at `399.5 Hz` host rate and `399.4 Hz` board
+  timestamp rate for 10 seconds at `921600` baud, with zero CRC errors, zero MAVLink sequence gaps,
+  injected heartbeat/TIMESYNC/version/parameter traffic, and firmware loop timing avg `406.2 us`,
+  max `468 us`.
 
 Those historical onboard counters were useful for identifying the scheduling problem, but current
 timing validation should use scope pins plus external MAVLink rate and packet-health tooling.

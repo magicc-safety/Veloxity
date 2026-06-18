@@ -58,8 +58,6 @@ where
             return RealtimeSchedulerStep::ControlUpdate;
         }
         if now_us >= self.next_realtime_service_us
-            && now_us.saturating_sub(self.last_realtime_control_us)
-                <= REALTIME_SERVICE_WINDOW_AFTER_CONTROL_US
             && self.realtime_service_has_control_slack(now_us)
         {
             RealtimeSchedulerStep::Service
@@ -145,15 +143,6 @@ where
         }
 
         let interval_us = 1_000_000_u64 / rate_hz as u64;
-        #[cfg(feature = "scope-timing-pins")]
-        {
-            self.board.set_test_pin_1(true);
-            for _ in 0..8 {
-                core::hint::spin_loop();
-            }
-            self.board.set_test_pin_1(false);
-        }
-
         let elapsed_intervals = now_us.saturating_sub(self.last_control_update_us) / interval_us;
         self.last_control_update_us = self
             .last_control_update_us
@@ -167,6 +156,9 @@ where
     pub(super) fn realtime_service_has_control_slack(&self, now_us: u64) -> bool {
         let rate_hz = self.control_loop_rates.control_hz;
         if rate_hz == 0 {
+            return true;
+        }
+        if self.control_update_due_at(now_us) && !self.control_imu_accumulator.has_samples() {
             return true;
         }
 

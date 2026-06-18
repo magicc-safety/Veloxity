@@ -542,11 +542,12 @@ sensors does not turn the IMU interrupt path into a multi-sensor polling loop.
 Pixracer Pro also uses the realtime scheduler, but its board runtime differs from the Pico 2 W
 dual-core path. STM32 peripheral tasks produce IMU, RC, and slower sensor packets, while one
 high-level firmware loop owns `World`. Hardware timing showed that Pixracer Pro had enough control
-slack for `400 Hz`, but the separate service window did not create enough telemetry scheduling
-opportunities for the bounded high-rate MAVLink profile. The Pixracer Pro entrypoint therefore uses
-a board-specific post-control telemetry burst: selected telemetry streams are enqueued immediately
-after a completed control update, while the ordinary service phases continue to handle RX,
-responses, slower sensors, and board maintenance.
+slack for `400 Hz`, but stale fixed-rate deadline state could block service for hundreds of
+milliseconds when no accumulated IMU sample was available. The Pixracer Pro entrypoint therefore
+uses a board-specific continuous service policy: prioritized service work runs back-to-back while
+the control-slack guard remains satisfied, and the guard allows service when an overdue control
+deadline cannot actually run because the IMU accumulator is empty. The ordinary service phases
+continue to handle RX, responses, slower sensors, telemetry, and board maintenance.
 
 This decision is intentionally board-specific. RP2350/Pico 2 W already decouples downlink transport
 through its mailbox/core split and should be retested for consistency before porting any additional

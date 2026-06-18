@@ -6,6 +6,7 @@ use veloxity_core::sensors::SensorBus;
 
 use embassy_time::Delay;
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
+#[cfg(not(feature = "scope-timing-pins"))]
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
 use stm_32::peripherals;
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
@@ -609,9 +610,11 @@ impl Board {
         );
 
         // Test PWM pins
+        #[cfg_attr(feature = "scope-timing-pins", allow(unused_mut))]
         let mut test_pin_1 = Output::new(p.PD11, Level::Low, Speed::VeryHigh);
         #[cfg(not(feature = "scope-timing-pins"))]
         test_pin_1.set_high();
+        #[cfg_attr(feature = "scope-timing-pins", allow(unused_mut))]
         let mut test_pin_2 = Output::new(p.PD12, Level::Low, Speed::VeryHigh);
         #[cfg(not(feature = "scope-timing-pins"))]
         test_pin_2.set_high();

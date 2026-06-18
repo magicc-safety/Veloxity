@@ -76,7 +76,9 @@ fn main() -> ! {
             }
             RealtimeSchedulerStep::Service => {
                 let _ = world.run_prioritized_service_steps_with_policy(
-                    RealtimeServicePolicy::continuous(PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_PHASE),
+                    RealtimeServicePolicy::continuous_polling(
+                        PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_PHASE,
+                    ),
                 );
             }
             RealtimeSchedulerStep::Idle => {}

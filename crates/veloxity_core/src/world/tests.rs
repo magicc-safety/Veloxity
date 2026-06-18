@@ -1107,6 +1107,41 @@ fn fixed_control_rate_does_not_consume_deadline_without_accumulated_imu() {
 }
 
 #[test]
+fn fixed_control_rate_allows_service_when_deadline_overdue_without_accumulated_imu() {
+    let params = Params::new();
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard::default(),
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
+    world.next_realtime_service_us = 0;
+
+    world.board.current_time_us = 1_000;
+    assert!(world.control_update_due_at(1_000));
+    assert!(!world.control_update_can_run_at(1_000));
+    assert!(world.realtime_service_has_control_slack(1_000));
+    assert_eq!(
+        world.realtime_scheduler_step(),
+        RealtimeSchedulerStep::Service
+    );
+}
+
+#[test]
 fn fixed_control_rate_late_wake_skips_missed_intervals_without_bursting() {
     let params = Params::new();
     let mixer = quadrotor::mixer::<f64>(&params);
