@@ -179,15 +179,7 @@ The `scope-timing-pins` feature maps the Pixracer Pro timing signals as follows:
 
 PD11 should pulse every `2.5 ms`. PD12 should remain well shorter than that period and should not
 overlap the next PD11 marker. The post-control telemetry burst is outside the measured control
-pipeline active pulse; use MAVLink timing diagnostics and TXQ/TXD counters to assess telemetry load.
-
-The `timing-diagnostics` feature emits STATUSTEXT diagnostics, including:
-
-| Prefix | Meaning |
-| --- | --- |
-| `TXQ` | Firmware writes into the telemetry TX pipe: attempts, full-frame successes, attempted bytes, accepted bytes, partial errors, and total errors. |
-| `TXD` | Async UART TX task drain/write counters: pipe reads, read bytes, UART writes, written bytes, and UART errors. |
-| `TMS` | Rotating telemetry scheduler counters per stream: eligible during actual send attempts, selected, sent, and selected-but-failed-final-gate counts. |
+pipeline active pulse; use the MAVLink tester to assess emitted stream rates and packet health.
 
 Diagnostic decision record:
 
@@ -195,10 +187,10 @@ Diagnostic decision record:
   control timing had substantial slack.
 - Increasing UART baud and increasing the per-service stream budget did not materially improve the
   rates.
-- `TXQ` and `TXD` matched exactly with zero partial writes or errors, ruling out UART baud, TX pipe
-  capacity, and async drain as the limiter.
-- `TMS` showed selected streams sent successfully (`f0`), so the missing frames were caused by too
-  few scheduling opportunities, not final send gating.
+- Historical TX queue/drain counters matched exactly with zero partial writes or errors, ruling
+  out UART baud, TX pipe capacity, and async drain as the limiter.
+- Historical telemetry scheduler counters showed selected streams sent successfully, so the missing
+  frames were caused by too few scheduling opportunities, not final send gating.
 - Adding a small post-control telemetry burst fixed the rates. Burst `3` hit the target streams;
   burst `4` is the current Pixracer Pro value for extra scheduling margin and still keeps the
   `400 Hz` control loop comfortably inside budget.
@@ -210,13 +202,12 @@ Diagnostic decision record:
   healthy.
 - The accepted `4c6c478` validation run held the configured streams for 120 seconds at `921600`
   baud: IMU `399.4 Hz`, RC `100.0 Hz`, attitude `50.0 Hz`, output raw `50.0 Hz`, zero CRC errors,
-  zero MAVLink sequence gaps, clean `TXQ`/`TXD`, and no priority IMU due/freshness skips
-  (`RTI a400 ok400 nd0 st0 ni0`). The measured IMU telemetry timestamp max interval was `2.508 ms`,
+  zero MAVLink sequence gaps, clean telemetry queue/drain diagnostics, and no priority IMU
+  due/freshness skips. The measured IMU telemetry timestamp max interval was `2.508 ms`,
   with firmware loop timing avg `396.0 us`, p99 `459 us`, max `522 us`.
 
-`TMS` emits one stream per diagnostic interval so scheduler visibility does not flood the shared
-STATUSTEXT response queue. Readiness probes such as `named_telemetry_due()` do not update TMS
-counters; the counters describe actual realtime send attempts.
+Those historical onboard counters were useful for identifying the scheduling problem, but current
+timing validation should use scope pins plus external MAVLink rate and packet-health tooling.
 
 ## Bring-Up Order
 

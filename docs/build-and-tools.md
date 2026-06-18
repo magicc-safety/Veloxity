@@ -171,13 +171,13 @@ Pixracer Pro is the active STM32 validation target. The current high-rate timing
 
 ```bash
 cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity --release \
-  --features 'scope-timing-pins timing-diagnostics'
+  --features 'scope-timing-pins'
 ```
 
 The current Pixracer Pro hardware baseline is a fixed `400 Hz` control loop with a board-specific
 post-control telemetry burst of four streams. A 120-second bidirectional MAVLink load at `921600`
-baud passed with zero CRC errors, zero MAVLink sequence gaps, clean TX enqueue/drain diagnostics,
-about `398 Hz` IMU telemetry, exact `100 Hz` RC and `50 Hz` attitude/output streams, and roughly
+baud passed with zero CRC errors, zero MAVLink sequence gaps, about `398 Hz` IMU telemetry,
+exact `100 Hz` RC and `50 Hz` attitude/output streams, and roughly
 `1.9 ms` of control-period slack at the observed worst case. Follow
 [STM32 boards](boards/stm32.md) for the decision record, scope-pin meanings, and remaining
 real-flight validation steps.

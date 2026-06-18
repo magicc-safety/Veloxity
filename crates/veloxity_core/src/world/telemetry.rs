@@ -41,7 +41,7 @@ where
     /// Board realtime loops may call this after a completed control update when hardware timing
     /// shows enough post-control slack and service phases alone do not provide enough telemetry
     /// scheduling opportunities. Keep the budget board-specific and validate the resulting control
-    /// p99/max timing with scope pins or timing diagnostics before making it a production default.
+    /// p99/max timing with scope pins before making it a production default.
     pub fn run_realtime_telemetry_stage_budgeted(&mut self, max_streams: usize) -> usize {
         let mut sent = 0;
         while sent < max_streams && self.send_realtime_telemetry_stream() {
@@ -97,22 +97,8 @@ where
         priority: RealtimeTelemetryPriority,
     ) -> bool {
         let now_us = self.board.clock_micros();
-        #[cfg(feature = "timing-diagnostics")]
-        let imu_readiness = if priority.stream == crate::comm::NamedTelemetryStream::Imu {
-            self.realtime_cadence_diagnostics.priority_imu_attempt = self
-                .realtime_cadence_diagnostics
-                .priority_imu_attempt
-                .saturating_add(1);
-            Some(self.comm.imu_telemetry_readiness_for_gate(
-                now_us,
-                &self.processed_sensors,
-                priority.gate,
-            ))
-        } else {
-            None
-        };
         let sensor_error_count = self.board.sensors_errors_count();
-        let sent = self.comm.send_named_telemetry_stream_with_gate(
+        self.comm.send_named_telemetry_stream_with_gate(
             priority,
             TelemetryCtx {
                 board: &mut self.board,
@@ -126,42 +112,6 @@ where
                 sensor_error_count,
                 loop_time_us: self.control_pipeline.latest_loop_time_us,
             },
-        );
-        #[cfg(feature = "timing-diagnostics")]
-        if let Some(readiness) = imu_readiness {
-            if sent {
-                self.realtime_cadence_diagnostics.priority_imu_sent = self
-                    .realtime_cadence_diagnostics
-                    .priority_imu_sent
-                    .saturating_add(1);
-                if let Some(packet) = self.processed_sensors.imu {
-                    self.realtime_cadence_diagnostics
-                        .record_imu_telemetry_timestamp(packet.header.timestamp);
-                }
-            } else {
-                match readiness {
-                    ImuTelemetryReadiness::Due => {}
-                    ImuTelemetryReadiness::NotDue => {
-                        self.realtime_cadence_diagnostics.priority_imu_not_due = self
-                            .realtime_cadence_diagnostics
-                            .priority_imu_not_due
-                            .saturating_add(1);
-                    }
-                    ImuTelemetryReadiness::Stale => {
-                        self.realtime_cadence_diagnostics.priority_imu_stale = self
-                            .realtime_cadence_diagnostics
-                            .priority_imu_stale
-                            .saturating_add(1);
-                    }
-                    ImuTelemetryReadiness::NoImu => {
-                        self.realtime_cadence_diagnostics.priority_imu_no_imu = self
-                            .realtime_cadence_diagnostics
-                            .priority_imu_no_imu
-                            .saturating_add(1);
-                    }
-                }
-            }
-        }
-        sent
+        )
     }
 }

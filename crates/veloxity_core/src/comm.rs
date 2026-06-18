@@ -17,13 +17,7 @@ use crate::packets::{RC_PACKET_CHANNELS, RangeType};
 use crate::params::{ParamId, ParamValue, Params};
 use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
-#[cfg(feature = "timing-diagnostics")]
-use core::fmt::Write;
 use core::marker::PhantomData;
-#[cfg(feature = "timing-diagnostics")]
-use core::sync::atomic::{AtomicU32, Ordering};
-#[cfg(feature = "timing-diagnostics")]
-use heapless::String;
 
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
@@ -74,106 +68,6 @@ where
     pub actuator_commands: &'a A,
     pub sensor_error_count: u16,
     pub loop_time_us: u16,
-}
-
-#[cfg(feature = "timing-diagnostics")]
-const NAMED_TELEMETRY_STREAM_COUNT: usize = 12;
-
-#[cfg(feature = "timing-diagnostics")]
-impl NamedTelemetryStream {
-    const fn index(self) -> usize {
-        match self {
-            Self::Heartbeat => 0,
-            Self::Status => 1,
-            Self::Imu => 2,
-            Self::Rc => 3,
-            Self::Attitude => 4,
-            Self::OutputRaw => 5,
-            Self::Gnss => 6,
-            Self::DiffPressure => 7,
-            Self::Baro => 8,
-            Self::Mag => 9,
-            Self::Range => 10,
-            Self::Battery => 11,
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Heartbeat => "H",
-            Self::Status => "S",
-            Self::Imu => "I",
-            Self::Rc => "R",
-            Self::Attitude => "A",
-            Self::OutputRaw => "O",
-            Self::Gnss => "G",
-            Self::DiffPressure => "D",
-            Self::Baro => "B",
-            Self::Mag => "M",
-            Self::Range => "N",
-            Self::Battery => "P",
-        }
-    }
-
-    const fn from_index(index: usize) -> Option<Self> {
-        match index {
-            0 => Some(Self::Heartbeat),
-            1 => Some(Self::Status),
-            2 => Some(Self::Imu),
-            3 => Some(Self::Rc),
-            4 => Some(Self::Attitude),
-            5 => Some(Self::OutputRaw),
-            6 => Some(Self::Gnss),
-            7 => Some(Self::DiffPressure),
-            8 => Some(Self::Baro),
-            9 => Some(Self::Mag),
-            10 => Some(Self::Range),
-            11 => Some(Self::Battery),
-            _ => None,
-        }
-    }
-}
-
-#[cfg(feature = "timing-diagnostics")]
-static TELEMETRY_STREAM_DUE: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
-    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
-#[cfg(feature = "timing-diagnostics")]
-static TELEMETRY_STREAM_SELECTED: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
-    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
-#[cfg(feature = "timing-diagnostics")]
-static TELEMETRY_STREAM_SENT: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
-    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
-#[cfg(feature = "timing-diagnostics")]
-static TELEMETRY_STREAM_FAILED: [AtomicU32; NAMED_TELEMETRY_STREAM_COUNT] =
-    [const { AtomicU32::new(0) }; NAMED_TELEMETRY_STREAM_COUNT];
-
-#[cfg(feature = "timing-diagnostics")]
-fn record_telemetry_stream_due(stream: NamedTelemetryStream) {
-    TELEMETRY_STREAM_DUE[stream.index()].fetch_add(1, Ordering::Relaxed);
-}
-
-#[cfg(feature = "timing-diagnostics")]
-fn record_telemetry_stream_selected(stream: NamedTelemetryStream) {
-    TELEMETRY_STREAM_SELECTED[stream.index()].fetch_add(1, Ordering::Relaxed);
-}
-
-#[cfg(feature = "timing-diagnostics")]
-fn record_telemetry_stream_sent(stream: NamedTelemetryStream) {
-    TELEMETRY_STREAM_SENT[stream.index()].fetch_add(1, Ordering::Relaxed);
-}
-
-#[cfg(feature = "timing-diagnostics")]
-fn record_telemetry_stream_failed(stream: NamedTelemetryStream) {
-    TELEMETRY_STREAM_FAILED[stream.index()].fetch_add(1, Ordering::Relaxed);
-}
-
-#[cfg(feature = "timing-diagnostics")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ImuTelemetryReadiness {
-    Due,
-    NotDue,
-    Stale,
-    NoImu,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -357,8 +251,6 @@ where
     telemetry_rates: TelemetryRates,
     telemetry_rate_state: TelemetryRateState,
     last_realtime_imu_telemetry_timestamp: Option<u64>,
-    #[cfg(feature = "timing-diagnostics")]
-    telemetry_diag_text_index: usize,
 
     pub sysid: u8,
     comm_link: T,
@@ -379,8 +271,6 @@ where
             telemetry_rates: TelemetryRates::upstream(),
             telemetry_rate_state: TelemetryRateState::default(),
             last_realtime_imu_telemetry_timestamp: None,
-            #[cfg(feature = "timing-diagnostics")]
-            telemetry_diag_text_index: 0,
 
             sysid: 1,
             comm_link,
@@ -418,76 +308,18 @@ where
     where
         R: FlightFloat,
     {
-        self.select_due_named_telemetry_stream(now_us, processed_sensors, false)
+        self.select_due_named_telemetry_stream(now_us, processed_sensors)
             .is_some()
-    }
-
-    #[cfg(feature = "timing-diagnostics")]
-    pub fn imu_telemetry_readiness<R>(
-        &self,
-        now_us: u64,
-        processed_sensors: &ProcessedSensors<R>,
-    ) -> ImuTelemetryReadiness
-    where
-        R: FlightFloat,
-    {
-        let Some(imu_packet) = processed_sensors.imu else {
-            return ImuTelemetryReadiness::NoImu;
-        };
-        if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
-            return ImuTelemetryReadiness::Stale;
-        }
-        if stream_due_deadline_us(
-            now_us,
-            self.telemetry_rate_state.imu_us,
-            self.telemetry_rates.imu_hz,
-        )
-        .is_some()
-        {
-            ImuTelemetryReadiness::Due
-        } else {
-            ImuTelemetryReadiness::NotDue
-        }
-    }
-
-    #[cfg(feature = "timing-diagnostics")]
-    pub fn imu_telemetry_readiness_for_gate<R>(
-        &self,
-        now_us: u64,
-        processed_sensors: &ProcessedSensors<R>,
-        gate: RealtimeTelemetryPriorityGate,
-    ) -> ImuTelemetryReadiness
-    where
-        R: FlightFloat,
-    {
-        match gate {
-            RealtimeTelemetryPriorityGate::DueDeadline => {
-                self.imu_telemetry_readiness(now_us, processed_sensors)
-            }
-            RealtimeTelemetryPriorityGate::FreshSample => {
-                let Some(imu_packet) = processed_sensors.imu else {
-                    return ImuTelemetryReadiness::NoImu;
-                };
-                if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
-                    ImuTelemetryReadiness::Stale
-                } else {
-                    ImuTelemetryReadiness::Due
-                }
-            }
-        }
     }
 
     fn select_due_named_telemetry_stream<R>(
         &self,
         now_us: u64,
         processed_sensors: &ProcessedSensors<R>,
-        record_diagnostics: bool,
     ) -> Option<NamedTelemetryStream>
     where
         R: FlightFloat,
     {
-        #[cfg(not(feature = "timing-diagnostics"))]
-        let _ = record_diagnostics;
         let mut selected = None;
         let mut selected_deadline = u64::MAX;
 
@@ -499,10 +331,6 @@ where
             else {
                 return;
             };
-            #[cfg(feature = "timing-diagnostics")]
-            if record_diagnostics {
-                record_telemetry_stream_due(stream);
-            }
             if selected.is_none() || deadline < *selected_deadline {
                 *selected = Some(stream);
                 *selected_deadline = deadline;
@@ -976,12 +804,9 @@ where
         A: AsRef<[R]>,
         R: FlightFloat,
     {
-        let Some(stream) = self.select_due_named_telemetry_stream(ctx.now_us, ctx.sensors, true)
-        else {
+        let Some(stream) = self.select_due_named_telemetry_stream(ctx.now_us, ctx.sensors) else {
             return false;
         };
-        #[cfg(feature = "timing-diagnostics")]
-        record_telemetry_stream_selected(stream);
 
         self.send_selected_named_telemetry_stream(stream, &mut ctx)
     }
@@ -1001,11 +826,6 @@ where
             .is_none()
         {
             return false;
-        }
-        #[cfg(feature = "timing-diagnostics")]
-        {
-            record_telemetry_stream_due(stream);
-            record_telemetry_stream_selected(stream);
         }
 
         self.send_selected_named_telemetry_stream(stream, &mut ctx)
@@ -1028,11 +848,6 @@ where
             RealtimeTelemetryPriorityGate::FreshSample => {
                 if priority.stream != NamedTelemetryStream::Imu {
                     return self.send_named_telemetry_stream_if_due(priority.stream, ctx);
-                }
-                #[cfg(feature = "timing-diagnostics")]
-                {
-                    record_telemetry_stream_due(priority.stream);
-                    record_telemetry_stream_selected(priority.stream);
                 }
                 self.send_selected_named_telemetry_stream_with_gate(
                     priority.stream,
@@ -1324,47 +1139,7 @@ where
                 None => false,
             },
         };
-        #[cfg(feature = "timing-diagnostics")]
-        if sent {
-            record_telemetry_stream_sent(stream);
-        } else {
-            record_telemetry_stream_failed(stream);
-        }
         sent
-    }
-
-    #[cfg(feature = "timing-diagnostics")]
-    pub fn telemetry_scheduler_diagnostic_text(&mut self) -> Option<[u8; 50]> {
-        while self.telemetry_diag_text_index < NAMED_TELEMETRY_STREAM_COUNT {
-            let index = self.telemetry_diag_text_index;
-            self.telemetry_diag_text_index += 1;
-            let Some(stream) = NamedTelemetryStream::from_index(index) else {
-                continue;
-            };
-            let due = TELEMETRY_STREAM_DUE[index].swap(0, Ordering::Relaxed);
-            let selected = TELEMETRY_STREAM_SELECTED[index].swap(0, Ordering::Relaxed);
-            let sent = TELEMETRY_STREAM_SENT[index].swap(0, Ordering::Relaxed);
-            let failed = TELEMETRY_STREAM_FAILED[index].swap(0, Ordering::Relaxed);
-            if due == 0 && selected == 0 && sent == 0 && failed == 0 {
-                continue;
-            }
-            let mut text = String::<50>::new();
-            let _ = write!(
-                text,
-                "TMS {} d{} s{} ok{} f{}",
-                stream.label(),
-                due,
-                selected,
-                sent,
-                failed
-            );
-            let mut bytes = [0_u8; 50];
-            let payload = text.as_bytes();
-            bytes[..payload.len()].copy_from_slice(payload);
-            return Some(bytes);
-        }
-        self.telemetry_diag_text_index = 0;
-        None
     }
 
     fn send_imu_if_due<R>(

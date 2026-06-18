@@ -5,7 +5,6 @@ edition = "2024"
 
 [features]
 default = []
-timing-diagnostics = []
 
 [dependencies]
 veloxity_core = { workspace = true }

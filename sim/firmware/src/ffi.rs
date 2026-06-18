@@ -251,8 +251,6 @@ struct FfiBoard {
     last_range_timestamp_us: u64,
     last_battery_timestamp_us: u64,
     last_rc_timestamp_us: u64,
-    #[cfg(feature = "timing-diagnostics")]
-    last_serial_rx_count: usize,
 }
 
 impl FfiBoard {
@@ -282,8 +280,6 @@ impl FfiBoard {
             last_range_timestamp_us: 0,
             last_battery_timestamp_us: 0,
             last_rc_timestamp_us: 0,
-            #[cfg(feature = "timing-diagnostics")]
-            last_serial_rx_count: 0,
         })
     }
 }
@@ -442,32 +438,13 @@ impl BoardIo for FfiBoard {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
-        let result = match self.mavlink_socket.recv(buf) {
-            Ok(size) => {
-                #[cfg(feature = "timing-diagnostics")]
-                {
-                    self.last_serial_rx_count = size;
-                }
-                Some(Ok(size))
-            }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                #[cfg(feature = "timing-diagnostics")]
-                {
-                    self.last_serial_rx_count = 0;
-                }
-                None
-            }
-            Err(_) => {
-                #[cfg(feature = "timing-diagnostics")]
-                {
-                    self.last_serial_rx_count = 0;
-                }
-                Some(Err(errors::TelemError::GenericTelemError(
-                    "error reading MAVLink UDP socket",
-                )))
-            }
-        };
-        result
+        match self.mavlink_socket.recv(buf) {
+            Ok(size) => Some(Ok(size)),
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => None,
+            Err(_) => Some(Err(errors::TelemError::GenericTelemError(
+                "error reading MAVLink UDP socket",
+            ))),
+        }
     }
 
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -480,11 +457,6 @@ impl BoardIo for FfiBoard {
                 "error writing MAVLink UDP socket",
             ))),
         }
-    }
-
-    #[cfg(feature = "timing-diagnostics")]
-    fn serial_rx_last_count(&self) -> usize {
-        self.last_serial_rx_count
     }
 
     fn clock_millis(&self) -> u32 {

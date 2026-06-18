@@ -15,76 +15,6 @@ include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 
 static mut PARAM_STORE: Option<Params> = None;
 
-#[cfg(feature = "timing-diagnostics")]
-mod tx_diagnostics {
-    use core::fmt::Write;
-    use core::sync::atomic::{AtomicU32, Ordering};
-
-    use heapless::String;
-
-    static TX_PIPE_ATTEMPTS: AtomicU32 = AtomicU32::new(0);
-    static TX_PIPE_ATTEMPT_BYTES: AtomicU32 = AtomicU32::new(0);
-    static TX_PIPE_ACCEPTED_BYTES: AtomicU32 = AtomicU32::new(0);
-    static TX_PIPE_FULL_WRITES: AtomicU32 = AtomicU32::new(0);
-    static TX_PIPE_PARTIAL_ERRORS: AtomicU32 = AtomicU32::new(0);
-    static TX_PIPE_WRITE_ERRORS: AtomicU32 = AtomicU32::new(0);
-
-    pub fn record_pipe_attempt(len: usize) {
-        TX_PIPE_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
-        TX_PIPE_ATTEMPT_BYTES.fetch_add(len as u32, Ordering::Relaxed);
-    }
-
-    pub fn record_pipe_accepted(len: usize) {
-        TX_PIPE_ACCEPTED_BYTES.fetch_add(len as u32, Ordering::Relaxed);
-    }
-
-    pub fn record_pipe_full_write() {
-        TX_PIPE_FULL_WRITES.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn record_pipe_error(partial: bool) {
-        if partial {
-            TX_PIPE_PARTIAL_ERRORS.fetch_add(1, Ordering::Relaxed);
-        }
-        TX_PIPE_WRITE_ERRORS.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn pipe_text() -> [u8; 50] {
-        let attempts = TX_PIPE_ATTEMPTS.swap(0, Ordering::Relaxed);
-        let full_writes = TX_PIPE_FULL_WRITES.swap(0, Ordering::Relaxed);
-        let attempt_bytes = TX_PIPE_ATTEMPT_BYTES.swap(0, Ordering::Relaxed);
-        let accepted_bytes = TX_PIPE_ACCEPTED_BYTES.swap(0, Ordering::Relaxed);
-        let partial_errors = TX_PIPE_PARTIAL_ERRORS.swap(0, Ordering::Relaxed);
-        let errors = TX_PIPE_WRITE_ERRORS.swap(0, Ordering::Relaxed);
-        let mut text = String::<50>::new();
-        let _ = write!(
-            text,
-            "TXQ a{} ok{} ab{} wb{} p{} e{}",
-            attempts, full_writes, attempt_bytes, accepted_bytes, partial_errors, errors
-        );
-        to_bytes(text)
-    }
-
-    pub fn drain_text() -> [u8; 50] {
-        let (reads, read_bytes, writes, write_bytes, errors) =
-            stm_32::peripherals::telem::take_tx_drain_diagnostics();
-        let mut text = String::<50>::new();
-        let _ = write!(
-            text,
-            "TXD r{} rb{} w{} wb{} e{}",
-            reads, read_bytes, writes, write_bytes, errors
-        );
-        to_bytes(text)
-    }
-
-    fn to_bytes(text: String<50>) -> [u8; 50] {
-        let mut bytes = [0_u8; 50];
-        let payload = text.as_bytes();
-        bytes[..payload.len()].copy_from_slice(payload);
-        bytes
-    }
-}
-
 #[cfg(feature = "sensor-poll-diagnostics")]
 mod sensor_poll_diagnostics {
     use core::sync::atomic::{AtomicU32, Ordering};
@@ -189,8 +119,6 @@ pub struct Board {
     sbus_last_rc_status: u32,
     #[cfg(feature = "sensor-poll-diagnostics")]
     sbus_last_rc_lol: bool,
-    #[cfg(feature = "timing-diagnostics")]
-    diagnostic_text_index: u8,
 }
 
 impl BoardIo for Board {
@@ -287,13 +215,9 @@ impl BoardIo for Board {
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         let mut n = 0;
         let len = bytes.len();
-        #[cfg(feature = "timing-diagnostics")]
-        tx_diagnostics::record_pipe_attempt(len);
         loop {
             match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
                 Ok(wrote) => {
-                    #[cfg(feature = "timing-diagnostics")]
-                    tx_diagnostics::record_pipe_accepted(wrote);
                     if wrote == (len - n) {
                         break;
                     } else {
@@ -301,31 +225,13 @@ impl BoardIo for Board {
                     }
                 }
                 Err(_) => {
-                    #[cfg(feature = "timing-diagnostics")]
-                    tx_diagnostics::record_pipe_error(n > 0);
                     return Some(Err(errors::TelemError::GenericTelemError(
                         "Error Writing Telem Packet!",
                     )));
                 }
             }
         }
-        #[cfg(feature = "timing-diagnostics")]
-        tx_diagnostics::record_pipe_full_write();
         Some(Ok(len))
-    }
-
-    #[cfg(feature = "timing-diagnostics")]
-    fn board_diagnostic_text(&mut self) -> Option<[u8; 50]> {
-        let text = match self.diagnostic_text_index {
-            0 => Some(tx_diagnostics::pipe_text()),
-            1 => Some(tx_diagnostics::drain_text()),
-            _ => None,
-        };
-        self.diagnostic_text_index = self.diagnostic_text_index.saturating_add(1);
-        if text.is_none() {
-            self.diagnostic_text_index = 0;
-        }
-        text
     }
 
     fn clock_millis(&self) -> u32 {
@@ -732,8 +638,6 @@ impl Board {
                 sbus_last_rc_status: 0,
                 #[cfg(feature = "sensor-poll-diagnostics")]
                 sbus_last_rc_lol: false,
-                #[cfg(feature = "timing-diagnostics")]
-                diagnostic_text_index: 0,
             },
             servos,
         )

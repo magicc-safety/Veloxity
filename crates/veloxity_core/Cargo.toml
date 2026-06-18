@@ -5,7 +5,6 @@ edition = "2024"
 
 [features]
 default = []
-timing-diagnostics = []
 scope-timing-pins = []
 pre-control-scope = []
 rc-command-scope = []

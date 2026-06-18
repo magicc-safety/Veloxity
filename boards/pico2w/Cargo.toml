@@ -6,7 +6,6 @@ build = "build.rs"
 
 [features]
 default = ["ism330dhcx-driver", "imu-producer-interrupt-executor"]
-timing-diagnostics = ["veloxity_core/timing-diagnostics"]
 imu-400hz = []
 ism330dhcx-driver = ["dep:ism330dhcx-rs"]
 imu-odr-1666hz = ["ism330dhcx-driver"]

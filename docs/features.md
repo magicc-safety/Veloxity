@@ -11,7 +11,6 @@ These live in `crates/veloxity_core/Cargo.toml`.
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `timing-diagnostics` | Enables core-side timing counters and status text used by board/sim diagnostics. | No; diagnostic-only. |
 | `scope-timing-pins` | Enables compile-time paths that let board crates drive logic-analyzer timing pins around selected core stages. | No; measurement-only. |
 | `pre-control-scope` | Marks the pre-control portion of a control tick when paired with board scope pins. | No. |
 | `rc-command-scope` | Marks RC command/state handling timing when paired with board scope pins. | No. |
@@ -33,7 +32,6 @@ The default Pico feature set is `ism330dhcx-driver` plus `imu-producer-interrupt
 | `imu-odr-1666hz` | Selects the lower `1.666 kHz` ISM330DHCX output data rate. ODR means output data rate: the hardware sample production rate. | No; comparison/bring-up. |
 | `ism330dhcx-1k666` | Backward-compatible alias for `imu-odr-1666hz`. | No; prefer `imu-odr-1666hz`. |
 | `imu-400hz` | Legacy GY-91 MPU sample throttle used by old probe paths. It is not the current ISM330DHCX flight IMU path. | No. |
-| `timing-diagnostics` | Enables `veloxity_core/timing-diagnostics`. | No; diagnostic-only. |
 | `scope-timing-pins` | Enables board GPIO timing pulses for Saleae/logic-analyzer captures and `veloxity_core/scope-timing-pins`. | No; measurement-only. |
 | `imu-producer-scope` | Uses the scope pin for IMU producer timing. | No. |
 | `pre-control-scope` | Uses the scope pin for pre-control timing and enables the matching core feature. | No. |
@@ -54,28 +52,11 @@ These live in `boards/pixracerpro/Cargo.toml`.
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `timing-diagnostics` | Legacy STM32 and core STATUSTEXT timing diagnostics. | No; prefer scope timing pins. |
 | `scope-timing-pins` | Enables Pixracer Pro logic-analyzer timing outputs. | No; measurement-only. |
 | `sensor-poll-diagnostics` | Enables board sensor-poll diagnostics. | No; diagnostic-only. |
-
-## Sim Firmware Features
-
-These live in `sim/firmware/Cargo.toml`.
-
-| Feature | Purpose | Normal simulator run? |
-| --- | --- | --- |
-| `timing-diagnostics` | Enables core timing diagnostics in the host-side simulator firmware. | No; use only when investigating timing behavior. |
-
-## STM32 Platform Features
-
-These live in `platforms/stm_32/Cargo.toml`.
-
-| Feature | Purpose | Normal flight build? |
-| --- | --- | --- |
-| `timing-diagnostics` | Legacy shared STM32 peripheral timing counters used by Pixracer Pro diagnostics. | No; prefer scope timing pins. |
 
 ## Why Features Matter
 
 Feature flags change the compiled firmware image. When reporting a timing result, always record the
-exact feature set, target, optimization mode, and board. A build with timing pins or diagnostic text
-is not identical to a clean flight build.
+exact feature set, target, optimization mode, and board. A build with timing pins is not identical
+to a clean flight build.

@@ -5,7 +5,6 @@ edition = "2024"
 
 [features]
 default = []
-timing-diagnostics = ["veloxity_core/timing-diagnostics"]
 
 [lib]
 crate-type = ["rlib", "staticlib"]
