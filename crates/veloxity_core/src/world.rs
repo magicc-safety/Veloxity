@@ -24,9 +24,9 @@ use crate::{
     params::{ParamId, ParamValue, Params},
     ports::EventEmitPort,
     pwm::PwmDriver,
-    pwm::system::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
+    pwm::output_sync::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
-    rc::system::{RcCommandStateCtx, run_rc_command_state},
+    rc::command_state::{RcCommandStateCtx, run_rc_command_state},
     sensors::health::{SensorHealthCtx, update_sensor_health},
     sensors::ingestion::{
         SensorIngestionCtx, SensorProcessorSet, process_imu_sensor, process_sensor_bus,

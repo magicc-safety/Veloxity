@@ -3,7 +3,7 @@ use crate::packets::RcPacket;
 use crate::params::{ParamId, ParamValue, Params};
 use crate::state_machine::{ErrorFlag, Event, StateManager};
 
-pub mod system;
+pub mod command_state;
 
 // --- Constants ---
 pub const STICKS_COUNT: usize = 4;

@@ -69,11 +69,11 @@ Veloxity/
 │           │   └── health.rs
 │           ├── rc.rs
 │           ├── rc/
-│           │   └── system.rs
+│           │   └── command_state.rs
 │           ├── control.rs
 │           ├── pwm.rs
 │           ├── pwm/
-│           │   └── system.rs
+│           │   └── output_sync.rs
 │           ├── estimator.rs
 │           ├── estimator/
 │           │   └── quad.rs
@@ -842,13 +842,13 @@ ROS /sim/RC
                 └── RcPacket in SensorBus
                     └── sensors::ingestion::process_sensor_bus
                         └── ProcessedSensors.rc
-                            └── rc::system::run_rc_command_state
+                            └── rc::command_state::run_rc_command_state
                                 ├── Rc::receive
                                 ├── Rc::run
                                 ├── CommandManager::run
                                 └── StateManager::run
                                     └── World::run_pwm_output_stage
-                                        └── pwm::system::sync_pwm_output_state
+                                        └── pwm::output_sync::sync_pwm_output_state
 ```
 
 RC arming is not handled in the ROS shim. The shim only passes RC input through. The firmware logic
@@ -868,8 +868,8 @@ new IMU packet
             ├── mixer.mix
             ├── update mixer health error
             ├── pwm.configure_output_rates
-            ├── pwm::system::compose_pwm_outputs
-            ├── pwm::system::write_pwm_commands
+            ├── pwm::output_sync::compose_pwm_outputs
+            ├── pwm::output_sync::write_pwm_commands
             └── ControlPipelineResource::set_latest
                 └── telemetry later reads latest estimator/control/PWM state
 ```
@@ -922,7 +922,7 @@ Runtime branch
 Flight-behavior branch
 ├── belongs in core systems/resources
 ├── examples: armed vs disarmed, failsafe vs normal, new IMU vs no new IMU
-└── implemented in systems such as state_machine, rc/system, control, pwm/system
+└── implemented in systems such as state_machine, rc/command_state, control, pwm/output_sync
 
 Protocol branch
 ├── belongs in comm adapter or comm manager
@@ -1017,7 +1017,7 @@ sensors/health.rs
 rc.rs
 └── RC resource and channel interpretation
 
-rc/system.rs
+rc/command_state.rs
 └── processed RC packet, RC resource, command manager, state machine handoff
 
 control.rs
@@ -1026,7 +1026,7 @@ control.rs
 pwm.rs
 └── PWM driver contract and protocol/rate helpers
 
-pwm/system.rs
+pwm/output_sync.rs
 └── PWM enable state, output composition, command writing
 
 state_machine.rs
@@ -1083,12 +1083,12 @@ Use this order when stepping through the simulator integration:
    └── health.rs
 
 7. crates/veloxity_core/src/rc/
-   └── system.rs
+   └── command_state.rs
 
 8. crates/veloxity_core/src/control.rs
 
 9. crates/veloxity_core/src/pwm/
-   └── system.rs
+   └── output_sync.rs
 
 10. comms/veloxity_mavlink/src/
     ├── parser.rs

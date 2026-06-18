@@ -1,6 +1,6 @@
 use crate::{board::BoardIo, math::FlightFloat};
 
-pub mod system;
+pub mod output_sync;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PwmError {

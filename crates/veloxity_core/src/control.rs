@@ -8,7 +8,7 @@ use crate::{
     mixer::{Mixer, MixerCtx, MixerStatus},
     params::Params,
     pwm::PwmDriver,
-    pwm::system::{PwmOutputState, compose_pwm_outputs, write_pwm_commands},
+    pwm::output_sync::{PwmOutputState, compose_pwm_outputs, write_pwm_commands},
     sensors::ProcessedSensors,
     state_machine::{ErrorFlag, StateManager},
 };
@@ -29,7 +29,7 @@ compile_error!("Enable only one control-scope-* feature at a time");
 pub struct ControlPipelineResource<S, A, R: FlightFloat> {
     pub latest_estimator_state: S,
     pub latest_actuator_commands: Option<A>,
-    pub latest_pwm_outputs: [R; crate::pwm::system::PWM_OUTPUT_CHANNELS],
+    pub latest_pwm_outputs: [R; crate::pwm::output_sync::PWM_OUTPUT_CHANNELS],
     pub latest_loop_time_us: u16,
     last_imu_time: u64,
     pwm_rates_configured: bool,
@@ -45,7 +45,7 @@ where
             latest_estimator_state: Default::default(),
             latest_actuator_commands: None,
             latest_pwm_outputs: [<R as FlightFloat>::from_f32(0.0);
-                crate::pwm::system::PWM_OUTPUT_CHANNELS],
+                crate::pwm::output_sync::PWM_OUTPUT_CHANNELS],
             latest_loop_time_us: 0,
             last_imu_time: 0,
             pwm_rates_configured: false,
@@ -86,7 +86,7 @@ impl<S, A, R: FlightFloat> ControlPipelineResource<S, A, R> {
         &mut self,
         state: S,
         actuator_commands: A,
-        pwm_outputs: [R; crate::pwm::system::PWM_OUTPUT_CHANNELS],
+        pwm_outputs: [R; crate::pwm::output_sync::PWM_OUTPUT_CHANNELS],
         loop_time_us: u16,
     ) {
         self.latest_estimator_state = state;
