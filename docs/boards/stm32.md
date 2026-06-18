@@ -41,13 +41,6 @@ other sensor packets, and one high-level firmware loop owns `World`. The first P
 does not rewrite driver tasks; it changes only how board-owned packets are presented to the core
 fast path and service path.
 
-Pixracer Pro has a `legacy-run-once` feature for A/B testing against the ordinary `World::run_once()`
-loop:
-
-```bash
-cargo check -p pixracerpro --target thumbv7em-none-eabihf --features legacy-run-once
-```
-
 The realtime Pixracer Pro entrypoint uses a board-specific telemetry policy. It keeps the shared
 core defaults intact, but uses a Pixracer-owned realtime service policy that attempts prioritized
 service work back-to-back while the control-slack guard remains satisfied. Fresh RC gets handled
@@ -174,7 +167,7 @@ Use this diagnostic firmware when validating the current MAVLink throughput issu
 
 ```bash
 cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity --release \
-  --features 'scope-timing-pins timing-diagnostics'
+  --features 'scope-timing-pins'
 ```
 
 The `scope-timing-pins` feature maps the Pixracer Pro timing signals as follows:

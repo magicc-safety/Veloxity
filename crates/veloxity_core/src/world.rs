@@ -600,18 +600,6 @@ mod telemetry;
 #[cfg(test)]
 mod tests;
 
-fn raw_sensor_present<R: FlightFloat>(sensors: &SensorBus<R>) -> bool {
-    sensors.imu.is_some()
-        || sensors.mag.is_some()
-        || sensors.baro.is_some()
-        || sensors.pitot.is_some()
-        || sensors.range.is_some()
-        || sensors.gnss.is_some()
-        || sensors.battery.is_some()
-        || sensors.rc.is_some()
-        || sensors.attitude.is_some()
-}
-
 #[cfg(feature = "timing-diagnostics")]
 fn elapsed_u16(start_us: u64, end_us: u64) -> u16 {
     end_us.saturating_sub(start_us).min(u16::MAX as u64) as u16

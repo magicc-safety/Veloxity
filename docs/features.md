@@ -42,8 +42,6 @@ The default Pico feature set is `ism330dhcx-driver` plus `imu-producer-interrupt
 | `control-scope-controller` | Selects controller timing inside the control pipeline. | No. |
 | `control-scope-mixer` | Selects mixer timing inside the control pipeline. | No. |
 | `control-scope-pwm` | Selects PWM output timing inside the control pipeline. | No. |
-| `release-loop-bench` | Legacy release-mode loop timing summaries. | No. |
-| `release-loop-classifier` | Adds classification around the release loop benchmark path. | No. |
 | `core1-disable-heartbeat` | Disables core 1 heartbeat work to isolate timing effects. | No; isolation diagnostic. |
 | `core1-disable-mavlink-tx` | Disables core 1 MAVLink transmit work to isolate timing effects. | No. |
 | `core1-disable-mavlink-rx` | Disables core 1 MAVLink receive work to isolate timing effects. | No. |
@@ -56,8 +54,7 @@ These live in `boards/pixracerpro/Cargo.toml`.
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `legacy-run-once` | Uses the ordinary `World::run_once()` loop for A/B checks against the realtime scheduler. | No; comparison mode. |
-| `timing-diagnostics` | Enables STM32 and core timing diagnostics. | No; diagnostic-only. |
+| `timing-diagnostics` | Legacy STM32 and core STATUSTEXT timing diagnostics. | No; prefer scope timing pins. |
 | `scope-timing-pins` | Enables Pixracer Pro logic-analyzer timing outputs. | No; measurement-only. |
 | `sensor-poll-diagnostics` | Enables board sensor-poll diagnostics. | No; diagnostic-only. |
 
@@ -75,7 +72,7 @@ These live in `platforms/stm_32/Cargo.toml`.
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `timing-diagnostics` | Enables shared STM32 peripheral timing counters used by Pixracer Pro diagnostics. | No; diagnostic-only. |
+| `timing-diagnostics` | Legacy shared STM32 peripheral timing counters used by Pixracer Pro diagnostics. | No; prefer scope timing pins. |
 
 ## Why Features Matter
 

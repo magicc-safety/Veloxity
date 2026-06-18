@@ -195,46 +195,6 @@ where
         self.update_sensor_health_and_calibration(now_us);
     }
 
-    #[cfg(feature = "timing-diagnostics")]
-    pub(super) fn run_sensor_ingestion_and_health_stage_measured(
-        &mut self,
-        drain_logs: bool,
-    ) -> SensorStageTiming {
-        let now_us = self.board.clock_micros();
-
-        let update_start_us = self.board.clock_micros();
-        self.board.update_sensor_bus(&mut self.raw_sensors);
-        let update_us = elapsed_u16(update_start_us, self.board.clock_micros());
-        let sensor_presence = SensorStagePresence {
-            had_sensor: raw_sensor_present(&self.raw_sensors),
-            had_imu: self.raw_sensors.imu.is_some(),
-        };
-
-        let process_start_us = self.board.clock_micros();
-        self.process_sensor_bus_after_update();
-        let process_us = elapsed_u16(process_start_us, self.board.clock_micros());
-
-        let health_start_us = self.board.clock_micros();
-        self.update_sensor_health_and_calibration(now_us);
-        let health_us = elapsed_u16(health_start_us, self.board.clock_micros());
-
-        let log_response_us = if drain_logs {
-            let log_start_us = self.board.clock_micros();
-            self.drain_logs_and_send_responses();
-            elapsed_u16(log_start_us, self.board.clock_micros())
-        } else {
-            0
-        };
-
-        SensorStageTiming {
-            presence: sensor_presence,
-            update_us,
-            process_us,
-            health_us,
-            log_response_us,
-        }
-    }
-
     pub(super) fn process_comm_stage(&mut self) {
         self.comm.process_incoming_messages(&mut self.board);
         if !self.comm.has_pending_messages() {
@@ -334,17 +294,6 @@ where
         }
     }
 
-    #[cfg(feature = "timing-diagnostics")]
-    pub(super) fn run_sensor_ingestion_stage(&mut self) -> SensorStagePresence {
-        self.board.update_sensor_bus(&mut self.raw_sensors);
-        let sensor_presence = SensorStagePresence {
-            had_sensor: raw_sensor_present(&self.raw_sensors),
-            had_imu: self.raw_sensors.imu.is_some(),
-        };
-        self.process_sensor_bus_after_update();
-        sensor_presence
-    }
-
     pub(super) fn process_sensor_bus_after_update(&mut self) {
         let calibration_flags_before = self.cal_flags;
         process_sensor_bus(SensorIngestionCtx {
@@ -399,7 +348,6 @@ where
         }
     }
 
-    #[cfg(not(feature = "timing-diagnostics"))]
     pub(super) fn run_sensor_ingestion_stage(&mut self) {
         self.board.update_sensor_bus(&mut self.raw_sensors);
         self.process_sensor_bus_after_update();

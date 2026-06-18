@@ -75,8 +75,7 @@ opt-in features should be treated as measurement, fallback, or bring-up tools:
 | `scope-timing-pins` | Enables GP18/GP19/GP22 Saleae timing outputs. | No; use only while measuring. |
 | `control-scope-estimator`, `control-scope-controller`, `control-scope-mixer`, `control-scope-pwm` | Selects which control substage GP22 marks. | No; combine one with `scope-timing-pins` during timing captures. |
 | `imu-producer-scope`, `pre-control-scope`, `rc-command-scope` | Uses GP22 for producer, pre-control, or RC service timing. | No; targeted timing captures only. |
-| `timing-diagnostics` | Emits coarse MAVLink STATUSTEXT timing diagnostics from measured world paths. | No; useful when a logic analyzer is unavailable. |
-| `release-loop-bench`, `release-loop-classifier` | Legacy onboard release-mode loop timing summaries. | No; prefer Saleae captures for final timing claims. |
+| `timing-diagnostics` | Legacy coarse MAVLink STATUSTEXT timing diagnostics from measured world paths. | No; prefer Saleae captures. |
 | `core1-disable-heartbeat`, `core1-disable-mavlink-tx`, `core1-disable-mavlink-rx`, `core1-disable-crsf`, `core1-disable-gps` | Core 1 transport isolation gates used to identify interference from individual producer/transport tasks. | No; diagnostic-only. |
 
 ### ISM330DHCX Driver Status
@@ -315,7 +314,7 @@ cargo build -p pico2w --target thumbv8m.main-none-eabihf --bin veloxity --releas
   --features 'scope-timing-pins rc-command-scope'
 ```
 
-Do not enable `timing-diagnostics`, `release-loop-bench`, or `release-loop-classifier` when taking
+Do not enable `timing-diagnostics` when taking
 clean GPIO timing captures. Those features are useful for coarse telemetry, but they add work and
 can obscure the exact scope-edge timing.
 
@@ -463,10 +462,10 @@ python3 tools/mavlink_tester.py \
 
 The `63` second duration with a `3` second warmup produces a 60 second measured window.
 
-Older bench and classifier reports counted broad scheduler passes rather than the exact IMU
-close-loop path. They were useful for finding the architecture problem, but they are intentionally
-not reproduced here because the GPIO captures above are now the authoritative timing source for the
-realtime loop. Use Git history for those obsolete 1.666 kHz/release-loop diagnostic runs.
+Older onboard timing reports counted broad scheduler passes rather than the exact IMU close-loop
+path. They were useful for finding the architecture problem, but they are intentionally not
+reproduced here because the GPIO captures above are now the authoritative timing source for the
+realtime loop. Use Git history for those obsolete diagnostic runs.
 
 Current loaded receiver validation command:
 
