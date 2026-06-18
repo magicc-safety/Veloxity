@@ -6,7 +6,6 @@ use pixracerpro::pwm::BoardPwmDriver;
 use pixracerpro::*;
 use stm_32::*;
 use veloxity_core::world::ControlLoopRates;
-#[cfg(not(feature = "legacy-run-once"))]
 use veloxity_core::world::RealtimeSchedulerStep;
 use veloxity_core::{
     board::BoardIo,
@@ -20,7 +19,6 @@ use veloxity_mavlink::MavlinkInterface;
 
 type PixracerReal = f64;
 const PIXRACER_CONTROL_LOOP_HZ: u16 = 400;
-#[cfg(not(feature = "legacy-run-once"))]
 const PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_PHASE: usize = 2;
 
 type PixracerWorld<'a> = World<
@@ -69,11 +67,6 @@ fn main() -> ! {
     world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(PIXRACER_CONTROL_LOOP_HZ));
 
     loop {
-        #[cfg(feature = "legacy-run-once")]
-        {
-            world.run_once();
-        }
-        #[cfg(not(feature = "legacy-run-once"))]
         match world.realtime_scheduler_step() {
             RealtimeSchedulerStep::ImuControl => {
                 #[cfg(feature = "timing-diagnostics")]

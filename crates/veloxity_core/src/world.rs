@@ -224,8 +224,8 @@ impl RealtimeServicePolicy {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ControlLoopRates {
-    /// Full estimator/controller/mixer/PWM update rate. A value of 0 preserves the legacy
-    /// behavior of running control on every new IMU sample.
+    /// Full estimator/controller/mixer/PWM update rate. A value of 0 runs control on every new
+    /// IMU sample.
     pub control_hz: u16,
 }
 
@@ -242,38 +242,6 @@ impl ControlLoopRates {
 impl Default for ControlLoopRates {
     fn default() -> Self {
         Self::every_imu_sample()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum RealtimeServicePhase {
-    #[default]
-    Input,
-    Sensors,
-    RcCommand,
-    Responses,
-    Telemetry0,
-    Telemetry1,
-    Telemetry2,
-    Flush,
-    DeferredBoard,
-}
-
-const REALTIME_TELEMETRY_STREAMS_PER_SERVICE_PHASE: usize = 2;
-
-impl RealtimeServicePhase {
-    fn next(self) -> Self {
-        match self {
-            Self::Input => Self::Sensors,
-            Self::Sensors => Self::RcCommand,
-            Self::RcCommand => Self::Responses,
-            Self::Responses => Self::Telemetry0,
-            Self::Telemetry0 => Self::Telemetry1,
-            Self::Telemetry1 => Self::Telemetry2,
-            Self::Telemetry2 => Self::Flush,
-            Self::Flush => Self::DeferredBoard,
-            Self::DeferredBoard => Self::Input,
-        }
     }
 }
 
@@ -511,7 +479,6 @@ where
     last_control_update_us: u64,
     last_realtime_control_us: u64,
     next_realtime_service_us: u64,
-    realtime_service_phase: RealtimeServicePhase,
     #[cfg(feature = "timing-diagnostics")]
     timing_diagnostics: TimingDiagnostics,
     #[cfg(feature = "timing-diagnostics")]
@@ -609,7 +576,6 @@ where
             last_control_update_us: now_us,
             last_realtime_control_us: now_us,
             next_realtime_service_us: now_us,
-            realtime_service_phase: RealtimeServicePhase::default(),
             #[cfg(feature = "timing-diagnostics")]
             timing_diagnostics: TimingDiagnostics::new(now_us),
             #[cfg(feature = "timing-diagnostics")]
@@ -1025,85 +991,6 @@ where
         result
     }
 
-    pub fn run_service_step(&mut self) -> WorldReport {
-        let pass_start_us = self.board.clock_micros();
-        let had_rx = self.board.serial_rx_pending();
-        self.run_service_input_stage();
-        self.run_service_sensor_and_rc_stage();
-        self.drain_logs_and_send_responses();
-        self.run_telemetry_stage();
-        self.board.serial_flush();
-        self.board.run_deferred_board_actions();
-
-        WorldReport {
-            had_rx,
-            telemetry_due: self
-                .comm
-                .named_telemetry_due(self.board.clock_micros(), &self.processed_sensors)
-                || !self.comm_events.is_empty(),
-            elapsed_after_control_us: self
-                .board
-                .clock_micros()
-                .saturating_sub(pass_start_us)
-                .min(u32::MAX as u64) as u32,
-            ..WorldReport::default()
-        }
-    }
-
-    pub fn run_service_step_with_deferral(&mut self, max_service_deferral_us: u64) -> WorldReport {
-        self.run_service_step_with_deferral_and_telemetry_budget(
-            max_service_deferral_us,
-            REALTIME_TELEMETRY_STREAMS_PER_SERVICE_PHASE,
-        )
-    }
-
-    pub fn run_service_step_with_deferral_and_telemetry_budget(
-        &mut self,
-        max_service_deferral_us: u64,
-        telemetry_streams_per_phase: usize,
-    ) -> WorldReport {
-        let pass_start_us = self.board.clock_micros();
-        let had_rx = self.board.serial_rx_pending();
-        let phase = self.realtime_service_phase;
-        self.realtime_service_phase = self.realtime_service_phase.next();
-
-        self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_phase);
-
-        match phase {
-            RealtimeServicePhase::Input => self.run_service_input_stage(),
-            RealtimeServicePhase::Sensors => {
-                let _ = self.run_service_sensor_stage();
-            }
-            RealtimeServicePhase::RcCommand => self.run_rc_command_state_stages(),
-            RealtimeServicePhase::Responses => {
-                self.drain_logs_and_send_responses_limited(REALTIME_SERVICE_RESPONSE_BUDGET);
-            }
-            RealtimeServicePhase::Telemetry0
-            | RealtimeServicePhase::Telemetry1
-            | RealtimeServicePhase::Telemetry2 => {
-                self.run_realtime_telemetry_stage_budgeted(telemetry_streams_per_phase);
-            }
-            RealtimeServicePhase::Flush => self.board.serial_flush_budgeted(1),
-            RealtimeServicePhase::DeferredBoard => self.board.run_deferred_board_actions(),
-        }
-
-        self.next_realtime_service_us = self
-            .board
-            .clock_micros()
-            .saturating_add(max_service_deferral_us);
-
-        let result = WorldReport {
-            had_rx,
-            elapsed_after_control_us: self
-                .board
-                .clock_micros()
-                .saturating_sub(pass_start_us)
-                .min(u32::MAX as u64) as u32,
-            ..WorldReport::default()
-        };
-        result
-    }
-
     pub fn run_prioritized_service_steps_with_policy(
         &mut self,
         policy: RealtimeServicePolicy,
@@ -1180,11 +1067,6 @@ where
 
     fn run_service_input_stage(&mut self) {
         self.run_communication_and_parameter_service_stage();
-    }
-
-    fn run_service_sensor_and_rc_stage(&mut self) {
-        let _ = self.run_service_sensor_stage();
-        self.run_rc_command_state_stages();
     }
 
     fn run_service_sensor_stage(&mut self) -> WorldReport {
@@ -2819,7 +2701,7 @@ mod tests {
     }
 
     #[test]
-    fn world_service_step_runs_service_sensors_comm_telemetry_and_board_service() {
+    fn prioritized_service_runs_service_sensors_comm_telemetry_and_board_service() {
         let params = Params::new();
         let mixer = quadrotor::mixer::<f64>(&params);
         let mut world = World::<
@@ -2850,7 +2732,7 @@ mod tests {
             ..Default::default()
         });
 
-        world.run_service_step();
+        world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 1));
 
         assert_eq!(world.board.update_count, 1);
         assert_eq!(world.board.serial_flush_count, 1);
@@ -2894,7 +2776,7 @@ mod tests {
             seq: 1,
         });
 
-        world.run_service_step();
+        world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::continuous(0));
 
         assert!(world.processed_sensors.imu.is_some());
         assert!(
@@ -2935,7 +2817,9 @@ mod tests {
             world.realtime_scheduler_step(),
             RealtimeSchedulerStep::Service
         );
-        world.run_service_step_with_deferral(1_000);
+        world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(
+            1_000, 0,
+        ));
         assert_eq!(world.realtime_scheduler_step(), RealtimeSchedulerStep::Idle);
 
         world.control_pipeline.set_last_imu_time(10_000);
@@ -3078,73 +2962,6 @@ mod tests {
 
         world.board.current_time_us = 10_300;
         assert_eq!(world.realtime_scheduler_step(), RealtimeSchedulerStep::Idle);
-    }
-
-    #[test]
-    fn realtime_service_splits_sensor_rc_and_telemetry_micro_phases() {
-        let params = Params::new();
-        let mixer = quadrotor::mixer::<f64>(&params);
-        let mut world = World::<
-            SensorStageBoard,
-            quadrotor::Estimator<f64>,
-            quadrotor::Controller<f64>,
-            quadrotor::Mixer<f64>,
-            SensorStageCommLink,
-            TestPwm,
-            f64,
-        >::init(
-            SensorStageBoard {
-                current_time_us: 1_100_000,
-                rc: Some(RcPacket {
-                    header: RosflightPacketHeader {
-                        timestamp: 1_100_000,
-                        status: 0,
-                    },
-                    n_chan: 1,
-                    chan: [0.5; RC_PACKET_CHANNELS],
-                    lol: false,
-                }),
-                ..Default::default()
-            },
-            params,
-            SensorStageCommLink::default(),
-            StateManager::new(),
-            Default::default(),
-            Default::default(),
-            mixer,
-            TestPwm::new(),
-        );
-        world.processed_sensors.imu = Some(ImuPacket {
-            header: RosflightPacketHeader {
-                timestamp: 1_100_000,
-                status: 0,
-            },
-            accel: [0.0, 0.0, -9.80665],
-            gyro: [0.0, 0.0, 0.0],
-            temperature: 25.0,
-            seq: 1,
-        });
-
-        world.run_service_step_with_deferral(0);
-        assert_eq!(world.board.update_count, 0);
-
-        world.run_service_step_with_deferral(0);
-        assert_eq!(world.board.update_count, 1);
-
-        world.run_service_step_with_deferral(0);
-        assert_eq!(world.processed_sensors.rc.map(|rc| rc.n_chan), Some(1));
-
-        world.run_service_step_with_deferral(0);
-
-        world.run_service_step_with_deferral(0);
-        world.run_service_step_with_deferral(0);
-        world.run_service_step_with_deferral(0);
-
-        world.run_service_step_with_deferral(0);
-        assert_eq!(world.board.serial_flush_count, 1);
-
-        world.run_service_step_with_deferral(0);
-        assert_eq!(world.board.deferred_board_action_count, 1);
     }
 
     #[test]

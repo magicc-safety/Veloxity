@@ -78,7 +78,7 @@ use veloxity_core::{
     params::Params,
     state_machine::StateManager,
     vehicle::quadrotor,
-    world::{ControlLoopRates, World},
+    world::{ControlLoopRates, RealtimeServicePolicy, World},
 };
 use veloxity_mavlink::{MavlinkFrameEncoder, MavlinkInterface, parser::MavlinkParser};
 
@@ -108,7 +108,7 @@ const UART_IDLE_DELAY_US: u64 = 50;
 const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 32;
 const GPS_UART_BAUDRATE: u32 = 115_200;
-const MAIN_LOOP_MAX_SERVICE_DEFERRAL_US: u64 = 250;
+const PICO2W_TELEMETRY_STREAMS_PER_SERVICE_PHASE: usize = 2;
 const PICO2W_CONTROL_LOOP_HZ: u16 = 1_500;
 #[cfg(any(
     all(feature = "pre-control-scope", feature = "imu-producer-scope"),
@@ -1381,10 +1381,17 @@ fn main() -> ! {
                 {
                     let start_us = Instant::now().as_micros();
                     #[cfg(feature = "release-loop-classifier")]
-                    let report =
-                        world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
+                    let report = world.run_prioritized_service_steps_with_policy(
+                        RealtimeServicePolicy::continuous(
+                            PICO2W_TELEMETRY_STREAMS_PER_SERVICE_PHASE,
+                        ),
+                    );
                     #[cfg(not(feature = "release-loop-classifier"))]
-                    let _ = world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
+                    let _ = world.run_prioritized_service_steps_with_policy(
+                        RealtimeServicePolicy::continuous(
+                            PICO2W_TELEMETRY_STREAMS_PER_SERVICE_PHASE,
+                        ),
+                    );
                     let end_us = Instant::now().as_micros();
                     #[cfg(feature = "release-loop-classifier")]
                     loop_bench.record(
@@ -1399,7 +1406,9 @@ fn main() -> ! {
                     );
                 }
                 #[cfg(not(feature = "release-loop-bench"))]
-                let _ = world.run_service_step_with_deferral(MAIN_LOOP_MAX_SERVICE_DEFERRAL_US);
+                let _ = world.run_prioritized_service_steps_with_policy(
+                    RealtimeServicePolicy::continuous(PICO2W_TELEMETRY_STREAMS_PER_SERVICE_PHASE),
+                );
                 #[cfg(feature = "scope-timing-pins")]
                 if SCOPE_GP22_MARKS_SERVICE {
                     world.set_test_pin_3(false);

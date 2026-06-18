@@ -5,7 +5,6 @@ edition = "2024"
 
 [features]
 default = []
-legacy-run-once = []
 timing-diagnostics = ["stm_32/timing-diagnostics", "veloxity_core/timing-diagnostics"]
 scope-timing-pins = ["veloxity_core/scope-timing-pins"]
 sensor-poll-diagnostics = []
