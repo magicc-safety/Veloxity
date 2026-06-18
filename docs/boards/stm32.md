@@ -142,18 +142,28 @@ Pixracer Pro has been validated on hardware with the bounded high-rate MAVLink p
 
 | Stream | Configured rate | Observed result |
 | --- | --- | --- |
-| IMU | `400 Hz` | `399.5 Hz` host rate, `399.4 Hz` board timestamp rate in the latest UART acceptance run. |
-| RC | `100 Hz` | `100.0 Hz`. |
 | Attitude | `50 Hz` | `50.0 Hz`. |
-| Output raw | `50 Hz` | `50.0 Hz`. |
-| Status | `10 Hz` | `10.0 Hz`. |
+| Barometer | `25 Hz` | `25.0 Hz`. |
+| Command ACK | On demand | Single response frame. |
+| GNSS | No fix expected in this run | `0.0 Hz`, no frames. |
 | Heartbeat | `1 Hz` | `1.0 Hz`. |
+| IMU | `400 Hz` | `399.5 Hz` host rate, `399.4 Hz` board timestamp rate. |
+| Output raw | `50 Hz` | `50.0 Hz`. |
+| Parameter traffic | Request/response burst | `2563.1 Hz` during the parameter burst, `334` frames. |
+| RC | `100 Hz` | `100.0 Hz`. |
+| Status | `10 Hz` | `10.0 Hz`. |
+| TIMESYNC | `5 Hz` | `5.0 Hz`. |
+| Version response | On demand | Single response frame. |
 
-The latest 10-second UART MAVLink acceptance run at `921600` baud passed with zero CRC errors and
-zero MAVLink sequence gaps. The run injected ground-station heartbeat and TIMESYNC frames plus
-version and parameter requests, so it exercises telemetry, parser, and response paths. It is not a
-substitute for a full flight-command profile; offboard/setpoint/RC override traffic should be tested
-separately if those are part of the mission.
+For messages with board timestamps, the latest run measured IMU at `399.4 Hz`, attitude at
+`50.0 Hz`, output raw at `50.0 Hz`, RC at `100.0 Hz`, and TIMESYNC at `5.0 Hz` on the board side.
+
+The latest 10-second UART MAVLink acceptance run at `921600` baud passed with `6420` valid MAVLink
+frames, zero CRC errors, zero MAVLink sequence gaps, zero estimated missing frames, and zero
+duplicates. The run injected ground-station heartbeat and TIMESYNC frames plus version and parameter
+requests, so it exercises telemetry, parser, and response paths. It is not a substitute for a full
+flight-command profile; offboard/setpoint/RC override traffic should be tested separately if those
+are part of the mission.
 
 Control timing stayed well inside the `2.5 ms` period. The latest acceptance run reported firmware
 loop timing around `406 us` average and `468 us` max. Saleae captures showed the BMI08x producer,

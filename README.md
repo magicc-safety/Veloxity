@@ -55,8 +55,9 @@ commands.
 
 The current Pixracer Pro / STM32H7 path runs a fixed `400 Hz` control loop with board-specific
 continuous service polling. Hardware tests at `921600` baud show `399.5 Hz` host / `399.4 Hz`
-board-timestamp IMU telemetry, zero CRC errors or MAVLink sequence gaps, and sub-`100 us`
-producer-to-consumer IMU handoff latency in scope captures. See
+board-timestamp IMU telemetry, expected stream rates for attitude, RC, TIMESYNC, barometer,
+output, status, heartbeat, and parameters, zero CRC errors or MAVLink sequence gaps, and
+sub-`100 us` producer-to-consumer IMU handoff latency in scope captures. See
 [STM32 boards](docs/boards/stm32.md) for the Pixracer Pro timing decisions and diagnostics.
 
 For ROSflight simulation, source ROS 2 and the ROSflight workspace first, then build the shim:
