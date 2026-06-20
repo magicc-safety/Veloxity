@@ -60,3 +60,4 @@ pygments_lang_class = true
 [project.markdown_extensions.pymdownx.inlinehilite]
 [project.markdown_extensions.pymdownx.snippets]
 [project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.gfm_admonition]

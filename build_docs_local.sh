@@ -28,7 +28,7 @@ cargo doc --no-deps -p veloxity_core -p stm_32 -p nucleo -p pixracerpro --target
 if [ ! -d ".venv" ] || [ ! -f ".venv/bin/zensical" ]; then
     echo "Bootstrapping environment with uv..."
     uv venv .venv
-    uv pip install --python .venv zensical
+    uv pip install --python .venv zensical markdown-gfm-admonition
 fi
 
 # 3. Build Zensical high-level documentation
