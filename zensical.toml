@@ -20,7 +20,8 @@ extra_javascript = [
 
 [project.theme]
 name = "material"
-logo = "assets/veloxity-logo.svg"
+logo = "assets/veloxity-logo-light-rust.svg"
+favicon = "assets/veloxity-logo-light-rust.svg"
 features = [
     "navigation.tabs",
     "navigation.sections",
