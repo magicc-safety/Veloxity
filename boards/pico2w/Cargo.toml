@@ -7,7 +7,7 @@ build = "build.rs"
 [features]
 default = ["ism330dhcx-driver", "imu-producer-interrupt-executor"]
 imu-400hz = []
-ism330dhcx-driver = ["dep:ism330dhcx-rs"]
+ism330dhcx-driver = ["dep:ism330dhcx-rs", "rp2350_platform/ism330dhcx-driver"]
 imu-odr-1666hz = ["ism330dhcx-driver"]
 ism330dhcx-1k666 = ["imu-odr-1666hz"]
 scope-timing-pins = ["veloxity_core/scope-timing-pins"]

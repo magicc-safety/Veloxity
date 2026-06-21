@@ -1,24 +1,18 @@
-use rp2350_platform::{
-    multicore::{CoreAssignment, MulticoreMailboxConfig},
-    pio::{PioAllocation, PioBlock, PioPurpose, StateMachine},
+use rp2350_platform::config::{
+    GpsSerialBus, HardwareI2cBus, HardwareSpiBus, HardwareUartBus, ImuSensorKind, PlatformConfig,
+    PressureSensorKind, RcReceiverProtocol,
 };
-
-pub const MAX_PWM_OUTPUTS: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pico2WConfig {
-    pub cores: CoreAssignment,
-    pub mailbox: MulticoreMailboxConfig,
-    pub pio_allocations: &'static [PioAllocation],
+    pub platform: PlatformConfig,
     pub pinout: Pico2WPinout,
 }
 
 impl Default for Pico2WConfig {
     fn default() -> Self {
         Self {
-            cores: CoreAssignment::default(),
-            mailbox: MulticoreMailboxConfig::default(),
-            pio_allocations: DEFAULT_PIO_ALLOCATIONS,
+            platform: PlatformConfig::default(),
             pinout: Pico2WPinout::default(),
         }
     }
@@ -30,6 +24,7 @@ pub struct Pico2WPinout {
     pub gps: GpsPinout,
     pub esc: DshotEscPinout,
     pub imu: ImuSpiPinout,
+    pub pressure: PressureSensorPinout,
     pub rc: RcReceiverPinout,
     pub slow_i2c: SlowI2cPinout,
     pub leds: StatusLedPinout,
@@ -42,6 +37,7 @@ impl Default for Pico2WPinout {
             gps: GpsPinout::default(),
             esc: DshotEscPinout::default(),
             imu: ImuSpiPinout::default(),
+            pressure: PressureSensorPinout::default(),
             rc: RcReceiverPinout::default(),
             slow_i2c: SlowI2cPinout::default(),
             leds: StatusLedPinout::default(),
@@ -90,11 +86,6 @@ impl Default for GpsPinout {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GpsSerialBus {
-    PioUart,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DshotEscPinout {
     pub motor_signal_gpios: [u8; 4],
     pub telemetry_gpio: Option<u8>,
@@ -116,7 +107,6 @@ pub struct ImuSpiPinout {
     pub mosi_gpio: u8,
     pub miso_gpio: u8,
     pub cs_gpio: u8,
-    pub bmp_cs_gpio: Option<u8>,
     pub data_ready_gpio: Option<u8>,
     pub aux_interrupt_gpio: Option<u8>,
     pub sensor: ImuSensorKind,
@@ -130,30 +120,28 @@ impl Default for ImuSpiPinout {
             mosi_gpio: 11,
             miso_gpio: 12,
             cs_gpio: 13,
-            bmp_cs_gpio: None,
             data_ready_gpio: Some(14),
-            aux_interrupt_gpio: Some(15),
+            aux_interrupt_gpio: None,
             sensor: ImuSensorKind::Ism330dhcx,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HardwareSpiBus {
-    Spi0,
-    Spi1,
+pub struct PressureSensorPinout {
+    pub spi_bus: HardwareSpiBus,
+    pub cs_gpio: u8,
+    pub sensor: PressureSensorKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HardwareUartBus {
-    Uart0,
-    Uart1,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImuSensorKind {
-    Mpu6500Bmp280,
-    Ism330dhcx,
+impl Default for PressureSensorPinout {
+    fn default() -> Self {
+        Self {
+            spi_bus: HardwareSpiBus::Spi1,
+            cs_gpio: 15,
+            sensor: PressureSensorKind::Ms5611,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,11 +168,6 @@ impl Default for RcReceiverPinout {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RcReceiverProtocol {
-    Crsf,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlowI2cPinout {
     pub bus: HardwareI2cBus,
     pub sda_gpio: u8,
@@ -199,12 +182,6 @@ impl Default for SlowI2cPinout {
             scl_gpio: 21,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HardwareI2cBus {
-    I2c0,
-    I2c1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,14 +202,3 @@ impl Default for StatusLedPinout {
         }
     }
 }
-
-pub const DEFAULT_PIO_ALLOCATIONS: &[PioAllocation] = &[
-    PioAllocation::new(PioBlock::Pio0, StateMachine::Sm0, PioPurpose::Reserved),
-    PioAllocation::new(PioBlock::Pio1, StateMachine::Sm0, PioPurpose::MotorOutput),
-    PioAllocation::new(
-        PioBlock::Pio1,
-        StateMachine::Sm1,
-        PioPurpose::MotorTelemetry,
-    ),
-    PioAllocation::new(PioBlock::Pio2, StateMachine::Sm0, PioPurpose::StatusLed),
-];

@@ -2,6 +2,7 @@
 name = "rp2350_platform"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
 embassy-rp = { version = "0.10.0", features = [
@@ -12,6 +13,33 @@ embassy-rp = { version = "0.10.0", features = [
   "executor-thread",
   "executor-interrupt",
 ] }
+veloxity_core = { workspace = true }
+veloxity_mavlink = { workspace = true }
+
+crsf = "2.0.1"
+critical-section = "1.2.0"
+embassy-embedded-hal = { version = "0.6.0" }
+embassy-executor = { version = "0.10.0" }
+embassy-sync = "0.8.0"
+embassy-time = "0.5.1"
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+fixed = "1.31.0"
+heapless = { version = "0.8.0", default-features = false }
+ism330dhcx-rs = { version = "2.0.0", default-features = false, features = ["async", "blocking"], optional = true }
+pio = "0.3.0"
+st-mems-bus = "2.0.0"
+static_cell = "2.1"
+cortex-m-rt = "0.7.0"
+panic-halt = "1.0.0"
+
+[features]
+default = []
+ism330dhcx-driver = ["dep:ism330dhcx-rs"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "ism330dhcx_async_rate_test"
+harness = false

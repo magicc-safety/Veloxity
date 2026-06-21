@@ -1,21 +1,21 @@
-use crate::{
-    barometer::{SHARED_BARO_QUEUE, SharedBaroQueue},
-    comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
-    config::Pico2WConfig,
-    gps::{SHARED_GNSS_QUEUE, SharedGnssQueue},
-    gy91::Gy91,
-    ism330dhcx::{SHARED_ISM330DHCX_IMU_QUEUE, SharedIsm330dhcxImuQueue},
-    pwm::PioPwmDriver,
-    rc_receiver::{SHARED_CRSF_RC_QUEUE, SharedCrsfRcQueue},
-};
+use crate::config::Pico2WConfig;
 use embassy_time::Instant;
 #[cfg(feature = "scope-timing-pins")]
 use rp2350_platform::hal::gpio::Output;
+use rp2350_platform::{
+    comms::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox},
+    peripherals::{
+        barometer::{SHARED_BARO_QUEUE, SharedBaroQueue},
+        gps::{SHARED_GNSS_QUEUE, SharedGnssQueue},
+        ism330dhcx::{SHARED_ISM330DHCX_IMU_QUEUE, SharedIsm330dhcxImuQueue},
+        pwm::PioPwmDriver,
+        rc_receiver::{SHARED_CRSF_RC_QUEUE, SharedCrsfRcQueue},
+    },
+};
 use veloxity_core::{
     board::{BoardIo, SerialRxFrame, SerialTxPriority},
     comm::messages::messages::DownlinkMessage,
     errors,
-    packets::BaroPacket,
     params::Params,
     sensors::SensorBus,
 };
@@ -25,35 +25,19 @@ struct PicoSensorProducer {
     crsf_rc: SharedCrsfRcQueue,
     gnss: SharedGnssQueue,
     baro: SharedBaroQueue,
-    gy91_baro: Option<Gy91>,
-    pending_baro: Option<Result<BaroPacket, errors::SensorError>>,
     last_imu_seq: Option<u32>,
     imu_seq_gaps: u32,
 }
 
 impl PicoSensorProducer {
-    fn new(gy91_baro: Option<Gy91>) -> Self {
+    fn new() -> Self {
         Self {
             ism330dhcx_imu: SHARED_ISM330DHCX_IMU_QUEUE,
             crsf_rc: SHARED_CRSF_RC_QUEUE,
             gnss: SHARED_GNSS_QUEUE,
             baro: SHARED_BARO_QUEUE,
-            gy91_baro,
-            pending_baro: None,
             last_imu_seq: None,
             imu_seq_gaps: 0,
-        }
-    }
-
-    fn sample_due(&mut self, now_us: u64) {
-        let Some(gy91_baro) = &mut self.gy91_baro else {
-            return;
-        };
-
-        match gy91_baro.sample_baro(now_us) {
-            Ok(Some(baro)) => self.pending_baro = Some(Ok(baro)),
-            Ok(None) => {}
-            Err(err) => self.pending_baro = Some(Err(err.sensor_error())),
         }
     }
 
@@ -73,9 +57,6 @@ impl PicoSensorProducer {
             sensors.gnss = Some(gnss);
         }
         if let Some(baro) = self.baro.take_latest() {
-            sensors.baro = Some(baro);
-        }
-        if let Some(baro) = self.pending_baro.take() {
             sensors.baro = Some(baro);
         }
     }
@@ -120,7 +101,6 @@ pub struct Board {
 impl Board {
     pub fn new_uart(
         config: Pico2WConfig,
-        gy91_baro: Option<Gy91>,
         #[cfg(feature = "scope-timing-pins")] deadline_scope_pin: Output<'static>,
         #[cfg(feature = "scope-timing-pins")] control_scope_pin: Output<'static>,
         #[cfg(all(feature = "scope-timing-pins", not(feature = "imu-producer-scope")))]
@@ -130,7 +110,7 @@ impl Board {
             Self {
                 config,
                 mavlink: SHARED_MAVLINK_MAILBOX,
-                sensors: PicoSensorProducer::new(gy91_baro),
+                sensors: PicoSensorProducer::new(),
                 params: Params::default(),
                 params_valid: false,
                 boot_time: Instant::now(),
@@ -265,8 +245,5 @@ impl BoardIo for Board {
         true
     }
 
-    fn run_deferred_board_actions(&mut self) {
-        let now_us = self.clock_micros();
-        self.sensors.sample_due(now_us);
-    }
+    fn run_deferred_board_actions(&mut self) {}
 }

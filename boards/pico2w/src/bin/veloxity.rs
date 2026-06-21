@@ -6,23 +6,8 @@ use core::ptr::addr_of_mut;
 use cortex_m_rt::entry;
 use embassy_time::{Duration, Instant, Timer};
 use panic_halt as _;
-use pico2w::comms_core::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
-use pico2w::gps::{
-    SHARED_GNSS_QUEUE, UbxNavPvtParser, make_ubx_packet, record_gps_byte, record_nav_pvt,
-};
-#[cfg(any(all(feature = "ism330dhcx-driver")))]
-use pico2w::ism330dhcx::SHARED_ISM330DHCX_IMU_QUEUE;
-#[cfg(all(feature = "ism330dhcx-driver"))]
-use pico2w::ism330dhcx::{
-    record_ism330dhcx_drdy_edge, record_ism330dhcx_init_attempt, record_ism330dhcx_init_failure,
-    record_ism330dhcx_init_ok, record_ism330dhcx_read_error, record_ism330dhcx_read_ok,
-};
-use pico2w::pio_uart_dma::{PioUartDmaRx, PioUartDmaRxProgram};
-use pico2w::rc_receiver::{
-    CRSF_BAUDRATE, CrsfRcParser, SHARED_CRSF_RC_QUEUE, record_crsf_bytes, record_crsf_frame,
-    record_crsf_read_error,
-};
-use pico2w::{board, config::Pico2WConfig, pwm::PioPwmDriver};
+use pico2w::{board, config::Pico2WConfig};
+use rp2350_platform::comms::{SHARED_MAVLINK_MAILBOX, SharedMavlinkMailbox};
 use rp2350_platform::hal::clocks::ClockConfig;
 use rp2350_platform::hal::dma;
 #[cfg(all(
@@ -39,7 +24,7 @@ use rp2350_platform::hal::peripherals::PIN_22;
 #[cfg(feature = "ism330dhcx-driver")]
 use rp2350_platform::hal::peripherals::{PIN_10, PIN_11, PIN_12, PIN_13, PIN_14, SPI1};
 #[cfg(feature = "ism330dhcx-driver")]
-use rp2350_platform::hal::spi::{Blocking, Config as SpiConfig, Phase, Polarity, Spi};
+use rp2350_platform::hal::spi::{Config as SpiConfig, Phase, Polarity, Spi};
 use rp2350_platform::hal::{
     self as rp, Peri, bind_interrupts,
     config::Config as HalConfig,
@@ -64,9 +49,25 @@ use rp2350_platform::hal::{
     interrupt,
     interrupt::{InterruptExt, Priority},
 };
-use static_cell::StaticCell;
+use rp2350_platform::multicore::Core0FlightConfig;
+use rp2350_platform::peripherals::gps::{
+    SHARED_GNSS_QUEUE, UbxNavPvtParser, make_ubx_packet, record_gps_byte, record_nav_pvt,
+};
 #[cfg(any(all(feature = "ism330dhcx-driver")))]
-use veloxity_core::packets::{ImuPacket, RosflightPacketHeader};
+use rp2350_platform::peripherals::ism330dhcx::SHARED_ISM330DHCX_IMU_QUEUE;
+#[cfg(all(feature = "ism330dhcx-driver"))]
+use rp2350_platform::peripherals::ism330dhcx::{
+    ISM330DHCX_SPI_HZ, Ism330dhcxImuProducer, Ism330dhcxSampleConfig, record_ism330dhcx_drdy_edge,
+    record_ism330dhcx_init_attempt, record_ism330dhcx_init_failure, record_ism330dhcx_init_ok,
+    record_ism330dhcx_read_error, record_ism330dhcx_read_ok,
+};
+use rp2350_platform::peripherals::pio_uart_dma::{PioUartDmaRx, PioUartDmaRxProgram};
+use rp2350_platform::peripherals::pwm::PioPwmDriver;
+use rp2350_platform::peripherals::rc_receiver::{
+    CRSF_BAUDRATE, CrsfRcParser, SHARED_CRSF_RC_QUEUE, record_crsf_bytes, record_crsf_frame,
+    record_crsf_read_error,
+};
+use static_cell::StaticCell;
 use veloxity_core::world::RealtimeSchedulerStep;
 use veloxity_core::{
     board::{BoardIo, SerialRxPriority},
@@ -104,8 +105,6 @@ const UART_IDLE_DELAY_US: u64 = 50;
 const MAVLINK_UART_BAUDRATE: u32 = 2_000_000;
 const CRSF_RX_CHUNK_BYTES: usize = 32;
 const GPS_UART_BAUDRATE: u32 = 115_200;
-const PICO2W_TELEMETRY_STREAMS_PER_SERVICE_PHASE: usize = 2;
-const PICO2W_CONTROL_LOOP_HZ: u16 = 1_500;
 #[cfg(any(
     all(feature = "pre-control-scope", feature = "imu-producer-scope"),
     all(feature = "pre-control-scope", feature = "rc-command-scope"),
@@ -122,36 +121,12 @@ const PICO2W_CONTROL_LOOP_HZ: u16 = 1_500;
 compile_error!(
     "pre-control-scope and rc-command-scope use GP22 and cannot be combined with other GP22 scope modes"
 );
-#[cfg(all(feature = "ism330dhcx-driver"))]
-const ISM330DHCX_IMU_PERIOD_US: u64 = 0;
 #[cfg(all(feature = "ism330dhcx-driver", feature = "imu-odr-1666hz"))]
-const ISM330DHCX_ODR_CONFIG: Ism330dhcxOdrConfig = Ism330dhcxOdrConfig::ODR_1666HZ;
+const ISM330DHCX_SAMPLE_CONFIG: Ism330dhcxSampleConfig =
+    Ism330dhcxSampleConfig::ODR_1666HZ_16G_2000DPS;
 #[cfg(all(feature = "ism330dhcx-driver", not(feature = "imu-odr-1666hz")))]
-const ISM330DHCX_ODR_CONFIG: Ism330dhcxOdrConfig = Ism330dhcxOdrConfig::ODR_3333HZ;
-#[cfg(all(feature = "ism330dhcx-driver"))]
-const ISM330DHCX_SPI_HZ: u32 = 10_000_000;
-#[cfg(all(feature = "ism330dhcx-driver"))]
-const ISM330DHCX_WHO_AM_I: u8 = 0x6b;
-#[cfg(all(feature = "ism330dhcx-driver"))]
-#[derive(Clone, Copy)]
-struct Ism330dhcxOdrConfig {
-    accel_ctrl1_xl: u8,
-    gyro_ctrl2_g: u8,
-}
-
-#[cfg(all(feature = "ism330dhcx-driver"))]
-impl Ism330dhcxOdrConfig {
-    #[allow(dead_code)]
-    const ODR_1666HZ: Self = Self {
-        accel_ctrl1_xl: 0x84,
-        gyro_ctrl2_g: 0x8c,
-    };
-    #[allow(dead_code)]
-    const ODR_3333HZ: Self = Self {
-        accel_ctrl1_xl: 0x94,
-        gyro_ctrl2_g: 0x9c,
-    };
-}
+const ISM330DHCX_SAMPLE_CONFIG: Ism330dhcxSampleConfig =
+    Ism330dhcxSampleConfig::ODR_3333HZ_16G_2000DPS;
 bind_interrupts!(struct Irqs {
     UART0_IRQ => UartInterruptHandler<UART0>;
     UART1_IRQ => UartInterruptHandler<UART1>;
@@ -196,20 +171,20 @@ async fn core1_heartbeat_task(mailbox: SharedMavlinkMailbox) -> ! {
 #[cfg(all(feature = "ism330dhcx-driver"))]
 #[embassy_executor::task]
 async fn ism330dhcx_imu_task(
-    mut spi: Spi<'static, SPI1, Blocking>,
-    mut cs: Output<'static>,
+    spi: Spi<'static, SPI1, rp2350_platform::hal::spi::Blocking>,
+    cs: Output<'static>,
     mut drdy: Input<'static>,
     #[cfg(feature = "imu-producer-scope")] mut imu_scope: Output<'static>,
 ) -> ! {
-    let mut seq = 0_u32;
+    let mut imu = Ism330dhcxImuProducer::new(spi, cs, ISM330DHCX_SAMPLE_CONFIG);
     loop {
         record_ism330dhcx_init_attempt();
-        match ism330dhcx_init(&mut spi, &mut cs) {
+        match imu.init() {
             Ok(who_am_i) => {
                 record_ism330dhcx_init_ok(who_am_i);
             }
-            Err(who_am_i) => {
-                record_ism330dhcx_init_failure(who_am_i);
+            Err(()) => {
+                record_ism330dhcx_init_failure(None);
                 Timer::after_millis(1_000).await;
                 continue;
             }
@@ -217,32 +192,30 @@ async fn ism330dhcx_imu_task(
 
         {
             loop {
-                if ISM330DHCX_IMU_PERIOD_US == 0 {
+                if imu.period_us() == 0 {
                     drdy.wait_for_rising_edge().await;
                     record_ism330dhcx_drdy_edge();
                     #[cfg(feature = "imu-producer-scope")]
                     imu_scope.set_high();
                     let now_us = Instant::now().as_micros();
-                    match ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
+                    match imu.read_packet(now_us) {
                         Ok(packet) => {
                             record_ism330dhcx_read_ok();
                             SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
-                            seq = seq.wrapping_add(1);
                         }
                         Err(()) => record_ism330dhcx_read_error(),
                     }
                     #[cfg(feature = "imu-producer-scope")]
                     imu_scope.set_low();
                 } else {
-                    Timer::after(Duration::from_micros(ISM330DHCX_IMU_PERIOD_US)).await;
+                    Timer::after(Duration::from_micros(imu.period_us())).await;
                     #[cfg(feature = "imu-producer-scope")]
                     imu_scope.set_high();
                     let now_us = Instant::now().as_micros();
-                    match ism330dhcx_read_packet(&mut spi, &mut cs, now_us, seq) {
+                    match imu.read_packet(now_us) {
                         Ok(packet) => {
                             record_ism330dhcx_read_ok();
                             SHARED_ISM330DHCX_IMU_QUEUE.push_from_interrupt(packet);
-                            seq = seq.wrapping_add(1);
                         }
                         Err(()) => record_ism330dhcx_read_error(),
                     }
@@ -252,102 +225,6 @@ async fn ism330dhcx_imu_task(
             }
         }
     }
-}
-
-#[cfg(all(feature = "ism330dhcx-driver"))]
-fn ism330dhcx_init(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-) -> Result<u8, Option<u8>> {
-    let who_am_i = ism330dhcx_read_reg(spi, cs, 0x0f).map_err(|_| None)?;
-    if who_am_i != ISM330DHCX_WHO_AM_I {
-        return Err(Some(who_am_i));
-    }
-    ism330dhcx_write_reg(spi, cs, 0x12, 0x44).map_err(|_| Some(who_am_i))?;
-    ism330dhcx_write_reg(spi, cs, 0x10, ISM330DHCX_ODR_CONFIG.accel_ctrl1_xl)
-        .map_err(|_| Some(who_am_i))?;
-    ism330dhcx_write_reg(spi, cs, 0x11, ISM330DHCX_ODR_CONFIG.gyro_ctrl2_g)
-        .map_err(|_| Some(who_am_i))?;
-    ism330dhcx_write_reg(spi, cs, 0x0b, 0x80).map_err(|_| Some(who_am_i))?;
-    ism330dhcx_write_reg(spi, cs, 0x0d, 0x03).map_err(|_| Some(who_am_i))?;
-    Ok(who_am_i)
-}
-
-#[cfg(all(feature = "ism330dhcx-driver"))]
-fn ism330dhcx_read_packet(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    now_us: u64,
-    seq: u32,
-) -> Result<ImuPacket<f32>, ()> {
-    let mut bytes = [0_u8; 15];
-    bytes[0] = 0x20 | 0x80;
-    cs.set_low();
-    let result = spi.blocking_transfer_in_place(&mut bytes);
-    cs.set_high();
-    result.map_err(|_| ())?;
-
-    let temperature_raw = i16::from_le_bytes([bytes[1], bytes[2]]);
-    let gyro_raw = [
-        i16::from_le_bytes([bytes[3], bytes[4]]),
-        i16::from_le_bytes([bytes[5], bytes[6]]),
-        i16::from_le_bytes([bytes[7], bytes[8]]),
-    ];
-    let accel_raw = [
-        i16::from_le_bytes([bytes[9], bytes[10]]),
-        i16::from_le_bytes([bytes[11], bytes[12]]),
-        i16::from_le_bytes([bytes[13], bytes[14]]),
-    ];
-
-    const GYRO_2000DPS_TO_RAD_S: f32 = 0.07 * core::f32::consts::PI / 180.0;
-    const ACCEL_16G_TO_M_S2: f32 = 0.000_488 * 9.80665;
-
-    Ok(ImuPacket {
-        header: RosflightPacketHeader {
-            timestamp: now_us,
-            status: 0,
-        },
-        accel: [
-            accel_raw[0] as f32 * ACCEL_16G_TO_M_S2,
-            accel_raw[1] as f32 * ACCEL_16G_TO_M_S2,
-            accel_raw[2] as f32 * ACCEL_16G_TO_M_S2,
-        ],
-        gyro: [
-            gyro_raw[0] as f32 * GYRO_2000DPS_TO_RAD_S,
-            gyro_raw[1] as f32 * GYRO_2000DPS_TO_RAD_S,
-            gyro_raw[2] as f32 * GYRO_2000DPS_TO_RAD_S,
-        ],
-        temperature: 25.0 + temperature_raw as f32 / 256.0,
-        seq,
-    })
-}
-
-#[cfg(all(feature = "ism330dhcx-driver"))]
-fn ism330dhcx_read_reg(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    reg: u8,
-) -> Result<u8, ()> {
-    let mut bytes = [reg | 0x80, 0];
-    cs.set_low();
-    let result = spi.blocking_transfer_in_place(&mut bytes);
-    cs.set_high();
-    result.map_err(|_| ())?;
-    Ok(bytes[1])
-}
-
-#[cfg(all(feature = "ism330dhcx-driver"))]
-fn ism330dhcx_write_reg(
-    spi: &mut Spi<'static, SPI1, Blocking>,
-    cs: &mut Output<'static>,
-    reg: u8,
-    value: u8,
-) -> Result<(), ()> {
-    let mut bytes = [reg & 0x7f, value];
-    cs.set_low();
-    let result = spi.blocking_transfer_in_place(&mut bytes);
-    cs.set_high();
-    result.map_err(|_| ())
 }
 
 #[embassy_executor::task]
@@ -688,7 +565,12 @@ fn configure_core1_transport_interrupt_priorities() {
     interrupt::DMA_IRQ_0.set_priority(Priority::P3);
 }
 
-fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> Pico2WWorld {
+fn init_world(
+    board: board::Board,
+    params: Params,
+    pwm_driver: PioPwmDriver,
+    core0: Core0FlightConfig,
+) -> Pico2WWorld {
     let mixer = quadrotor::mixer(&params);
     let mut world = Pico2WWorld::init(
         board,
@@ -701,7 +583,7 @@ fn init_world(board: board::Board, params: Params, pwm_driver: PioPwmDriver) -> 
         pwm_driver,
     );
     world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
-    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(PICO2W_CONTROL_LOOP_HZ));
+    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(core0.control_loop_hz));
     world
 }
 
@@ -759,7 +641,6 @@ fn main() -> ! {
 
     let (mut board, pwm_driver) = board::Board::new_uart(
         config,
-        None,
         #[cfg(feature = "scope-timing-pins")]
         deadline_scope_pin,
         #[cfg(feature = "scope-timing-pins")]
@@ -774,7 +655,8 @@ fn main() -> ! {
         let _ = board.write_params(&params);
     }
 
-    let mut world = init_world(board, params, pwm_driver);
+    let core0 = config.platform.core0;
+    let mut world = init_world(board, params, pwm_driver, core0);
     loop {
         match world.realtime_scheduler_step() {
             RealtimeSchedulerStep::ImuControl => {
@@ -789,7 +671,7 @@ fn main() -> ! {
                     world.set_test_pin_3(true);
                 }
                 let _ = world.run_prioritized_service_steps_with_policy(
-                    RealtimeServicePolicy::continuous(PICO2W_TELEMETRY_STREAMS_PER_SERVICE_PHASE),
+                    RealtimeServicePolicy::continuous(core0.telemetry_streams_per_service_phase),
                 );
                 #[cfg(feature = "scope-timing-pins")]
                 if SCOPE_GP22_MARKS_SERVICE {
