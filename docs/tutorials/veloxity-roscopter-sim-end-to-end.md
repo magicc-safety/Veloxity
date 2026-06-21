@@ -1,35 +1,36 @@
 # Veloxity ROScopter Sim End-to-End
 
-> [!summary]
-> This guide runs the Veloxity Rust firmware inside the ROSflight standalone multirotor simulator,
-> initializes that firmware through `rosflight_io`, then starts ROScopter autonomy and loads a
-> waypoint mission.
+This guide runs the Veloxity Rust firmware inside the ROSflight standalone
+multirotor simulator, initializes that firmware through `rosflight_io`, then
+starts ROScopter autonomy and loads a waypoint mission.
 
-> [!important]
-> The words below are intentionally specific:
+> [!important] The words below are intentionally specific:
 >
-> - **Build the shim** means compile the Rust simulator library and the C++ ROS 2 bridge.
-> - **Start the simulator** means launch ROSflight standalone sim, `rosflight_io`, and the Veloxity
->   Rust firmware endpoint.
-> - **Initialize the running firmware** means load firmware params, calibrate IMU/baro, and write
->   params through `rosflight_io` services.
-> - **Launch ROScopter** means start the autonomy stack after the firmware endpoint is already alive.
+> - **Build the shim** means compile the Rust simulator library and the C++ ROS
+>   2 bridge.
+> - **Start the simulator** means launch ROSflight standalone sim,
+>   `rosflight_io`, and the Veloxity Rust firmware endpoint.
+> - **Initialize the running firmware** means load firmware params, calibrate
+>   IMU/baro, and write params through `rosflight_io` services.
+> - **Launch ROScopter** means start the autonomy stack after the firmware
+>   endpoint is already alive.
 
 > [!note]
-> These commands assume ROS 2 and the ROSflight workspace have already been sourced by your shell.
-> Veloxity scripts use the caller's environment; they do not source external ROSflight helper
-> scripts.
+>
+> These commands assume ROS 2 and the ROSflight workspace have already been
+> sourced by your shell. Veloxity scripts use the caller's environment; they do
+> not source external ROSflight helper scripts.
 
 ## Terminal Layout
 
 Use separate terminals so long-running nodes stay visible.
 
-| Terminal | Purpose |
-|---|---|
+| Terminal   | Purpose                                                  |
+| ---------- | -------------------------------------------------------- |
 | Terminal 1 | Build the shim, then keep the Veloxity simulator running |
-| Terminal 2 | Initialize the running firmware |
-| Terminal 3 | Launch ROScopter autonomy |
-| Terminal 4 | Load missions, publish waypoints, arm, monitor |
+| Terminal 2 | Initialize the running firmware                          |
+| Terminal 3 | Launch ROScopter autonomy                                |
+| Terminal 4 | Load missions, publish waypoints, arm, monitor           |
 
 ## Phase 1: Build The Shim
 
@@ -53,8 +54,9 @@ zsh scripts/build_and_source_ros2_shim.zsh
 ```
 
 > [!tip]
-> The first command should usually be run with `source` so the built overlay is available in the
-> current terminal.
+>
+> The first command should usually be run with `source` so the built overlay is
+> available in the current terminal.
 
 ## Phase 2: Start The Simulator And Rust Firmware
 
@@ -97,11 +99,13 @@ rosflight_io: Received all parameters
 ```
 
 > [!warning]
+>
 > Do not close Terminal 1 after this. It is the simulator and firmware process.
 
 ### Compare Against C Firmware
 
-Use this only when you specifically want the upstream ROSflight C firmware endpoint:
+Use this only when you specifically want the upstream ROSflight C firmware
+endpoint:
 
 ```bash
 ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
@@ -109,25 +113,28 @@ ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
   use_rviz:=true
 ```
 
-Run the same firmware init, mission load, arm, and override sequence for both endpoints when
-checking parity. The Veloxity FFI shim is expected to present the same ROSflight SIL boundary as
-the C firmware: `rosflight_sil_manager` calls `sil_board/run`, sensor data enters through the
-standalone sim topics, MAVLink goes through unmodified `rosflight_io`, and motor output is published
-on `sim/pwm_output`.
+Run the same firmware init, mission load, arm, and override sequence for both
+endpoints when checking parity. The Veloxity FFI shim is expected to present the
+same ROSflight SIL boundary as the C firmware: `rosflight_sil_manager` calls
+`sil_board/run`, sensor data enters through the standalone sim topics, MAVLink
+goes through unmodified `rosflight_io`, and motor output is published on
+`sim/pwm_output`.
 
-One important detail is the IMU handoff. The shim latches the latest IMU sample after the first
-`sim/sensors/imu/data` message and includes that sample on every firmware step. This avoids false
-ROScopter IMU silence warnings caused by phase drift between the 400 Hz IMU publisher and the
-400 Hz `sil_board/run` service timer. Lower-rate sensors remain availability-gated.
+One important detail is the IMU handoff. The shim latches the latest IMU sample
+after the first `sim/sensors/imu/data` message and includes that sample on every
+firmware step. This avoids false ROScopter IMU silence warnings caused by phase
+drift between the 400 Hz IMU publisher and the 400 Hz `sil_board/run` service
+timer. Lower-rate sensors remain availability-gated.
 
-Brief `Autopilot ERROR: Unhealthy estimator` messages can occur around computer-control and mode
-transitions with both the Veloxity endpoint and upstream C endpoint. Treat those as ROSflight/C
-parity behavior unless they are paired with persistent ROScopter sensor silence warnings.
+Brief `Autopilot ERROR: Unhealthy estimator` messages can occur around
+computer-control and mode transitions with both the Veloxity endpoint and
+upstream C endpoint. Treat those as ROSflight/C parity behavior unless they are
+paired with persistent ROScopter sensor silence warnings.
 
 ## Phase 3: Initialize The Running Firmware
 
-The firmware process is already running in Terminal 1. This phase sends setup commands to it through
-`rosflight_io`.
+The firmware process is already running in Terminal 1. This phase sends setup
+commands to it through `rosflight_io`.
 
 **Terminal 2**
 
@@ -165,8 +172,10 @@ This sends the following service calls in order:
 4. `/param_write`
 
 > [!note]
-> This is the Veloxity version of the ROSflight tutorial's convenience script. It adds barometer
-> calibration, which the upstream ROSflight convenience launch does not perform.
+>
+> This is the Veloxity version of the ROSflight tutorial's convenience script.
+> It adds barometer calibration, which the upstream ROSflight convenience launch
+> does not perform.
 
 Optional arguments:
 
@@ -191,8 +200,8 @@ ros2 service call /calibrate_baro std_srvs/srv/Trigger
 ros2 service call /param_write std_srvs/srv/Trigger
 ```
 
-Watch Terminal 1 during init. You should see parameter traffic and the startup calibration errors
-recover.
+Watch Terminal 1 during init. You should see parameter traffic and the startup
+calibration errors recover.
 
 ### Persistent Veloxity Params
 
@@ -216,8 +225,10 @@ ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
 Keep Terminal 1 running.
 
 > [!important]
-> For service-based arming and override control, the standalone sim should be running with the built-in
-> RC node enabled. That is the default. If you set it explicitly, use:
+>
+> For service-based arming and override control, the standalone sim should be
+> running with the built-in RC node enabled. That is the default. If you set it
+> explicitly, use:
 >
 > ```bash
 > use_builtin_rc:=true
@@ -309,8 +320,9 @@ ros2 service call /toggle_override std_srvs/srv/Trigger
 ```
 
 > [!warning]
-> ROSflight starts with RC override enabled by default. Autonomy cannot control the vehicle until
-> override is disabled.
+>
+> ROSflight starts with RC override enabled by default. Autonomy cannot control
+> the vehicle until override is disabled.
 
 ## Phase 7: Monitor Flight
 
@@ -351,11 +363,13 @@ ros2 topic echo /rc_raw --once
 ros2 topic echo /sim/pwm_output --once
 ```
 
-> [!bug]
-> If `/sim/truth_state` is quiet but `/imu/data`, `/baro`, `/status`, or timestamps look impossible,
-> the problem is likely in the firmware bridge or firmware telemetry path, not in ROScopter mission
-> logic. `/imu/data` and other firmware telemetry should have normal ROS stamps after timesync; they
-> should not show negative seconds.
+> [!caution]
+>
+> If `/sim/truth_state` is quiet but `/imu/data`, `/baro`, `/status`, or
+> timestamps look impossible, the problem is likely in the firmware bridge or
+> firmware telemetry path, not in ROScopter mission logic. `/imu/data` and other
+> firmware telemetry should have normal ROS stamps after timesync; they should
+> not show negative seconds.
 
 ## References
 
