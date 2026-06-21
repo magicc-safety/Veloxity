@@ -5,8 +5,37 @@ site_url = "https://magicc-safety.github.io/veloxity/"
 
 nav = [
     { "Welcome" = "README.md" },
-    # { "Architecture" = "architecture.md" },
-    # { "API Reference" = "api/index.md" }
+    { "Source Code" = [
+        { "Repository Map" = "repository-map.md" },
+        { "Build and Tool Commands" = "build-and-tools.md" },
+        { "Feature Flags" = "features.md" },
+        { "Core Architecture" = "architecture-guide.md" }
+    ] },
+    # { "Simulator" = [
+    #     { "Build and Tool Commands" = "build-and-tools.md" },
+    #     { "Veloxity ROScopter Sim End-to-End" = "tutorials/veloxity-roscopter-sim-end-to-end.md" }
+    # ] },
+    { "Hardware" = [
+        { "Board Bring-Up Guide" = "boards/README.md" },
+        { "RP2350 / Pico 2 W Guide" = "boards/rp2350-pico2w.md" },
+        { "Pico 2 W Wiring" = "pico2w-esc-imu-pinout.md" },
+        { "ESP32C5 ESP-NOW UART Bridge" = "https://github.com/magicc-safety/Veloxity/blob/main/tools/espnow_uart_bridge/README.md" },
+        { "STM32 Board Guide" = "boards/stm32.md" }
+    ] },
+    { "Firmware" = [
+        # { "Core Architecture" = "architecture-guide.md" },
+        # { "Feature Flags" = "features.md" },
+        { "world.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/world.rs" },
+        { "control.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/control.rs" },
+        { "estimator/quad.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/estimator/quad.rs" },
+        { "controller/quad.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/controller/quad.rs" },
+        { "mixer/matrix.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/mixer/matrix.rs" },
+        { "link.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/comms/veloxity_mavlink/src/link.rs" }
+    ] },
+    { "Tutorials" = [
+        { "Veloxity ROScopter Sim End-to-End" = "tutorials/veloxity-roscopter-sim-end-to-end.md" },
+        { "Pico 2 W Sensor Bring-Up" = "tutorials/pico2w-sensor-bringup.md" }
+    ] }
 ]
 
 extra_css = [
