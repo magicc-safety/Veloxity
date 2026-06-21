@@ -4,18 +4,20 @@ This guide runs the Veloxity Rust firmware inside the ROSflight standalone
 multirotor simulator, initializes that firmware through `rosflight_io`, then
 starts ROScopter autonomy and loads a waypoint mission.
 
-> [!important] The words below are intentionally specific:
->
-> - **Build the shim** means compile the Rust simulator library and the C++ ROS
->   2 bridge.
-> - **Start the simulator** means launch ROSflight standalone sim,
->   `rosflight_io`, and the Veloxity Rust firmware endpoint.
-> - **Initialize the running firmware** means load firmware params, calibrate
->   IMU/baro, and write params through `rosflight_io` services.
-> - **Launch ROScopter** means start the autonomy stack after the firmware
->   endpoint is already alive.
+!!! info
 
-> [!note]
+    The words below are intentionally specific:
+
+    - **Build the shim** means compile the Rust simulator library and the C++ ROS
+      2 bridge.
+    - **Start the simulator** means launch ROSflight standalone sim,
+      `rosflight_io`, and the Veloxity Rust firmware endpoint.
+    - **Initialize the running firmware** means load firmware params, calibrate
+      IMU/baro, and write params through `rosflight_io` services.
+    - **Launch ROScopter** means start the autonomy stack after the firmware
+      endpoint is already alive.
+
+> [!NOTE]
 >
 > These commands assume ROS 2 and the ROSflight workspace have already been
 > sourced by your shell. Veloxity scripts use the caller's environment; they do
@@ -53,7 +55,7 @@ cargo test -p sim
 zsh scripts/build_and_source_ros2_shim.zsh
 ```
 
-> [!tip]
+> [!TIP]
 >
 > The first command should usually be run with `source` so the built overlay is
 > available in the current terminal.
@@ -98,7 +100,7 @@ rosflight_io: Got HEARTBEAT, connected.
 rosflight_io: Received all parameters
 ```
 
-> [!warning]
+> [!WARNING]
 >
 > Do not close Terminal 1 after this. It is the simulator and firmware process.
 
@@ -224,15 +226,14 @@ ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
 
 Keep Terminal 1 running.
 
-> [!important]
->
-> For service-based arming and override control, the standalone sim should be
-> running with the built-in RC node enabled. That is the default. If you set it
-> explicitly, use:
->
-> ```bash
-> use_builtin_rc:=true
-> ```
+!!! info
+
+    For service-based arming and override control, the standalone sim should be
+    running with the built-in RC node enabled. That is the default. If you set it
+    explicitly, use:
+    ```bash
+    use_builtin_rc:=true
+    ```
 
 **Terminal 3**
 
@@ -319,7 +320,7 @@ ros2 service call /toggle_arm std_srvs/srv/Trigger
 ros2 service call /toggle_override std_srvs/srv/Trigger
 ```
 
-> [!warning]
+> [!WARNING]
 >
 > ROSflight starts with RC override enabled by default. Autonomy cannot control
 > the vehicle until override is disabled.
@@ -363,13 +364,13 @@ ros2 topic echo /rc_raw --once
 ros2 topic echo /sim/pwm_output --once
 ```
 
-> [!caution]
->
-> If `/sim/truth_state` is quiet but `/imu/data`, `/baro`, `/status`, or
-> timestamps look impossible, the problem is likely in the firmware bridge or
-> firmware telemetry path, not in ROScopter mission logic. `/imu/data` and other
-> firmware telemetry should have normal ROS stamps after timesync; they should
-> not show negative seconds.
+!!! bug
+
+    If `/sim/truth_state` is quiet but `/imu/data`, `/baro`, `/status`, or
+    timestamps look impossible, the problem is likely in the firmware bridge or
+    firmware telemetry path, not in ROScopter mission logic. `/imu/data` and other
+    firmware telemetry should have normal ROS stamps after timesync; they should not
+    show negative seconds.
 
 ## References
 
