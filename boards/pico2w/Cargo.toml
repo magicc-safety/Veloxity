@@ -53,3 +53,4 @@ workspace = true
 name = "veloxity"
 test = false
 bench = false
+doc = false

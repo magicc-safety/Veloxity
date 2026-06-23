@@ -1,0 +1,94 @@
+[project]
+site_name = "Veloxity Documentation"
+site_description = "High-level guides and low-level API documentation for the Veloxity firmware."
+site_url = "https://magicc-safety.github.io/veloxity/"
+
+nav = [
+    { "Welcome" = "README.md" },
+    { "Source Code" = [
+        { "Repository Map" = "repository-map.md" },
+        { "Build and Tool Commands" = "build-and-tools.md" },
+        { "Feature Flags" = "features.md" },
+        { "Core Architecture" = "architecture-guide.md" }
+    ] },
+    # { "Simulator" = [
+    #     { "Build and Tool Commands" = "build-and-tools.md" },
+    #     { "Veloxity ROScopter Sim End-to-End" = "tutorials/veloxity-roscopter-sim-end-to-end.md" }
+    # ] },
+    { "Hardware" = [
+        { "Board Bring-Up Guide" = "boards/README.md" },
+        { "RP2350 / Pico 2 W Guide" = "boards/rp2350-pico2w.md" },
+        { "Pico 2 W Wiring" = "pico2w-esc-imu-pinout.md" },
+        { "ESP32C5 ESP-NOW UART Bridge" = "https://github.com/magicc-safety/Veloxity/blob/main/tools/espnow_uart_bridge/README.md" },
+        { "STM32 Board Guide" = "boards/stm32.md" }
+    ] },
+    # { "Firmware" = [
+    #     # { "Core Architecture" = "architecture-guide.md" },
+    #     # { "Feature Flags" = "features.md" },
+    #     { "world.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/world.rs" },
+    #     { "control.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/control.rs" },
+    #     { "estimator/quad.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/estimator/quad.rs" },
+    #     { "controller/quad.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/controller/quad.rs" },
+    #     { "mixer/matrix.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/crates/veloxity_core/src/mixer/matrix.rs" },
+    #     { "link.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/comms/veloxity_mavlink/src/link.rs" }
+    # ] },
+    { "Tutorials" = [
+        { "Veloxity ROScopter Sim End-to-End" = "tutorials/veloxity-roscopter-sim-end-to-end.md" },
+        { "Pico 2 W Sensor Bring-Up" = "tutorials/pico2w-sensor-bringup.md" }
+    ] },
+    { "API" = "api/index.md" }
+]
+
+extra_css = [
+    "stylesheets/extra.css"
+]
+
+extra_javascript = [
+    "javascript/mathjax.js",
+    "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"
+]
+
+[project.theme]
+name = "material"
+logo = "assets/veloxity-logo-light-rust.svg"
+favicon = "assets/veloxity-logo-light-rust.svg"
+features = [
+    "navigation.tabs",
+    "navigation.sections",
+    "navigation.top",
+    "search.suggest",
+    "search.highlight",
+    "content.code.copy"
+]
+palette = [
+    # Light mode
+    { media = "(prefers-color-scheme: light)", scheme = "default", primary = "blue", accent = "orange", toggle = { icon = "material/brightness-7", name = "Switch to dark mode" } },
+    # Dark mode
+    { media = "(prefers-color-scheme: dark)", scheme = "slate", primary = "blue", accent = "orange", toggle = { icon = "material/brightness-4", name = "Switch to light mode" } }
+]
+
+[project.markdown_extensions]
+admonition = {}
+def_list = {}
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.arithmatex]
+generic = true
+
+[project.markdown_extensions.pymdownx.superfences]
+preserve_tabs = true
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
+]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.snippets]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.gfm_admonition]
