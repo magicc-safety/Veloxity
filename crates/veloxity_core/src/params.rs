@@ -393,6 +393,7 @@ declare_params! {
     PARAM_MOTOR_IDLE_THROTTLE, "MOTOR_IDLE_THR", Float(0.1);
     PARAM_FAILSAFE_THROTTLE, "FAILSAFE_THR", Float(-1.0);
     PARAM_SPIN_MOTORS_WHEN_ARMED, "ARM_SPIN_MOTORS", Int(1);
+    PARAM_MOTOR_OUTPUT_MASK, "MOTOR_OUTPUT_MASK", Int(-1);
     PARAM_INIT_TIME, "FILT_INIT_T", Int(3000);
     PARAM_FILTER_KP_ACC, "FILT_ACC_KP", Float(0.5);
     PARAM_FILTER_KI, "FILT_KI", Float(0.01);
@@ -485,7 +486,7 @@ mod tests {
     #[test]
     fn test_param_count() {
         assert_eq!(PARAMS_COUNT, PARAM_DEFINITIONS.len());
-        assert_eq!(PARAMS_COUNT, 333);
+        assert_eq!(PARAMS_COUNT, 334);
     }
 
     #[test]
@@ -510,6 +511,10 @@ mod tests {
             ParamId::PARAM_BATTERY_VOLTAGE_ALPHA.as_str(),
             "BATT_VOLT_LPF"
         );
+        assert_eq!(
+            ParamId::PARAM_MOTOR_OUTPUT_MASK.as_str(),
+            "MOTOR_OUTPUT_MASK"
+        );
     }
 
     #[test]
@@ -526,6 +531,10 @@ mod tests {
         assert_eq!(
             p.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED),
             ParamValue::Int(1)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK),
+            ParamValue::Int(-1)
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM),
