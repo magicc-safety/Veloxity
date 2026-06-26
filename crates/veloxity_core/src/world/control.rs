@@ -106,7 +106,8 @@ where
             rc: &mut self.rc,
             command: &mut self.command,
             state: &mut self.state,
-            params: &self.params,
+            params: &mut self.params,
+            param_events: Some(&mut self.param_events),
         });
         self.run_pwm_output_stage();
         self.update_board_leds(now_ms);

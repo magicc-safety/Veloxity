@@ -17,7 +17,9 @@ pub enum ControlType {
 }
 
 // simpler than the enum representation in c++ command_manager.h
-const ATTITUDE_RATE_MODE: i32 = 0;
+pub(crate) const ATTITUDE_RATE_MODE: i32 = 0;
+#[cfg(test)]
+const ATTITUDE_ANGLE_MODE: i32 = 1;
 
 pub const OVERRIDE_NO_OVERRIDE: u16 = 0x0;
 pub const OVERRIDE_ATT_SWITCH: u16 = 0x1;
@@ -60,6 +62,159 @@ pub struct CombinedControl {
     pub passthrough: [ControlChannel; 4],
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RcAngleModeLockoutState {
+    #[default]
+    Inactive,
+    SwitchResetRequired {
+        estimator_recovered: bool,
+        rate_wait_logged: bool,
+    },
+    ParamRateUntilExplicitAngle,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RcAngleModeLockoutMachine {
+    state: RcAngleModeLockoutState,
+    denial_active: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RcAngleModeLockoutInput {
+    fixed_wing: bool,
+    estimator_unhealthy: bool,
+    offboard_angle_requested: bool,
+    rc_angle_requested: bool,
+    rc_attitude_source_requested: bool,
+    att_type_switch_mapped: bool,
+    att_type_switch_rate: bool,
+    param_mode_rate: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RcAngleModeLockoutOutput {
+    force_rc_attitude: bool,
+    force_rc_rate: bool,
+    force_param_rate: bool,
+}
+
+impl RcAngleModeLockoutMachine {
+    fn step(&mut self, input: RcAngleModeLockoutInput) -> RcAngleModeLockoutOutput {
+        if input.fixed_wing {
+            self.state = RcAngleModeLockoutState::Inactive;
+            self.denial_active = false;
+            return RcAngleModeLockoutOutput::default();
+        }
+
+        self.advance(input);
+
+        let lockout_active = !matches!(self.state, RcAngleModeLockoutState::Inactive);
+        let unsafe_angle_requested = input.estimator_unhealthy
+            && (input.offboard_angle_requested
+                || (input.rc_attitude_source_requested && input.rc_angle_requested));
+
+        if unsafe_angle_requested {
+            self.enter(input);
+        } else {
+            self.denial_active = false;
+        }
+
+        RcAngleModeLockoutOutput {
+            force_rc_attitude: input.estimator_unhealthy && input.offboard_angle_requested,
+            force_rc_rate: lockout_active || unsafe_angle_requested,
+            force_param_rate: !input.att_type_switch_mapped
+                && unsafe_angle_requested
+                && !input.param_mode_rate,
+        }
+    }
+
+    fn advance(&mut self, input: RcAngleModeLockoutInput) {
+        match self.state {
+            RcAngleModeLockoutState::Inactive => {}
+            RcAngleModeLockoutState::SwitchResetRequired {
+                estimator_recovered,
+                rate_wait_logged,
+            } => {
+                let recovered = estimator_recovered || !input.estimator_unhealthy;
+                if recovered && input.att_type_switch_rate {
+                    self.state = RcAngleModeLockoutState::Inactive;
+                    if !estimator_recovered {
+                        crate::log_info!(
+                            "Firmware Lockout: Estimator healthy: angle mode can be re-enabled"
+                        );
+                    }
+                } else {
+                    if !estimator_recovered && recovered {
+                        crate::log_info!(
+                            "Firmware Lockout: Estimator healthy: angle mode can be re-enabled"
+                        );
+                    }
+                    if input.att_type_switch_rate && !recovered && !rate_wait_logged {
+                        crate::log_info!(
+                            "Firmware Lockout: Angle mode switch will be available once estimator reacquires"
+                        );
+                    }
+                    self.state = RcAngleModeLockoutState::SwitchResetRequired {
+                        estimator_recovered: recovered,
+                        rate_wait_logged: rate_wait_logged
+                            || (input.att_type_switch_rate && !recovered),
+                    };
+                }
+            }
+            RcAngleModeLockoutState::ParamRateUntilExplicitAngle => {
+                if !input.estimator_unhealthy && input.param_mode_rate {
+                    self.state = RcAngleModeLockoutState::Inactive;
+                    crate::log_info!(
+                        "Firmware Lockout: Estimator healthy: angle mode can be re-enabled"
+                    );
+                }
+            }
+        }
+    }
+
+    fn enter(&mut self, input: RcAngleModeLockoutInput) {
+        if self.denial_active {
+            return;
+        }
+        self.denial_active = true;
+
+        crate::log_error!("Firmware Lockout: Unhealthy estimator: forced RC rate mode");
+        if input.att_type_switch_mapped {
+            if !matches!(
+                self.state,
+                RcAngleModeLockoutState::SwitchResetRequired { .. }
+            ) {
+                self.state = RcAngleModeLockoutState::SwitchResetRequired {
+                    estimator_recovered: false,
+                    rate_wait_logged: false,
+                };
+            }
+            crate::log_error!(
+                "Firmware Lockout: Move RC attitude switch to rate before angle mode can be re-enabled"
+            );
+        } else {
+            self.state = RcAngleModeLockoutState::ParamRateUntilExplicitAngle;
+            if !input.param_mode_rate {
+                crate::log_error!(
+                    "Firmware Lockout: RC_ATT_MODE set to rate; set RC_ATT_MODE to angle after estimator recovery to re-enable angle mode"
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CommandRunResult {
+    pub force_rc_attitude_mode_rate: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct EstimatorModeSafety {
+    force_rc_attitude: bool,
+    force_rc_rate: bool,
+    force_param_rate: bool,
+}
+
 #[derive(Default)]
 pub struct CommandManager {
     // Command structs
@@ -75,6 +230,7 @@ pub struct CommandManager {
     rc_throttle_override: bool,
     rc_attitude_override: bool,
     rc_override: u16,
+    rc_angle_mode_lockout: RcAngleModeLockoutMachine,
 }
 
 impl CommandManager {
@@ -205,8 +361,11 @@ impl CommandManager {
         params: &Params,
         rc: &mut Rc,
         state_manager: &mut StateManager, // <-- Must be mutable
-    ) -> bool {
+    ) -> CommandRunResult {
         let now_us = now_ms as u64 * 1000;
+        let mut result = CommandRunResult {
+            force_rc_attitude_mode_rate: false,
+        };
 
         if !rc.check_rc_health(now_us, params) {
             state_manager.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), params);
@@ -224,23 +383,31 @@ impl CommandManager {
             } else {
                 self.multirotor_failsafe_command
             };
-            return true; // Exit early
-        }
-
-        // --- 2. RC Update (C++ line 244) ---
-        // Fresh RC packets update the RC input command. Combined command resolution runs below
-        // even without fresh RC so offboard updates and timeouts are not gated by RC cadence.
-        if rc.new_command() {
-            self.interpret_rc(rc, params);
+            return result; // Exit early
         }
 
         // --- 3. Offboard Timeout "Fail-over" (C++ lines 246-252) ---
         self.update_offboard_timeout(now_us, params);
 
-        // --- 4. Muxing (C++ lines 253-256) ---
-        self.do_muxing(params, rc, now_ms);
+        let safety = self.estimator_mode_safety(params, rc, state_manager);
+        result.force_rc_attitude_mode_rate = safety.force_param_rate;
 
-        true
+        // --- 2. RC Update (C++ line 244) ---
+        // Fresh RC packets update the RC input command. Combined command resolution runs below
+        // even without fresh RC so offboard updates and timeouts are not gated by RC cadence.
+        let has_new_rc = rc.new_command();
+        if has_new_rc || safety.force_rc_rate {
+            self.interpret_rc(
+                rc,
+                params,
+                safety.force_rc_rate.then_some(ControlType::Rate),
+            );
+        }
+
+        // --- 4. Muxing (C++ lines 253-256) ---
+        self.do_muxing(params, rc, now_ms, safety.force_rc_attitude);
+
+        result
     }
 
     fn update_offboard_timeout(&mut self, now_us: u64, params: &Params) {
@@ -336,7 +503,12 @@ impl CommandManager {
     }
 
     /// Port of C++ `interpret_rc` (command_manager.cpp:101)
-    fn interpret_rc(&mut self, rc: &Rc, params: &Params) {
+    fn interpret_rc(
+        &mut self,
+        rc: &Rc,
+        params: &Params,
+        forced_roll_pitch_type: Option<ControlType>,
+    ) {
         // Read all stick values from the RC unit
         self.rc_command.qx.value = rc.stick(Stick::X);
         self.rc_command.qy.value = rc.stick(Stick::Y);
@@ -403,7 +575,9 @@ impl CommandManager {
             self.rc_command.fz.control_type = ControlType::Passthrough;
         } else {
             // check if we've mapped the AttType channel...
-            let roll_pitch_type = if rc.switch_mapped(Switch::AttType) {
+            let roll_pitch_type = if let Some(forced_roll_pitch_type) = forced_roll_pitch_type {
+                forced_roll_pitch_type
+            } else if rc.switch_mapped(Switch::AttType) {
                 // if we have, probe it to know if we should use rate or angle for qx and qy
                 if rc.switch_on(Switch::AttType) {
                     ControlType::Angle
@@ -472,9 +646,9 @@ impl CommandManager {
     }
 
     /// This is the C++ `run` function's muxing logic
-    fn do_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32) {
+    fn do_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32, force_rc_attitude: bool) {
         // C++: command_manager.cpp (lines 253-256)
-        let attitude_override = self.do_attitude_muxing(params, rc, now_ms);
+        let attitude_override = self.do_attitude_muxing(params, rc, now_ms, force_rc_attitude);
         let throttle_override = self.do_throttle_muxing(params, rc);
         self.rc_override = attitude_override | throttle_override;
         self.rc_attitude_override = attitude_override != OVERRIDE_NO_OVERRIDE;
@@ -502,7 +676,13 @@ impl CommandManager {
         true
     }
 
-    fn do_attitude_muxing(&mut self, params: &Params, rc: &Rc, now_ms: u32) -> u16 {
+    fn do_attitude_muxing(
+        &mut self,
+        params: &Params,
+        rc: &Rc,
+        now_ms: u32,
+        force_rc_attitude: bool,
+    ) -> u16 {
         let deviation_param = match params.get_by_id(ParamId::PARAM_RC_OVERRIDE_DEVIATION) {
             ParamValue::Float(val) => val,
             _ => {
@@ -521,7 +701,7 @@ impl CommandManager {
         let switch_override =
             rc.switch_mapped(Switch::AttOverride) && rc.switch_on(Switch::AttOverride);
 
-        let mut override_mask = if switch_override {
+        let mut override_mask = if switch_override || force_rc_attitude {
             OVERRIDE_ATT_SWITCH
         } else {
             OVERRIDE_NO_OVERRIDE
@@ -535,12 +715,15 @@ impl CommandManager {
         if !self.offboard_command.qx.active {
             override_mask |= OVERRIDE_OFFBOARD_X_INACTIVE;
         }
-        self.combined_command.qx =
-            if switch_override || x_stick_deviated || !self.offboard_command.qx.active {
-                self.rc_command.qx
-            } else {
-                self.offboard_command.qx
-            };
+        self.combined_command.qx = if force_rc_attitude
+            || switch_override
+            || x_stick_deviated
+            || !self.offboard_command.qx.active
+        {
+            self.rc_command.qx
+        } else {
+            self.offboard_command.qx
+        };
 
         let y_stick_deviated =
             self.attitude_stick_deviated(rc, Stick::Y, deviation_param, lag_time_ms, now_ms);
@@ -550,12 +733,15 @@ impl CommandManager {
         if !self.offboard_command.qy.active {
             override_mask |= OVERRIDE_OFFBOARD_Y_INACTIVE;
         }
-        self.combined_command.qy =
-            if switch_override || y_stick_deviated || !self.offboard_command.qy.active {
-                self.rc_command.qy
-            } else {
-                self.offboard_command.qy
-            };
+        self.combined_command.qy = if force_rc_attitude
+            || switch_override
+            || y_stick_deviated
+            || !self.offboard_command.qy.active
+        {
+            self.rc_command.qy
+        } else {
+            self.offboard_command.qy
+        };
 
         let z_stick_deviated =
             self.attitude_stick_deviated(rc, Stick::Z, deviation_param, lag_time_ms, now_ms);
@@ -573,6 +759,51 @@ impl CommandManager {
             };
 
         override_mask
+    }
+
+    fn estimator_mode_safety(
+        &mut self,
+        params: &Params,
+        rc: &Rc,
+        state_manager: &StateManager,
+    ) -> EstimatorModeSafety {
+        let estimator_unhealthy = state_manager
+            .get_errors()
+            .contains(ErrorFlag::UNHEALTHY_ESTIMATOR);
+        let fixed_wing = matches!(
+            params.get_by_id(ParamId::PARAM_FIXED_WING),
+            ParamValue::Int(value) if value != 0
+        );
+
+        let lockout = self.rc_angle_mode_lockout.step(RcAngleModeLockoutInput {
+            fixed_wing,
+            estimator_unhealthy,
+            offboard_angle_requested: self.offboard_angle_requested(),
+            rc_angle_requested: rc_angle_mode_selected(params, rc),
+            rc_attitude_source_requested: self.rc_attitude_source_requested(rc),
+            att_type_switch_mapped: rc.switch_mapped(Switch::AttType),
+            att_type_switch_rate: !rc.switch_on(Switch::AttType),
+            param_mode_rate: param_rc_attitude_mode_is_rate(params),
+        });
+
+        EstimatorModeSafety {
+            force_rc_attitude: lockout.force_rc_attitude,
+            force_rc_rate: lockout.force_rc_rate,
+            force_param_rate: lockout.force_param_rate,
+        }
+    }
+
+    fn offboard_angle_requested(&self) -> bool {
+        (self.offboard_command.qx.active
+            && self.offboard_command.qx.control_type == ControlType::Angle)
+            || (self.offboard_command.qy.active
+                && self.offboard_command.qy.control_type == ControlType::Angle)
+    }
+
+    fn rc_attitude_source_requested(&self, rc: &Rc) -> bool {
+        let switch_override =
+            rc.switch_mapped(Switch::AttOverride) && rc.switch_on(Switch::AttOverride);
+        switch_override || !self.offboard_command.qx.active || !self.offboard_command.qy.active
     }
 
     fn do_throttle_muxing(&mut self, params: &Params, rc: &Rc) -> u16 {
@@ -655,6 +886,21 @@ impl CommandManager {
     }
 }
 
+fn rc_angle_mode_selected(params: &Params, rc: &Rc) -> bool {
+    if rc.switch_mapped(Switch::AttType) {
+        rc.switch_on(Switch::AttType)
+    } else {
+        !param_rc_attitude_mode_is_rate(params)
+    }
+}
+
+fn param_rc_attitude_mode_is_rate(params: &Params) -> bool {
+    matches!(
+        params.get_by_id(ParamId::PARAM_RC_ATTITUDE_MODE),
+        ParamValue::Int(ATTITUDE_RATE_MODE)
+    )
+}
+
 impl From<ControlType> for OffboardControlMode {
     fn from(val: ControlType) -> Self {
         match val {
@@ -669,6 +915,7 @@ impl From<ControlType> for OffboardControlMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::log::Logger;
     use crate::packets::{RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader};
 
     fn initialized_rc(params: &Params) -> Rc {
@@ -693,6 +940,36 @@ mod tests {
             lol: false,
         });
         rc.run(100, params, state);
+    }
+
+    fn clear_logs() {
+        while Logger::pop().is_some() {}
+    }
+
+    fn drain_log_count() -> usize {
+        let mut count = 0;
+        while Logger::pop().is_some() {
+            count += 1;
+        }
+        count
+    }
+
+    fn set_unhealthy_estimator(state: &mut StateManager, params: &Params, unhealthy: bool) {
+        state.set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, unhealthy, params);
+    }
+
+    fn offboard_msg(mode: OffboardControlMode) -> OffboardControlMsg {
+        OffboardControlMsg {
+            mode,
+            ignore: OffboardControlIgnore::empty(),
+            qx: 0.25,
+            qy: -0.5,
+            qz: 0.75,
+            fx: 0.0,
+            fy: 0.0,
+            fz: 0.4,
+            passthrough: [0.0; 4],
+        }
     }
 
     #[test]
@@ -726,6 +1003,163 @@ mod tests {
 
         assert_eq!(command.get_rc_override(), OVERRIDE_X | OVERRIDE_T);
         assert!(command.rc_override_active());
+    }
+
+    #[test]
+    fn take_min_throttle_uses_rc_when_rc_throttle_is_lower() {
+        let mut params = Params::new();
+        params.set_by_id(
+            ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+            ParamValue::Int(1),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[2] = 0.2;
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.8,
+                passthrough: [0.0; 4],
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, channels);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(command.get_rc_override(), OVERRIDE_T);
+        assert_eq!(combined.fz.control_type, ControlType::Throttle);
+        assert!((combined.fz.value - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn take_min_throttle_keeps_offboard_when_offboard_throttle_is_lower() {
+        let mut params = Params::new();
+        params.set_by_id(
+            ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+            ParamValue::Int(1),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[2] = 0.8;
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.2,
+                passthrough: [0.0; 4],
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, channels);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(command.get_rc_override(), OVERRIDE_NO_OVERRIDE);
+        assert_eq!(combined.fz.control_type, ControlType::Throttle);
+        assert!((combined.fz.value - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn take_min_throttle_uses_rc_when_throttle_switch_on_and_rc_throttle_is_lower() {
+        let mut params = Params::new();
+        params.set_by_id(
+            ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+            ParamValue::Int(1),
+        );
+        params.set_by_id(
+            ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL,
+            ParamValue::Int(5),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[2] = 0.2;
+        channels[5] = 1.0;
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.0,
+                fy: 0.0,
+                fz: 0.8,
+                passthrough: [0.0; 4],
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, channels);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(command.get_rc_override(), OVERRIDE_THR_SWITCH | OVERRIDE_T);
+        assert_eq!(combined.fz.control_type, ControlType::Throttle);
+        assert!((combined.fz.value - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn take_min_throttle_with_passthrough_ned_thrust_documents_current_muxing() {
+        let mut params = Params::new();
+        params.set_by_id(
+            ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE,
+            ParamValue::Int(1),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[2] = 0.2;
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &OffboardControlMsg {
+                mode: OffboardControlMode::ModePassThrough,
+                ignore: OffboardControlIgnore::empty(),
+                qx: 0.0,
+                qy: 0.0,
+                qz: 0.0,
+                fx: 0.0,
+                fy: 0.0,
+                fz: -25.0,
+                passthrough: [0.0; 4],
+            },
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, channels);
+
+        command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(command.get_rc_override(), OVERRIDE_NO_OVERRIDE);
+        assert_eq!(combined.fz.control_type, ControlType::Passthrough);
+        assert_eq!(combined.fz.value, -25.0);
     }
 
     #[test]
@@ -797,6 +1231,339 @@ mod tests {
         assert_eq!(combined.qz.value, 0.75);
         assert_eq!(combined.fz.value, 0.4);
         assert_eq!(command.get_rc_override(), OVERRIDE_NO_OVERRIDE);
+    }
+
+    #[test]
+    fn healthy_estimator_allows_offboard_angle_mode() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &offboard_msg(OffboardControlMode::ModeRollPitchYawrateThrottle),
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+
+        let result = command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(combined.qx.control_type, ControlType::Angle);
+        assert_eq!(combined.qx.value, 0.25);
+        assert_eq!(combined.qy.control_type, ControlType::Angle);
+        assert_eq!(combined.qy.value, -0.5);
+        assert_eq!(command.get_rc_override(), OVERRIDE_NO_OVERRIDE);
+        assert!(!result.force_rc_attitude_mode_rate);
+    }
+
+    #[test]
+    fn unhealthy_estimator_allows_offboard_rate_and_passthrough_modes() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &offboard_msg(OffboardControlMode::ModeRollratePitchrateYawrateThrottle),
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        let result = command.run(1000, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+        assert_eq!(command.combined_control().qx.value, 0.25);
+        assert!(!result.force_rc_attitude_mode_rate);
+
+        command.set_new_offboard_command(
+            1_001_000,
+            &offboard_msg(OffboardControlMode::ModePassThrough),
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        let result = command.run(1001, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Passthrough
+        );
+        assert_eq!(command.combined_control().qx.value, 0.25);
+        assert!(!result.force_rc_attitude_mode_rate);
+    }
+
+    #[test]
+    fn unhealthy_estimator_denies_offboard_angle_and_uses_rc_rate() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_ROLLRATE, ParamValue::Float(2.0));
+        params.set_by_id(ParamId::PARAM_RC_MAX_PITCHRATE, ParamValue::Float(3.0));
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[0] = 0.75;
+        channels[1] = 0.25;
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &offboard_msg(OffboardControlMode::ModeRollPitchYawrateThrottle),
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, channels);
+
+        let result = command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(combined.qx.control_type, ControlType::Rate);
+        assert!((combined.qx.value - 1.0).abs() < 1e-6);
+        assert_eq!(combined.qy.control_type, ControlType::Rate);
+        assert!((combined.qy.value + 1.5).abs() < 1e-6);
+        assert_eq!(
+            command.get_rc_override(),
+            OVERRIDE_ATT_SWITCH | OVERRIDE_X | OVERRIDE_Y
+        );
+        assert!(result.force_rc_attitude_mode_rate);
+    }
+
+    #[test]
+    fn unhealthy_estimator_denies_rc_angle_switch_and_logs_without_spam() {
+        clear_logs();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        params.set_by_id(
+            ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
+            ParamValue::Int(5),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[5] = 1.0;
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        receive_rc(&mut rc, &params, &mut state, channels);
+        let first = command.run(1000, &params, &mut rc, &mut state);
+        receive_rc(&mut rc, &params, &mut state, channels);
+        let second = command.run(1001, &params, &mut rc, &mut state);
+
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+        assert_eq!(
+            command.get_rc_override(),
+            OVERRIDE_OFFBOARD_X_INACTIVE
+                | OVERRIDE_OFFBOARD_Y_INACTIVE
+                | OVERRIDE_OFFBOARD_Z_INACTIVE
+                | OVERRIDE_OFFBOARD_T_INACTIVE
+        );
+        assert!(!first.force_rc_attitude_mode_rate);
+        assert!(!second.force_rc_attitude_mode_rate);
+        assert_eq!(drain_log_count(), 2);
+    }
+
+    #[test]
+    fn switch_reset_before_estimator_recovery_waits_then_unlocks_on_recovery() {
+        clear_logs();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        params.set_by_id(
+            ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
+            ParamValue::Int(5),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[5] = 1.0;
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1000, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 2);
+
+        channels[5] = 0.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1001, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 1);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1002, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 0);
+
+        set_unhealthy_estimator(&mut state, &params, false);
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1003, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 1);
+
+        channels[5] = 1.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1004, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Angle
+        );
+    }
+
+    #[test]
+    fn estimator_recovery_before_switch_reset_unlocks_when_switch_moves_to_rate() {
+        clear_logs();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        params.set_by_id(
+            ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
+            ParamValue::Int(5),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[5] = 1.0;
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1000, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 2);
+
+        set_unhealthy_estimator(&mut state, &params, false);
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1001, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+        assert_eq!(drain_log_count(), 1);
+
+        channels[5] = 0.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1002, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+        assert_eq!(drain_log_count(), 0);
+
+        channels[5] = 1.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1003, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Angle
+        );
+    }
+
+    #[test]
+    fn switch_must_be_rate_at_unlock_even_if_rate_was_observed_before_recovery() {
+        clear_logs();
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        params.set_by_id(
+            ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
+            ParamValue::Int(5),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[5] = 1.0;
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1000, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 2);
+
+        channels[5] = 0.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1001, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 1);
+
+        channels[5] = 1.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1002, &params, &mut rc, &mut state);
+        assert_eq!(drain_log_count(), 2);
+
+        set_unhealthy_estimator(&mut state, &params, false);
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1003, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+        assert_eq!(drain_log_count(), 1);
+
+        channels[5] = 0.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1004, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+
+        channels[5] = 1.0;
+        receive_rc(&mut rc, &params, &mut state, channels);
+        command.run(1005, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Angle
+        );
+    }
+
+    #[test]
+    fn no_switch_angle_mode_requests_param_rate_until_explicit_angle_after_recovery() {
+        clear_logs();
+        let mut params = Params::new();
+        params.set_by_id(
+            ParamId::PARAM_RC_ATTITUDE_MODE,
+            ParamValue::Int(ATTITUDE_ANGLE_MODE),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        let result = command.run(1000, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+        assert!(result.force_rc_attitude_mode_rate);
+        assert_eq!(drain_log_count(), 2);
+
+        params.set_by_id(
+            ParamId::PARAM_RC_ATTITUDE_MODE,
+            ParamValue::Int(ATTITUDE_RATE_MODE),
+        );
+        set_unhealthy_estimator(&mut state, &params, false);
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        command.run(1001, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Rate
+        );
+        assert_eq!(drain_log_count(), 1);
+
+        params.set_by_id(
+            ParamId::PARAM_RC_ATTITUDE_MODE,
+            ParamValue::Int(ATTITUDE_ANGLE_MODE),
+        );
+        receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
+        command.run(1002, &params, &mut rc, &mut state);
+        assert_eq!(
+            command.combined_control().qx.control_type,
+            ControlType::Angle
+        );
     }
 
     #[test]
@@ -895,7 +1662,7 @@ mod tests {
         channels[1] = 0.25;
 
         receive_rc(&mut rc, &params, &mut state, channels);
-        command.interpret_rc(&rc, &params);
+        command.interpret_rc(&rc, &params, None);
 
         assert_eq!(command.rc_control().qx.control_type, ControlType::Angle);
         assert_eq!(command.rc_control().qy.control_type, ControlType::Angle);
@@ -1024,7 +1791,7 @@ mod tests {
         let mut rc = initialized_rc(&params);
 
         receive_rc(&mut rc, &params, &mut state, [0.5; RC_PACKET_CHANNELS]);
-        command.interpret_rc(&rc, &params);
+        command.interpret_rc(&rc, &params, None);
 
         let rc_control = command.rc_control();
         assert_eq!(rc_control.qx.control_type, ControlType::Passthrough);
