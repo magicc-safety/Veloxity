@@ -207,7 +207,7 @@ calibration errors recover.
 
 ### Motor Output Isolation
 
-Use `MOTOR_OUTPUT_MASK` when checking motor order one output at a time. The mask
+Use `MTR_OUT_MASK` when checking motor order one output at a time. The mask
 is applied inside Veloxity after normal arming and idle-throttle handling, so
 disabled motor outputs stay at zero command even if `ARM_SPIN_MOTORS` is enabled.
 
@@ -226,7 +226,7 @@ Set the mask through unmodified `rosflight_io`:
 
 ```bash
 ros2 service call /param_set rosflight_msgs/srv/ParamSet \
-  "{name: MOTOR_OUTPUT_MASK, value: 1.0}"
+  "{name: MTR_OUT_MASK, value: 1.0}"
 ```
 
 Then arm the firmware and watch the physical motor or the sim output topic:
@@ -239,13 +239,13 @@ ros2 topic echo /sim/pwm_output --once
 In the simulator, a disabled motor channel should read `1000` us. The enabled
 motor channel should rise above `1000` us when the vehicle is armed and idle
 spin or throttle command is active. For hardware tests, remove props, start with
-`MOTOR_OUTPUT_MASK=0`, then step through masks `1`, `2`, `4`, and `8`.
+`MTR_OUT_MASK=0`, then step through masks `1`, `2`, `4`, and `8`.
 
 Return to normal operation when finished:
 
 ```bash
 ros2 service call /param_set rosflight_msgs/srv/ParamSet \
-  "{name: MOTOR_OUTPUT_MASK, value: -1.0}"
+  "{name: MTR_OUT_MASK, value: -1.0}"
 ```
 
 ### Persistent Veloxity Params

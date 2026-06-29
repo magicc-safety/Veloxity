@@ -393,7 +393,7 @@ declare_params! {
     PARAM_MOTOR_IDLE_THROTTLE, "MOTOR_IDLE_THR", Float(0.1);
     PARAM_FAILSAFE_THROTTLE, "FAILSAFE_THR", Float(-1.0);
     PARAM_SPIN_MOTORS_WHEN_ARMED, "ARM_SPIN_MOTORS", Int(1);
-    PARAM_MOTOR_OUTPUT_MASK, "MOTOR_OUTPUT_MASK", Int(-1);
+    PARAM_MOTOR_OUTPUT_MASK, "MTR_OUT_MASK", Int(-1);
     PARAM_INIT_TIME, "FILT_INIT_T", Int(3000);
     PARAM_FILTER_KP_ACC, "FILT_ACC_KP", Float(0.5);
     PARAM_FILTER_KI, "FILT_KI", Float(0.01);
@@ -520,7 +520,7 @@ mod tests {
         );
         assert_eq!(
             ParamId::PARAM_MOTOR_OUTPUT_MASK.as_str(),
-            "MOTOR_OUTPUT_MASK"
+            "MTR_OUT_MASK"
         );
     }
 

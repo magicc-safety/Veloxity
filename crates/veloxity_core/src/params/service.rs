@@ -313,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_param_requests_matches_fixed_width_long_param_names() {
+    fn apply_param_requests_matches_motor_output_mask_name() {
         let mut params = Params::new();
         let mut events = ParamEventQueues::default();
         let mut comm_events = CommEventQueues::default();
@@ -321,7 +321,7 @@ mod tests {
 
         let request = ParamSetRequested {
             value: ParamValue::Int(0x0f),
-            param_id_bytes: crate::comm::str_to_fixed_bytes("MOTOR_OUTPUT_MASK"),
+            param_id_bytes: crate::comm::str_to_fixed_bytes("MTR_OUT_MASK"),
         };
         let _ = events.set_requests.push(request);
 
