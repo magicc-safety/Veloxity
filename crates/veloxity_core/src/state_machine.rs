@@ -167,24 +167,7 @@ impl Init {
 impl Preflight {
     fn on_event(self, sm: State<Self>, event: Event, params: &Params) -> StateMachine {
         match event {
-            Event::REQUEST_ARM => {
-                if matches!(
-                    params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM),
-                    ParamValue::Int(value) if value != 0
-                ) {
-                    let mut error_flags = sm.error_flags;
-                    error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
-                    StateMachine::Calibrating(State {
-                        state: Calibrating,
-                        error_flags: error_flags,
-                    })
-                } else {
-                    StateMachine::Armed(State {
-                        state: Armed,
-                        error_flags: sm.error_flags,
-                    })
-                }
-            }
+            Event::REQUEST_ARM => arm_from_preflight(sm.error_flags, params),
             Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(State {
                 state: Armed,
                 error_flags: sm.error_flags,
@@ -312,11 +295,16 @@ impl ErrorFailsafe {
 }
 
 impl ErrorPresent {
-    fn on_event(self, sm: State<Self>, event: Event, _params: &Params) -> StateMachine {
+    fn on_event(self, sm: State<Self>, event: Event, params: &Params) -> StateMachine {
         match event {
             Event::REQUEST_ARM => {
-                log_arming_errors(sm.error_flags);
-                StateMachine::ErrorPresent(sm)
+                let blocking_errors = arming_blocking_errors(sm.error_flags, params);
+                if blocking_errors.is_empty() {
+                    arm_from_preflight(sm.error_flags, params)
+                } else {
+                    log_arming_errors(blocking_errors);
+                    StateMachine::ErrorPresent(sm)
+                }
             }
             Event::HARDFAULT_REARM_REQUESTED => StateMachine::Armed(State {
                 state: Armed,
@@ -334,6 +322,36 @@ impl ErrorPresent {
             }
             _ => StateMachine::ErrorPresent(sm),
         }
+    }
+}
+
+fn arm_from_preflight(error_flags: ErrorFlag, params: &Params) -> StateMachine {
+    if matches!(
+        params.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM),
+        ParamValue::Int(value) if value != 0
+    ) {
+        let mut error_flags = error_flags;
+        error_flags.remove(ErrorFlag::UNCALIBRATED_IMU);
+        StateMachine::Calibrating(State {
+            state: Calibrating,
+            error_flags,
+        })
+    } else {
+        StateMachine::Armed(State {
+            state: Armed,
+            error_flags,
+        })
+    }
+}
+
+fn arming_blocking_errors(error_flags: ErrorFlag, params: &Params) -> ErrorFlag {
+    if matches!(
+        params.get_by_id(ParamId::PARAM_ALLOW_UNHEALTHY_ESTIMATOR),
+        ParamValue::Int(value) if value != 0
+    ) {
+        error_flags - ErrorFlag::UNHEALTHY_ESTIMATOR
+    } else {
+        error_flags
     }
 }
 
@@ -417,8 +435,12 @@ impl StateManager {
 
     // The main update loop. Takes an event and applies it to the internal state machine.
     pub fn update(&mut self, event: Event, params: &Params) {
+        let arming_attempt_can_transition = matches!(self.machine, StateMachine::Preflight(_))
+            || (matches!(self.machine, StateMachine::ErrorPresent(_))
+                && arming_blocking_errors(self.machine.get_errors(), params).is_empty());
+
         if matches!(event, Event::REQUEST_ARM)
-            && matches!(self.machine, StateMachine::Preflight(_))
+            && arming_attempt_can_transition
             && !self.arming_safety_allows_arm(params)
         {
             return;

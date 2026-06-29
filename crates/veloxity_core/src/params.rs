@@ -450,6 +450,8 @@ declare_params! {
     PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE, "TAKE_MIN_THR", Int(1);
     PARAM_RC_MAX_THROTTLE, "RC_MAX_THR", Float(0.7);
     PARAM_RC_ATTITUDE_MODE, "RC_ATT_MODE", Int(1);
+    PARAM_ALLOW_UNHEALTHY_ESTIMATOR, "BYPASS_UNH_EST", Int(1);
+    PARAM_EST_ANGLE_LOCKOUT, "EST_ANG_LOCKOUT", Int(0);
     PARAM_RC_MAX_ROLL, "RC_MAX_ROLL", Float(0.786);
     PARAM_RC_MAX_PITCH, "RC_MAX_PITCH", Float(0.786);
     PARAM_RC_MAX_ROLLRATE, "RC_MAX_ROLLRATE", Float(3.14159);
@@ -486,7 +488,7 @@ mod tests {
     #[test]
     fn test_param_count() {
         assert_eq!(PARAMS_COUNT, PARAM_DEFINITIONS.len());
-        assert_eq!(PARAMS_COUNT, 334);
+        assert_eq!(PARAMS_COUNT, 336);
     }
 
     #[test]
@@ -503,6 +505,11 @@ mod tests {
             ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE.as_str(),
             "TAKE_MIN_THR"
         );
+        assert_eq!(
+            ParamId::PARAM_ALLOW_UNHEALTHY_ESTIMATOR.as_str(),
+            "BYPASS_UNH_EST"
+        );
+        assert_eq!(ParamId::PARAM_EST_ANGLE_LOCKOUT.as_str(), "EST_ANG_LOCKOUT");
         assert_eq!(ParamId::PARAM_ELEVATOR_REVERSE.as_str(), "REV_ELEVATOR");
         assert_eq!(ParamId::PARAM_IMU_ROLL.as_str(), "IMU_ROLL");
         assert_eq!(ParamId::PARAM_MAG_YAW.as_str(), "MAG_YAW");

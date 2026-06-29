@@ -244,7 +244,7 @@ fn param_id_from_name_bytes(bytes: [u8; 16]) -> Option<ParamId> {
     let name = core::str::from_utf8(&bytes[..len]).ok()?;
     PARAM_DEFINITIONS
         .iter()
-        .find(|def| def.name == name)
+        .find(|def| def.name == name || str_to_fixed_bytes(def.name) == bytes)
         .map(|def| def.id)
 }
 
@@ -310,6 +310,32 @@ mod tests {
             }
             _ => panic!("expected param value response"),
         }
+    }
+
+    #[test]
+    fn apply_param_requests_matches_fixed_width_long_param_names() {
+        let mut params = Params::new();
+        let mut events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut state = ParamListState::default();
+
+        let request = ParamSetRequested {
+            value: ParamValue::Int(0x0f),
+            param_id_bytes: crate::comm::str_to_fixed_bytes("MOTOR_OUTPUT_MASK"),
+        };
+        let _ = events.set_requests.push(request);
+
+        apply_param_requests(&mut test_ctx(
+            &mut params,
+            &mut state,
+            &mut events,
+            &mut comm_events,
+        ));
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK),
+            ParamValue::Int(0x0f)
+        );
     }
 
     #[test]

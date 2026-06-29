@@ -124,6 +124,7 @@ mod tests {
     fn rc_command_state_emits_param_change_when_lockout_forces_rate_mode() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_EST_ANGLE_LOCKOUT, ParamValue::Int(1));
         let sensors = ProcessedSensors {
             rc: Some(RcPacket {
                 header: RosflightPacketHeader {
@@ -161,5 +162,45 @@ mod tests {
         assert_eq!(change.id, ParamId::PARAM_RC_ATTITUDE_MODE);
         assert_eq!(change.old, ParamValue::Int(1));
         assert_eq!(change.new, ParamValue::Int(ATTITUDE_RATE_MODE));
+    }
+
+    #[test]
+    fn rc_command_state_does_not_force_rate_mode_when_lockout_disabled() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(1));
+        let sensors = ProcessedSensors {
+            rc: Some(RcPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 1,
+                    status: 0,
+                },
+                n_chan: 8,
+                chan: [0.5; RC_PACKET_CHANNELS],
+                lol: false,
+            }),
+            ..ProcessedSensors::<f64>::default()
+        };
+        let mut rc = Rc::new();
+        rc.init(&params);
+        let mut command = CommandManager::new();
+        let mut state = StateManager::new();
+        state.set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, true, &params);
+        let mut param_events = ParamEventQueues::default();
+
+        run_rc_command_state(RcCommandStateCtx {
+            now_ms: 1,
+            sensors: &sensors,
+            rc: &mut rc,
+            command: &mut command,
+            state: &mut state,
+            params: &mut params,
+            param_events: Some(&mut param_events),
+        });
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_RC_ATTITUDE_MODE),
+            ParamValue::Int(1)
+        );
+        assert!(param_events.changes.pop().is_none());
     }
 }

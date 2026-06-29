@@ -99,10 +99,14 @@ struct RcAngleModeLockoutOutput {
 }
 
 impl RcAngleModeLockoutMachine {
+    fn reset(&mut self) {
+        self.state = RcAngleModeLockoutState::Inactive;
+        self.denial_active = false;
+    }
+
     fn step(&mut self, input: RcAngleModeLockoutInput) -> RcAngleModeLockoutOutput {
         if input.fixed_wing {
-            self.state = RcAngleModeLockoutState::Inactive;
-            self.denial_active = false;
+            self.reset();
             return RcAngleModeLockoutOutput::default();
         }
 
@@ -774,6 +778,10 @@ impl CommandManager {
             params.get_by_id(ParamId::PARAM_FIXED_WING),
             ParamValue::Int(value) if value != 0
         );
+        if fixed_wing || !estimator_angle_lockout_enabled(params) {
+            self.rc_angle_mode_lockout.reset();
+            return EstimatorModeSafety::default();
+        }
 
         let lockout = self.rc_angle_mode_lockout.step(RcAngleModeLockoutInput {
             fixed_wing,
@@ -901,6 +909,13 @@ fn param_rc_attitude_mode_is_rate(params: &Params) -> bool {
     )
 }
 
+fn estimator_angle_lockout_enabled(params: &Params) -> bool {
+    matches!(
+        params.get_by_id(ParamId::PARAM_EST_ANGLE_LOCKOUT),
+        ParamValue::Int(value) if value != 0
+    )
+}
+
 impl From<ControlType> for OffboardControlMode {
     fn from(val: ControlType) -> Self {
         match val {
@@ -956,6 +971,10 @@ mod tests {
 
     fn set_unhealthy_estimator(state: &mut StateManager, params: &Params, unhealthy: bool) {
         state.set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, unhealthy, params);
+    }
+
+    fn enable_estimator_angle_lockout(params: &mut Params) {
+        params.set_by_id(ParamId::PARAM_EST_ANGLE_LOCKOUT, ParamValue::Int(1));
     }
 
     fn offboard_msg(mode: OffboardControlMode) -> OffboardControlMsg {
@@ -1298,8 +1317,41 @@ mod tests {
     }
 
     #[test]
+    fn unhealthy_estimator_allows_angle_modes_when_lockout_disabled() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
+        params.set_by_id(
+            ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
+            ParamValue::Int(5),
+        );
+        let mut state = StateManager::new();
+        let mut command = CommandManager::new();
+        let mut rc = initialized_rc(&params);
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[5] = 1.0;
+        set_unhealthy_estimator(&mut state, &params, true);
+
+        command.set_new_offboard_command(
+            1_000_000,
+            &offboard_msg(OffboardControlMode::ModeRollPitchYawrateThrottle),
+            &params,
+        );
+        receive_rc(&mut rc, &params, &mut state, channels);
+
+        let result = command.run(1000, &params, &mut rc, &mut state);
+
+        let combined = command.combined_control();
+        assert_eq!(combined.qx.control_type, ControlType::Angle);
+        assert_eq!(combined.qx.value, 0.25);
+        assert_eq!(combined.qy.control_type, ControlType::Angle);
+        assert_eq!(combined.qy.value, -0.5);
+        assert!(!result.force_rc_attitude_mode_rate);
+    }
+
+    #[test]
     fn unhealthy_estimator_denies_offboard_angle_and_uses_rc_rate() {
         let mut params = Params::new();
+        enable_estimator_angle_lockout(&mut params);
         params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
         params.set_by_id(ParamId::PARAM_RC_MAX_ROLLRATE, ParamValue::Float(2.0));
         params.set_by_id(ParamId::PARAM_RC_MAX_PITCHRATE, ParamValue::Float(3.0));
@@ -1336,6 +1388,7 @@ mod tests {
     fn unhealthy_estimator_denies_rc_angle_switch_and_logs_without_spam() {
         clear_logs();
         let mut params = Params::new();
+        enable_estimator_angle_lockout(&mut params);
         params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
         params.set_by_id(
             ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
@@ -1373,6 +1426,7 @@ mod tests {
     fn switch_reset_before_estimator_recovery_waits_then_unlocks_on_recovery() {
         clear_logs();
         let mut params = Params::new();
+        enable_estimator_angle_lockout(&mut params);
         params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
         params.set_by_id(
             ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
@@ -1420,6 +1474,7 @@ mod tests {
     fn estimator_recovery_before_switch_reset_unlocks_when_switch_moves_to_rate() {
         clear_logs();
         let mut params = Params::new();
+        enable_estimator_angle_lockout(&mut params);
         params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
         params.set_by_id(
             ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
@@ -1467,6 +1522,7 @@ mod tests {
     fn switch_must_be_rate_at_unlock_even_if_rate_was_observed_before_recovery() {
         clear_logs();
         let mut params = Params::new();
+        enable_estimator_angle_lockout(&mut params);
         params.set_by_id(ParamId::PARAM_OVERRIDE_LAG_TIME, ParamValue::Int(0));
         params.set_by_id(
             ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL,
@@ -1523,6 +1579,7 @@ mod tests {
     fn no_switch_angle_mode_requests_param_rate_until_explicit_angle_after_recovery() {
         clear_logs();
         let mut params = Params::new();
+        enable_estimator_angle_lockout(&mut params);
         params.set_by_id(
             ParamId::PARAM_RC_ATTITUDE_MODE,
             ParamValue::Int(ATTITUDE_ANGLE_MODE),
