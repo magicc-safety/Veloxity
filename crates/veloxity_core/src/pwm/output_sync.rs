@@ -4,7 +4,7 @@ use crate::{
     math::FlightFloat,
     mixer::MixerOutputType,
     params::{ParamId, ParamValue, Params},
-    pwm::{PwmDriver, PwmError},
+    pwm::{PwmDriver, PwmError, safe_disarmed_command},
     state_machine::StateManager,
 };
 
@@ -32,7 +32,7 @@ where
     pub board: &'a mut B,
     pub pwm: &'a mut P,
     pub output: &'a mut PwmOutputState,
-    pub state: &'a StateManager,
+    pub output_kill_active: bool,
 }
 
 pub fn sync_pwm_output_state<B, P, R>(ctx: PwmSyncCtx<'_, B, P>) -> Result<bool, PwmError>
@@ -41,7 +41,7 @@ where
     P: PwmDriver<R>,
     R: FlightFloat,
 {
-    let desired_enabled = ctx.state.is_armed();
+    let desired_enabled = !ctx.output_kill_active;
     if desired_enabled == ctx.output.enabled {
         return Ok(false);
     }
@@ -62,6 +62,8 @@ pub fn write_pwm_commands<B, P, R>(
     pwm: &mut P,
     output: &PwmOutputState,
     commands: &[R],
+    output_types: &[MixerOutputType],
+    state: &StateManager,
 ) -> Result<bool, PwmError>
 where
     B: BoardIo,
@@ -72,7 +74,11 @@ where
         return Ok(false);
     }
 
-    pwm.send_commands(board, commands)?;
+    if state.is_armed() {
+        pwm.send_commands(board, commands)?;
+    } else {
+        pwm.send_disarmed_commands(board, output_types)?;
+    }
     Ok(true)
 }
 
@@ -113,7 +119,9 @@ pub fn compose_pwm_outputs<R: FlightFloat>(
             (primary_type, primary_value)
         };
 
-        outputs[channel] = if output_type == MixerOutputType::Motor
+        outputs[channel] = if !state.is_armed() {
+            safe_disarmed_command(output_type)
+        } else if output_type == MixerOutputType::Motor
             && !motor_output_enabled(motor_output_mask, channel)
         {
             <R as FlightFloat>::from_f32(0.0)
@@ -289,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn pwm_output_state_enables_and_disables_only_on_state_transitions() {
+    fn pwm_output_state_defaults_to_enabled_safe_disarmed_outputs() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
@@ -299,26 +307,27 @@ mod tests {
         let mut output = PwmOutputState::new(pwm.is_enabled());
 
         assert!(
-            !sync_pwm_output_state(PwmSyncCtx {
+            sync_pwm_output_state(PwmSyncCtx {
                 board: &mut board,
                 pwm: &mut pwm,
                 output: &mut output,
-                state: &state,
+                output_kill_active: false,
             })
             .unwrap()
         );
-        assert_eq!(pwm.enable_all_count, 0);
+        assert!(output.is_enabled());
+        assert_eq!(pwm.enable_all_count, 1);
         assert_eq!(pwm.disable_all_count, 0);
 
         state.update_arming_safety(true, true);
         state.update(Event::REQUEST_ARM, &params);
 
         assert!(
-            sync_pwm_output_state(PwmSyncCtx {
+            !sync_pwm_output_state(PwmSyncCtx {
                 board: &mut board,
                 pwm: &mut pwm,
                 output: &mut output,
-                state: &state,
+                output_kill_active: false,
             })
             .unwrap()
         );
@@ -330,7 +339,7 @@ mod tests {
                 board: &mut board,
                 pwm: &mut pwm,
                 output: &mut output,
-                state: &state,
+                output_kill_active: false,
             })
             .unwrap()
         );
@@ -339,17 +348,66 @@ mod tests {
         state.update(Event::REQUEST_DISARM, &params);
 
         assert!(
+            !sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                output_kill_active: false,
+            })
+            .unwrap()
+        );
+        assert!(output.is_enabled());
+        assert_eq!(pwm.disable_all_count, 0);
+        assert_eq!(pwm.flush_count, 0);
+    }
+
+    #[test]
+    fn pwm_output_state_disables_outputs_while_kill_switch_is_active() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update_arming_safety(true, true);
+        state.update(Event::REQUEST_ARM, &params);
+        let mut board = TestBoard { now_us: 0 };
+        let mut pwm = TestPwm::new(false);
+        let mut output = PwmOutputState::new(pwm.is_enabled());
+
+        assert!(
             sync_pwm_output_state(PwmSyncCtx {
                 board: &mut board,
                 pwm: &mut pwm,
                 output: &mut output,
-                state: &state,
+                output_kill_active: false,
+            })
+            .unwrap()
+        );
+        assert!(output.is_enabled());
+
+        assert!(
+            sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                output_kill_active: true,
             })
             .unwrap()
         );
         assert!(!output.is_enabled());
         assert_eq!(pwm.disable_all_count, 1);
         assert_eq!(pwm.flush_count, 1);
+
+        assert!(
+            sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                output_kill_active: false,
+            })
+            .unwrap()
+        );
+        assert!(output.is_enabled());
+        assert_eq!(pwm.enable_all_count, 2);
     }
 
     #[test]
@@ -358,15 +416,43 @@ mod tests {
         let mut pwm = TestPwm::new(false);
         let disabled = PwmOutputState::new(false);
         let enabled = PwmOutputState::new(true);
+        let params = Params::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
 
         assert_eq!(
-            write_pwm_commands(&mut board, &mut pwm, &disabled, &[0.1, 0.2]),
+            write_pwm_commands(&mut board, &mut pwm, &disabled, &[0.1, 0.2], &[], &state),
             Ok(false)
         );
         assert_eq!(pwm.send_count, 0);
 
+        state.update_arming_safety(true, true);
+        state.update(Event::REQUEST_ARM, &params);
         assert_eq!(
-            write_pwm_commands(&mut board, &mut pwm, &enabled, &[0.1, 0.2]),
+            write_pwm_commands(&mut board, &mut pwm, &enabled, &[0.1, 0.2], &[], &state),
+            Ok(true)
+        );
+        assert_eq!(pwm.send_count, 1);
+    }
+
+    #[test]
+    fn write_pwm_commands_sends_safe_defaults_when_disarmed() {
+        let mut board = TestBoard { now_us: 0 };
+        let mut pwm = TestPwm::new(false);
+        let enabled = PwmOutputState::new(true);
+        let params = Params::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+
+        assert_eq!(
+            write_pwm_commands(
+                &mut board,
+                &mut pwm,
+                &enabled,
+                &[0.9, 0.9],
+                &[MixerOutputType::Motor, MixerOutputType::Aux],
+                &state
+            ),
             Ok(true)
         );
         assert_eq!(pwm.send_count, 1);
@@ -441,6 +527,7 @@ mod tests {
         );
 
         assert_eq!(outputs[4], 0.0);
+        assert_eq!(outputs[6], 0.5);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::{board::BoardIo, math::FlightFloat};
+use crate::{board::BoardIo, math::FlightFloat, mixer::MixerOutputType};
 
 pub mod output_sync;
 
@@ -25,9 +25,17 @@ pub struct DshotCommand {
 }
 
 impl DshotCommand {
+    pub const STOP: u16 = 0;
     pub const MIN_THROTTLE: u16 = 48;
     pub const MAX_THROTTLE: u16 = 2047;
     pub const FRAME_BITS: usize = 16;
+
+    pub const fn stop() -> Self {
+        Self {
+            throttle: Self::STOP,
+            telemetry: false,
+        }
+    }
 
     pub fn from_normalized<R: FlightFloat>(value: R) -> Self {
         let normalized = value.clamp(
@@ -116,8 +124,36 @@ pub trait PwmDriver<R: FlightFloat> {
         Ok(())
     }
 
+    fn output_protocol(&self, _channel: usize) -> Result<PwmOutputProtocol, PwmError> {
+        Ok(PwmOutputProtocol::StandardPwm)
+    }
+
     // actually loops over the channels (up to self.len()) and sends pwm commands via set_duty_cycle
     fn send_commands<B: BoardIo>(&mut self, board: &mut B, commands: &[R]) -> Result<(), PwmError>;
+
+    fn send_disarmed_commands<B: BoardIo>(
+        &mut self,
+        board: &mut B,
+        output_types: &[MixerOutputType],
+    ) -> Result<(), PwmError> {
+        let mut commands =
+            [<R as FlightFloat>::from_f32(0.5); crate::pwm::output_sync::PWM_OUTPUT_CHANNELS];
+        for (channel, command) in commands.iter_mut().enumerate().take(self.len()) {
+            let output_type = output_types
+                .get(channel)
+                .copied()
+                .unwrap_or(MixerOutputType::Aux);
+            *command = safe_disarmed_command(output_type);
+        }
+        self.send_commands(board, &commands)
+    }
+}
+
+pub fn safe_disarmed_command<R: FlightFloat>(output_type: MixerOutputType) -> R {
+    match output_type {
+        MixerOutputType::Motor | MixerOutputType::Gpio => <R as FlightFloat>::from_f32(0.0),
+        MixerOutputType::Aux | MixerOutputType::Servo => <R as FlightFloat>::from_f32(0.5),
+    }
 }
 
 #[cfg(test)]
@@ -164,5 +200,11 @@ mod tests {
         let value = 48u16 << 1;
         let expected_crc = (value ^ (value >> 4) ^ (value >> 8)) & 0x000f;
         assert_eq!(command.frame(), (value << 4) | expected_crc);
+    }
+
+    #[test]
+    fn dshot_stop_frame_uses_zero_throttle() {
+        assert_eq!(DshotCommand::stop().throttle, 0);
+        assert_eq!(DshotCommand::stop().frame(), 0);
     }
 }

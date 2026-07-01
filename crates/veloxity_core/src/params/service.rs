@@ -48,8 +48,8 @@ pub fn apply_param_requests(ctx: &mut ParamServiceCtx<'_>) {
             if is_mixer_choice_param(id) {
                 crate::mixer::matrix::sync_reflected_mixer_params(ctx.params, id);
                 emit_reflected_mixer_param_responses(ctx.comm_events, ctx.params, id);
-                emit_param_value_response(ctx.comm_events, ctx.params.get_by_id(id), id);
             }
+            emit_param_value_response(ctx.comm_events, ctx.params.get_by_id(id), id);
             continue;
         }
 
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_param_requests_ignores_wrong_type_and_unchanged_value() {
+    fn apply_param_requests_ignores_wrong_type_and_acknowledges_unchanged_value() {
         let mut params = Params::new();
         let mut events = ParamEventQueues::default();
         let mut comm_events = CommEventQueues::default();
@@ -366,6 +366,13 @@ mod tests {
             ParamValue::Int(1)
         );
         assert!(events.changes.is_empty());
+        match comm_events.responses.pop().unwrap() {
+            CommResponse::ParamValue(response) => {
+                assert_eq!(response.param_index, ParamId::PARAM_SYSTEM_ID as u16);
+                assert_eq!(response.param_value, ParamValue::Int(1));
+            }
+            _ => panic!("expected param value response"),
+        }
         assert!(comm_events.responses.is_empty());
     }
 

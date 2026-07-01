@@ -293,7 +293,14 @@ where
         ctx.state,
         ctx.params,
     );
-    if let Err(error) = write_pwm_commands(ctx.board, ctx.pwm, ctx.pwm_output, &pwm_outputs) {
+    if let Err(error) = write_pwm_commands(
+        ctx.board,
+        ctx.pwm,
+        ctx.pwm_output,
+        &pwm_outputs,
+        ctx.mixer.output_types(),
+        ctx.state,
+    ) {
         crate::log_warn!("PWM driver rejected output command: {:?}", error);
     }
     control_scope_pwm(ctx.board, false);

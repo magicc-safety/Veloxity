@@ -1787,9 +1787,9 @@ mod tests {
             &mut board,
         );
 
-        assert!(param_events.set_requests.is_full());
-        assert_eq!(param_events.set_requests.len(), 4);
-        assert_eq!(manager.msgs.param_set.len(), 1);
+        assert!(!param_events.set_requests.is_full());
+        assert_eq!(param_events.set_requests.len(), 5);
+        assert_eq!(manager.msgs.param_set.len(), 0);
 
         let _ = param_events.set_requests.pop();
         manager.act_on_messages(
@@ -1800,9 +1800,9 @@ mod tests {
             &mut board,
         );
 
-        assert!(param_events.set_requests.is_full());
+        assert!(!param_events.set_requests.is_full());
         assert_eq!(manager.msgs.param_set.len(), 0);
-        let values: heapless::Vec<_, 4> = param_events
+        let values: heapless::Vec<_, 8> = param_events
             .set_requests
             .iter()
             .map(|req| req.value)
@@ -1815,6 +1815,45 @@ mod tests {
                 ParamValue::Int(13),
                 ParamValue::Int(14),
             ]
+        );
+    }
+
+    #[test]
+    fn param_set_ingress_accepts_full_companion_param_burst() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        for value in 0..360 {
+            manager.msgs.store(ParamSetMsg {
+                target_system: 1,
+                target_component: 1,
+                param_id: *b"SYS_ID\0\0\0\0\0\0\0\0\0\0",
+                param_value: ParamValue::Int(value),
+            });
+        }
+
+        assert_eq!(manager.msgs.param_set.len(), 360);
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events(),
+            &mut board,
+        );
+
+        assert_eq!(manager.msgs.param_set.len(), 0);
+        assert_eq!(param_events.set_requests.len(), 360);
+        assert_eq!(
+            param_events.set_requests.iter().next().unwrap().value,
+            ParamValue::Int(0)
+        );
+        assert_eq!(
+            param_events.set_requests.iter().last().unwrap().value,
+            ParamValue::Int(359)
         );
     }
 

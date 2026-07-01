@@ -118,7 +118,8 @@ where
             board: &mut self.board,
             pwm: &mut self.pwm,
             output: &mut self.pwm_output,
-            state: &self.state,
+            output_kill_active: self.rc.switch_mapped(crate::rc::Switch::OutputKill)
+                && self.rc.switch_on(crate::rc::Switch::OutputKill),
         })
         .unwrap_or(false)
     }

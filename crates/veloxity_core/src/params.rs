@@ -475,6 +475,7 @@ declare_params! {
     PARAM_BATTERY_VOLTAGE_ALPHA, "BATT_VOLT_LPF", Float(0.995);
     PARAM_BATTERY_CURRENT_ALPHA, "BATT_CURR_LPF", Float(0.995);
     PARAM_OFFBOARD_TIMEOUT, "OFFBOARD_TIMEOUT", Int(100);
+    PARAM_RC_OUTPUT_KILL_CHANNEL, "RC_KILL_CHN", Int(-1);
 }
 
 //=================================================================================
@@ -488,7 +489,7 @@ mod tests {
     #[test]
     fn test_param_count() {
         assert_eq!(PARAMS_COUNT, PARAM_DEFINITIONS.len());
-        assert_eq!(PARAMS_COUNT, 336);
+        assert_eq!(PARAMS_COUNT, 337);
     }
 
     #[test]
@@ -518,9 +519,10 @@ mod tests {
             ParamId::PARAM_BATTERY_VOLTAGE_ALPHA.as_str(),
             "BATT_VOLT_LPF"
         );
+        assert_eq!(ParamId::PARAM_MOTOR_OUTPUT_MASK.as_str(), "MTR_OUT_MASK");
         assert_eq!(
-            ParamId::PARAM_MOTOR_OUTPUT_MASK.as_str(),
-            "MTR_OUT_MASK"
+            ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL.as_str(),
+            "RC_KILL_CHN"
         );
     }
 
@@ -541,6 +543,10 @@ mod tests {
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK),
+            ParamValue::Int(-1)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL),
             ParamValue::Int(-1)
         );
         assert_eq!(

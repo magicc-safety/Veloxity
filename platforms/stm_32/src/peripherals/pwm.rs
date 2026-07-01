@@ -5,8 +5,12 @@ use embassy_stm32::peripherals::{
 };
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
-use veloxity_core::pwm::{
-    DshotCommand, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
+use veloxity_core::{
+    mixer::MixerOutputType,
+    pwm::{
+        DshotCommand, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
+        safe_disarmed_command,
+    },
 };
 
 const DSHOT_FRAME_WORDS: usize = DshotCommand::FRAME_BITS + 1;
@@ -128,11 +132,39 @@ impl ServoMonstrosity {
         Ok(())
     }
 
+    pub fn send_disarmed_commands(
+        &mut self,
+        output_types: &[MixerOutputType],
+    ) -> Result<(), TimerError> {
+        let count = output_types.len().min(self.chan_list.len());
+        for output in 0..count {
+            match self.output_protocols[output] {
+                PwmOutputProtocol::StandardPwm => {
+                    let duty = self
+                        .standard_pwm_duty(output, safe_disarmed_command(output_types[output]))?;
+                    self.set_duty_cycle(output, duty)?;
+                }
+                PwmOutputProtocol::Dshot => {
+                    self.prepare_dshot_command(output, DshotCommand::stop())?;
+                    return Err(TimerError::UnsupportedProtocol);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn prepare_dshot_frame(&mut self, output: usize, command: f64) -> Result<(), TimerError> {
+        self.prepare_dshot_command(output, DshotCommand::from_normalized(command))
+    }
+
+    fn prepare_dshot_command(
+        &mut self,
+        output: usize,
+        command: DshotCommand,
+    ) -> Result<(), TimerError> {
         let (timer_index, _) = self.chan_list[output];
         let max_duty = self.timers[timer_index].max_duty_cycle();
-        self.dshot_frames[output] =
-            dshot_waveform(DshotCommand::from_normalized(command), max_duty);
+        self.dshot_frames[output] = dshot_waveform(command, max_duty);
         Ok(())
     }
 
@@ -258,16 +290,44 @@ impl PixRacerProServoMonstrosity {
         Ok(())
     }
 
+    pub fn send_disarmed_commands(
+        &mut self,
+        output_types: &[MixerOutputType],
+    ) -> Result<(), TimerError> {
+        let count = output_types.len().min(self.chan_list.len());
+        for output in 0..count {
+            match self.output_protocols[output] {
+                PwmOutputProtocol::StandardPwm => {
+                    let duty = self
+                        .standard_pwm_duty(output, safe_disarmed_command(output_types[output]))?;
+                    self.set_duty_cycle(output, duty)?;
+                }
+                PwmOutputProtocol::Dshot => {
+                    self.prepare_dshot_command(output, DshotCommand::stop())?;
+                    self.emit_dshot_frame(output)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn max_duty_cycle(&self, ch: usize) -> u16 {
         let (ix, _chan) = self.chan_list[ch];
         self.timers[ix].max_duty_cycle()
     }
 
     fn prepare_dshot_frame(&mut self, output: usize, command: f64) -> Result<(), TimerError> {
+        self.prepare_dshot_command(output, DshotCommand::from_normalized(command))
+    }
+
+    fn prepare_dshot_command(
+        &mut self,
+        output: usize,
+        command: DshotCommand,
+    ) -> Result<(), TimerError> {
         let (timer_index, _) = self.chan_list[output];
         let max_duty = self.timers[timer_index].max_duty_cycle();
-        self.dshot_frames[output] =
-            dshot_waveform(DshotCommand::from_normalized(command), max_duty);
+        self.dshot_frames[output] = dshot_waveform(command, max_duty);
         Ok(())
     }
 

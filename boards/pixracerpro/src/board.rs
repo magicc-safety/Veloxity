@@ -202,6 +202,19 @@ impl BoardIo for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+        #[cfg(feature = "usb-vcp-serial")]
+        match peripherals::vcp::VCP_RX.try_read(buf) {
+            Ok(n) => {
+                return Some(Ok(n));
+            }
+            Err(embassy_sync::pipe::TryReadError::Empty) => {
+                // This is NORMAL. Do not log an error.
+                // Return Ok(0) to indicate "no bytes right now" without erroring.
+                return Some(Ok(0));
+            }
+        }
+
+        #[cfg(not(feature = "usb-vcp-serial"))]
         match peripherals::telem::TELEM_RX.try_read(buf) {
             Ok(n) => {
                 return Some(Ok(n));
@@ -214,25 +227,51 @@ impl BoardIo for Board {
         }
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        let mut n = 0;
-        let len = bytes.len();
-        loop {
-            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
-                Ok(wrote) => {
-                    if wrote == (len - n) {
-                        break;
-                    } else {
-                        n += wrote;
+        #[cfg(feature = "usb-vcp-serial")]
+        {
+            let mut n = 0;
+            let len = bytes.len();
+            loop {
+                match peripherals::vcp::VCP_TX.try_write(&bytes[n..len]) {
+                    Ok(wrote) => {
+                        if wrote == (len - n) {
+                            break;
+                        } else {
+                            n += wrote;
+                        }
+                    }
+                    Err(_) => {
+                        return Some(Err(errors::TelemError::GenericTelemError(
+                            "Error Writing USB VCP Packet!",
+                        )));
                     }
                 }
-                Err(_) => {
-                    return Some(Err(errors::TelemError::GenericTelemError(
-                        "Error Writing Telem Packet!",
-                    )));
+            }
+            return Some(Ok(len));
+        }
+
+        #[cfg(not(feature = "usb-vcp-serial"))]
+        {
+            let mut n = 0;
+            let len = bytes.len();
+            loop {
+                match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
+                    Ok(wrote) => {
+                        if wrote == (len - n) {
+                            break;
+                        } else {
+                            n += wrote;
+                        }
+                    }
+                    Err(_) => {
+                        return Some(Err(errors::TelemError::GenericTelemError(
+                            "Error Writing Telem Packet!",
+                        )));
+                    }
                 }
             }
+            Some(Ok(len))
         }
-        Some(Ok(len))
     }
 
     fn clock_millis(&self) -> u32 {

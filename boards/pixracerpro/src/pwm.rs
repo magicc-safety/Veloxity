@@ -1,6 +1,7 @@
 use stm_32::peripherals::pwm::{PixRacerProServoMonstrosity, TimerError};
 use veloxity_core::board::BoardIo;
-use veloxity_core::pwm::{PwmDriver, PwmError};
+use veloxity_core::mixer::MixerOutputType;
+use veloxity_core::pwm::{PwmDriver, PwmError, PwmOutputProtocol};
 
 const NUM_HW_CHANNELS: usize = 7;
 
@@ -107,6 +108,12 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
         Ok(())
     }
 
+    fn output_protocol(&self, channel: usize) -> Result<PwmOutputProtocol, PwmError> {
+        self.servos
+            .output_protocol(channel)
+            .map_err(timer_error_to_pwm_error)
+    }
+
     fn flush<B: BoardIo>(&mut self, _board: &mut B) {
         // Hardware state is already applied in set_duty_cycle.
     }
@@ -118,6 +125,18 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
     ) -> Result<(), PwmError> {
         self.servos
             .send_normalized_commands(commands_slice)
+            .map_err(timer_error_to_pwm_error)?;
+        self.flush(board);
+        Ok(())
+    }
+
+    fn send_disarmed_commands<B: BoardIo>(
+        &mut self,
+        board: &mut B,
+        output_types: &[MixerOutputType],
+    ) -> Result<(), PwmError> {
+        self.servos
+            .send_disarmed_commands(output_types)
             .map_err(timer_error_to_pwm_error)?;
         self.flush(board);
         Ok(())
