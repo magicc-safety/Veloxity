@@ -574,15 +574,22 @@ impl Board {
         spawn_task(&spawner4, peripherals::telem::task_tx(telem3_tx));
         spawn_task(&spawner4, peripherals::sd_card::task(usd_card));
 
-        // Normal servo outputs are intentionally left unmapped for now. PA15 is
-        // the Pixracer Pro buzzer PWM pin, and this board is currently using
-        // only PD11/PD12 as explicit GPIO timing pins.
+        // Only the four TIM1 motor outputs are mapped. PA15 is the Pixracer Pro
+        // buzzer PWM pin, and TIM4 aux outputs are intentionally left unmapped.
+        let tim1_ch1_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PE9, OutputType::PushPull);
+        let tim1_ch2_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PE11, OutputType::PushPull);
+        let tim1_ch3_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PE13, OutputType::PushPull);
+        let tim1_ch4_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PE14, OutputType::PushPull);
+
         let timer1 = SimplePwm::new(
             p.TIM1,
-            None,
-            None,
-            None,
-            None,
+            Some(tim1_ch1_pin),
+            Some(tim1_ch2_pin),
+            Some(tim1_ch3_pin),
+            Some(tim1_ch4_pin),
             Hertz::hz(400),
             Default::default(),
         );
