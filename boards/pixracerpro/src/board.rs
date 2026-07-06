@@ -574,48 +574,30 @@ impl Board {
         spawn_task(&spawner4, peripherals::telem::task_tx(telem3_tx));
         spawn_task(&spawner4, peripherals::sd_card::task(usd_card));
 
-        // SERVOS + TIMERS
-        // There are only 7 available Servo Channels on the PixRacer Pro
-        // TIM1
-        let tim1_ch1_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PE9, OutputType::PushPull);
-        let tim1_ch2_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PE11, OutputType::PushPull);
-        let tim1_ch3_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PE13, OutputType::PushPull);
-        let tim1_ch4_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PE14, OutputType::PushPull);
-
-        // TIM4
-        let tim4_ch2_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PD13, OutputType::PushPull);
-        let tim4_ch3_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PD14, OutputType::PushPull);
-
-        // TIM2
-        let tim2_ch1_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PA15, OutputType::PushPull);
-
+        // Normal servo outputs are intentionally left unmapped for now. PA15 is
+        // the Pixracer Pro buzzer PWM pin, and this board is currently using
+        // only PD11/PD12 as explicit GPIO timing pins.
         let timer1 = SimplePwm::new(
             p.TIM1,
-            Some(tim1_ch1_pin),
-            Some(tim1_ch2_pin),
-            Some(tim1_ch3_pin),
-            Some(tim1_ch4_pin),
+            None,
+            None,
+            None,
+            None,
             Hertz::hz(400),
             Default::default(),
         );
         let timer4 = SimplePwm::new(
             p.TIM4,
             None,
-            Some(tim4_ch2_pin),
-            Some(tim4_ch3_pin),
+            None,
+            None,
             None,
             Hertz::hz(400),
             Default::default(),
         );
         let timer2 = SimplePwm::new(
             p.TIM2,
-            Some(tim2_ch1_pin),
+            None,
             None,
             None,
             None,

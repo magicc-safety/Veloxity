@@ -1,35 +1,17 @@
-use stm_32::peripherals::pwm::{PixRacerProServoMonstrosity, TimerError};
+use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 use veloxity_core::board::BoardIo;
 use veloxity_core::mixer::MixerOutputType;
 use veloxity_core::pwm::{PwmDriver, PwmError, PwmOutputProtocol};
 
-const NUM_HW_CHANNELS: usize = 7;
+const NUM_HW_CHANNELS: usize = 0;
 
 pub struct BoardPwmDriver<'a> {
-    servos: &'a mut PixRacerProServoMonstrosity,
-    current_values: [f32; NUM_HW_CHANNELS],
-    enabled_chan_mask: u16,
-    max_duty_counts: [u16; NUM_HW_CHANNELS],
+    _servos: &'a mut PixRacerProServoMonstrosity,
 }
 
 impl<'a> BoardPwmDriver<'a> {
     pub fn new(servos: &'a mut PixRacerProServoMonstrosity) -> Self {
-        let mut max_duty_counts = [0u16; NUM_HW_CHANNELS];
-        for i in 0..NUM_HW_CHANNELS {
-            max_duty_counts[i] = servos.max_duty_cycle(i);
-        }
-
-        Self {
-            servos,
-            current_values: [1000.0; NUM_HW_CHANNELS],
-            enabled_chan_mask: 0,
-            max_duty_counts,
-        }
-    }
-
-    fn duty_u16_to_pwm_us(duty: u16) -> f32 {
-        let normalized = duty as f32 / u16::MAX as f32;
-        (normalized.clamp(0.0, 1.0) * 1000.0) + 1000.0
+        Self { _servos: servos }
     }
 }
 
@@ -39,33 +21,17 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
     }
 
     fn is_enabled(&self) -> bool {
-        self.enabled_chan_mask == ((1 << NUM_HW_CHANNELS) - 1)
+        true
     }
 
     fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
-        if channel >= NUM_HW_CHANNELS {
-            return Err(PwmError::ChannelOutOfRange);
-        }
-        self.servos
-            .enable(channel)
-            .map_err(|_| PwmError::GenericError)?;
-
-        self.enabled_chan_mask |= 1 << channel;
-
-        Ok(())
+        let _ = channel;
+        Err(PwmError::ChannelOutOfRange)
     }
 
     fn disable(&mut self, channel: usize) -> Result<(), PwmError> {
-        if channel >= NUM_HW_CHANNELS {
-            return Err(PwmError::ChannelOutOfRange);
-        }
-        self.servos
-            .disable(channel)
-            .map_err(|_| PwmError::GenericError)?;
-
-        self.enabled_chan_mask &= !(1 << channel);
-
-        Ok(())
+        let _ = channel;
+        Err(PwmError::ChannelOutOfRange)
     }
 
     fn enable_all(&mut self) -> Result<(), PwmError> {
@@ -82,36 +48,18 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
     }
 
     fn set_duty_cycle(&mut self, channel: usize, duty: u16) -> Result<(), PwmError> {
-        if channel >= NUM_HW_CHANNELS {
-            return Err(PwmError::ChannelOutOfRange);
-        }
-        let pwm_us = Self::duty_u16_to_pwm_us(duty);
-        self.current_values[channel] = pwm_us;
-
-        let max_duty = self.max_duty_counts[channel] as f32;
-        let raw_pwm = pwm_us / 2500.0 * max_duty;
-
-        self.servos
-            .set_duty_cycle(channel, raw_pwm as u16)
-            .map_err(|_| PwmError::GenericError)
+        let _ = (channel, duty);
+        Err(PwmError::ChannelOutOfRange)
     }
 
     fn configure_output_rates(&mut self, rates_hz: &[f64]) -> Result<(), PwmError> {
-        self.servos
-            .configure_output_rates(rates_hz)
-            .map_err(timer_error_to_pwm_error)?;
-
-        for i in 0..NUM_HW_CHANNELS {
-            self.max_duty_counts[i] = self.servos.max_duty_cycle(i);
-        }
-
+        let _ = rates_hz;
         Ok(())
     }
 
     fn output_protocol(&self, channel: usize) -> Result<PwmOutputProtocol, PwmError> {
-        self.servos
-            .output_protocol(channel)
-            .map_err(timer_error_to_pwm_error)
+        let _ = channel;
+        Err(PwmError::ChannelOutOfRange)
     }
 
     fn flush<B: BoardIo>(&mut self, _board: &mut B) {
@@ -123,9 +71,7 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
         board: &mut B,
         commands_slice: &[f64],
     ) -> Result<(), PwmError> {
-        self.servos
-            .send_normalized_commands(commands_slice)
-            .map_err(timer_error_to_pwm_error)?;
+        let _ = commands_slice;
         self.flush(board);
         Ok(())
     }
@@ -135,19 +81,8 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
         board: &mut B,
         output_types: &[MixerOutputType],
     ) -> Result<(), PwmError> {
-        self.servos
-            .send_disarmed_commands(output_types)
-            .map_err(timer_error_to_pwm_error)?;
+        let _ = output_types;
         self.flush(board);
         Ok(())
-    }
-}
-
-fn timer_error_to_pwm_error(error: TimerError) -> PwmError {
-    match error {
-        TimerError::ChanNotSupported => PwmError::ChannelOutOfRange,
-        TimerError::InvalidRate => PwmError::InvalidRate,
-        TimerError::UnsupportedProtocol => PwmError::UnsupportedProtocol,
-        TimerError::TimerNotSupported => PwmError::GenericError,
     }
 }

@@ -10,6 +10,7 @@ use embassy_stm32::bind_interrupts;
 use embassy_stm32::dma;
 use embassy_stm32::exti;
 use embassy_stm32::exti::ExtiInput;
+#[allow(unused_imports)]
 use embassy_stm32::gpio::OutputType;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::gpio::{Level, Output, Speed};
@@ -24,6 +25,7 @@ use embassy_stm32::spi;
 use embassy_stm32::spi::mode::Master as SpiMaster;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::time::mhz;
+#[allow(unused_imports)]
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart;
 use embassy_stm32::usart::Uart;
