@@ -1,6 +1,7 @@
 use crate::{
     comm::messages::{
-        PARAM_SET_BURST_QUEUE_CAPACITY, PARAM_SET_EVENT_QUEUE_CAPACITY,
+        PARAM_READ_INGRESS_QUEUE_CAPACITY, PARAM_SET_BURST_QUEUE_CAPACITY,
+        PARAM_SET_EVENT_QUEUE_CAPACITY,
         enums::{ParamIdentifier, RosflightCmd},
         messages::{
             ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamValueMsg,
@@ -162,7 +163,7 @@ pub enum CommResponse {
 }
 
 pub const PARAM_SET_REQUEST_QUEUE_CAPACITY: usize = PARAM_SET_EVENT_QUEUE_CAPACITY;
-pub const PARAM_READ_REQUEST_QUEUE_CAPACITY: usize = 4;
+pub const PARAM_READ_REQUEST_QUEUE_CAPACITY: usize = PARAM_READ_INGRESS_QUEUE_CAPACITY;
 pub const PARAM_LIST_REQUEST_QUEUE_CAPACITY: usize = 2;
 pub const PARAM_CHANGED_QUEUE_CAPACITY: usize = 8;
 pub const COMM_RESPONSE_QUEUE_CAPACITY: usize = PARAM_SET_BURST_QUEUE_CAPACITY;
