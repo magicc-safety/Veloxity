@@ -4,18 +4,18 @@ This guide runs the Veloxity Rust firmware inside the ROSflight standalone
 multirotor simulator, initializes that firmware through `rosflight_io`, then
 starts ROScopter autonomy and loads a waypoint mission.
 
-!!! info
-
-    The words below are intentionally specific:
-
-    - **Build the shim** means compile the Rust simulator library and the C++ ROS
-      2 bridge.
-    - **Start the simulator** means launch ROSflight standalone sim,
-      `rosflight_io`, and the Veloxity Rust firmware endpoint.
-    - **Initialize the running firmware** means load firmware params, calibrate
-      IMU/baro, and write params through `rosflight_io` services.
-    - **Launch ROScopter** means start the autonomy stack after the firmware
-      endpoint is already alive.
+> [!INFO]
+>
+>   The words below are intentionally specific:
+>
+>   - **Build the shim** means compile the Rust simulator library and the C++ ROS
+>     2 bridge.
+>   - **Start the simulator** means launch ROSflight standalone sim,
+>     `rosflight_io`, and the Veloxity Rust firmware endpoint.
+>   - **Initialize the running firmware** means load firmware params, calibrate
+>     IMU/baro, and write params through `rosflight_io` services.
+>   - **Launch ROScopter** means start the autonomy stack after the firmware
+>     endpoint is already alive.
 
 > [!NOTE]
 >
