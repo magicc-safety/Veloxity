@@ -30,7 +30,8 @@ The important distinction is:
 ## Files
 
 - `run_waypoint_angle_experiment.zsh`: launch, preflight checks, bag recording,
-  cleanup, and mixer restoration.
+  cleanup, and mixer restoration. With `--firmware`, it also owns a fresh
+  standalone SIL/RViz stack for that run.
 - `clean_slate.zsh`: stop both the example-owned processes and the visual
   SIL/RViz stack before a fresh run.
 - `cleanup_stale_processes.zsh`: stop stale example-owned ROScopter/GCS/bag
@@ -101,12 +102,22 @@ visible. Also watch the first few seconds of output: `rosflight_io` must not
 print `bind: Address already in use`. The RViz config already contains displays
 for the vehicle mesh, vehicle path, and waypoint markers.
 
+To explicitly choose the firmware endpoint when launching the visual stack:
+
+```bash
+ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
+  use_rviz:=true \
+  firmware:=veloxity
+```
+
+Use `firmware:=c` for the upstream ROSflight SIL firmware endpoint.
+
 ### 4. Terminal 2: Initialize Firmware/Baro
 
 In a second terminal, initialize firmware/baro before each clean capture:
 
 ```bash
-ros2 launch veloxity_sil_board_shim veloxity_multirotor_init_firmware.launch.py write_delay:=3.0
+ros2 launch veloxity_sil_board_shim veloxity_multirotor_init_firmware.launch.py write_delay_s:=3.0
 ```
 
 Confirm the firmware is healthy before flying:
@@ -146,6 +157,41 @@ open another sourced terminal and run:
 ```
 
 Leave that process running while you inspect RViz.
+
+## Managed Firmware Comparison
+
+For repeatable one-run-after-another comparisons, let the runner own the SIL
+stack by passing `--firmware`. This starts a fresh visual stack, initializes the
+firmware/baro, applies the experiment mixer, resets the simulated ground state,
+runs a final IMU/baro calibration on that ground state, records a bag, restores
+mixer params, and stops the stack on exit.
+
+```bash
+Veloxity/examples/quadx_angle_waypoints/clean_slate.zsh
+
+./examples/quadx_angle_waypoints/run_waypoint_angle_experiment.zsh \
+  --firmware rust \
+  --auto-release \
+  --duration 120 \
+  --bag-name takeoff_logs/quadx_waypoint_angle_mode_rust
+
+./examples/quadx_angle_waypoints/run_waypoint_angle_experiment.zsh \
+  --firmware c \
+  --auto-release \
+  --duration 120 \
+  --bag-name takeoff_logs/quadx_waypoint_angle_mode_c
+```
+
+`--firmware rust` selects the Rust/Veloxity FFI endpoint. Internally, this maps
+to the launch file's `firmware:=veloxity` option. If `--bag-name` is omitted,
+the managed runner writes to `takeoff_logs/quadx_waypoint_angle_mode_rust` or
+`takeoff_logs/quadx_waypoint_angle_mode_c`.
+
+When `--firmware` is omitted, the runner preserves the original behavior and
+uses whichever SIL/RViz stack is already running.
+
+Use `--final-cal-settle-s` to change the sensor settle time before the final
+ground calibration. The default is `1.0` second.
 
 ## Analyze
 
