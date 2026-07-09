@@ -106,7 +106,8 @@ where
             rc: &mut self.rc,
             command: &mut self.command,
             state: &mut self.state,
-            params: &self.params,
+            params: &mut self.params,
+            param_events: Some(&mut self.param_events),
         });
         self.run_pwm_output_stage();
         self.update_board_leds(now_ms);
@@ -117,7 +118,8 @@ where
             board: &mut self.board,
             pwm: &mut self.pwm,
             output: &mut self.pwm_output,
-            state: &self.state,
+            output_kill_active: self.rc.switch_mapped(crate::rc::Switch::OutputKill)
+                && self.rc.switch_on(crate::rc::Switch::OutputKill),
         })
         .unwrap_or(false)
     }

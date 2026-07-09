@@ -14,6 +14,7 @@ HEARTBEAT = 0
 PARAM_REQUEST_READ = 20
 PARAM_REQUEST_LIST = 21
 PARAM_VALUE = 22
+PARAM_SET = 23
 RC_CHANNELS = 65
 TIMESYNC = 111
 SMALL_IMU = 181
@@ -262,6 +263,47 @@ def parse_args():
     )
     parser.add_argument("--request-version-s", type=float, default=1.0)
     parser.add_argument("--request-params-s", type=float, default=2.0)
+    parser.add_argument(
+        "--param-flood",
+        metavar="NAME",
+        help="Send a burst of PARAM_SET messages for NAME while receiving telemetry.",
+    )
+    parser.add_argument(
+        "--param-flood-count",
+        type=int,
+        default=300,
+        help="Number of PARAM_SET messages to send when --param-flood is set.",
+    )
+    parser.add_argument(
+        "--param-flood-value",
+        type=float,
+        default=0.0,
+        help="First PARAM_SET value to send during a flood.",
+    )
+    parser.add_argument(
+        "--param-flood-step",
+        type=float,
+        default=0.0,
+        help="Value increment between flooded PARAM_SET messages.",
+    )
+    parser.add_argument(
+        "--param-flood-type",
+        choices=("real32", "int32"),
+        default="real32",
+        help="MAV_PARAM_TYPE for flooded PARAM_SET messages.",
+    )
+    parser.add_argument(
+        "--param-flood-delay-s",
+        type=float,
+        default=0.0,
+        help="Delay before starting PARAM_SET flood.",
+    )
+    parser.add_argument(
+        "--param-flood-period-s",
+        type=float,
+        default=0.0,
+        help="Optional pacing between PARAM_SET messages; 0 sends the burst immediately.",
+    )
     return parser.parse_args()
 
 
@@ -329,25 +371,44 @@ def param_request_read_payload(args, param_name="", param_index=0):
     return struct.pack("<hBB16s", param_index, args.target_system, args.target_component, param_id)
 
 
+def param_set_payload(args, param_name, value):
+    param_id = param_name.encode("ascii", errors="ignore")[:16].ljust(16, b"\0")
+    param_type = 9 if args.param_flood_type == "real32" else 6
+    if args.param_flood_type == "int32":
+        value = float(int(value))
+    return struct.pack(
+        "<fBB16sB",
+        float(value),
+        args.target_system,
+        args.target_component,
+        param_id,
+        param_type,
+    )
+
+
 def rosflight_cmd_payload(command):
     return struct.pack("<B", command)
 
 
 class MavlinkInjector:
-    def __init__(self, args):
+    def __init__(self, args, request_delay_base_s=0.0):
         self.args = args
         self.seq = 0
         now = time.monotonic()
+        request_base = now + request_delay_base_s
         self.next_heartbeat = now
         self.next_timesync = now
-        self.next_version = now + args.request_version_s
-        self.next_params = now + args.request_params_s
+        self.next_version = request_base + args.request_version_s
+        self.next_params = request_base + args.request_params_s
+        self.next_param_flood = now + args.param_flood_delay_s
+        self.param_flood_sent = 0
         self.sent = {
             "heartbeat": 0,
             "timesync": 0,
             "version_cmd": 0,
             "param_request_list": 0,
             "param_request_read": 0,
+            "param_set": 0,
         }
 
     def frame(self, msgid, payload):
@@ -393,6 +454,24 @@ class MavlinkInjector:
             self.sent["param_request_list"] += 1
             self.sent["param_request_read"] += 1
             self.next_params = float("inf")
+        if self.args.param_flood and now >= self.next_param_flood:
+            while self.param_flood_sent < self.args.param_flood_count:
+                value = (
+                    self.args.param_flood_value
+                    + self.param_flood_sent * self.args.param_flood_step
+                )
+                write_transport(
+                    self.args,
+                    source,
+                    self.frame(PARAM_SET, param_set_payload(self.args, self.args.param_flood, value)),
+                )
+                self.sent["param_set"] += 1
+                self.param_flood_sent += 1
+                if self.args.param_flood_period_s > 0:
+                    self.next_param_flood = now + self.args.param_flood_period_s
+                    break
+            else:
+                self.next_param_flood = float("inf")
 
 
 def open_udp(args):
@@ -894,6 +973,42 @@ def summarize_status_diagnostics(records, recent_limit=24):
             print(f"    {text}")
 
 
+def summarize_param_flood(args, records):
+    if not args.param_flood:
+        return
+
+    expected_values = [
+        args.param_flood_value + i * args.param_flood_step for i in range(args.param_flood_count)
+    ]
+    if args.param_flood_type == "int32":
+        expected_values = [float(int(value)) for value in expected_values]
+    expected_unique = set(expected_values)
+
+    matching = [
+        record
+        for record in records["param"]
+        if record["values"].get("id") == args.param_flood
+    ]
+    ack_values = [record["values"].get("value") for record in matching]
+    matching_expected = [
+        value
+        for value in ack_values
+        if any(abs(value - expected) <= 1e-6 for expected in expected_unique)
+    ]
+    print(
+        "param flood: "
+        f"name={args.param_flood} sent={args.param_flood_count} "
+        f"matching_param_value={len(matching)} matching_expected={len(matching_expected)}"
+    )
+    if ack_values:
+        print(
+            "  ack values: "
+            f"first={format_decoded_scalar(ack_values[0])} "
+            f"last={format_decoded_scalar(ack_values[-1])} "
+            f"unique={len(set(ack_values))}"
+        )
+
+
 def summarize_perf(records):
     if not records:
         print("perf: no timing diagnostic frames")
@@ -1084,6 +1199,8 @@ def acceptance_failures(args, parser, sequence_summary, records):
 
 def main():
     args = parse_args()
+    if args.param_flood:
+        args.bidirectional = True
     parser = MavlinkV1Parser(
         validate_crc=not args.no_crc,
         invalid_sample_limit=args.invalid_samples if args.diagnostics else 0,
@@ -1113,7 +1230,11 @@ def main():
     timesync_seq = 0
     timesync_sent = 0
     next_timesync_ns = 0
-    injector = MavlinkInjector(args) if args.bidirectional or args.acceptance else None
+    injector = (
+        MavlinkInjector(args, request_delay_base_s=args.warmup_s if args.acceptance else 0.0)
+        if args.bidirectional or args.acceptance
+        else None
+    )
     raw_capture = open(args.raw_capture, "wb") if args.raw_capture else None
 
     if args.transport == "uart":
@@ -1238,6 +1359,7 @@ def main():
     summarize("status", records["status"])
     summarize_text(records["text"])
     summarize_status_diagnostics(records["text"])
+    summarize_param_flood(args, records)
     summarize_perf(records["perf"])
     summarize_expected_rate("imu receive rate", imu_rate_hz, args.expect_imu_hz)
     summarize_expected_rate("rc receive rate", rc_rate_hz, args.expect_rc_hz)

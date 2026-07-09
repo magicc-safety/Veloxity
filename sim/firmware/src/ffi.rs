@@ -12,11 +12,12 @@ use veloxity_core::{
     errors,
     estimator::quad::QuadEstimator,
     math::FlightFloat,
-    mixer::matrix::MatrixMixer,
+    mixer::{MixerOutputType, matrix::MatrixMixer},
     packets,
     params::{PARAM_DEFINITIONS, ParamValue, Params},
     pwm::{
         PwmDriver, PwmError, PwmOutputProtocol, effective_output_rate_hz, output_protocol_for_rate,
+        safe_disarmed_command,
     },
     sensors::SensorBus,
     state_machine::StateManager,
@@ -225,6 +226,13 @@ impl PwmDriver<f64> for FfiPwmDriver {
         Ok(())
     }
 
+    fn output_protocol(&self, channel: usize) -> Result<PwmOutputProtocol, PwmError> {
+        self.output_protocols
+            .get(channel)
+            .copied()
+            .ok_or(PwmError::ChannelOutOfRange)
+    }
+
     fn send_commands<B: BoardIo>(
         &mut self,
         _board: &mut B,
@@ -233,6 +241,23 @@ impl PwmDriver<f64> for FfiPwmDriver {
         for (channel, command) in commands.iter().take(NUM_PWM_CHANNELS).enumerate() {
             let pwm_us = 1000.0 + command.clamp(0.0, 1.0) * 1000.0;
             self.set_pwm(channel, pwm_us as u16)?;
+        }
+        Ok(())
+    }
+
+    fn send_disarmed_commands<B: BoardIo>(
+        &mut self,
+        _board: &mut B,
+        output_types: &[MixerOutputType],
+    ) -> Result<(), PwmError> {
+        for (channel, output_type) in output_types.iter().take(NUM_PWM_CHANNELS).enumerate() {
+            let command = safe_disarmed_command::<f64>(*output_type);
+            let output = match self.output_protocols[channel] {
+                PwmOutputProtocol::StandardPwm => 1000.0 + command * 1000.0,
+                PwmOutputProtocol::Dshot if *output_type == MixerOutputType::Motor => 0.0,
+                PwmOutputProtocol::Dshot => command,
+            };
+            self.set_pwm(channel, output as u16)?;
         }
         Ok(())
     }

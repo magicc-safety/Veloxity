@@ -776,8 +776,8 @@ impl Bmi08xSensor {
             let _ = self.dev_g.transfer(&mut rx, &tx).await;
 
             let mut gyro = [0f64; 3];
-            gyro[0] = scale_factor_g * (((rx[2] as i16) << 8 | (rx[1] as i16)) as f64);
-            gyro[1] = scale_factor_g * (((rx[4] as i16) << 8 | (rx[3] as i16)) as f64);
+            gyro[0] = -scale_factor_g * (((rx[2] as i16) << 8 | (rx[1] as i16)) as f64);
+            gyro[1] = -scale_factor_g * (((rx[4] as i16) << 8 | (rx[3] as i16)) as f64);
             gyro[2] = scale_factor_g * (((rx[6] as i16) << 8 | (rx[5] as i16)) as f64);
 
             let status = 0u16; // dummy value

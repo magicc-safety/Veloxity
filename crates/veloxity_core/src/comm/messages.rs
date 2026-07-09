@@ -4,8 +4,11 @@ use messages::*;
 
 // PARAM_SET has a two-stage path: decoded MAVLink ingress waits here, then the
 // comm system admits work into the ECS event queue while that queue has room.
-pub const PARAM_SET_INGRESS_QUEUE_CAPACITY: usize = 32;
-pub const PARAM_SET_EVENT_QUEUE_CAPACITY: usize = 4;
+// Keep enough room for a companion computer to send a full parameter-table load
+// as one burst without dropping valid set requests.
+pub const PARAM_SET_BURST_QUEUE_CAPACITY: usize = 512;
+pub const PARAM_SET_INGRESS_QUEUE_CAPACITY: usize = PARAM_SET_BURST_QUEUE_CAPACITY;
+pub const PARAM_SET_EVENT_QUEUE_CAPACITY: usize = PARAM_SET_BURST_QUEUE_CAPACITY;
 
 #[derive(Default)]
 pub struct Messages {
@@ -69,7 +72,9 @@ impl_store!(
 );
 impl Store<ParamSetMsg> for Messages {
     fn store(&mut self, msg: ParamSetMsg) {
-        let _ = self.param_set.push_back(msg);
+        if self.param_set.push_back(msg).is_err() {
+            crate::log_warn!("message queue full: param_set");
+        }
     }
 
     fn take(&mut self) -> Option<ParamSetMsg> {

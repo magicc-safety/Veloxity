@@ -401,6 +401,65 @@ fn test_unable_to_arm_with_uncalibrated_imu_error() {
 }
 
 #[test]
+fn test_bypass_unhealthy_estimator_default_allows_arm_with_only_estimator_error() {
+    let (mut manager, params) = setup_state_manager();
+    manager.set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, true, &params);
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(manager.is_armed());
+    assert_eq!(manager.get_errors(), ErrorFlag::UNHEALTHY_ESTIMATOR);
+    assert_state!(manager.machine, StateMachine::Armed);
+}
+
+#[test]
+fn test_bypass_unhealthy_estimator_param_off_blocks_arm_with_estimator_error() {
+    let (mut manager, mut params) = setup_state_manager();
+    params.set_by_id(ParamId::PARAM_ALLOW_UNHEALTHY_ESTIMATOR, ParamValue::Int(0));
+    manager.set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, true, &params);
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(!manager.is_armed());
+    assert_eq!(manager.get_errors(), ErrorFlag::UNHEALTHY_ESTIMATOR);
+    assert_state!(manager.machine, StateMachine::ErrorPresent);
+}
+
+#[test]
+fn test_bypass_unhealthy_estimator_keeps_other_errors_blocking_arm() {
+    let (mut manager, params) = setup_state_manager();
+    manager.set_error_flag(
+        ErrorFlag::UNHEALTHY_ESTIMATOR | ErrorFlag::RC_LOST,
+        true,
+        &params,
+    );
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(!manager.is_armed());
+    assert_eq!(
+        manager.get_errors(),
+        ErrorFlag::UNHEALTHY_ESTIMATOR | ErrorFlag::RC_LOST
+    );
+    assert_state!(manager.machine, StateMachine::ErrorPresent);
+}
+
+#[test]
+fn test_bypass_unhealthy_estimator_still_enforces_arming_safety() {
+    let params = Params::new();
+    let mut manager = StateManager::new();
+    manager.update(Event::INITIALIZED, &params);
+    manager.update_arming_safety(false, true);
+    manager.set_error_flag(ErrorFlag::UNHEALTHY_ESTIMATOR, true, &params);
+
+    manager.update(Event::REQUEST_ARM, &params);
+
+    assert!(!manager.is_armed());
+    assert_eq!(manager.get_errors(), ErrorFlag::UNHEALTHY_ESTIMATOR);
+    assert_state!(manager.machine, StateMachine::ErrorPresent);
+}
+
+#[test]
 fn test_able_to_arm_after_rc_recovery() {
     let (mut sm, params) = setup_sm();
     sm.update(Event::ERROR_OCCURRED(ErrorFlag::RC_LOST), &params);

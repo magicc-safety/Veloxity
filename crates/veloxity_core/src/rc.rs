@@ -7,7 +7,7 @@ pub mod command_state;
 
 // --- Constants ---
 pub const STICKS_COUNT: usize = 4;
-pub const SWITCHES_COUNT: usize = 4;
+pub const SWITCHES_COUNT: usize = 5;
 pub const RC_STRUCT_CHANNELS: usize = 16; // A common max channel count
 
 const RC_TIMEOUT_US: u64 = 500_000;
@@ -30,6 +30,7 @@ pub enum Switch {
     AttOverride = 1,
     ThrottleOverride = 2,
     AttType = 3,
+    OutputKill = 4,
 }
 
 // --- RC Data Structs ---
@@ -185,6 +186,9 @@ impl Rc {
                 i if i == Switch::AttType as usize => {
                     Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL)
                 }
+                i if i == Switch::OutputKill as usize => {
+                    Some(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL)
+                }
                 _ => None,
             };
 
@@ -241,6 +245,9 @@ impl Rc {
                     "ATTITUDE TYPE",
                     Some(ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL),
                 ),
+                i if i == Switch::OutputKill as usize => {
+                    ("OUTPUT KILL", Some(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL))
+                }
                 _ => ("INVALID", None),
             };
 
@@ -277,6 +284,7 @@ impl Rc {
             | ParamId::PARAM_RC_THROTTLE_OVERRIDE_CHANNEL
             | ParamId::PARAM_RC_ATT_CONTROL_TYPE_CHANNEL
             | ParamId::PARAM_RC_ARM_CHANNEL
+            | ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL
             | ParamId::PARAM_RC_SWITCH_5_DIRECTION
             | ParamId::PARAM_RC_SWITCH_6_DIRECTION
             | ParamId::PARAM_RC_SWITCH_7_DIRECTION

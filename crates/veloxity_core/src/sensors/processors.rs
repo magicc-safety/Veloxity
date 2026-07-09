@@ -1114,4 +1114,31 @@ mod tests {
             ParamValue::Float(0.2)
         );
     }
+
+    #[test]
+    fn imu_calibration_uses_mount_rotation_before_gravity_sanity_gate() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_IMU_ROLL, ParamValue::Float(90.0));
+        let mut processor = ImuProcessor::<f64>::new();
+        let mut flags = CalibrationFlags::ACCEL | CalibrationFlags::GYRO;
+
+        for seq in 0..=1000 {
+            let mut raw = Some(Ok(ImuPacket {
+                accel: [0.1, -9.50665, 0.2],
+                gyro: [0.2, 0.3, 0.1],
+                seq,
+                ..Default::default()
+            }));
+            let _ = processor.process(&mut raw, &mut flags, &mut params);
+        }
+
+        assert!(!flags.intersects(CalibrationFlags::IMU));
+        assert!(!flags.intersects(CalibrationFlags::ACCEL_FAILED | CalibrationFlags::GYRO_FAILED));
+        assert!((param_float(&params, ParamId::PARAM_ACC_X_BIAS) - 0.1).abs() < 1e-6);
+        assert!((param_float(&params, ParamId::PARAM_ACC_Y_BIAS) + 0.2).abs() < 1e-6);
+        assert!((param_float(&params, ParamId::PARAM_ACC_Z_BIAS) - 0.3).abs() < 1e-5);
+        assert!((param_float(&params, ParamId::PARAM_GYRO_X_BIAS) - 0.2).abs() < 1e-6);
+        assert!((param_float(&params, ParamId::PARAM_GYRO_Y_BIAS) + 0.1).abs() < 1e-6);
+        assert!((param_float(&params, ParamId::PARAM_GYRO_Z_BIAS) - 0.3).abs() < 1e-6);
+    }
 }

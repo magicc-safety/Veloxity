@@ -1756,8 +1756,9 @@ fn world_pwm_output_stage_follows_armed_state_transitions() {
     params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
     let mut world = test_world_with_params(params);
 
-    assert!(!world.run_pwm_output_stage());
-    assert_eq!(world.pwm.enable_all_count, 0);
+    assert!(world.run_pwm_output_stage());
+    assert!(world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.enable_all_count, 1);
     assert_eq!(world.pwm.disable_all_count, 0);
 
     world.state.update_arming_safety(true, true);
@@ -1765,7 +1766,7 @@ fn world_pwm_output_stage_follows_armed_state_transitions() {
         .state
         .update(crate::state_machine::Event::REQUEST_ARM, &world.params);
 
-    assert!(world.run_pwm_output_stage());
+    assert!(!world.run_pwm_output_stage());
     assert!(world.pwm_output.is_enabled());
     assert_eq!(world.pwm.enable_all_count, 1);
 
@@ -1776,10 +1777,58 @@ fn world_pwm_output_stage_follows_armed_state_transitions() {
         .state
         .update(crate::state_machine::Event::REQUEST_DISARM, &world.params);
 
+    assert!(!world.run_pwm_output_stage());
+    assert!(world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.disable_all_count, 0);
+    assert_eq!(world.pwm.flush_count, 0);
+}
+
+#[test]
+fn world_pwm_output_stage_disables_outputs_while_rc_kill_switch_is_active() {
+    let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
+    params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
+    params.set_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL, ParamValue::Int(4));
+    let mut world = test_world_with_params(params);
+
+    assert!(world.run_pwm_output_stage());
+    assert!(world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.enable_all_count, 1);
+
+    let mut channels = [0.5; RC_PACKET_CHANNELS];
+    channels[4] = 1.0;
+    world.rc.receive(&RcPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_000,
+            status: 0,
+        },
+        n_chan: 6,
+        chan: channels,
+        lol: false,
+    });
+    world.rc.run(1, &world.params, &mut world.state);
+
     assert!(world.run_pwm_output_stage());
     assert!(!world.pwm_output.is_enabled());
     assert_eq!(world.pwm.disable_all_count, 1);
     assert_eq!(world.pwm.flush_count, 1);
+
+    channels[4] = 0.0;
+    world.rc.receive(&RcPacket {
+        header: RosflightPacketHeader {
+            timestamp: 2_000,
+            status: 0,
+        },
+        n_chan: 6,
+        chan: channels,
+        lol: false,
+    });
+    world.rc.run(2, &world.params, &mut world.state);
+
+    assert!(world.run_pwm_output_stage());
+    assert!(world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.enable_all_count, 2);
+    assert_eq!(world.pwm.disable_all_count, 1);
 }
 
 #[test]

@@ -1,0 +1,28 @@
+/trajectory_to_angle_command_experiment:
+  ros__parameters:
+    hover_throttle: 0.686
+    min_throttle: 0.43
+    max_throttle: 0.82
+
+    max_angle_rad: 0.30
+    max_yaw_rate_rad_s: 0.70
+    takeoff_attitude_gate_m: 0.30
+
+    use_filtered_target: false
+    max_horizontal_position_error_m: 3.0
+    max_vertical_position_error_m: 2.0
+
+    max_horizontal_slew_m_s: 2.0
+    max_down_slew_m_s: 1.0
+    yaw_slew_rate_rad_s: 0.70
+
+    kp_n: 0.45
+    kd_n: 0.70
+    kp_e: 0.45
+    kd_e: 0.70
+    max_horizontal_accel_m_s2: 2.6
+
+    kp_d_throttle: 0.035
+    kd_d_throttle: 0.075
+    kff_d_accel_throttle: -0.010
+    yaw_kp: 1.20

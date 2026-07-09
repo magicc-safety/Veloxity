@@ -34,11 +34,11 @@
 // ******************************************************************************
 
 use embassy_futures::join::join;
-use embassy_futures::select::{Either, select};
 use embassy_stm32::peripherals::USB_OTG_FS;
 use embassy_stm32::usb::{Driver, Instance};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
+use embassy_time::{Duration, with_timeout};
 use embassy_usb::Builder;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use veloxity_core::comm::interface::EmbeddedComInterface;
@@ -46,6 +46,7 @@ use veloxity_core::errors::SensorError;
 
 pub const VCP_TX_BUFF_SIZE: usize = 2048;
 pub const VCP_RX_BUFF_SIZE: usize = 2048;
+const USB_CDC_FS_PACKET_SIZE: usize = 64;
 
 pub static VCP_TX: Pipe<CriticalSectionRawMutex, VCP_TX_BUFF_SIZE> = Pipe::new();
 pub static VCP_RX: Pipe<CriticalSectionRawMutex, VCP_RX_BUFF_SIZE> = Pipe::new();
@@ -119,26 +120,23 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
         let mut rx_buf = [0u8; VCP_RX_BUFF_SIZE];
 
         loop {
-            let tx_fut = VCP_TX.read(&mut tx_buf);
-            let rx_fut = class.read_packet(&mut rx_buf);
+            match with_timeout(Duration::from_micros(100), class.read_packet(&mut rx_buf)).await {
+                Ok(Ok(n)) if n > 0 => {
+                    byte_processor.process_bytes(&rx_buf[..n], n).await;
+                }
+                Ok(Err(_)) => {
+                    return Err(SensorError::GenericSensorError("VCP RX failed")); // Assume disconnect, return to outer loop
+                }
+                _ => {}
+            }
 
-            match select(tx_fut, rx_fut).await {
-                Either::First(n) => {
-                    if n > 0 {
-                        if let Err(_) = class.write_packet(&tx_buf[..n]).await {
-                            return Err(SensorError::GenericSensorError("VCP TX failed")); // Assume disconnect, return to outer loop
-                        }
+            let n = VCP_TX.read(&mut tx_buf).await;
+            if n > 0 {
+                for packet in tx_buf[..n].chunks(USB_CDC_FS_PACKET_SIZE) {
+                    if let Err(_) = class.write_packet(packet).await {
+                        return Err(SensorError::GenericSensorError("VCP TX failed")); // Assume disconnect, return to outer loop
                     }
                 }
-                Either::Second(result) => match result {
-                    Ok(n) if n > 0 => {
-                        byte_processor.process_bytes(&rx_buf[..n], n).await;
-                    }
-                    Err(_) => {
-                        return Err(SensorError::GenericSensorError("VCP RX failed")); // Assume disconnect, return to outer loop
-                    }
-                    _ => {} // no data, do nothing
-                },
             }
         }
     }

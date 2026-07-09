@@ -237,6 +237,19 @@ impl BoardIo for Board {
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
+        #[cfg(feature = "usb-vcp-serial")]
+        match peripherals::vcp::VCP_RX.try_read(buf) {
+            Ok(n) => {
+                return Some(Ok(n));
+            }
+            Err(embassy_sync::pipe::TryReadError::Empty) => {
+                // This is NORMAL. Do not log an error.
+                // Return Ok(0) to indicate "no bytes right now" without erroring.
+                return Some(Ok(0));
+            }
+        }
+
+        #[cfg(not(feature = "usb-vcp-serial"))]
         match peripherals::telem::TELEM_RX.try_read(buf) {
             Ok(n) => {
                 return Some(Ok(n));
@@ -249,25 +262,51 @@ impl BoardIo for Board {
         }
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
-        let mut n = 0;
-        let len = bytes.len();
-        loop {
-            match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
-                Ok(wrote) => {
-                    if wrote == (len - n) {
-                        break;
-                    } else {
-                        n += wrote;
+        #[cfg(feature = "usb-vcp-serial")]
+        {
+            let mut n = 0;
+            let len = bytes.len();
+            loop {
+                match peripherals::vcp::VCP_TX.try_write(&bytes[n..len]) {
+                    Ok(wrote) => {
+                        if wrote == (len - n) {
+                            break;
+                        } else {
+                            n += wrote;
+                        }
+                    }
+                    Err(_) => {
+                        return Some(Err(errors::TelemError::GenericTelemError(
+                            "Error Writing USB VCP Packet!",
+                        )));
                     }
                 }
-                Err(_) => {
-                    return Some(Err(errors::TelemError::GenericTelemError(
-                        "Error Writing Telem Packet!",
-                    )));
+            }
+            return Some(Ok(len));
+        }
+
+        #[cfg(not(feature = "usb-vcp-serial"))]
+        {
+            let mut n = 0;
+            let len = bytes.len();
+            loop {
+                match peripherals::telem::TELEM_TX.try_write(&bytes[n..len]) {
+                    Ok(wrote) => {
+                        if wrote == (len - n) {
+                            break;
+                        } else {
+                            n += wrote;
+                        }
+                    }
+                    Err(_) => {
+                        return Some(Err(errors::TelemError::GenericTelemError(
+                            "Error Writing Telem Packet!",
+                        )));
+                    }
                 }
             }
+            Some(Ok(len))
         }
-        Some(Ok(len))
     }
 
     fn clock_millis(&self) -> u32 {
@@ -570,9 +609,8 @@ impl Board {
         spawn_task(&spawner4, peripherals::telem::task_tx(telem3_tx));
         spawn_task(&spawner4, peripherals::sd_card::task(usd_card));
 
-        // SERVOS + TIMERS
-        // There are only 7 available Servo Channels on the PixRacer Pro
-        // TIM1
+        // Only the four TIM1 motor outputs are mapped. PA15 is the Pixracer Pro
+        // buzzer PWM pin, and TIM4 aux outputs are intentionally left unmapped.
         let tim1_ch1_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PE9, OutputType::PushPull);
         let tim1_ch2_pin =
             PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PE11, OutputType::PushPull);
@@ -580,16 +618,6 @@ impl Board {
             PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PE13, OutputType::PushPull);
         let tim1_ch4_pin =
             PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PE14, OutputType::PushPull);
-
-        // TIM4
-        let tim4_ch2_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PD13, OutputType::PushPull);
-        let tim4_ch3_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PD14, OutputType::PushPull);
-
-        // TIM2
-        let tim2_ch1_pin =
-            PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PA15, OutputType::PushPull);
 
         let timer1 = SimplePwm::new(
             p.TIM1,
@@ -603,15 +631,15 @@ impl Board {
         let timer4 = SimplePwm::new(
             p.TIM4,
             None,
-            Some(tim4_ch2_pin),
-            Some(tim4_ch3_pin),
+            None,
+            None,
             None,
             Hertz::hz(400),
             Default::default(),
         );
         let timer2 = SimplePwm::new(
             p.TIM2,
-            Some(tim2_ch1_pin),
+            None,
             None,
             None,
             None,

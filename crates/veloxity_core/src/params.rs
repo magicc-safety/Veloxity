@@ -393,6 +393,7 @@ declare_params! {
     PARAM_MOTOR_IDLE_THROTTLE, "MOTOR_IDLE_THR", Float(0.1);
     PARAM_FAILSAFE_THROTTLE, "FAILSAFE_THR", Float(-1.0);
     PARAM_SPIN_MOTORS_WHEN_ARMED, "ARM_SPIN_MOTORS", Int(1);
+    PARAM_MOTOR_OUTPUT_MASK, "MTR_OUT_MASK", Int(-1);
     PARAM_INIT_TIME, "FILT_INIT_T", Int(3000);
     PARAM_FILTER_KP_ACC, "FILT_ACC_KP", Float(0.5);
     PARAM_FILTER_KI, "FILT_KI", Float(0.01);
@@ -449,6 +450,8 @@ declare_params! {
     PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE, "TAKE_MIN_THR", Int(1);
     PARAM_RC_MAX_THROTTLE, "RC_MAX_THR", Float(0.7);
     PARAM_RC_ATTITUDE_MODE, "RC_ATT_MODE", Int(1);
+    PARAM_ALLOW_UNHEALTHY_ESTIMATOR, "BYPASS_UNH_EST", Int(1);
+    PARAM_EST_ANGLE_LOCKOUT, "EST_ANG_LOCKOUT", Int(0);
     PARAM_RC_MAX_ROLL, "RC_MAX_ROLL", Float(0.786);
     PARAM_RC_MAX_PITCH, "RC_MAX_PITCH", Float(0.786);
     PARAM_RC_MAX_ROLLRATE, "RC_MAX_ROLLRATE", Float(3.14159);
@@ -472,6 +475,7 @@ declare_params! {
     PARAM_BATTERY_VOLTAGE_ALPHA, "BATT_VOLT_LPF", Float(0.995);
     PARAM_BATTERY_CURRENT_ALPHA, "BATT_CURR_LPF", Float(0.995);
     PARAM_OFFBOARD_TIMEOUT, "OFFBOARD_TIMEOUT", Int(100);
+    PARAM_RC_OUTPUT_KILL_CHANNEL, "RC_KILL_CHN", Int(-1);
 }
 
 //=================================================================================
@@ -485,7 +489,7 @@ mod tests {
     #[test]
     fn test_param_count() {
         assert_eq!(PARAMS_COUNT, PARAM_DEFINITIONS.len());
-        assert_eq!(PARAMS_COUNT, 333);
+        assert_eq!(PARAMS_COUNT, 337);
     }
 
     #[test]
@@ -502,6 +506,11 @@ mod tests {
             ParamId::PARAM_RC_OVERRIDE_TAKE_MIN_THROTTLE.as_str(),
             "TAKE_MIN_THR"
         );
+        assert_eq!(
+            ParamId::PARAM_ALLOW_UNHEALTHY_ESTIMATOR.as_str(),
+            "BYPASS_UNH_EST"
+        );
+        assert_eq!(ParamId::PARAM_EST_ANGLE_LOCKOUT.as_str(), "EST_ANG_LOCKOUT");
         assert_eq!(ParamId::PARAM_ELEVATOR_REVERSE.as_str(), "REV_ELEVATOR");
         assert_eq!(ParamId::PARAM_IMU_ROLL.as_str(), "IMU_ROLL");
         assert_eq!(ParamId::PARAM_MAG_YAW.as_str(), "MAG_YAW");
@@ -509,6 +518,11 @@ mod tests {
         assert_eq!(
             ParamId::PARAM_BATTERY_VOLTAGE_ALPHA.as_str(),
             "BATT_VOLT_LPF"
+        );
+        assert_eq!(ParamId::PARAM_MOTOR_OUTPUT_MASK.as_str(), "MTR_OUT_MASK");
+        assert_eq!(
+            ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL.as_str(),
+            "RC_KILL_CHN"
         );
     }
 
@@ -526,6 +540,14 @@ mod tests {
         assert_eq!(
             p.get_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED),
             ParamValue::Int(1)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK),
+            ParamValue::Int(-1)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL),
+            ParamValue::Int(-1)
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_CALIBRATE_GYRO_ON_ARM),

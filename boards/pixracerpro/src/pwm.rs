@@ -35,9 +35,10 @@
 
 use stm_32::peripherals::pwm::{PixRacerProServoMonstrosity, TimerError};
 use veloxity_core::board::BoardIo;
-use veloxity_core::pwm::{PwmDriver, PwmError};
+use veloxity_core::mixer::MixerOutputType;
+use veloxity_core::pwm::{PwmDriver, PwmError, PwmOutputProtocol};
 
-const NUM_HW_CHANNELS: usize = 7;
+const NUM_HW_CHANNELS: usize = 4;
 
 pub struct BoardPwmDriver<'a> {
     servos: &'a mut PixRacerProServoMonstrosity,
@@ -49,8 +50,8 @@ pub struct BoardPwmDriver<'a> {
 impl<'a> BoardPwmDriver<'a> {
     pub fn new(servos: &'a mut PixRacerProServoMonstrosity) -> Self {
         let mut max_duty_counts = [0u16; NUM_HW_CHANNELS];
-        for i in 0..NUM_HW_CHANNELS {
-            max_duty_counts[i] = servos.max_duty_cycle(i);
+        for (channel, max_duty) in max_duty_counts.iter_mut().enumerate() {
+            *max_duty = servos.max_duty_cycle(channel);
         }
 
         Self {
@@ -132,14 +133,23 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
 
     fn configure_output_rates(&mut self, rates_hz: &[f64]) -> Result<(), PwmError> {
         self.servos
-            .configure_output_rates(rates_hz)
+            .configure_output_rates(&rates_hz[..rates_hz.len().min(NUM_HW_CHANNELS)])
             .map_err(timer_error_to_pwm_error)?;
 
-        for i in 0..NUM_HW_CHANNELS {
-            self.max_duty_counts[i] = self.servos.max_duty_cycle(i);
+        for (channel, max_duty) in self.max_duty_counts.iter_mut().enumerate() {
+            *max_duty = self.servos.max_duty_cycle(channel);
         }
 
         Ok(())
+    }
+
+    fn output_protocol(&self, channel: usize) -> Result<PwmOutputProtocol, PwmError> {
+        if channel >= NUM_HW_CHANNELS {
+            return Err(PwmError::ChannelOutOfRange);
+        }
+        self.servos
+            .output_protocol(channel)
+            .map_err(timer_error_to_pwm_error)
     }
 
     fn flush<B: BoardIo>(&mut self, _board: &mut B) {
@@ -152,7 +162,19 @@ impl<'a> PwmDriver<f64> for BoardPwmDriver<'a> {
         commands_slice: &[f64],
     ) -> Result<(), PwmError> {
         self.servos
-            .send_normalized_commands(commands_slice)
+            .send_normalized_commands(&commands_slice[..commands_slice.len().min(NUM_HW_CHANNELS)])
+            .map_err(timer_error_to_pwm_error)?;
+        self.flush(board);
+        Ok(())
+    }
+
+    fn send_disarmed_commands<B: BoardIo>(
+        &mut self,
+        board: &mut B,
+        output_types: &[MixerOutputType],
+    ) -> Result<(), PwmError> {
+        self.servos
+            .send_disarmed_commands(&output_types[..output_types.len().min(NUM_HW_CHANNELS)])
             .map_err(timer_error_to_pwm_error)?;
         self.flush(board);
         Ok(())

@@ -205,6 +205,49 @@ ros2 service call /param_write std_srvs/srv/Trigger
 Watch Terminal 1 during init. You should see parameter traffic and the startup
 calibration errors recover.
 
+### Motor Output Isolation
+
+Use `MTR_OUT_MASK` when checking motor order one output at a time. The mask
+is applied inside Veloxity after normal arming and idle-throttle handling, so
+disabled motor outputs stay at zero command even if `ARM_SPIN_MOTORS` is enabled.
+
+Mask values are 0-based bitmasks:
+
+```text
+-1: normal, all motor outputs pass through
+ 0: all motor outputs forced to zero
+ 1: only motor/output 0 enabled
+ 2: only motor/output 1 enabled
+ 4: only motor/output 2 enabled
+ 8: only motor/output 3 enabled
+```
+
+Set the mask through unmodified `rosflight_io`:
+
+```bash
+ros2 service call /param_set rosflight_msgs/srv/ParamSet \
+  "{name: MTR_OUT_MASK, value: 1.0}"
+```
+
+Then arm the firmware and watch the physical motor or the sim output topic:
+
+```bash
+ros2 service call /toggle_arm std_srvs/srv/Trigger
+ros2 topic echo /sim/pwm_output --once
+```
+
+In the simulator, a disabled motor channel should read `1000` us. The enabled
+motor channel should rise above `1000` us when the vehicle is armed and idle
+spin or throttle command is active. For hardware tests, remove props, start with
+`MTR_OUT_MASK=0`, then step through masks `1`, `2`, `4`, and `8`.
+
+Return to normal operation when finished:
+
+```bash
+ros2 service call /param_set rosflight_msgs/srv/ParamSet \
+  "{name: MTR_OUT_MASK, value: -1.0}"
+```
+
 ### Persistent Veloxity Params
 
 Veloxity FFI sim parameters are saved through `VELOXITY_SIM_PARAM_DIR`.
