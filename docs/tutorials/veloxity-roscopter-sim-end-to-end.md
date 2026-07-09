@@ -4,9 +4,7 @@ This guide runs the Veloxity Rust firmware inside the ROSflight standalone
 multirotor simulator, initializes that firmware through `rosflight_io`, then
 starts ROScopter autonomy and loads a waypoint mission.
 
-> [!INFO]
->
->   The words below are intentionally specific:
+> [!TIP]
 >
 >   - **Build the shim** means compile the Rust simulator library and the C++ ROS
 >     2 bridge.
@@ -269,14 +267,14 @@ ros2 launch veloxity_sil_board_shim multirotor_standalone_sil.launch.py \
 
 Keep Terminal 1 running.
 
-!!! info
-
-    For service-based arming and override control, the standalone sim should be
-    running with the built-in RC node enabled. That is the default. If you set it
-    explicitly, use:
-    ```bash
-    use_builtin_rc:=true
-    ```
+> [!TIP]
+>
+>   For service-based arming and override control, the standalone sim should be
+>   running with the built-in RC node enabled. That is the default. If you set it
+>   explicitly, use:
+>   ```bash
+>   use_builtin_rc:=true
+>   ```
 
 **Terminal 3**
 
@@ -407,13 +405,13 @@ ros2 topic echo /rc_raw --once
 ros2 topic echo /sim/pwm_output --once
 ```
 
-!!! bug
-
-    If `/sim/truth_state` is quiet but `/imu/data`, `/baro`, `/status`, or
-    timestamps look impossible, the problem is likely in the firmware bridge or
-    firmware telemetry path, not in ROScopter mission logic. `/imu/data` and other
-    firmware telemetry should have normal ROS stamps after timesync; they should not
-    show negative seconds.
+> [!TIP]
+>
+>   If `/sim/truth_state` is quiet but `/imu/data`, `/baro`, `/status`, or
+>   timestamps look impossible, the problem is likely in the firmware bridge or
+>   firmware telemetry path, not in ROScopter mission logic. `/imu/data` and other
+>   firmware telemetry should have normal ROS stamps after timesync; they should not
+>   show negative seconds.
 
 ## References
 
