@@ -1282,8 +1282,7 @@ where
                 .push_or_log(CompanionHeartbeatReceived { msg }, "companion heartbeat");
         }
 
-        // first check the param_request_list
-        if let Some(msg) = self.msgs.param_request_read.take() {
+        while let Some(msg) = Store::<ParamRequestReadMsg>::take(&mut self.msgs) {
             if self.targets_this_system(msg.target_system) {
                 param_events.read_requests.push_or_log(
                     ParamReadRequested {
@@ -1875,7 +1874,7 @@ mod tests {
             target_system: 42,
             target_component: 1,
         });
-        manager.msgs.param_request_read = Some(ParamRequestReadMsg {
+        manager.msgs.store(ParamRequestReadMsg {
             target_system: 42,
             target_component: 1,
             param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
@@ -1945,7 +1944,7 @@ mod tests {
         let mut comm_events = CommEventQueues::default();
         let mut command_events = CommandEventQueues::default();
 
-        manager.msgs.param_request_read = Some(ParamRequestReadMsg {
+        manager.msgs.store(ParamRequestReadMsg {
             target_system: 1,
             target_component: 1,
             param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
@@ -1976,6 +1975,41 @@ mod tests {
         let sent = manager.comm_link.sent_param_values[0].unwrap();
         assert_eq!(sent.param_index, ParamId::PARAM_SYSTEM_ID as u16);
         assert_eq!(sent.param_value, ParamValue::Int(42));
+    }
+
+    #[test]
+    fn param_request_read_burst_preserves_all_missing_index_requests() {
+        let mut board = TestBoard::default();
+        let mut manager = CommManager::new(RecordingCommLink::new(), board.clock_micros());
+        let mut param_events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut command_events = CommandEventQueues::default();
+
+        for index in [330, 331, 332, 333, 334, 335, 336] {
+            manager.msgs.store(ParamRequestReadMsg {
+                target_system: 1,
+                target_component: 1,
+                param_identifier: ParamIdentifier::INDEX(index),
+            });
+        }
+
+        manager.act_on_messages(
+            &mut param_events,
+            &mut comm_events,
+            &mut command_events,
+            &mut companion_events(),
+            &mut board,
+        );
+
+        let received: heapless::Vec<_, 8> = param_events
+            .read_requests
+            .iter()
+            .map(|req| req.identifier)
+            .collect();
+
+        assert_eq!(received.len(), 7);
+        assert_eq!(received[0], ParamIdentifier::INDEX(330));
+        assert_eq!(received[6], ParamIdentifier::INDEX(336));
     }
 
     #[test]

@@ -9,6 +9,7 @@ use crate::{
             ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamRequestListMsg,
             ParamRequestReadMsg, ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
         },
+        Store,
     },
     estimator::AttitudeEstimate,
     packets::{ImuPacket, RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
@@ -483,7 +484,7 @@ fn world_scheduler_answers_param_request_read_through_param_system() {
     params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
     let mut world = test_world_with_params(params);
 
-    world.comm.msgs.param_request_read = Some(ParamRequestReadMsg {
+    Store::store(&mut world.comm.msgs, ParamRequestReadMsg {
         target_system: 1,
         target_component: 1,
         param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),

@@ -9,11 +9,12 @@ use messages::*;
 pub const PARAM_SET_BURST_QUEUE_CAPACITY: usize = 512;
 pub const PARAM_SET_INGRESS_QUEUE_CAPACITY: usize = PARAM_SET_BURST_QUEUE_CAPACITY;
 pub const PARAM_SET_EVENT_QUEUE_CAPACITY: usize = PARAM_SET_BURST_QUEUE_CAPACITY;
+pub const PARAM_READ_INGRESS_QUEUE_CAPACITY: usize = PARAM_SET_BURST_QUEUE_CAPACITY;
 
 #[derive(Default)]
 pub struct Messages {
     pub heartbeat: Option<HeartbeatMsg>,
-    pub param_request_read: Option<ParamRequestReadMsg>,
+    pub param_request_read: Deque<ParamRequestReadMsg, PARAM_READ_INGRESS_QUEUE_CAPACITY>,
     pub param_request_list: Option<ParamRequestListMsg>,
     pub param_set: Deque<ParamSetMsg, PARAM_SET_INGRESS_QUEUE_CAPACITY>,
     pub timesync: Option<TimesyncMsg>,
@@ -27,7 +28,7 @@ pub struct Messages {
 impl Messages {
     pub fn has_pending(&self) -> bool {
         self.heartbeat.is_some()
-            || self.param_request_read.is_some()
+            || !self.param_request_read.is_empty()
             || self.param_request_list.is_some()
             || !self.param_set.is_empty()
             || self.timesync.is_some()
@@ -60,11 +61,17 @@ macro_rules! impl_store {
 
 // implemented for messages that will be received
 impl_store!(HeartbeatMsg, heartbeat, "heartbeat");
-impl_store!(
-    ParamRequestReadMsg,
-    param_request_read,
-    "param_request_read"
-);
+impl Store<ParamRequestReadMsg> for Messages {
+    fn store(&mut self, msg: ParamRequestReadMsg) {
+        if self.param_request_read.push_back(msg).is_err() {
+            crate::log_warn!("message queue full: param_request_read");
+        }
+    }
+
+    fn take(&mut self) -> Option<ParamRequestReadMsg> {
+        self.param_request_read.pop_front()
+    }
+}
 impl_store!(
     ParamRequestListMsg,
     param_request_list,
