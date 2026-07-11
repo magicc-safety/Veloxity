@@ -86,12 +86,6 @@ where
             RosflightCmd::BaroCalibration => {
                 ctx.flags.remove(CalibrationFlags::BARO_FAILED);
                 ctx.flags.insert(CalibrationFlags::BARO);
-                set_param_and_emit_change(
-                    ctx.params,
-                    &mut ctx.param_events.changes,
-                    ParamId::PARAM_BARO_BIAS,
-                    ParamValue::Float(0.0),
-                );
             }
             RosflightCmd::AirspeedCalibration => {
                 ctx.flags.remove(CalibrationFlags::PITOT_FAILED);
@@ -506,9 +500,11 @@ mod tests {
             params.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
             ParamValue::Float(0.0)
         );
+        // Barometer calibration updates BARO_BIAS only after its sample
+        // window finishes; the command acknowledgement merely accepts it.
         assert_eq!(
             params.get_by_id(ParamId::PARAM_BARO_BIAS),
-            ParamValue::Float(0.0)
+            ParamValue::Float(1000.0)
         );
         assert_eq!(comm_events.responses.len(), 2);
         for expected in [RosflightCmd::GyroCalibration, RosflightCmd::BaroCalibration] {

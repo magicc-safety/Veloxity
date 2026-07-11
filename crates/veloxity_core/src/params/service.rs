@@ -82,6 +82,19 @@ pub fn set_param_and_emit_change(
     }
     params.set_by_id(id, value);
     let new = params.get_by_id(id);
+    emit_param_change(changes, id, old, new);
+}
+
+/// Queue an onboard parameter-value update after a subsystem has changed a
+/// parameter directly.  Sensor calibration uses this once its sample window
+/// completes, so the companion receives the resulting value as MAVLink
+/// `PARAM_VALUE` rather than only the command acknowledgement.
+pub fn emit_param_change(
+    changes: &mut EventQueue<ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>,
+    id: ParamId,
+    old: ParamValue,
+    new: ParamValue,
+) {
     changes.push_or_log(
         ParamChanged {
             id,

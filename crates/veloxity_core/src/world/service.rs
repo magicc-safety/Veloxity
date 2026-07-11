@@ -296,6 +296,8 @@ where
 
     pub(super) fn process_sensor_bus_after_update(&mut self) {
         let calibration_flags_before = self.cal_flags;
+        let baro_bias_before = self.params.get_by_id(ParamId::PARAM_BARO_BIAS);
+        let ground_level_before = self.params.get_by_id(ParamId::PARAM_GROUND_LEVEL);
         process_sensor_bus(SensorIngestionCtx {
             raw: &mut self.raw_sensors,
             processed: &mut self.processed_sensors,
@@ -303,6 +305,27 @@ where
             flags: &mut self.cal_flags,
             params: &mut self.params,
         });
+        if calibration_flags_before.contains(CalibrationFlags::BARO)
+            && !self.cal_flags.contains(CalibrationFlags::BARO)
+            && !self.cal_flags.contains(CalibrationFlags::BARO_FAILED)
+        {
+            // The barometer processor owns the asynchronous sampling window
+            // and writes these values directly.  Publish them now so
+            // rosflight_io receives the completion acknowledgement as the
+            // normal MAVLink parameter update.
+            param_service::emit_param_change(
+                &mut self.param_events.changes,
+                ParamId::PARAM_BARO_BIAS,
+                baro_bias_before,
+                self.params.get_by_id(ParamId::PARAM_BARO_BIAS),
+            );
+            param_service::emit_param_change(
+                &mut self.param_events.changes,
+                ParamId::PARAM_GROUND_LEVEL,
+                ground_level_before,
+                self.params.get_by_id(ParamId::PARAM_GROUND_LEVEL),
+            );
+        }
         if calibration_flags_before.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)

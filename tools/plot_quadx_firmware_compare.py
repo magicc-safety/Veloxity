@@ -455,6 +455,59 @@ def plot_errors(rust: dict[str, np.ndarray], c: dict[str, np.ndarray], output: P
     return fig
 
 
+def plot_error_magnitudes(rust: dict[str, np.ndarray], c: dict[str, np.ndarray], output: Path | None):
+    fig, axes = plt.subplots(5, 1, figsize=(15, 13), sharex=True)
+    fig.subplots_adjust(bottom=0.08)
+    colors = {"rust": "tab:orange", "c": "tab:blue"}
+    bags = {"rust": rust, "c": c}
+
+    for name, bag in bags.items():
+        t = common_time(bag["truth_t"], bag["est_t"], bag["traj_t"])
+        if t.size == 0:
+            continue
+        truth_pos = interp_matrix(bag["truth_t"], bag["truth_pos"], t)
+        truth_vel = interp_matrix(bag["truth_t"], bag["truth_vel"], t)
+        truth_rates = interp_matrix(bag["truth_t"], bag["truth_rates"], t)
+        truth_acc = interp_matrix(bag["truth_t"], bag["truth_accel"], t)
+        est_euler = interp_matrix(bag["est_t"], bag["est_euler"], t)
+        traj_pos = interp_matrix(bag["traj_t"], bag["traj_pos"], t)
+        traj_vel = interp_matrix(bag["traj_t"], bag["traj_vel"], t)
+        traj_acc = interp_matrix(bag["traj_t"], bag["traj_accel"], t)
+        traj_psi = interp_matrix(bag["traj_t"], bag["traj_psi"], t)
+        traj_psi_dot = interp_matrix(bag["traj_t"], bag["traj_psi_dot"], t)
+
+        axes[0].plot(t, np.linalg.norm(truth_pos - traj_pos, axis=1), color=colors[name], label=name)
+        axes[1].plot(t, np.linalg.norm(truth_vel - traj_vel, axis=1), color=colors[name], label=name)
+        axes[2].plot(t, np.linalg.norm(truth_acc - traj_acc, axis=1), color=colors[name], label=name)
+        axes[3].plot(t, np.abs(np.rad2deg(wrap_pi(est_euler[:, 2] - traj_psi))), color=colors[name], label=name)
+        axes[4].plot(t, np.abs(np.rad2deg(truth_rates[:, 2] - traj_psi_dot)), color=colors[name], label=name)
+
+    titles = [
+        "Position-error magnitude: ||truth - moving carrot||",
+        "Velocity-error magnitude: ||truth - moving carrot||",
+        "Acceleration-error magnitude: ||truth body accel - trajectory accel||",
+        "Heading-error magnitude: |estimated yaw - commanded yaw|",
+        "Yaw-rate-error magnitude: |truth r - commanded psi_dot|",
+    ]
+    ylabels = ["m", "m/s", "m/s^2", "deg", "deg/s"]
+    for ax, title, ylabel in zip(axes, titles, ylabels):
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(bottom=0.0)
+        ax.grid(True, alpha=0.25)
+        ax.legend(fontsize="small")
+    axes[-1].set_xlabel("time [s]")
+
+    fig.suptitle("Drone vs moving carrot error magnitudes")
+    t_min, t_max = time_bounds(rust, c)
+    slider = init_time_slider(fig, axes, t_min, t_max, lambda _start, _end: None)
+    fig._time_slider = slider
+    if output is not None:
+        fig.savefig(output, dpi=180)
+        print(f"Wrote {output}")
+    return fig
+
+
 def main() -> None:
     home = Path.home()
     parser = argparse.ArgumentParser()
@@ -463,6 +516,11 @@ def main() -> None:
     parser.add_argument("--save", action="store_true", help="Save PNGs in addition to opening interactive windows.")
     parser.add_argument("--overview", type=Path, default=home / "quadx_firmware_compare_overview.png")
     parser.add_argument("--errors", type=Path, default=home / "quadx_firmware_compare_errors.png")
+    parser.add_argument(
+        "--error-magnitudes",
+        type=Path,
+        default=home / "quadx_firmware_compare_error_magnitudes.png",
+    )
     parser.add_argument("--estimate-delta", type=Path, default=home / "quadx_firmware_compare_estimate_delta.png")
     parser.add_argument("--truth-rust", type=Path, default=home / "quadx_firmware_compare_truth_minus_rust.png")
     parser.add_argument("--no-show", action="store_true", help="Do not open interactive windows. Useful with --save.")
@@ -472,6 +530,7 @@ def main() -> None:
     c = read_bag(args.c_bag)
     plot_overview(rust, c, args.overview if args.save else None)
     plot_errors(rust, c, args.errors if args.save else None)
+    plot_error_magnitudes(rust, c, args.error_magnitudes if args.save else None)
     plot_estimate_delta(rust, c, args.estimate_delta if args.save else None)
     plot_truth_minus_rust(rust, args.truth_rust if args.save else None)
 

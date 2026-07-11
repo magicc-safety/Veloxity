@@ -452,6 +452,7 @@ impl BaroProcessor {
                 self.calibration_state.calibrated = true;
                 flags.remove(CalibrationFlags::BARO);
                 self.calibration_state.request_active = false;
+                log_info!("Baro calibration complete");
             } else {
                 flags.insert(CalibrationFlags::BARO_FAILED);
                 log_error!("Baro calibration failed");
