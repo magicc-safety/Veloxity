@@ -12,6 +12,7 @@ USE_RVIZ="true"
 DURATION="120"
 BAG_NAME="takeoff_logs/quadx_upstream_angle_mode_rust"
 RECORD_ALL="false"
+VELOCITY_FEEDFORWARD="true"
 INIT_WRITE_DELAY_S="3.0"
 SIL_STARTUP_TIMEOUT_S="30"
 FINAL_CAL_SETTLE_S="1.0"
@@ -24,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --duration) DURATION="$2"; shift 2 ;;
     --bag-name) BAG_NAME="$2"; shift 2 ;;
     --record-all) RECORD_ALL="$2"; shift 2 ;;
+    --velocity-feedforward) VELOCITY_FEEDFORWARD="$2"; shift 2 ;;
     --mission) MISSION="$2"; shift 2 ;;
     --init-write-delay-s) INIT_WRITE_DELAY_S="$2"; shift 2 ;;
     --sil-startup-timeout-s) SIL_STARTUP_TIMEOUT_S="$2"; shift 2 ;;
@@ -45,6 +47,10 @@ esac
 case "$RECORD_ALL" in
   true|false) ;;
   *) print -u2 "--record-all must be 'true' or 'false'."; exit 2 ;;
+esac
+case "$VELOCITY_FEEDFORWARD" in
+  true|false) ;;
+  *) print -u2 "--velocity-feedforward must be 'true' or 'false'."; exit 2 ;;
 esac
 
 if ! command -v ros2 >/dev/null 2>&1; then
@@ -216,9 +222,16 @@ ros2 run roscopter path_manager --ros-args -r __node:=path_manager --params-file
 children+=("$!")
 ros2 run roscopter path_planner --ros-args -r __node:=path_planner --params-file "$MULTIROTOR_PARAMS" -r estimated_state:=estimated_state &
 children+=("$!")
-python3 "$EXAMPLE_DIR/trajectory_velocity_adapter.py" --ros-args --params-file "$EXPERIMENT_PARAMS" &
-children+=("$!")
-ros2 run roscopter trajectory_follower --ros-args -r __node:=trajectory_follower --params-file "$MULTIROTOR_PARAMS" --params-file "$EXPERIMENT_PARAMS" -r estimated_state:=estimated_state -r trajectory_command:=trajectory_command_compensated -r high_level_command:=high_level_command_thrust &
+follower_trajectory_topic="trajectory_command"
+if [[ "$VELOCITY_FEEDFORWARD" == "true" ]]; then
+  print "Enabling trajectory velocity feed-forward adapter."
+  python3 "$EXAMPLE_DIR/trajectory_velocity_adapter.py" --ros-args --params-file "$EXPERIMENT_PARAMS" &
+  children+=("$!")
+  follower_trajectory_topic="trajectory_command_compensated"
+else
+  print "Velocity feed-forward disabled; follower consumes the original trajectory command."
+fi
+ros2 run roscopter trajectory_follower --ros-args -r __node:=trajectory_follower --params-file "$MULTIROTOR_PARAMS" --params-file "$EXPERIMENT_PARAMS" -r estimated_state:=estimated_state -r trajectory_command:="$follower_trajectory_topic" -r high_level_command:=high_level_command_thrust &
 children+=("$!")
 python3 "$EXAMPLE_DIR/thrust_to_throttle_adapter.py" --ros-args --params-file "$MULTIROTOR_PARAMS" --params-file "$EXPERIMENT_PARAMS" &
 children+=("$!")
@@ -232,7 +245,16 @@ print "Checking graph and preflight state..."
 ros2 node list
 ros2 topic info /command --verbose
 ros2 topic info /high_level_command --verbose
-ros2 topic info /trajectory_command_compensated --verbose
+follower_topic_info="$(ros2 topic info "/$follower_trajectory_topic" --verbose)"
+print "$follower_topic_info"
+follower_publishers="$(print "$follower_topic_info" | awk '/^Publisher count:/ {print $3; exit}')"
+follower_subscribers="$(print "$follower_topic_info" | awk '/^Subscription count:/ {print $3; exit}')"
+if [[ -z "$follower_publishers" || "$follower_publishers" -lt 1 || \
+      -z "$follower_subscribers" || "$follower_subscribers" -lt 1 ]]; then
+  print -u2 "/$follower_trajectory_topic is not fully connected " \
+    "(publishers=${follower_publishers:-unknown}, subscribers=${follower_subscribers:-unknown})."
+  exit 5
+fi
 state="$(timeout 6 ros2 topic echo /estimated_state --once 2>/dev/null || true)"
 print "$state"
 pd_abs="$(print "$state" | awk '/^p_d:/ {v=$2; if (v < 0) v=-v; print v; exit}')"

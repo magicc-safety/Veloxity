@@ -66,6 +66,11 @@ source scripts/build_and_source_ros2_shim.zsh
 Pass `--record-all true` for backend-comparison captures that must retain every
 discovered ROS topic. The default remains the smaller curated topic set.
 
+Pass `--velocity-feedforward false` to bypass
+`trajectory_velocity_adapter.py` and connect the upstream path manager's
+original `/trajectory_command` directly to the trajectory follower. This is
+an ablation switch; velocity feed-forward remains enabled by default.
+
 ## Compare Veloxity and C backends
 
 The checked-in comparison plotter opens interactive Matplotlib figures with

@@ -17,10 +17,11 @@
 ### I Want To Work On Hardware
 
 1. [Board bring-up guide](boards/README.md)
-2. [RP2350 / Pico 2 W guide](boards/rp2350-pico2w.md)
-3. [Pico 2 W wiring](pico2w-esc-imu-pinout.md)
-4. [ESP32C5 ESP-NOW UART bridge](../tools/espnow_uart_bridge/README.md)
-5. [STM32 board guide](boards/stm32.md)
+2. [Hardware experiment 2 ROScopter startup](tutorials/hardware-exp2-roscopter-startup.md)
+3. [RP2350 / Pico 2 W guide](boards/rp2350-pico2w.md)
+4. [Pico 2 W wiring](pico2w-esc-imu-pinout.md)
+5. [ESP32C5 ESP-NOW UART bridge](../tools/espnow_uart_bridge/README.md)
+6. [STM32 board guide](boards/stm32.md)
 
 The current RP2350/Pico 2 W firmware target uses high-rate ISM330DHCX data-ready
 intake with a fixed 1.5 kHz control loop and bounded service phases. The June 12
@@ -50,6 +51,7 @@ live in the STM32 board guide.
 ## Maintained Tutorials
 
 - [Veloxity ROScopter sim end-to-end](tutorials/veloxity-roscopter-sim-end-to-end.md)
+- [Hardware experiment 2 ROScopter startup](tutorials/hardware-exp2-roscopter-startup.md)
 - [Pico 2 W sensor bring-up](tutorials/pico2w-sensor-bringup.md)
 
 ROSplane tutorials were removed from this branch's active documentation because

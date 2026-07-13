@@ -370,3 +370,164 @@ Neither capture lasted a full 10 s after its first tolerance entry, so neither
 advanced beyond the final hold. The visible residual offset is therefore a
 small closed-loop/estimator residual inside the accepted region, not evidence
 that the controller stopped issuing corrections at the tolerance boundary.
+
+## Velocity feed-forward ablation
+
+**Status:** completed 2026-07-13.
+
+**Question:** Is `trajectory_velocity_adapter.py` necessary for acceptable
+trajectory following, or does the unmodified upstream ROScopter trajectory
+command perform as well or better with corrected Veloxity firmware?
+
+**Hypothesis:** Removing the adapter will increase tracking lag and corner
+error because the upstream trajectory follower does not consume
+`TrajectoryCommand.velocity`; its derivative term damps measured velocity
+without subtracting the commanded velocity. The overall mission may still be
+stable because waypoint speed and acceleration are already conservative.
+
+**Independent variable:** trajectory-follower input. Control uses either the
+feed-forward-compensated `/trajectory_command_compensated` or the original
+upstream `/trajectory_command`.
+
+**Controlled variables:** corrected Veloxity firmware, GUI/RViz enabled,
+120-second duration, all-topic recording, mission, estimator, path-manager
+limits, trajectory-follower gains, thrust-to-throttle conversion, controller,
+firmware parameters, mixer, and initialization/calibration sequence.
+
+**Procedure:** Add `--velocity-feedforward false` to the existing experiment
+runner. In that mode, do not start `trajectory_velocity_adapter.py` and remap
+the trajectory follower directly to `trajectory_command`. Record the trial in
+`takeoff_logs/quadx_upstream_veloxity_no_velocity_ff_20260713`, then compare it
+against the fresh corrected feed-forward bag
+`quadx_upstream_backend_compare_veloxity_accel_quat_fix_repeat`.
+
+**Observations:** The no-feed-forward vehicle remained stable and followed the
+mission in the correct general direction, but visibly lagged the moving
+trajectory. At the first north waypoint, the reference entered a 0.15 m
+capture radius 32.21 s after release while aligned truth was only at 18.28 m.
+The closest truth pass did not occur until another 5.78 s. With feed-forward,
+reference capture occurred at 30.04 s, truth was already at 19.60 m, and its
+closest pass followed after 1.29 s.
+
+Across the moving portion of each 120-second bag, the matched horizontal
+tracking metrics were:
+
+| Metric | Feed-forward | No feed-forward | Change |
+| --- | ---: | ---: | ---: |
+| Estimate-to-command RMS | 0.376 m | 2.172 m | 5.78x worse |
+| Aligned-truth-to-command RMS | 0.510 m | 2.119 m | 4.15x worse |
+| Aligned-truth-to-command 95th percentile | 0.887 m | 3.608 m | 4.07x worse |
+| Aligned-truth-to-command maximum | 0.936 m | 3.827 m | 4.09x worse |
+| Final estimated distance from waypoint 4 | 0.366 m | 4.748 m | 12.97x worse |
+
+The feed-forward reference and estimate had reached approximately
+`(0.00, 0.00, -40.00)` m and `(-0.16, 0.20, -40.26)` m. The no-feed-forward
+reference was still at approximately `(0.00, -2.04, -37.96)` m and the estimate
+at `(-0.16, -4.08, -37.58)` m when the same-duration run ended. The ablation
+also emitted `Bad baro calibration. Recalibrating` at arm +1.00 s, so vertical
+differences are not clean evidence for or against velocity feed-forward. The
+horizontal result is unaffected by that confound and is already decisive.
+
+**Interpretation:** The adapter is not compensating for a Veloxity firmware
+defect. It compensates for the unmodified upstream ROScopter trajectory
+follower's control law: the follower uses position error and subtracts measured
+velocity, but does not use `TrajectoryCommand.velocity`. For a moving reference
+this behaves like damping toward zero velocity and creates steady tracking
+lag. Adding `(kd / kp) * commanded_velocity` to the position reference makes
+the proportional term supply the omitted `kd * commanded_velocity`, producing
+the intended velocity-error term without modifying the upstream workspace.
+Statements that a normal ROSflight setup does not need this adapter can still
+be true for stationary setpoints, slower missions, different follower gains,
+or a controller that directly consumes desired velocity; they do not describe
+this exact upstream ROScopter moving-carrot path.
+
+**Decision:** Retain `trajectory_velocity_adapter.py` for this experiment and
+for the hardware startup procedure using the same ROScopter follower and
+mission. The hypothesis was supported. Do not attribute vertical differences
+from this single trial to the adapter because the barometer initialization was
+not matched.
+
+## Fresh Experiment 2 feed-forward backend replication
+
+**Status:** completed 2026-07-13.
+
+**Question:** With the validated velocity feed-forward path explicitly enabled,
+do fresh corrected-Veloxity and upstream-C Experiment 2 trials reproduce the
+previous backend parity and acceptable waypoint tracking?
+
+**Hypothesis:** Both backends will again produce comparable horizontal
+trajectory and attitude performance. Run-to-run barometer initialization may
+still create an independent vertical offset.
+
+**Independent variable:** firmware backend: corrected Veloxity or upstream C.
+
+**Controlled variables:** `--velocity-feedforward true`, GUI/RViz enabled,
+120-second duration, all-topic recording, mission, estimator, path-manager
+limits, trajectory-follower gains, thrust-to-throttle conversion, controller,
+firmware parameters, mixer, and automated initialization/release sequence.
+
+**Procedure:** Delete and recreate the paired comparison bags at
+`takeoff_logs/quadx_upstream_backend_compare_veloxity_accel_quat_fix_repeat`
+and `takeoff_logs/quadx_upstream_backend_compare_c`. Preserve the separate
+no-feed-forward ablation bag. Run Veloxity first and C second, then apply the
+same tracking, corner, vertical, and estimator-parity analyses used for the
+previous pair.
+
+**Rejected Veloxity trial:** The first visible replication developed a large
+XY position-estimator drift that the operator noticed in RViz. After aligning
+truth and estimator origins at mission release, estimator-to-truth horizontal
+RMS increased from 0.493 m during mission seconds 0--30 to 1.735 m during
+seconds 90--120 and ended at 1.832 m. Whole-mission RMS was 1.132 m. This was
+not a constant display-frame offset. The attitude commands remained modest,
+feed-forward was active, barometer initialization completed normally, and
+vertical estimator-to-truth RMS was 0.297 m. The trial is excluded from the
+paired backend comparison because its time-varying ROScopter/GNSS position
+error would dominate trajectory metrics. It is preserved for diagnosis at
+`takeoff_logs/quadx_upstream_backend_compare_veloxity_rejected_xy_drift_20260713`
+rather than silently discarded. Repeat Veloxity visibly before starting C.
+
+**Feed-forward verification:** A live graph query taken near shutdown briefly
+reported zero publishers on `/trajectory_command_compensated`, suggesting the
+adapter had exited. The completed bags disproved that preliminary diagnosis:
+the rejected and accepted Veloxity bags contain 6,496 and 6,502 compensated
+messages respectively, and the C bag contains 6,495. Inspection of the runner
+diff also confirmed that `--velocity-feedforward true` launches the same
+adapter and follower remap as the pre-ablation runner. The query was therefore
+a shutdown/graph-discovery snapshot, not evidence that feed-forward was absent.
+The runner now fails preflight unless the selected follower topic reports at
+least one publisher and one subscriber.
+
+**Accepted paired results:** The replacement Veloxity run reduced aligned
+estimator-to-truth XY RMS to 0.647 m, close to the earlier good replication's
+0.562 m. Both accepted bags reached the final `(0, 0, -40)` m command and ended
+inside the 0.5 m waypoint-4 tolerance.
+
+| Metric | Veloxity | C |
+| --- | ---: | ---: |
+| Estimate-to-command XY RMS | 0.365 m | 0.357 m |
+| Estimate-to-command XY 95th percentile | 0.554 m | 0.600 m |
+| Estimate-to-command XY maximum | 0.597 m | 0.649 m |
+| Aligned estimator-to-truth XY RMS | 0.647 m | 0.463 m |
+| Aligned truth-to-command XY RMS | 0.901 m | 0.529 m |
+| Final estimated waypoint-4 distance | 0.288 m | 0.342 m |
+| Estimate-to-aligned-truth down RMS | 0.362 m | 0.381 m |
+| Estimate-to-command down RMS | 0.295 m | 0.289 m |
+| Attitude-to-truth RMS roll | 0.01040 rad | 0.01051 rad |
+| Attitude-to-truth RMS pitch | 0.00747 rad | 0.00730 rad |
+| Attitude-to-truth RMS yaw | 0.00898 rad | 0.00593 rad |
+
+The first-corner aligned-truth overshoot was 0.76 m for Veloxity and remained
+0.10 m short for C, while estimated overshoot was negligible in both. This
+difference is consistent with the runs' unequal ROScopter position-estimator
+errors: at the corner the estimate-to-truth horizontal error was 0.71 m for
+Veloxity and 0.14 m for C. Vertical results were closely matched and neither
+accepted run reported a bad barometer recalibration during the recorded
+mission. C emitted intermittent 4--5 ms IMU-arrival warnings, but its resulting
+tracking and attitude metrics did not degrade relative to Veloxity.
+
+**Conclusion:** With feed-forward explicitly enabled, Veloxity and upstream C
+again have essentially equivalent closed-loop command tracking and attitude
+accuracy. The visible run-to-run XY separation comes primarily from stochastic
+ROScopter/GNSS position-estimator drift shared by both backend configurations,
+not from the new feed-forward switch or a restored firmware regression. Retain
+feed-forward and retain the new graph-connectivity preflight check.
