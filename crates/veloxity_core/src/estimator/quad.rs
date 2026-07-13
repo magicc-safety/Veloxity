@@ -499,9 +499,9 @@ fn accel_correction<R: FlightFloat>(
     let q_tilde_w =
         q_acc_w * attitude.w - q_acc_x * attitude.i - q_acc_y * attitude.j - q_acc_z * attitude.k;
     let q_tilde_i =
-        q_acc_w * attitude.i + q_acc_x * attitude.w + q_acc_y * attitude.k - q_acc_z * attitude.j;
+        q_acc_w * attitude.i + q_acc_x * attitude.w - q_acc_y * attitude.k + q_acc_z * attitude.j;
     let q_tilde_j =
-        q_acc_w * attitude.j - q_acc_x * attitude.k + q_acc_y * attitude.w + q_acc_z * attitude.i;
+        q_acc_w * attitude.j + q_acc_x * attitude.k + q_acc_y * attitude.w - q_acc_z * attitude.i;
     Vector::from([
         <R as FlightFloat>::from_f32(-2.0) * q_tilde_w * q_tilde_i,
         <R as FlightFloat>::from_f32(-2.0) * q_tilde_w * q_tilde_j,
@@ -572,6 +572,25 @@ mod tests {
         packets::{ImuPacket, RosflightPacketHeader},
         sensors::ProcessedSensors,
     };
+
+    #[test]
+    fn accel_correction_matches_rosflight_turbomath_convention_with_coupled_attitude() {
+        // Upstream turbomath uses the opposite quaternion cross-term convention
+        // from nalgebra. This coupled yaw/tilt case exercises all terms that
+        // differ; axis-aligned tests cannot detect the convention mismatch.
+        let attitude = Quaternion::new(
+            0.923_380_516_9_f64,
+            0.102_597_835_2,
+            -0.153_896_752_8,
+            0.307_793_505_6,
+        );
+
+        let correction = accel_correction(attitude, Vector::from([2.0, -1.0, -9.5]));
+
+        assert!((correction[0] - -0.156_011_43).abs() < 1e-8);
+        assert!((correction[1] - 0.478_690_38).abs() < 1e-8);
+        assert_eq!(correction[2], 0.0);
+    }
 
     fn estimate(
         estimator: &mut QuadEstimator<f64>,
