@@ -12,6 +12,187 @@ override with the physical transmitter.
 Do not start the stock `roscopter.launch.py`. It starts an unremapped
 trajectory follower and would conflict with the two experiment adapters.
 
+## CM4 quick-start configuration
+
+The following setup is intended for the `rustflight-pi` Raspberry Pi CM4. It
+keeps aircraft-specific files outside the repository under
+`~/.config/veloxity/airframes/3dquad` while running the adapter scripts from a
+checkout at `$HOME/Veloxity`.
+
+Before flight, audit `ros/hardware-exp2.yaml`. The relevant sections must use
+the exact node names and ROS 2 parameter nesting shown below:
+
+```yaml
+/**:
+  ros__parameters:
+    gravity: 9.81
+    mass: 0.821  # Replace whenever ready-to-fly mass changes.
+
+/trajectory_velocity_adapter:
+  ros__parameters:
+    north_kp: 1.5
+    north_kd: 3.55
+    east_kp: 1.5
+    east_kd: 3.5
+    down_kp: 4.0
+    down_kd: 3.5
+
+/thrust_to_throttle_adapter:
+  ros__parameters:
+    equilibrium_throttle: REPLACE_WITH_MEASURED_NUMBER
+    min_throttle: REPLACE_WITH_VALIDATED_NUMBER
+    max_throttle: REPLACE_WITH_VALIDATED_NUMBER
+    max_roll_rad: 0.30
+    max_pitch_rad: 0.30
+    max_yaw_rate_rad_s: 0.70
+
+/controller:
+  ros__parameters:
+    equilibrium_throttle: REPLACE_WITH_SAME_MEASURED_NUMBER
+    min_throttle: REPLACE_WITH_SAME_VALIDATED_NUMBER
+    max_throttle: REPLACE_WITH_SAME_VALIDATED_NUMBER
+```
+
+Replace every placeholder with a YAML number before starting any node. In
+particular, do not use `trajectory_veloxity_adapter`, `ros__params`, or a
+parameter section without the `ros__parameters` key. Do not copy the
+simulation hover throttle onto the aircraft without hardware measurements.
+
+The CM4 `setup.bash` should export at least these locations:
+
+```bash
+export VELOXITY_ROOT="$HOME/Veloxity"
+export ROSFLIGHT_WS="$HOME/ROSflight_veloxity"
+
+source /opt/ros/humble/setup.bash
+source "$ROSFLIGHT_WS/install/local_setup.bash"
+
+export ROSCOPTER_SHARE="$(ros2 pkg prefix roscopter)/share/roscopter"
+export MULTIROTOR="$ROSCOPTER_SHARE/params/multirotor.yaml"
+export ESTIMATOR="$ROSCOPTER_SHARE/params/estimator.yaml"
+
+export AIRFRAME_CONFIG="$HOME/.config/veloxity/airframes/3dquad"
+export FIRMWARE_PARAMS="$AIRFRAME_CONFIG/firmware/firmware-startup.yaml"
+export EXPERIMENT="$AIRFRAME_CONFIG/ros/hardware-exp2.yaml"
+export ESTIMATOR_HW="$AIRFRAME_CONFIG/ros/estimator-hardware.yaml"
+export MISSION="$AIRFRAME_CONFIG/missions/hover-check.yaml"
+export FLIGHT_LOG_ROOT="$HOME/flight-logs"
+
+export ROSFLIGHT_UART=/dev/ttyAMA0
+export ROSFLIGHT_USB=/dev/ttyACM0
+export ROSFLIGHT_BAUD=921600
+```
+
+Add the following experiment functions to the airframe's `commands.bash` in
+addition to `start_uart`, `start_usb`, firmware parameter, calibration,
+mission, status, and bag helpers:
+
+```bash
+start_estimator() {
+  ros2 run roscopter estimator --ros-args \
+    -r __node:=estimator \
+    --params-file "$ESTIMATOR" \
+    --params-file "$ESTIMATOR_HW"
+}
+
+start_path_manager() {
+  ros2 run roscopter path_manager --ros-args \
+    -r __node:=path_manager \
+    --params-file "$MULTIROTOR" \
+    --params-file "$EXPERIMENT" \
+    -r estimated_state:=estimated_state
+}
+
+start_path_planner() {
+  ros2 run roscopter path_planner --ros-args \
+    -r __node:=path_planner \
+    --params-file "$MULTIROTOR" \
+    -r estimated_state:=estimated_state
+}
+
+start_velocity_adapter() {
+  python3 \
+    "$VELOXITY_ROOT/examples/quadx_upstream_angle_waypoints/trajectory_velocity_adapter.py" \
+    --ros-args \
+    --params-file "$EXPERIMENT"
+}
+
+start_trajectory_follower() {
+  ros2 run roscopter trajectory_follower --ros-args \
+    -r __node:=trajectory_follower \
+    --params-file "$MULTIROTOR" \
+    --params-file "$EXPERIMENT" \
+    -r estimated_state:=estimated_state \
+    -r trajectory_command:=trajectory_command_compensated \
+    -r high_level_command:=high_level_command_thrust
+}
+
+start_throttle_adapter() {
+  python3 \
+    "$VELOXITY_ROOT/examples/quadx_upstream_angle_waypoints/thrust_to_throttle_adapter.py" \
+    --ros-args \
+    --params-file "$MULTIROTOR" \
+    --params-file "$EXPERIMENT"
+}
+
+start_controller() {
+  ros2 run roscopter controller --ros-args \
+    -r __node:=controller \
+    --params-file "$MULTIROTOR" \
+    --params-file "$EXPERIMENT" \
+    -r estimated_state:=estimated_state
+}
+
+print_mission() {
+  ros2 service call \
+    /path_planner/print_waypoints \
+    std_srvs/srv/Trigger \
+    '{}'
+
+  ros2 service call \
+    /path_manager/print_waypoints \
+    std_srvs/srv/Trigger \
+    '{}'
+}
+```
+
+After changing either shell file, reload it with `source ~/.bashrc`. Each
+long-running function below occupies its terminal. Use one terminal or tmux
+pane per line, with physical RC override active for the entire startup:
+
+```text
+Terminal 1: start_uart                 # Or start_usb, never both.
+Terminal 2: start_estimator
+Terminal 3: start_path_manager
+Terminal 4: start_path_planner
+Terminal 5: start_velocity_adapter
+Terminal 6: start_trajectory_follower
+Terminal 7: start_throttle_adapter
+Terminal 8: start_controller
+Terminal 9: monitoring, mission services, and start_bag
+```
+
+Once `rosflight_io` is connected, `load_firmware_params` may be used while
+disarmed to load the reviewed aircraft configuration. Check the service
+response and `/status`. Do not make `write_firmware_params` a routine startup
+step: use it only when intentionally persisting the current in-memory firmware
+parameters.
+
+After all eight nodes are healthy, use Terminal 9 to run the graph checks in
+Section 12, followed by:
+
+```bash
+load_mission
+print_mission
+start_bag
+```
+
+Require the planner and manager to print the same reviewed mission. Then use
+the physical transmitter to arm while retaining override, wait for estimator
+initialization, validate every command boundary, and apply the release gate in
+Sections 15--17. Never combine the final arm and override-release actions into
+an unattended shell function.
+
 ## 1. Understand the command path
 
 ```text
