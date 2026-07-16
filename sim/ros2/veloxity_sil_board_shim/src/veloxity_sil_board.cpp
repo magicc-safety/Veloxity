@@ -59,15 +59,16 @@ public:
     }
 
     initialize_default_rc();
+    submit_rc(latest_rc_);
     run_service_ = create_service<std_srvs::srv::Trigger>(
       "sil_board/run",
       [this](
         const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
         (void)request;
-        response->success = run_once();
-        response->message = response->success ? "Veloxity SIL iteration completed" :
-          "Veloxity SIL iteration failed";
+        response->success = synchronize_pwm();
+        response->message = response->success ? "Veloxity SIL PWM synchronized" :
+          "Veloxity SIL PWM synchronization failed";
       });
 
     pwm_publisher_ = create_publisher<rosflight_msgs::msg::PwmOutput>("sim/pwm_output", 1);
@@ -75,8 +76,15 @@ public:
     imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
       "sim/sensors/imu/data", 1,
       [this](sensor_msgs::msg::Imu::ConstSharedPtr message) {
-        latest_imu_ = *message;
-        imu_seen_ = true;
+        VeloxityFfiSensorSnapshot snapshot{};
+        snapshot.has_imu = true;
+        snapshot.imu.timestamp_us = fcu_clock_micros();
+        snapshot.imu.angular_velocity = vector_to_ffi(message->angular_velocity);
+        snapshot.imu.linear_acceleration = vector_to_ffi(message->linear_acceleration);
+        snapshot.imu.temperature_kelvin = imu_temperature_available_ ?
+          static_cast<float>(latest_imu_temperature_.temperature) :
+          298.15f;
+        submit_snapshot(snapshot, "IMU");
       });
 
     imu_temperature_subscription_ = create_subscription<sensor_msgs::msg::Temperature>(
@@ -89,50 +97,86 @@ public:
     mag_subscription_ = create_subscription<sensor_msgs::msg::MagneticField>(
       "sim/sensors/mag", 1,
       [this](sensor_msgs::msg::MagneticField::ConstSharedPtr message) {
-        latest_mag_ = *message;
-        mag_available_ = true;
+        VeloxityFfiSensorSnapshot snapshot{};
+        snapshot.has_mag = true;
+        snapshot.mag.timestamp_us = fcu_clock_micros();
+        snapshot.mag.magnetic_field = vector_to_ffi(message->magnetic_field);
+        submit_snapshot(snapshot, "magnetometer");
       });
 
     baro_subscription_ = create_subscription<rosflight_msgs::msg::Barometer>(
       "sim/sensors/baro", 1,
       [this](rosflight_msgs::msg::Barometer::ConstSharedPtr message) {
-        latest_baro_ = *message;
-        baro_available_ = true;
+        VeloxityFfiSensorSnapshot snapshot{};
+        snapshot.has_baro = true;
+        snapshot.baro.timestamp_us = fcu_clock_micros();
+        snapshot.baro.altitude = message->altitude;
+        snapshot.baro.pressure = message->pressure;
+        snapshot.baro.temperature_kelvin = message->temperature;
+        submit_snapshot(snapshot, "barometer");
       });
 
     gnss_subscription_ = create_subscription<rosflight_msgs::msg::GNSS>(
       "sim/sensors/gnss", 1,
       [this](rosflight_msgs::msg::GNSS::ConstSharedPtr message) {
-        latest_gnss_ = *message;
-        gnss_available_ = true;
+        VeloxityFfiSensorSnapshot snapshot{};
+        snapshot.has_gnss = true;
+        snapshot.gnss.timestamp_us = fcu_clock_micros();
+        snapshot.gnss.fix_type = message->fix_type;
+        snapshot.gnss.num_sat = message->num_sat;
+        snapshot.gnss.lat_degrees = message->lat;
+        snapshot.gnss.lon_degrees = message->lon;
+        snapshot.gnss.alt = message->alt;
+        snapshot.gnss.horizontal_accuracy = message->horizontal_accuracy;
+        snapshot.gnss.vertical_accuracy = message->vertical_accuracy;
+        snapshot.gnss.vel_n = message->vel_n;
+        snapshot.gnss.vel_e = message->vel_e;
+        snapshot.gnss.vel_d = message->vel_d;
+        snapshot.gnss.speed_accuracy = message->speed_accuracy;
+        snapshot.gnss.unix_seconds = message->gnss_unix_seconds;
+        snapshot.gnss.unix_nanos = message->gnss_unix_nanos;
+        submit_snapshot(snapshot, "GNSS");
       });
 
     diff_pressure_subscription_ = create_subscription<rosflight_msgs::msg::Airspeed>(
       "sim/sensors/diff_pressure", 1,
       [this](rosflight_msgs::msg::Airspeed::ConstSharedPtr message) {
-        latest_diff_pressure_ = *message;
-        diff_pressure_available_ = true;
+        VeloxityFfiSensorSnapshot snapshot{};
+        snapshot.has_airspeed = true;
+        snapshot.airspeed.timestamp_us = fcu_clock_micros();
+        snapshot.airspeed.differential_pressure = message->differential_pressure;
+        snapshot.airspeed.temperature_kelvin = message->temperature;
+        snapshot.airspeed.indicated_airspeed = message->velocity;
+        submit_snapshot(snapshot, "airspeed");
       });
 
     range_subscription_ = create_subscription<sensor_msgs::msg::Range>(
       "sim/sensors/range", 1,
       [this](sensor_msgs::msg::Range::ConstSharedPtr message) {
-        latest_range_ = *message;
-        range_available_ = true;
+        VeloxityFfiSensorSnapshot snapshot{};
+        snapshot.has_range = true;
+        snapshot.range.timestamp_us = fcu_clock_micros();
+        snapshot.range.range = message->range;
+        snapshot.range.min_range = message->min_range;
+        snapshot.range.max_range = message->max_range;
+        submit_snapshot(snapshot, "range");
       });
 
     battery_subscription_ = create_subscription<rosflight_msgs::msg::BatteryStatus>(
       "sim/sensors/battery", 1,
       [this](rosflight_msgs::msg::BatteryStatus::ConstSharedPtr message) {
-        latest_battery_ = *message;
-        battery_available_ = true;
+        VeloxityFfiSensorSnapshot snapshot{};
+        snapshot.has_battery = true;
+        snapshot.battery.timestamp_us = fcu_clock_micros();
+        snapshot.battery.voltage = message->voltage;
+        snapshot.battery.current = message->current;
+        submit_snapshot(snapshot, "battery");
       });
 
     rc_subscription_ = create_subscription<rosflight_msgs::msg::RCRaw>(
       "sim/RC", 1,
       [this](rosflight_msgs::msg::RCRaw::ConstSharedPtr message) {
-        latest_rc_ = *message;
-        rc_available_ = true;
+        submit_rc(*message);
       });
 
     RCLCPP_INFO(
@@ -149,7 +193,7 @@ private:
     }
   };
 
-  bool run_once()
+  bool synchronize_pwm()
   {
     if (!firmware_) {
       return false;
@@ -171,17 +215,9 @@ private:
     }
     last_run_start_ = run_start;
 
-    auto snapshot = build_sensor_snapshot();
-    if (!veloxity_sim_set_sensors(firmware_.get(), &snapshot)) {
-      RCLCPP_WARN(get_logger(), "failed to pass sensor snapshot to Veloxity");
+    if (!veloxity_sim_sync_latest_imu(firmware_.get())) {
+      RCLCPP_WARN(get_logger(), "timed out waiting for Veloxity firmware IMU processing");
       return false;
-    }
-
-    for (int iteration = 0; iteration < 2; ++iteration) {
-      if (!veloxity_sim_run_once(firmware_.get())) {
-        RCLCPP_WARN(get_logger(), "Veloxity firmware iteration %d failed", iteration + 1);
-        return false;
-      }
     }
 
     std::array<uint16_t, kPwmChannelCount> outputs{};
@@ -204,97 +240,24 @@ private:
     return true;
   }
 
-  VeloxityFfiSensorSnapshot build_sensor_snapshot()
+  bool submit_snapshot(const VeloxityFfiSensorSnapshot & snapshot, const char * sensor_name)
+  {
+    if (!firmware_ || !veloxity_sim_set_sensors(firmware_.get(), &snapshot)) {
+      RCLCPP_WARN(get_logger(), "failed to submit %s sample to Veloxity", sensor_name);
+      return false;
+    }
+    return true;
+  }
+
+  void submit_rc(const rosflight_msgs::msg::RCRaw & message)
   {
     VeloxityFfiSensorSnapshot snapshot{};
-    const auto timestamp_us = fcu_clock_micros();
-
-    snapshot.has_imu = imu_seen_;
-    if (snapshot.has_imu) {
-      snapshot.imu.timestamp_us = timestamp_us;
-      snapshot.imu.angular_velocity = vector_to_ffi(latest_imu_.angular_velocity);
-      snapshot.imu.linear_acceleration = vector_to_ffi(latest_imu_.linear_acceleration);
-      snapshot.imu.temperature_kelvin = imu_temperature_available_ ?
-        static_cast<float>(latest_imu_temperature_.temperature) :
-        298.15f;
-    }
-
-    snapshot.has_mag = mag_available_;
-    if (snapshot.has_mag) {
-      snapshot.mag.timestamp_us = timestamp_us;
-      snapshot.mag.magnetic_field = vector_to_ffi(latest_mag_.magnetic_field);
-      mag_available_ = false;
-    }
-
-    snapshot.has_baro = baro_available_;
-    if (snapshot.has_baro) {
-      snapshot.baro.timestamp_us = timestamp_us;
-      snapshot.baro.altitude = latest_baro_.altitude;
-      snapshot.baro.pressure = latest_baro_.pressure;
-      snapshot.baro.temperature_kelvin = latest_baro_.temperature;
-      baro_available_ = false;
-    }
-
-    snapshot.has_gnss = gnss_available_;
-    if (snapshot.has_gnss) {
-      snapshot.gnss.timestamp_us = timestamp_us;
-      snapshot.gnss.fix_type = latest_gnss_.fix_type;
-      snapshot.gnss.num_sat = latest_gnss_.num_sat;
-      snapshot.gnss.lat_degrees = latest_gnss_.lat;
-      snapshot.gnss.lon_degrees = latest_gnss_.lon;
-      snapshot.gnss.alt = latest_gnss_.alt;
-      snapshot.gnss.horizontal_accuracy = latest_gnss_.horizontal_accuracy;
-      snapshot.gnss.vertical_accuracy = latest_gnss_.vertical_accuracy;
-      snapshot.gnss.vel_n = latest_gnss_.vel_n;
-      snapshot.gnss.vel_e = latest_gnss_.vel_e;
-      snapshot.gnss.vel_d = latest_gnss_.vel_d;
-      snapshot.gnss.speed_accuracy = latest_gnss_.speed_accuracy;
-      snapshot.gnss.unix_seconds = latest_gnss_.gnss_unix_seconds;
-      snapshot.gnss.unix_nanos = latest_gnss_.gnss_unix_nanos;
-      gnss_available_ = false;
-    }
-
-    snapshot.has_airspeed = diff_pressure_available_;
-    if (snapshot.has_airspeed) {
-      snapshot.airspeed.timestamp_us = timestamp_us;
-      snapshot.airspeed.differential_pressure = latest_diff_pressure_.differential_pressure;
-      snapshot.airspeed.temperature_kelvin = latest_diff_pressure_.temperature;
-      snapshot.airspeed.indicated_airspeed = latest_diff_pressure_.velocity;
-      diff_pressure_available_ = false;
-    }
-
-    snapshot.has_range = range_available_;
-    if (snapshot.has_range) {
-      snapshot.range.timestamp_us = timestamp_us;
-      snapshot.range.range = latest_range_.range;
-      snapshot.range.min_range = latest_range_.min_range;
-      snapshot.range.max_range = latest_range_.max_range;
-      range_available_ = false;
-    }
-
-    snapshot.has_battery = battery_available_;
-    if (snapshot.has_battery) {
-      snapshot.battery.timestamp_us = timestamp_us;
-      snapshot.battery.voltage = latest_battery_.voltage;
-      snapshot.battery.current = latest_battery_.current;
-      battery_available_ = false;
-    }
-
     snapshot.has_rc = true;
-    if (rc_available_ || (rc_subscription_ && rc_subscription_->get_publisher_count() > 0)) {
-      snapshot.rc.timestamp_us = timestamp_us;
-      for (std::size_t i = 0; i < latest_rc_.values.size(); ++i) {
-        snapshot.rc.values[i] = latest_rc_.values[i];
-      }
-    } else {
-      snapshot.rc.timestamp_us = timestamp_us;
-      for (auto & value : snapshot.rc.values) {
-        value = kRcCenterMicros;
-      }
-      snapshot.rc.values[2] = kRcLowMicros;  // throttle/F
+    snapshot.rc.timestamp_us = fcu_clock_micros();
+    for (std::size_t i = 0; i < message.values.size(); ++i) {
+      snapshot.rc.values[i] = message.values[i];
     }
-
-    return snapshot;
+    submit_snapshot(snapshot, "RC");
   }
 
   void initialize_default_rc()
@@ -307,9 +270,7 @@ private:
 
   uint64_t fcu_clock_micros() const
   {
-    const auto elapsed = std::chrono::steady_clock::now() - boot_time_;
-    return static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count());
+    return firmware_ ? veloxity_sim_clock_micros(firmware_.get()) : 0;
   }
 
   void publish_pwm()
@@ -333,29 +294,13 @@ private:
   rclcpp::Subscription<rosflight_msgs::msg::BatteryStatus>::SharedPtr battery_subscription_;
   rclcpp::Subscription<rosflight_msgs::msg::RCRaw>::SharedPtr rc_subscription_;
 
-  sensor_msgs::msg::Imu latest_imu_;
   sensor_msgs::msg::Temperature latest_imu_temperature_;
-  sensor_msgs::msg::MagneticField latest_mag_;
-  rosflight_msgs::msg::Barometer latest_baro_;
-  rosflight_msgs::msg::GNSS latest_gnss_;
-  rosflight_msgs::msg::Airspeed latest_diff_pressure_;
-  sensor_msgs::msg::Range latest_range_;
-  rosflight_msgs::msg::BatteryStatus latest_battery_;
   rosflight_msgs::msg::RCRaw latest_rc_;
 
-  bool imu_seen_{false};
   bool imu_temperature_available_{false};
-  bool mag_available_{false};
-  bool baro_available_{false};
-  bool gnss_available_{false};
-  bool diff_pressure_available_{false};
-  bool range_available_{false};
-  bool battery_available_{false};
-  bool rc_available_{false};
 
   std::array<uint16_t, kPwmChannelCount> pwm_outputs_{};
   std::unique_ptr<VeloxityFfiHandle, FirmwareDeleter> firmware_;
-  std::chrono::steady_clock::time_point boot_time_{std::chrono::steady_clock::now()};
   std::optional<std::chrono::steady_clock::time_point> last_run_start_;
 };
 }  // namespace veloxity_sil_board_shim

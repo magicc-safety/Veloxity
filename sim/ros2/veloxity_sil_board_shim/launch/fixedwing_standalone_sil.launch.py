@@ -21,6 +21,8 @@ def generate_launch_description():
     use_builtin_rc = LaunchConfiguration("use_builtin_rc")
     use_rviz = LaunchConfiguration("use_rviz")
     veloxity_param_dir = LaunchConfiguration("veloxity_param_dir")
+    imu_update_frequency = LaunchConfiguration("imu_update_frequency")
+    pwm_publish_frequency = LaunchConfiguration("pwm_publish_frequency")
 
     is_c = PythonExpression(["'", firmware, "' == 'c'"])
     is_veloxity = PythonExpression(["'", firmware, "' == 'veloxity'"])
@@ -34,6 +36,16 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("use_sim_time", default_value="false"),
         DeclareLaunchArgument("use_vimfly", default_value="false"),
+        DeclareLaunchArgument(
+            "imu_update_frequency",
+            default_value="400.0",
+            description="Spoofed IMU publication rate in Hz; independent of control/PWM publication.",
+        ),
+        DeclareLaunchArgument(
+            "pwm_publish_frequency",
+            default_value="400.0",
+            description="SIL synchronization and sim/pwm_output publication rate in Hz.",
+        ),
         DeclareLaunchArgument(
             "use_builtin_rc",
             default_value="true",
@@ -80,6 +92,7 @@ def generate_launch_description():
             parameters=[{
                 "use_sim_time": use_sim_time,
                 "use_timer": True,
+                "simulation_loop_frequency": pwm_publish_frequency,
                 "service_exists_timeout_ms": 1000,
                 "service_result_timeout_ms": 1000,
             }],
@@ -105,7 +118,10 @@ def generate_launch_description():
             executable="standalone_sensors",
             name="standalone_sensors",
             output="screen",
-            parameters=[{"use_sim_time": use_sim_time}, dynamics_param_file],
+            parameters=[{
+                "use_sim_time": use_sim_time,
+                "imu_update_frequency": imu_update_frequency,
+            }, dynamics_param_file],
         ),
         Node(
             package="rosflight_io",
