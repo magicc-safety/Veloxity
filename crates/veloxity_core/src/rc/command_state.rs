@@ -1,16 +1,18 @@
 use crate::{
     command::{ATTITUDE_RATE_MODE, CommandManager},
     events::ParamEventQueues,
-    math::FlightFloat,
+    packets::RcPacket,
     params::{ParamId, ParamValue, Params},
     rc::Rc,
-    sensors::ProcessedSensors,
     state_machine::StateManager,
 };
 
-pub struct RcCommandStateCtx<'a, R: FlightFloat> {
+pub struct RcCommandStateCtx<'a> {
     pub now_ms: u32,
-    pub sensors: &'a ProcessedSensors<R>,
+    /// A newly ingested RC sample for this system pass. The long-lived RC
+    /// resource retains interpreted stick/switch state; cached sensor state is
+    /// never replayed as a fresh command.
+    pub fresh_rc: Option<RcPacket>,
     pub rc: &'a mut Rc,
     pub command: &'a mut CommandManager,
     pub state: &'a mut StateManager,
@@ -18,12 +20,12 @@ pub struct RcCommandStateCtx<'a, R: FlightFloat> {
     pub param_events: Option<&'a mut ParamEventQueues>,
 }
 
-pub fn run_rc_command_state<R: FlightFloat>(ctx: RcCommandStateCtx<'_, R>) {
-    if let Some(rc_packet) = ctx.sensors.rc {
+pub fn run_rc_command_state(ctx: RcCommandStateCtx<'_>) {
+    if let Some(rc_packet) = ctx.fresh_rc {
         ctx.rc.receive(&rc_packet);
+        ctx.rc.run(ctx.now_ms, ctx.params, ctx.state);
     }
 
-    ctx.rc.run(ctx.now_ms, ctx.params, ctx.state);
     let command_result = ctx.command.run(ctx.now_ms, ctx.params, ctx.rc, ctx.state);
     if command_result.force_rc_attitude_mode_rate {
         if let Some(param_events) = ctx.param_events {
@@ -57,25 +59,22 @@ mod tests {
     fn rc_command_state_consumes_named_rc_packet() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
-        let sensors = ProcessedSensors {
-            rc: Some(RcPacket {
-                header: RosflightPacketHeader {
-                    timestamp: 1,
-                    status: 0,
-                },
-                n_chan: 1,
-                chan: [0.5; RC_PACKET_CHANNELS],
-                lol: false,
-            }),
-            ..ProcessedSensors::<f64>::default()
-        };
+        let fresh_rc = Some(RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            n_chan: 1,
+            chan: [0.5; RC_PACKET_CHANNELS],
+            lol: false,
+        });
         let mut rc = Rc::new();
         let mut command = CommandManager::new();
         let mut state = StateManager::new();
 
         run_rc_command_state(RcCommandStateCtx {
             now_ms: 1,
-            sensors: &sensors,
+            fresh_rc,
             rc: &mut rc,
             command: &mut command,
             state: &mut state,
@@ -90,25 +89,22 @@ mod tests {
     fn rc_command_state_does_not_publish_command_from_lost_frame() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
-        let sensors = ProcessedSensors {
-            rc: Some(RcPacket {
-                header: RosflightPacketHeader {
-                    timestamp: 1,
-                    status: 1,
-                },
-                n_chan: 1,
-                chan: [0.5; RC_PACKET_CHANNELS],
-                lol: false,
-            }),
-            ..ProcessedSensors::<f64>::default()
-        };
+        let fresh_rc = Some(RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 1,
+            },
+            n_chan: 1,
+            chan: [0.5; RC_PACKET_CHANNELS],
+            lol: false,
+        });
         let mut rc = Rc::new();
         let mut command = CommandManager::new();
         let mut state = StateManager::new();
 
         run_rc_command_state(RcCommandStateCtx {
             now_ms: 1,
-            sensors: &sensors,
+            fresh_rc,
             rc: &mut rc,
             command: &mut command,
             state: &mut state,
@@ -125,18 +121,15 @@ mod tests {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(1));
         params.set_by_id(ParamId::PARAM_EST_ANGLE_LOCKOUT, ParamValue::Int(1));
-        let sensors = ProcessedSensors {
-            rc: Some(RcPacket {
-                header: RosflightPacketHeader {
-                    timestamp: 1,
-                    status: 0,
-                },
-                n_chan: 8,
-                chan: [0.5; RC_PACKET_CHANNELS],
-                lol: false,
-            }),
-            ..ProcessedSensors::<f64>::default()
-        };
+        let fresh_rc = Some(RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            n_chan: 8,
+            chan: [0.5; RC_PACKET_CHANNELS],
+            lol: false,
+        });
         let mut rc = Rc::new();
         rc.init(&params);
         let mut command = CommandManager::new();
@@ -146,7 +139,7 @@ mod tests {
 
         run_rc_command_state(RcCommandStateCtx {
             now_ms: 1,
-            sensors: &sensors,
+            fresh_rc,
             rc: &mut rc,
             command: &mut command,
             state: &mut state,
@@ -168,18 +161,15 @@ mod tests {
     fn rc_command_state_does_not_force_rate_mode_when_lockout_disabled() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_RC_ATTITUDE_MODE, ParamValue::Int(1));
-        let sensors = ProcessedSensors {
-            rc: Some(RcPacket {
-                header: RosflightPacketHeader {
-                    timestamp: 1,
-                    status: 0,
-                },
-                n_chan: 8,
-                chan: [0.5; RC_PACKET_CHANNELS],
-                lol: false,
-            }),
-            ..ProcessedSensors::<f64>::default()
-        };
+        let fresh_rc = Some(RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            n_chan: 8,
+            chan: [0.5; RC_PACKET_CHANNELS],
+            lol: false,
+        });
         let mut rc = Rc::new();
         rc.init(&params);
         let mut command = CommandManager::new();
@@ -189,7 +179,7 @@ mod tests {
 
         run_rc_command_state(RcCommandStateCtx {
             now_ms: 1,
-            sensors: &sensors,
+            fresh_rc,
             rc: &mut rc,
             command: &mut command,
             state: &mut state,

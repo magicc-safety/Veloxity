@@ -59,14 +59,20 @@ where
         let sensor_result = self.run_service_sensor_stage();
         result.merge_from(sensor_result);
 
-        if sensor_result.had_raw_rc && self.realtime_service_can_continue() {
-            self.run_rc_command_state_stages();
-            result.had_processed_rc = self.processed_sensors.rc.is_some();
-        }
-
         if self.realtime_service_can_continue() {
             result.had_rx |= self.board.serial_rx_pending();
             self.run_service_input_stage();
+        }
+
+        if self.realtime_service_can_continue() {
+            let fresh_rc = if sensor_result.had_raw_rc {
+                self.processed_sensors.rc
+            } else {
+                None
+            };
+            self.run_rc_command_state_stages(fresh_rc);
+            result.had_processed_rc =
+                sensor_result.had_raw_rc && self.processed_sensors.rc.is_some();
         }
 
         if self.realtime_service_can_continue() {
