@@ -675,7 +675,7 @@ fn vector_norm<R: FlightFloat>(vector: [R; 3]) -> R {
 }
 
 fn rotate_mag_in_place(packet: &mut MagPacket, params: &Params) {
-    let rotation = euler_rotation_matrix(
+    let rotation = rosflight_orientation_matrix(
         param_float(params, ParamId::PARAM_MAG_ROLL) * deg_to_rad::<f32>(),
         param_float(params, ParamId::PARAM_MAG_PITCH) * deg_to_rad::<f32>(),
         param_float(params, ParamId::PARAM_MAG_YAW) * deg_to_rad::<f32>(),
@@ -724,25 +724,51 @@ impl<R: FlightFloat> Default for ImuMountRotation<R> {
 }
 
 fn imu_mount_rotation_matrix<R: FlightFloat>(angles_deg: [f32; 3]) -> [[R; 3]; 3] {
-    euler_rotation_matrix(
+    rosflight_orientation_matrix(
         <R as FlightFloat>::from_f32(angles_deg[0]) * deg_to_rad(),
         <R as FlightFloat>::from_f32(angles_deg[1]) * deg_to_rad(),
         <R as FlightFloat>::from_f32(angles_deg[2]) * deg_to_rad(),
     )
 }
 
-fn euler_rotation_matrix<R: FlightFloat>(roll: R, pitch: R, yaw: R) -> [[R; 3]; 3] {
-    let sr = roll.sin();
-    let cr = roll.cos();
-    let sp = pitch.sin();
-    let cp = pitch.cos();
-    let sy = yaw.sin();
-    let cy = yaw.cos();
+fn rosflight_orientation_matrix<R: FlightFloat>(roll: R, pitch: R, yaw: R) -> [[R; 3]; 3] {
+    let two = <R as FlightFloat>::from_f32(2.0);
+    let half = <R as FlightFloat>::from_f32(0.5);
+    let roll_cos = (roll * half).cos();
+    let roll_sin = (roll * half).sin();
+    let pitch_cos = (pitch * half).cos();
+    let pitch_sin = (pitch * half).sin();
+    let yaw_cos = (yaw * half).cos();
+    let yaw_sin = (yaw * half).sin();
+
+    // Direct port of ROSflight C's Quaternion::from_RPY followed by Quaternion::rotate.
+    // ROSflight's rotate applies the passive/sensor-to-body form of the quaternion matrix.
+    let mut w = yaw_cos * pitch_cos * roll_cos + yaw_sin * pitch_sin * roll_sin;
+    let mut x = yaw_cos * pitch_cos * roll_sin - yaw_sin * pitch_sin * roll_cos;
+    let mut y = yaw_cos * pitch_sin * roll_cos + yaw_sin * pitch_cos * roll_sin;
+    let mut z = yaw_sin * pitch_cos * roll_cos - yaw_cos * pitch_sin * roll_sin;
+    let norm = (w * w + x * x + y * y + z * z).sqrt();
+    w /= norm;
+    x /= norm;
+    y /= norm;
+    z /= norm;
 
     [
-        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-        [-sp, cp * sr, cp * cr],
+        [
+            R::one() - two * y * y - two * z * z,
+            two * (x * y + w * z),
+            two * (x * z - w * y),
+        ],
+        [
+            two * (x * y - w * z),
+            R::one() - two * x * x - two * z * z,
+            two * (y * z + w * x),
+        ],
+        [
+            two * (x * z + w * y),
+            two * (y * z - w * x),
+            R::one() - two * x * x - two * y * y,
+        ],
     ]
 }
 
@@ -818,6 +844,55 @@ mod tests {
         processor.process(&mut raw, &mut flags, params).unwrap()
     }
 
+    fn assert_vector_close(actual: [f64; 3], expected: [f64; 3]) {
+        for axis in 0..3 {
+            assert!(
+                (actual[axis] - expected[axis]).abs() < 1e-6,
+                "axis {axis}: expected {}, got {}",
+                expected[axis],
+                actual[axis]
+            );
+        }
+    }
+
+    #[test]
+    fn rosflight_mount_rotation_matches_positive_and_negative_cardinal_axes() {
+        let cases = [
+            ([90.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]),
+            ([-90.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            ([0.0, 90.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            ([0.0, -90.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]),
+            ([0.0, 0.0, 90.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]),
+            ([0.0, 0.0, -90.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        ];
+
+        for (angles_deg, input, expected) in cases {
+            let rotation = imu_mount_rotation_matrix::<f64>(angles_deg);
+            assert_vector_close(rotate_vector_real(rotation, input), expected);
+        }
+    }
+
+    #[test]
+    fn rosflight_mount_rotation_matches_combined_rpy_reference() {
+        let rotation = imu_mount_rotation_matrix::<f64>([30.0, -20.0, 40.0]);
+        assert_vector_close(
+            rotate_vector_real(rotation, [0.3, -0.4, 0.5]),
+            [
+                0.14535485535869916,
+                -0.19277467629484094,
+                0.6646125865517978,
+            ],
+        );
+    }
+
+    #[test]
+    fn zero_mount_rotation_is_exact_identity() {
+        assert_eq!(
+            imu_mount_rotation_matrix::<f64>([0.0; 3]),
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+        );
+    }
+
     #[test]
     fn imu_processor_applies_rosflight_orientation_before_correction() {
         let mut params = Params::new();
@@ -836,9 +911,9 @@ mod tests {
         );
 
         assert!(processed.accel[0].abs() < 1e-6);
-        assert!((processed.accel[1] - 1.0).abs() < 1e-6);
+        assert!((processed.accel[1] + 1.0).abs() < 1e-6);
         assert!(processed.gyro[0].abs() < 1e-6);
-        assert!((processed.gyro[1] - 0.5).abs() < 1e-6);
+        assert!((processed.gyro[1] + 1.5).abs() < 1e-6);
     }
 
     #[test]
@@ -870,9 +945,9 @@ mod tests {
         );
 
         assert!(rotated.accel[0].abs() < 1e-6);
-        assert!((rotated.accel[1] - 1.0).abs() < 1e-6);
+        assert!((rotated.accel[1] + 1.0).abs() < 1e-6);
         assert!(rotated.gyro[0].abs() < 1e-6);
-        assert!((rotated.gyro[1] - 1.0).abs() < 1e-6);
+        assert!((rotated.gyro[1] + 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -933,11 +1008,11 @@ mod tests {
             &mut params,
         );
 
-        // Yaw rotation maps [1, 0, 2] to [0, 1, 2], then hard-iron Y bias
-        // produces [0, 0, 2]. The soft-iron rows are therefore 10, 26, 46.
-        assert!((processed.flux[0] - 10.0).abs() < 1e-5);
-        assert!((processed.flux[1] - 26.0).abs() < 1e-5);
-        assert!((processed.flux[2] - 46.0).abs() < 1e-5);
+        // ROSflight's passive yaw rotation maps [1, 0, 2] to [0, -1, 2]. After
+        // hard-iron Y correction the vector is [0, -2, 2].
+        assert!((processed.flux[0] - 4.0).abs() < 1e-5);
+        assert!((processed.flux[1] - 4.0).abs() < 1e-5);
+        assert!((processed.flux[2] - 8.0).abs() < 1e-5);
     }
 
     #[test]
@@ -1125,8 +1200,8 @@ mod tests {
 
         for seq in 0..=1000 {
             let mut raw = Some(Ok(ImuPacket {
-                accel: [0.1, -9.50665, 0.2],
-                gyro: [0.2, 0.3, 0.1],
+                accel: [0.1, 9.50665, -0.2],
+                gyro: [0.2, -0.3, -0.1],
                 seq,
                 ..Default::default()
             }));
