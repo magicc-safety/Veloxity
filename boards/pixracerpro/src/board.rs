@@ -51,23 +51,6 @@ include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 
 static mut PARAM_STORE: Option<Params> = None;
 
-// ROSflight C maps logical motor outputs 0..=3 to TIM1 channels 4..=1 on
-// Pixracer Pro. Keep this board-level permutation explicit so the same mixer
-// columns drive the same physical MAIN outputs under either firmware.
-const ROSFLIGHT_TIM1_MOTOR_MAP: [(usize, peripherals::pwm::TimerChannel); 4] = [
-    (0, peripherals::pwm::TimerChannel::Ch4),
-    (0, peripherals::pwm::TimerChannel::Ch3),
-    (0, peripherals::pwm::TimerChannel::Ch2),
-    (0, peripherals::pwm::TimerChannel::Ch1),
-];
-
-const _: () = {
-    assert!(ROSFLIGHT_TIM1_MOTOR_MAP[0].1 as u8 == peripherals::pwm::TimerChannel::Ch4 as u8);
-    assert!(ROSFLIGHT_TIM1_MOTOR_MAP[1].1 as u8 == peripherals::pwm::TimerChannel::Ch3 as u8);
-    assert!(ROSFLIGHT_TIM1_MOTOR_MAP[2].1 as u8 == peripherals::pwm::TimerChannel::Ch2 as u8);
-    assert!(ROSFLIGHT_TIM1_MOTOR_MAP[3].1 as u8 == peripherals::pwm::TimerChannel::Ch1 as u8);
-};
-
 #[cfg(feature = "sensor-poll-diagnostics")]
 mod sensor_poll_diagnostics {
     use core::sync::atomic::{AtomicU32, Ordering};
@@ -673,10 +656,10 @@ impl Board {
         let servos = peripherals::pwm::PixRacerProServoMonstrosity::with_timer_kinds_and_dma(
             timers,
             [
-                ROSFLIGHT_TIM1_MOTOR_MAP[0], // Logical outputs 0-3 match C: TIM1 CH4-CH1.
-                ROSFLIGHT_TIM1_MOTOR_MAP[1],
-                ROSFLIGHT_TIM1_MOTOR_MAP[2],
-                ROSFLIGHT_TIM1_MOTOR_MAP[3],
+                (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4
+                (0, peripherals::pwm::TimerChannel::Ch2), // -
+                (0, peripherals::pwm::TimerChannel::Ch3), // -
+                (0, peripherals::pwm::TimerChannel::Ch4), // -
                 (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
                 (2, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
                 (2, peripherals::pwm::TimerChannel::Ch3), // -
