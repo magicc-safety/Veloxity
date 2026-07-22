@@ -12,7 +12,7 @@ set(VELOXITY_SIM_STATICLIB "${VELOXITY_REPO_ROOT}/target/debug/libsim.a")
 
 add_custom_target(
   veloxity_sim_staticlib ALL
-  COMMAND cargo build -p sim --lib
+  COMMAND cargo build -p sim --lib --release
   WORKING_DIRECTORY "${VELOXITY_REPO_ROOT}"
   COMMENT "Building Veloxity sim static library"
   BYPRODUCTS "${VELOXITY_SIM_STATICLIB}"
