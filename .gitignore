@@ -20,6 +20,7 @@ __pycache__/
 scope_plots*/
 *.params
 rosflight_memory/
+/takeoff_logs/
 
 # Local walkthrough notes
 2026-06-17-veloxity-world-walkthrough.md
