@@ -36,10 +36,11 @@
 use veloxity_core::board::BoardIo;
 use veloxity_core::errors;
 use veloxity_core::math::FlightFloat;
+use veloxity_core::packets::ParamPacket;
 use veloxity_core::params::Params;
 use veloxity_core::sensors::SensorBus;
 
-use embassy_time::Delay;
+use embassy_time::{Delay, Duration, Instant};
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
 #[cfg(not(feature = "scope-timing-pins"))]
 use stm_32::cortex_m::prelude::_embedded_hal_blocking_delay_DelayUs;
@@ -49,7 +50,21 @@ use stm_32::*;
 
 include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 
-static mut PARAM_STORE: Option<Params> = None;
+const PARAM_STORAGE_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn wait_for_sd_response(request_id: u64) -> Option<ParamPacket> {
+    let start = Instant::now();
+    while start.elapsed() < PARAM_STORAGE_TIMEOUT {
+        match peripherals::sd_card::SD_READ_SIGNAL.try_take() {
+            Some(Ok(packet)) if packet.header.timestamp == request_id => return Some(packet),
+            Some(Ok(_)) => {}
+            Some(Err(_)) => return None,
+            None => {}
+        }
+        core::hint::spin_loop();
+    }
+    None
+}
 
 #[cfg(feature = "sensor-poll-diagnostics")]
 mod sensor_poll_diagnostics {
@@ -147,6 +162,7 @@ pub struct Board {
     test_pin_1: Output<'static>,
     test_pin_2: Output<'static>,
     pending_reset_to_bootloader: Option<bool>,
+    sd_request_id: u64,
     #[cfg(feature = "sensor-poll-diagnostics")]
     last_sbus_diag_ms: u32,
     #[cfg(feature = "sensor-poll-diagnostics")]
@@ -318,18 +334,35 @@ impl BoardIo for Board {
     }
 
     fn read_params(&mut self, params: &mut Params) -> bool {
-        let Some(stored) = (unsafe { PARAM_STORE }) else {
+        let request_id = self.next_sd_request_id();
+        peripherals::sd_card::SD_READ_SIGNAL.reset();
+        peripherals::sd_card::SD_READ_REQUEST_SIGNAL.signal(request_id);
+
+        let Some(packet) = wait_for_sd_response(request_id) else {
             return false;
         };
+        let Some(stored) = peripherals::sd_card::decode_params(&packet) else {
+            return false;
+        };
+
         *params = stored;
         true
     }
 
     fn write_params(&mut self, params: &Params) -> bool {
-        unsafe {
-            PARAM_STORE = Some(*params);
-        }
-        true
+        let Some(mut packet) = peripherals::sd_card::encode_params(params) else {
+            return false;
+        };
+        let request_id = self.next_sd_request_id();
+        packet.header.timestamp = request_id;
+
+        peripherals::sd_card::SD_READ_SIGNAL.reset();
+        peripherals::sd_card::SD_WRITE_SIGNAL.signal(Ok(packet));
+
+        matches!(
+            wait_for_sd_response(request_id),
+            Some(packet) if packet.header.status == 1
+        )
     }
 
     fn reboot(&mut self) -> bool {
@@ -352,6 +385,11 @@ impl BoardIo for Board {
 }
 
 impl Board {
+    fn next_sd_request_id(&mut self) -> u64 {
+        self.sd_request_id = self.sd_request_id.wrapping_add(1);
+        self.sd_request_id
+    }
+
     pub fn new() -> (Board, PixRacerProServoMonstrosity) {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
 
@@ -696,6 +734,7 @@ impl Board {
                 test_pin_1,
                 test_pin_2,
                 pending_reset_to_bootloader: None,
+                sd_request_id: 0,
                 #[cfg(feature = "sensor-poll-diagnostics")]
                 last_sbus_diag_ms: 0,
                 #[cfg(feature = "sensor-poll-diagnostics")]
