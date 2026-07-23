@@ -40,6 +40,10 @@ install(TARGETS veloxity_sil_board
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(PROGRAMS scripts/verified_param_loader.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(DIRECTORY include/
   DESTINATION include
 )

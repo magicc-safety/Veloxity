@@ -31,7 +31,7 @@ the exact node names and ROS 2 parameter nesting shown below:
 /trajectory_velocity_adapter:
   ros__parameters:
     north_kp: 1.5
-    north_kd: 3.55
+    north_kd: 3.5
     east_kp: 1.5
     east_kd: 3.5
     down_kp: 4.0
@@ -72,7 +72,9 @@ export MULTIROTOR="$ROSCOPTER_SHARE/params/multirotor.yaml"
 export ESTIMATOR="$ROSCOPTER_SHARE/params/estimator.yaml"
 
 export AIRFRAME_CONFIG="$HOME/.config/veloxity/airframes/3dquad"
-export FIRMWARE_PARAMS="$AIRFRAME_CONFIG/firmware/firmware-startup.yaml"
+export VELOXITY_FIRMWARE_PARAMS="$AIRFRAME_CONFIG/firmware/firmware-startup-veloxity.yaml"
+export C_FIRMWARE_PARAMS="$AIRFRAME_CONFIG/firmware/firmware-startup-c.yaml"
+export FIRMWARE_PARAMS=""  # Empty selects from the two files above by backend.
 export EXPERIMENT="$AIRFRAME_CONFIG/ros/hardware-exp2.yaml"
 export ESTIMATOR_HW="$AIRFRAME_CONFIG/ros/estimator-hardware.yaml"
 export MISSION="$AIRFRAME_CONFIG/missions/hover-check.yaml"
@@ -710,4 +712,5 @@ flight. Retake RC override, stabilize or land, and inspect the recorded topics.
 - [Experiment README](../../examples/quadx_upstream_angle_waypoints/README.md)
 - [Simulation orchestration](../../examples/quadx_upstream_angle_waypoints/run_upstream_angle_experiment.zsh)
 - [Experiment journal](../../examples/quadx_upstream_angle_waypoints/EXPERIMENT_LOG.md)
+- [Quad-X firmware-parameter incident report](quadx-firmware-parameter-incident.md)
 - [Pixracer Pro guide](../boards/stm32.md)

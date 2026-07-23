@@ -22,6 +22,8 @@ use core::marker::PhantomData;
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
 const OUTPUT_RAW_IMU_DIVISOR: u64 = 8;
+const TELEMETRY_RATE_DISABLED: u16 = u16::MAX;
+pub const MAX_TELEMETRY_RATE_HZ: i32 = 2_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NamedTelemetryStream {
@@ -88,6 +90,24 @@ pub struct TelemetryRates {
 }
 
 impl TelemetryRates {
+    pub fn from_params(params: &Params) -> Self {
+        Self {
+            heartbeat_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_HEARTBEAT_HZ),
+            status_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_STATUS_HZ),
+            imu_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_IMU_HZ),
+            attitude_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_ATTITUDE_HZ),
+            output_raw_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_OUTPUT_RAW_HZ),
+            diff_pressure_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_DIFF_PRESSURE_HZ),
+            baro_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_BARO_HZ),
+            mag_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_MAG_HZ),
+            range_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_RANGE_HZ),
+            battery_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_BATTERY_HZ),
+            gnss_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_GNSS_HZ),
+            rc_hz: telemetry_rate_param(params, ParamId::PARAM_TELEM_RC_HZ),
+            output_raw_imu_divisor: 0,
+        }
+    }
+
     pub const fn upstream() -> Self {
         Self {
             heartbeat_hz: 1,
@@ -125,9 +145,30 @@ impl TelemetryRates {
     }
 }
 
-impl Default for TelemetryRates {
-    fn default() -> Self {
-        Self::upstream()
+fn telemetry_rate_param(params: &Params, id: ParamId) -> u16 {
+    match params.get_by_id(id) {
+        ParamValue::Int(-1) => TELEMETRY_RATE_DISABLED,
+        ParamValue::Int(value) if value < -1 => TELEMETRY_RATE_DISABLED,
+        ParamValue::Int(value) => value.min(MAX_TELEMETRY_RATE_HZ) as u16,
+        _ => TELEMETRY_RATE_DISABLED,
+    }
+}
+
+pub fn telemetry_stream_for_param(id: ParamId) -> Option<NamedTelemetryStream> {
+    match id {
+        ParamId::PARAM_TELEM_HEARTBEAT_HZ => Some(NamedTelemetryStream::Heartbeat),
+        ParamId::PARAM_TELEM_STATUS_HZ => Some(NamedTelemetryStream::Status),
+        ParamId::PARAM_TELEM_IMU_HZ => Some(NamedTelemetryStream::Imu),
+        ParamId::PARAM_TELEM_ATTITUDE_HZ => Some(NamedTelemetryStream::Attitude),
+        ParamId::PARAM_TELEM_OUTPUT_RAW_HZ => Some(NamedTelemetryStream::OutputRaw),
+        ParamId::PARAM_TELEM_DIFF_PRESSURE_HZ => Some(NamedTelemetryStream::DiffPressure),
+        ParamId::PARAM_TELEM_BARO_HZ => Some(NamedTelemetryStream::Baro),
+        ParamId::PARAM_TELEM_MAG_HZ => Some(NamedTelemetryStream::Mag),
+        ParamId::PARAM_TELEM_RANGE_HZ => Some(NamedTelemetryStream::Range),
+        ParamId::PARAM_TELEM_BATTERY_HZ => Some(NamedTelemetryStream::Battery),
+        ParamId::PARAM_TELEM_GNSS_HZ => Some(NamedTelemetryStream::Gnss),
+        ParamId::PARAM_TELEM_RC_HZ => Some(NamedTelemetryStream::Rc),
+        _ => None,
     }
 }
 
@@ -146,6 +187,9 @@ struct TelemetryRateState {
 }
 
 fn stream_due(now_us: u64, last_us: &mut u64, rate_hz: u16) -> bool {
+    if rate_hz == TELEMETRY_RATE_DISABLED {
+        return false;
+    }
     if rate_hz == 0 {
         if *last_us == 0 {
             *last_us = now_us;
@@ -167,6 +211,9 @@ fn stream_due(now_us: u64, last_us: &mut u64, rate_hz: u16) -> bool {
 }
 
 fn stream_due_deadline_us(now_us: u64, last_us: u64, rate_hz: u16) -> Option<u64> {
+    if rate_hz == TELEMETRY_RATE_DISABLED {
+        return None;
+    }
     if rate_hz == 0 {
         return Some(if last_us == 0 { 0 } else { now_us });
     }
@@ -185,8 +232,11 @@ fn stream_due_deadline_us(now_us: u64, last_us: u64, rate_hz: u16) -> Option<u64
 }
 
 fn fixed_rate_due(now_us: u64, last_us: u64, rate_hz: u16) -> bool {
-    if rate_hz == 0 {
+    if rate_hz == TELEMETRY_RATE_DISABLED {
         return false;
+    }
+    if rate_hz == 0 {
+        return true;
     }
 
     let interval_us = 1_000_000_u64 / rate_hz as u64;
@@ -194,8 +244,11 @@ fn fixed_rate_due(now_us: u64, last_us: u64, rate_hz: u16) -> bool {
 }
 
 fn fixed_rate_due_deadline_us(now_us: u64, last_us: u64, rate_hz: u16) -> Option<u64> {
-    if rate_hz == 0 {
+    if rate_hz == TELEMETRY_RATE_DISABLED {
         return None;
+    }
+    if rate_hz == 0 {
+        return Some(now_us);
     }
 
     let interval_us = 1_000_000_u64 / rate_hz as u64;
@@ -298,6 +351,79 @@ where
         self.telemetry_rate_state = TelemetryRateState::default();
         self.output_raw_imu_count = 0;
         self.last_realtime_imu_telemetry_timestamp = None;
+    }
+
+    pub fn configure_telemetry_from_params(&mut self, params: &Params) {
+        self.set_telemetry_rates(TelemetryRates::from_params(params));
+    }
+
+    /// Applies one live telemetry parameter without disturbing the deadlines
+    /// of unrelated streams. The changed stream begins a new period at
+    /// `now_us`, avoiding a catch-up burst.
+    pub fn update_telemetry_param(&mut self, params: &Params, id: ParamId, now_us: u64) -> bool {
+        let Some(stream) = telemetry_stream_for_param(id) else {
+            return false;
+        };
+        let rate_hz = telemetry_rate_param(params, id);
+        match stream {
+            NamedTelemetryStream::Heartbeat => {
+                self.telemetry_rates.heartbeat_hz = rate_hz;
+                self.last_heartbeat_us = now_us;
+            }
+            NamedTelemetryStream::Status => {
+                self.telemetry_rates.status_hz = rate_hz;
+                self.last_status_send_us = now_us;
+            }
+            NamedTelemetryStream::Imu => {
+                self.telemetry_rates.imu_hz = rate_hz;
+                self.telemetry_rate_state.imu_us = now_us;
+                self.last_realtime_imu_telemetry_timestamp = None;
+            }
+            NamedTelemetryStream::Rc => {
+                self.telemetry_rates.rc_hz = rate_hz;
+                self.telemetry_rate_state.rc_us = now_us;
+            }
+            NamedTelemetryStream::Attitude => {
+                self.telemetry_rates.attitude_hz = rate_hz;
+                self.telemetry_rate_state.attitude_us = now_us;
+            }
+            NamedTelemetryStream::OutputRaw => {
+                self.telemetry_rates.output_raw_hz = rate_hz;
+                self.telemetry_rates.output_raw_imu_divisor = 0;
+                self.telemetry_rate_state.output_raw_us = now_us;
+                self.output_raw_imu_count = 0;
+            }
+            NamedTelemetryStream::Gnss => {
+                self.telemetry_rates.gnss_hz = rate_hz;
+                self.telemetry_rate_state.gnss_us = now_us;
+            }
+            NamedTelemetryStream::DiffPressure => {
+                self.telemetry_rates.diff_pressure_hz = rate_hz;
+                self.telemetry_rate_state.diff_pressure_us = now_us;
+            }
+            NamedTelemetryStream::Baro => {
+                self.telemetry_rates.baro_hz = rate_hz;
+                self.telemetry_rate_state.baro_us = now_us;
+            }
+            NamedTelemetryStream::Mag => {
+                self.telemetry_rates.mag_hz = rate_hz;
+                self.telemetry_rate_state.mag_us = now_us;
+            }
+            NamedTelemetryStream::Range => {
+                self.telemetry_rates.range_hz = rate_hz;
+                self.telemetry_rate_state.range_us = now_us;
+            }
+            NamedTelemetryStream::Battery => {
+                self.telemetry_rates.battery_hz = rate_hz;
+                self.telemetry_rate_state.battery_us = now_us;
+            }
+        }
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn telemetry_rates(&self) -> TelemetryRates {
+        self.telemetry_rates
     }
 
     pub fn named_telemetry_due<R>(
@@ -1632,6 +1758,41 @@ mod tests {
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
         state
+    }
+
+    #[test]
+    fn live_telemetry_update_changes_only_one_stream_and_restarts_its_period() {
+        let mut params = Params::new();
+        let mut manager =
+            CommManager::<TestBoard, RecordingCommLink>::new(RecordingCommLink::new(), 10);
+        manager.configure_telemetry_from_params(&params);
+        let original = manager.telemetry_rates();
+
+        params.set_by_id(ParamId::PARAM_TELEM_BARO_HZ, ParamValue::Int(20));
+        assert!(manager.update_telemetry_param(&params, ParamId::PARAM_TELEM_BARO_HZ, 1_000_000,));
+
+        let updated = manager.telemetry_rates();
+        assert_eq!(updated.baro_hz, 20);
+        assert_eq!(updated.imu_hz, original.imu_hz);
+        assert_eq!(updated.rc_hz, original.rc_hz);
+        assert_eq!(manager.telemetry_rate_state.baro_us, 1_000_000);
+        assert!(stream_due_deadline_us(1_049_999, 1_000_000, updated.baro_hz).is_none());
+        assert!(stream_due_deadline_us(1_050_000, 1_000_000, updated.baro_hz).is_some());
+    }
+
+    #[test]
+    fn telemetry_rate_minus_one_disables_and_zero_is_always_eligible() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_TELEM_BARO_HZ, ParamValue::Int(-1));
+        let disabled = TelemetryRates::from_params(&params).baro_hz;
+        assert_eq!(disabled, TELEMETRY_RATE_DISABLED);
+        assert!(!stream_due(1_000, &mut 0, disabled));
+        assert_eq!(stream_due_deadline_us(1_000, 0, disabled), None);
+
+        params.set_by_id(ParamId::PARAM_TELEM_BARO_HZ, ParamValue::Int(0));
+        let whenever = TelemetryRates::from_params(&params).baro_hz;
+        assert!(stream_due(1_000, &mut 0, whenever));
+        assert!(stream_due(1_001, &mut 1_000, whenever));
     }
 
     fn apply_test_command_requests(

@@ -1,6 +1,7 @@
 use crate::{
     comm::messages::{enums::ParamIdentifier, messages::ParamValueMsg},
     comm::str_to_fixed_bytes,
+    comm::{MAX_TELEMETRY_RATE_HZ, telemetry_stream_for_param},
     events::{
         CommEventQueues, CommResponse, EventQueue, PARAM_CHANGED_QUEUE_CAPACITY, ParamChanged,
         ParamEventQueues,
@@ -40,6 +41,11 @@ pub fn apply_param_requests(ctx: &mut ParamServiceCtx<'_>) {
 
         let def = &PARAM_DEFINITIONS[id as usize];
         if !same_param_type(def.default, req.value) {
+            continue;
+        }
+        if telemetry_stream_for_param(id).is_some()
+            && !matches!(req.value, ParamValue::Int(value) if (-1..=MAX_TELEMETRY_RATE_HZ).contains(&value))
+        {
             continue;
         }
 
@@ -326,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_param_requests_matches_motor_output_mask_name() {
+    fn apply_param_requests_matches_channel_output_mask_name() {
         let mut params = Params::new();
         let mut events = ParamEventQueues::default();
         let mut comm_events = CommEventQueues::default();
@@ -334,7 +340,7 @@ mod tests {
 
         let request = ParamSetRequested {
             value: ParamValue::Int(0x0f),
-            param_id_bytes: crate::comm::str_to_fixed_bytes("MTR_OUT_MASK"),
+            param_id_bytes: crate::comm::str_to_fixed_bytes("CHN_OUTPUT_MASK"),
         };
         let _ = events.set_requests.push(request);
 
@@ -346,9 +352,35 @@ mod tests {
         ));
 
         assert_eq!(
-            params.get_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK),
+            params.get_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK),
             ParamValue::Int(0x0f)
         );
+    }
+
+    #[test]
+    fn apply_param_requests_rejects_out_of_range_telemetry_rate() {
+        let mut params = Params::new();
+        let mut events = ParamEventQueues::default();
+        let mut comm_events = CommEventQueues::default();
+        let mut state = ParamListState::default();
+        let _ = events.set_requests.push(ParamSetRequested {
+            value: ParamValue::Int(MAX_TELEMETRY_RATE_HZ + 1),
+            param_id_bytes: crate::comm::str_to_fixed_bytes("TEL_BARO_HZ"),
+        });
+
+        apply_param_requests(&mut test_ctx(
+            &mut params,
+            &mut state,
+            &mut events,
+            &mut comm_events,
+        ));
+
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_TELEM_BARO_HZ),
+            ParamValue::Int(100)
+        );
+        assert!(events.changes.is_empty());
+        assert!(comm_events.responses.is_empty());
     }
 
     #[test]

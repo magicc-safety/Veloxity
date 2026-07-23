@@ -96,6 +96,10 @@ cargo xtask flash-board nucleo
 cargo xtask flash-board pixracerpro
 ```
 
+The Pixracer Pro wrapper command flashes a release build with UART transport and no optional
+features by default. Use `--vcp` to select USB VCP; `--scope-timing-pins` and
+`--sensor-poll-diagnostics` are separate explicit opt-ins and can be combined with it.
+
 Direct `cargo run` is also valid when the board crate runner and probe selection match the connected
 hardware:
 

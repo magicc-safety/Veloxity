@@ -393,7 +393,10 @@ declare_params! {
     PARAM_MOTOR_IDLE_THROTTLE, "MOTOR_IDLE_THR", Float(0.1);
     PARAM_FAILSAFE_THROTTLE, "FAILSAFE_THR", Float(-1.0);
     PARAM_SPIN_MOTORS_WHEN_ARMED, "ARM_SPIN_MOTORS", Int(1);
-    PARAM_MOTOR_OUTPUT_MASK, "MTR_OUT_MASK", Int(-1);
+    // Physical output-channel allow mask. Bit N controls channel N regardless
+    // of whether the mixer labels it as a motor, servo, GPIO, or auxiliary
+    // output. Zero is also a global hardware-output inhibit.
+    PARAM_CHANNEL_OUTPUT_MASK, "CHN_OUTPUT_MASK", Int(0);
     PARAM_INIT_TIME, "FILT_INIT_T", Int(3000);
     PARAM_FILTER_KP_ACC, "FILT_ACC_KP", Float(0.5);
     PARAM_FILTER_KI, "FILT_KI", Float(0.01);
@@ -476,6 +479,21 @@ declare_params! {
     PARAM_BATTERY_CURRENT_ALPHA, "BATT_CURR_LPF", Float(0.995);
     PARAM_OFFBOARD_TIMEOUT, "OFFBOARD_TIMEOUT", Int(100);
     PARAM_RC_OUTPUT_KILL_CHANNEL, "RC_KILL_CHN", Int(-1);
+
+    // Telemetry publication rates. -1 disables a stream, 0 publishes whenever
+    // eligible, and positive values request a fixed rate in hertz.
+    PARAM_TELEM_HEARTBEAT_HZ, "TEL_HB_HZ", Int(1);
+    PARAM_TELEM_STATUS_HZ, "TEL_STATUS_HZ", Int(10);
+    PARAM_TELEM_IMU_HZ, "TEL_IMU_HZ", Int(400);
+    PARAM_TELEM_ATTITUDE_HZ, "TEL_ATT_HZ", Int(400);
+    PARAM_TELEM_OUTPUT_RAW_HZ, "TEL_OUT_HZ", Int(50);
+    PARAM_TELEM_DIFF_PRESSURE_HZ, "TEL_DIFF_HZ", Int(100);
+    PARAM_TELEM_BARO_HZ, "TEL_BARO_HZ", Int(100);
+    PARAM_TELEM_MAG_HZ, "TEL_MAG_HZ", Int(50);
+    PARAM_TELEM_RANGE_HZ, "TEL_RANGE_HZ", Int(50);
+    PARAM_TELEM_BATTERY_HZ, "TEL_BATT_HZ", Int(200);
+    PARAM_TELEM_GNSS_HZ, "TEL_GNSS_HZ", Int(10);
+    PARAM_TELEM_RC_HZ, "TEL_RC_HZ", Int(800);
 }
 
 //=================================================================================
@@ -489,7 +507,7 @@ mod tests {
     #[test]
     fn test_param_count() {
         assert_eq!(PARAMS_COUNT, PARAM_DEFINITIONS.len());
-        assert_eq!(PARAMS_COUNT, 337);
+        assert_eq!(PARAMS_COUNT, 349);
     }
 
     #[test]
@@ -519,7 +537,10 @@ mod tests {
             ParamId::PARAM_BATTERY_VOLTAGE_ALPHA.as_str(),
             "BATT_VOLT_LPF"
         );
-        assert_eq!(ParamId::PARAM_MOTOR_OUTPUT_MASK.as_str(), "MTR_OUT_MASK");
+        assert_eq!(
+            ParamId::PARAM_CHANNEL_OUTPUT_MASK.as_str(),
+            "CHN_OUTPUT_MASK"
+        );
         assert_eq!(
             ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL.as_str(),
             "RC_KILL_CHN"
@@ -542,8 +563,8 @@ mod tests {
             ParamValue::Int(1)
         );
         assert_eq!(
-            p.get_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK),
-            ParamValue::Int(-1)
+            p.get_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK),
+            ParamValue::Int(0)
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL),

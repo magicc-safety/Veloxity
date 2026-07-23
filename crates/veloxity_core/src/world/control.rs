@@ -15,7 +15,8 @@ where
     pub fn run_once(&mut self) -> bool {
         self.run_communication_and_parameter_service_stage();
         self.run_sensor_ingestion_and_health_stage();
-        self.run_rc_command_state_stages();
+        let fresh_rc = self.processed_sensors.rc;
+        self.run_rc_command_state_stages(fresh_rc);
         self.run_control_and_mixing_stage_if_new_imu();
         self.run_telemetry_stage();
         self.board.serial_flush();
@@ -92,17 +93,12 @@ where
         ran_control
     }
 
-    pub fn run_rc_command_state_stages(&mut self) {
+    pub fn run_rc_command_state_stages(&mut self, fresh_rc: Option<crate::packets::RcPacket>) {
         let now_ms = self.board.clock_millis();
-        let has_new_rc = self.processed_sensors.rc.is_some();
-        if !has_new_rc && self.last_rc_command_state_ms == Some(now_ms) {
-            return;
-        }
-        self.last_rc_command_state_ms = Some(now_ms);
 
         run_rc_command_state(RcCommandStateCtx {
             now_ms,
-            sensors: &self.processed_sensors,
+            fresh_rc,
             rc: &mut self.rc,
             command: &mut self.command,
             state: &mut self.state,
@@ -114,12 +110,18 @@ where
     }
 
     pub fn run_pwm_output_stage(&mut self) -> bool {
+        let channel_outputs_disabled = matches!(
+            self.params
+                .get_by_id(crate::params::ParamId::PARAM_CHANNEL_OUTPUT_MASK),
+            crate::params::ParamValue::Int(0)
+        );
         sync_pwm_output_state(PwmSyncCtx {
             board: &mut self.board,
             pwm: &mut self.pwm,
             output: &mut self.pwm_output,
-            output_kill_active: self.rc.switch_mapped(crate::rc::Switch::OutputKill)
-                && self.rc.switch_on(crate::rc::Switch::OutputKill),
+            output_kill_active: channel_outputs_disabled
+                || (self.rc.switch_mapped(crate::rc::Switch::OutputKill)
+                    && self.rc.switch_on(crate::rc::Switch::OutputKill)),
         })
         .unwrap_or(false)
     }

@@ -252,7 +252,6 @@ where
     pwm_output: PwmOutputState,
     pwm: PD,
     last_imu_seen: u64,
-    last_rc_command_state_ms: Option<u32>,
     control_loop_rates: ControlLoopRates,
     last_control_update_us: u64,
     last_realtime_control_us: u64,
@@ -299,7 +298,8 @@ where
         command.init(&params, &mut state);
 
         let now_us = board.clock_micros();
-        let comm = CommManager::new(comm_link, now_us);
+        let mut comm = CommManager::new(comm_link, now_us);
+        comm.configure_telemetry_from_params(&params);
 
         let pwm_output = PwmOutputState::new(pwm.is_enabled());
 
@@ -345,7 +345,6 @@ where
             pwm_output,
             pwm,
             last_imu_seen: now_us,
-            last_rc_command_state_ms: None,
             control_loop_rates: ControlLoopRates::default(),
             last_control_update_us: now_us,
             last_realtime_control_us: now_us,

@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
     comm::messages::{
+        Store,
         enums::{
             OffboardControlIgnore, OffboardControlMode, ParamIdentifier, RosflightAuxCmdType,
             RosflightCmd, RosflightCmdResponse,
@@ -9,7 +10,6 @@ use crate::{
             ExternalAttitudeMsg, HeartbeatMsg, OffboardControlMsg, ParamRequestListMsg,
             ParamRequestReadMsg, ParamSetMsg, RosflightAuxCmdMsg, RosflightCmdMsg,
         },
-        Store,
     },
     estimator::AttitudeEstimate,
     packets::{ImuPacket, RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
@@ -387,6 +387,23 @@ fn test_world() -> TestWorld {
     test_world_with_params(Params::new())
 }
 
+fn seed_healthy_rc(world: &mut TestWorld) {
+    let mut channels = [0.5; RC_PACKET_CHANNELS];
+    channels[2] = 0.0;
+    world.rc.receive(&RcPacket {
+        header: RosflightPacketHeader {
+            timestamp: world.board.current_time_us,
+            status: 0,
+        },
+        n_chan: 8,
+        chan: channels,
+        lol: false,
+    });
+    world
+        .rc
+        .run(world.board.clock_millis(), &world.params, &mut world.state);
+}
+
 #[test]
 fn world_init_reconciles_reflected_mixer_params_from_persisted_mixer_choice() {
     let mut params = Params::new();
@@ -484,11 +501,14 @@ fn world_scheduler_answers_param_request_read_through_param_system() {
     params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
     let mut world = test_world_with_params(params);
 
-    Store::store(&mut world.comm.msgs, ParamRequestReadMsg {
-        target_system: 1,
-        target_component: 1,
-        param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
-    });
+    Store::store(
+        &mut world.comm.msgs,
+        ParamRequestReadMsg {
+            target_system: 1,
+            target_component: 1,
+            param_identifier: ParamIdentifier::ID(*b"SYS_ID\0\0\0\0\0\0\0\0\0\0"),
+        },
+    );
 
     world.run_comm_param_sensor_stages();
 
@@ -568,7 +588,8 @@ fn world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture() {
             .contains(crate::state_machine::ErrorFlag::IMU_NOT_RESPONDING)
     );
 
-    world.run_rc_command_state_stages();
+    let fresh_rc = world.processed_sensors.rc;
+    world.run_rc_command_state_stages(fresh_rc);
 
     assert!(
         !world
@@ -964,6 +985,62 @@ fn prioritized_service_applies_fresh_rc_in_one_service_opportunity() {
 }
 
 #[test]
+fn prioritized_service_does_not_replay_retained_rc_as_fresh_input() {
+    let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard {
+            current_time_us: 1_000,
+            rc: Some(RcPacket {
+                header: RosflightPacketHeader {
+                    timestamp: 1_000,
+                    status: 0,
+                },
+                n_chan: 1,
+                chan: [1.0; RC_PACKET_CHANNELS],
+                lol: false,
+            }),
+            ..Default::default()
+        },
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+
+    world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 0));
+    let selected_qx = world.command.combined_control().qx.value;
+
+    // Telemetry retains the latest packet, but without a new board sample it
+    // must not be consumed again as a new RC command.
+    world.processed_sensors.rc = Some(RcPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_001,
+            status: 0,
+        },
+        n_chan: 1,
+        chan: [0.0; RC_PACKET_CHANNELS],
+        lol: false,
+    });
+    world.board.current_time_us = 1_001;
+    world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 0));
+
+    assert_eq!(world.command.combined_control().qx.value, selected_qx);
+}
+
+#[test]
 fn fixed_control_rate_can_run_between_imu_edges() {
     let params = Params::new();
     let mixer = quadrotor::mixer::<f64>(&params);
@@ -1247,7 +1324,8 @@ fn world_scheduler_processes_named_rc_packet() {
         lol: false,
     });
 
-    world.run_rc_command_state_stages();
+    let fresh_rc = world.processed_sensors.rc;
+    world.run_rc_command_state_stages(fresh_rc);
 
     assert!(
         !world
@@ -1260,6 +1338,7 @@ fn world_scheduler_processes_named_rc_packet() {
 #[test]
 fn world_control_stage_runs_once_per_imu_timestamp() {
     let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
     params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
     params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
     params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
@@ -1409,7 +1488,7 @@ fn world_telemetry_stage_streams_non_imu_sensor_without_control_update() {
 }
 
 #[test]
-fn world_telemetry_rates_match_rosflight_c_default_stream_cadence() {
+fn world_telemetry_rates_follow_configured_default_stream_cadence() {
     let mut world = test_world();
 
     for sample in 0..40 {
@@ -1433,6 +1512,34 @@ fn world_telemetry_rates_match_rosflight_c_default_stream_cadence() {
     assert_eq!(world.comm.comm_link().imu_count, 40);
     assert_eq!(world.comm.comm_link().attitude_count, 40);
     assert_eq!(world.comm.comm_link().output_raw_count, 5);
+}
+
+#[test]
+fn world_applies_live_telemetry_parameter_without_resetting_other_rates() {
+    let mut world = test_world();
+    let original = world.comm.telemetry_rates();
+    world.board.current_time_us = 2_000_000;
+    world
+        .params
+        .set_by_id(ParamId::PARAM_TELEM_BARO_HZ, ParamValue::Int(25));
+    world
+        .param_events
+        .changes
+        .push(crate::events::ParamChanged {
+            id: ParamId::PARAM_TELEM_BARO_HZ,
+            old: ParamValue::Int(100),
+            new: ParamValue::Int(25),
+            param_id_bytes: crate::comm::str_to_fixed_bytes("TEL_BARO_HZ"),
+        })
+        .unwrap();
+
+    world.apply_param_reactions();
+
+    let updated = world.comm.telemetry_rates();
+    assert_eq!(updated.baro_hz, 25);
+    assert_eq!(updated.imu_hz, original.imu_hz);
+    assert_eq!(updated.attitude_hz, original.attitude_hz);
+    assert!(world.param_events.changes.is_empty());
 }
 
 #[test]
@@ -1472,7 +1579,8 @@ fn world_led_outputs_follow_rc_override_armed_error_and_failsafe_states() {
         chan: channels,
         lol: false,
     });
-    world.run_rc_command_state_stages();
+    let fresh_rc = world.processed_sensors.rc;
+    world.run_rc_command_state_stages(fresh_rc);
     world.update_board_leds(0);
     assert!(world.board.led0_high);
 
@@ -1753,6 +1861,7 @@ fn world_sends_calibration_ack_when_calibration_starts() {
 #[test]
 fn world_pwm_output_stage_follows_armed_state_transitions() {
     let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
     params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
     params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
     let mut world = test_world_with_params(params);
@@ -1785,8 +1894,29 @@ fn world_pwm_output_stage_follows_armed_state_transitions() {
 }
 
 #[test]
+fn world_channel_output_mask_zero_disables_the_entire_pwm_driver() {
+    let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
+    let mut world = test_world_with_params(params);
+
+    assert!(world.run_pwm_output_stage());
+    assert!(world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.enable_all_count, 1);
+
+    world
+        .params
+        .set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(0));
+
+    assert!(world.run_pwm_output_stage());
+    assert!(!world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.disable_all_count, 1);
+    assert_eq!(world.pwm.flush_count, 1);
+}
+
+#[test]
 fn world_pwm_output_stage_disables_outputs_while_rc_kill_switch_is_active() {
     let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
     params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
     params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
     params.set_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL, ParamValue::Int(4));
@@ -1834,7 +1964,9 @@ fn world_pwm_output_stage_disables_outputs_while_rc_kill_switch_is_active() {
 
 #[test]
 fn world_applies_offboard_control_command_event() {
-    let mut world = armed_test_world_with_params(Params::new());
+    let mut world = test_world();
+    world.board.current_time_us = 1_100_000;
+    seed_healthy_rc(&mut world);
 
     world.comm.msgs.offboard_control = Some(OffboardControlMsg {
         mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
@@ -1848,10 +1980,45 @@ fn world_applies_offboard_control_command_event() {
         passthrough: [0.0; 4],
     });
 
-    world.run_comm_param_sensor_stages();
+    world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 0));
 
     assert!(world.command.is_offboard_active());
     assert!(world.command_events.offboard_control_requests.is_empty());
+    assert_eq!(world.command.combined_control().qx.value, 0.1);
+    assert_eq!(
+        world.command.combined_control().qx.control_type,
+        crate::command::ControlType::Rate
+    );
+    assert_eq!(world.pwm.send_count, 0);
+}
+
+#[test]
+fn prioritized_service_expires_offboard_without_fresh_rc() {
+    let mut world = test_world();
+    world.board.current_time_us = 1_100_000;
+    seed_healthy_rc(&mut world);
+    world.comm.msgs.offboard_control = Some(OffboardControlMsg {
+        mode: OffboardControlMode::ModeRollratePitchrateYawrateThrottle,
+        ignore: OffboardControlIgnore::empty(),
+        qx: 0.25,
+        qy: 0.0,
+        qz: 0.0,
+        fx: 0.0,
+        fy: 0.0,
+        fz: 0.0,
+        passthrough: [0.0; 4],
+    });
+
+    world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 0));
+    assert!(world.command.is_offboard_active());
+    assert_eq!(world.command.combined_control().qx.value, 0.25);
+
+    world.board.current_time_us = 1_201_000;
+    world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 0));
+
+    assert!(!world.command.is_offboard_active());
+    assert_ne!(world.command.combined_control().qx.value, 0.25);
+    assert_eq!(world.pwm.send_count, 0);
 }
 
 #[test]
@@ -1979,7 +2146,7 @@ fn world_routes_rc_trim_calibration_and_sets_equilibrium_torques() {
     channels[0] = 0.55;
     channels[1] = 0.45;
     channels[3] = 0.60;
-    world.rc.receive(&crate::packets::RcPacket {
+    world.processed_sensors.rc = Some(crate::packets::RcPacket {
         header: crate::packets::RosflightPacketHeader {
             timestamp: 1,
             status: 0,
@@ -1988,7 +2155,8 @@ fn world_routes_rc_trim_calibration_and_sets_equilibrium_torques() {
         chan: channels,
         lol: false,
     });
-    world.run_rc_command_state_stages();
+    let fresh_rc = world.processed_sensors.rc;
+    world.run_rc_command_state_stages(fresh_rc);
 
     world.comm.msgs.cmd = Some(RosflightCmdMsg {
         command: RosflightCmd::RcCalibration,

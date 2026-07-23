@@ -52,8 +52,13 @@ These live in `boards/pixracerpro/Cargo.toml`.
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
+| `usb-vcp-serial` | Uses USB VCP instead of the companion-computer UART for MAVLink. | No; opt in with `cargo xtask flash-board pixracerpro --vcp`. |
 | `scope-timing-pins` | Enables Pixracer Pro logic-analyzer timing outputs. | No; measurement-only. |
 | `sensor-poll-diagnostics` | Enables board sensor-poll diagnostics. | No; diagnostic-only. |
+
+`cargo xtask flash-board pixracerpro` builds in release mode with no Cargo features, so UART is the
+default transport. The other Pixracer Pro features require their corresponding explicit flash
+flags.
 
 ## Why Features Matter
 

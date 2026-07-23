@@ -110,9 +110,10 @@ typedef struct VeloxityFfiSensorSnapshot
 VeloxityFfiHandle * veloxity_sim_create(void);
 void veloxity_sim_destroy(VeloxityFfiHandle * handle);
 bool veloxity_sim_set_sensors(
-  VeloxityFfiHandle * handle,
+  const VeloxityFfiHandle * handle,
   const VeloxityFfiSensorSnapshot * snapshot);
-bool veloxity_sim_run_once(VeloxityFfiHandle * handle);
+bool veloxity_sim_sync_latest_imu(const VeloxityFfiHandle * handle);
+uint64_t veloxity_sim_clock_micros(const VeloxityFfiHandle * handle);
 size_t veloxity_sim_get_pwm(
   const VeloxityFfiHandle * handle,
   uint16_t * output,

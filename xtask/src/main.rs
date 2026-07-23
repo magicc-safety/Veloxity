@@ -55,22 +55,21 @@ fn main() -> ExitCode {
         }
         "flash-board" => {
             let Some(board) = args.next() else {
-                eprintln!("missing board name: expected `pico2w`");
+                eprintln!("missing board name: expected `nucleo`, `pixracerpro`, or `pico2w`");
                 return ExitCode::from(2);
             };
             let Some(target) = board_target(&board) else {
                 eprintln!("unknown board `{board}`: expected `nucleo`, `pixracerpro`, or `pico2w`");
                 return ExitCode::from(2);
             };
-            cargo([
-                "run",
-                "-p",
-                board.as_str(),
-                "--target",
-                target,
-                "--bin",
-                "veloxity",
-            ])
+            let extra_args = args.collect::<Vec<_>>();
+            match flash_args(&board, target, &extra_args) {
+                Ok(cargo_args) => cargo(cargo_args),
+                Err(message) => {
+                    eprintln!("{message}");
+                    return ExitCode::from(2);
+                }
+            }
         }
         "build-sim-lib" => cargo(["build", "-p", "sim", "--lib"]),
         "clean-generated" => clean_generated(),
@@ -85,6 +84,57 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => ExitCode::from(code),
     }
+}
+
+fn flash_args(board: &str, target: &str, options: &[String]) -> Result<Vec<String>, String> {
+    let mut args = vec![
+        "run".to_owned(),
+        "-p".to_owned(),
+        board.to_owned(),
+        "--target".to_owned(),
+        target.to_owned(),
+        "--bin".to_owned(),
+        "veloxity".to_owned(),
+    ];
+
+    if board != "pixracerpro" {
+        if let Some(option) = options.first() {
+            return Err(format!(
+                "option `{option}` is only supported when flashing `pixracerpro`"
+            ));
+        }
+        return Ok(args);
+    }
+
+    // The flight firmware baseline is optimized and contains no diagnostic or
+    // alternate-transport features. With no feature selected, Pixracer Pro's
+    // MAVLink transport is the companion-computer UART.
+    args.extend(["--release".to_owned(), "--no-default-features".to_owned()]);
+
+    let mut features = Vec::new();
+    for option in options {
+        let feature = match option.as_str() {
+            "--vcp" => "usb-vcp-serial",
+            "--scope-timing-pins" => "scope-timing-pins",
+            "--sensor-poll-diagnostics" => "sensor-poll-diagnostics",
+            _ => {
+                return Err(format!(
+                    "unknown Pixracer Pro flash option `{option}`; expected `--vcp`, \
+                     `--scope-timing-pins`, or `--sensor-poll-diagnostics`"
+                ));
+            }
+        };
+        if !features.contains(&feature) {
+            features.push(feature);
+        }
+    }
+
+    if !features.is_empty() {
+        args.push("--features".to_owned());
+        args.push(features.join(","));
+    }
+
+    Ok(args)
 }
 
 fn clean_generated() -> Result<(), u8> {
@@ -196,7 +246,47 @@ fn print_usage() {
            check-board      check embedded firmware: nucleo | pixracerpro | pico2w\n\
            build-board      build embedded firmware: nucleo | pixracerpro | pico2w\n\
            flash-board      build and flash embedded firmware with probe-rs\n\
+                            Pixracer Pro: release UART by default; opt in with\n\
+                            --vcp, --scope-timing-pins, or --sensor-poll-diagnostics\n\
            build-sim-lib    build the simulator static library for ROS 2\n\
            clean-generated  remove ignored local build/runtime artifacts"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::flash_args;
+
+    const TARGET: &str = "thumbv7em-none-eabihf";
+
+    #[test]
+    fn pixracerpro_flash_defaults_to_release_without_features() {
+        let args = flash_args("pixracerpro", TARGET, &[]).unwrap();
+
+        assert!(args.iter().any(|arg| arg == "--release"));
+        assert!(args.iter().any(|arg| arg == "--no-default-features"));
+        assert!(!args.iter().any(|arg| arg == "--features"));
+    }
+
+    #[test]
+    fn pixracerpro_flash_maps_explicit_options_to_features() {
+        let options = vec![
+            "--vcp".to_owned(),
+            "--scope-timing-pins".to_owned(),
+            "--sensor-poll-diagnostics".to_owned(),
+        ];
+        let args = flash_args("pixracerpro", TARGET, &options).unwrap();
+
+        assert_eq!(
+            args.last().unwrap(),
+            "usb-vcp-serial,scope-timing-pins,sensor-poll-diagnostics"
+        );
+    }
+
+    #[test]
+    fn pixracerpro_flash_rejects_unknown_options() {
+        let error = flash_args("pixracerpro", TARGET, &["--debug".to_owned()]).unwrap_err();
+
+        assert!(error.contains("unknown Pixracer Pro flash option `--debug`"));
+    }
 }
