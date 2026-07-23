@@ -298,7 +298,8 @@ where
         command.init(&params, &mut state);
 
         let now_us = board.clock_micros();
-        let comm = CommManager::new(comm_link, now_us);
+        let mut comm = CommManager::new(comm_link, now_us);
+        comm.configure_telemetry_from_params(&params);
 
         let pwm_output = PwmOutputState::new(pwm.is_enabled());
 

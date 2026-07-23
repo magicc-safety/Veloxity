@@ -1338,6 +1338,7 @@ fn world_scheduler_processes_named_rc_packet() {
 #[test]
 fn world_control_stage_runs_once_per_imu_timestamp() {
     let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
     params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
     params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
     params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
@@ -1487,7 +1488,7 @@ fn world_telemetry_stage_streams_non_imu_sensor_without_control_update() {
 }
 
 #[test]
-fn world_telemetry_rates_match_rosflight_c_default_stream_cadence() {
+fn world_telemetry_rates_follow_configured_default_stream_cadence() {
     let mut world = test_world();
 
     for sample in 0..40 {
@@ -1511,6 +1512,34 @@ fn world_telemetry_rates_match_rosflight_c_default_stream_cadence() {
     assert_eq!(world.comm.comm_link().imu_count, 40);
     assert_eq!(world.comm.comm_link().attitude_count, 40);
     assert_eq!(world.comm.comm_link().output_raw_count, 5);
+}
+
+#[test]
+fn world_applies_live_telemetry_parameter_without_resetting_other_rates() {
+    let mut world = test_world();
+    let original = world.comm.telemetry_rates();
+    world.board.current_time_us = 2_000_000;
+    world
+        .params
+        .set_by_id(ParamId::PARAM_TELEM_BARO_HZ, ParamValue::Int(25));
+    world
+        .param_events
+        .changes
+        .push(crate::events::ParamChanged {
+            id: ParamId::PARAM_TELEM_BARO_HZ,
+            old: ParamValue::Int(100),
+            new: ParamValue::Int(25),
+            param_id_bytes: crate::comm::str_to_fixed_bytes("TEL_BARO_HZ"),
+        })
+        .unwrap();
+
+    world.apply_param_reactions();
+
+    let updated = world.comm.telemetry_rates();
+    assert_eq!(updated.baro_hz, 25);
+    assert_eq!(updated.imu_hz, original.imu_hz);
+    assert_eq!(updated.attitude_hz, original.attitude_hz);
+    assert!(world.param_events.changes.is_empty());
 }
 
 #[test]
@@ -1832,6 +1861,7 @@ fn world_sends_calibration_ack_when_calibration_starts() {
 #[test]
 fn world_pwm_output_stage_follows_armed_state_transitions() {
     let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
     params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
     params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
     let mut world = test_world_with_params(params);
@@ -1864,8 +1894,29 @@ fn world_pwm_output_stage_follows_armed_state_transitions() {
 }
 
 #[test]
+fn world_channel_output_mask_zero_disables_the_entire_pwm_driver() {
+    let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
+    let mut world = test_world_with_params(params);
+
+    assert!(world.run_pwm_output_stage());
+    assert!(world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.enable_all_count, 1);
+
+    world
+        .params
+        .set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(0));
+
+    assert!(world.run_pwm_output_stage());
+    assert!(!world.pwm_output.is_enabled());
+    assert_eq!(world.pwm.disable_all_count, 1);
+    assert_eq!(world.pwm.flush_count, 1);
+}
+
+#[test]
 fn world_pwm_output_stage_disables_outputs_while_rc_kill_switch_is_active() {
     let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
     params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
     params.set_by_id(ParamId::PARAM_FAILSAFE_THROTTLE, ParamValue::Float(0.0));
     params.set_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL, ParamValue::Int(4));

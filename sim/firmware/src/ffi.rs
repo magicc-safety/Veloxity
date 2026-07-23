@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::net::{SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -36,6 +36,9 @@ const PARAM_DIR_ENV: &str = "VELOXITY_SIM_PARAM_DIR";
 const PARAM_STORE_FILE: &str = "veloxity_sim.params";
 const FIRMWARE_SYNC_TIMEOUT: Duration = Duration::from_millis(5);
 const SIM_CONTROL_LOOP_HZ: u16 = 400;
+const SIM_TELEMETRY_STREAMS_PER_SERVICE_PHASE: usize = 2;
+const SIM_RX_TRACE_ENV: &str = "VELOXITY_SIM_RX_TRACE";
+const MAVLINK_OFFBOARD_CONTROL_MESSAGE_ID: u32 = 180;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -360,6 +363,7 @@ struct FfiBoard {
     last_range_timestamp_us: u64,
     last_battery_timestamp_us: u64,
     last_rc_timestamp_us: u64,
+    rx_trace: Option<BufWriter<fs::File>>,
 }
 
 impl FfiBoard {
@@ -376,6 +380,17 @@ impl FfiBoard {
         mavlink_socket.connect(remote_addr)?;
         mavlink_socket.set_nonblocking(true)?;
 
+        let rx_trace = std::env::var_os(SIM_RX_TRACE_ENV)
+            .and_then(|path| fs::File::create(path).ok())
+            .map(|file| {
+                let mut writer = BufWriter::new(file);
+                let _ = writeln!(
+                    writer,
+                    "firmware_time_us,datagram_bytes,mavlink_frames,offboard_frames"
+                );
+                writer
+            });
+
         Ok(Self {
             start_time,
             mavlink_socket,
@@ -388,8 +403,57 @@ impl FfiBoard {
             last_range_timestamp_us: 0,
             last_battery_timestamp_us: 0,
             last_rc_timestamp_us: 0,
+            rx_trace,
         })
     }
+
+    fn trace_rx_datagram(&mut self, bytes: &[u8]) {
+        let Some(_) = self.rx_trace else {
+            return;
+        };
+        let now_us = self.clock_micros();
+        let (mavlink_frames, offboard_frames) = count_mavlink_frames(bytes);
+        if let Some(trace) = &mut self.rx_trace {
+            let _ = writeln!(
+                trace,
+                "{now_us},{},{mavlink_frames},{offboard_frames}",
+                bytes.len()
+            );
+        }
+    }
+}
+
+fn count_mavlink_frames(bytes: &[u8]) -> (usize, usize) {
+    let mut index = 0;
+    let mut frame_count = 0;
+    let mut offboard_count = 0;
+    while index < bytes.len() {
+        let (frame_len, message_id) = match bytes[index] {
+            0xfe if index + 6 <= bytes.len() => {
+                let payload_len = bytes[index + 1] as usize;
+                (payload_len + 8, bytes[index + 5] as u32)
+            }
+            0xfd if index + 10 <= bytes.len() => {
+                let payload_len = bytes[index + 1] as usize;
+                let signature_len = if bytes[index + 2] & 0x01 != 0 { 13 } else { 0 };
+                let message_id = bytes[index + 7] as u32
+                    | ((bytes[index + 8] as u32) << 8)
+                    | ((bytes[index + 9] as u32) << 16);
+                (payload_len + 12 + signature_len, message_id)
+            }
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+        if index + frame_len > bytes.len() {
+            break;
+        }
+        frame_count += 1;
+        offboard_count += usize::from(message_id == MAVLINK_OFFBOARD_CONTROL_MESSAGE_ID);
+        index += frame_len;
+    }
+    (frame_count, offboard_count)
 }
 
 impl FfiBoard {
@@ -557,7 +621,10 @@ impl BoardIo for FfiBoard {
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         match self.mavlink_socket.recv(buf) {
-            Ok(size) => Some(Ok(size)),
+            Ok(size) => {
+                self.trace_rx_datagram(&buf[..size]);
+                Some(Ok(size))
+            }
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => None,
             Err(_) => Some(Err(errors::TelemError::GenericTelemError(
                 "error reading MAVLink UDP socket",
@@ -728,7 +795,9 @@ fn run_firmware_worker(
             }
             RealtimeSchedulerStep::Service => {
                 let _ = world.run_prioritized_service_steps_with_policy(
-                    RealtimeServicePolicy::with_spacing(1, 1),
+                    RealtimeServicePolicy::continuous_polling(
+                        SIM_TELEMETRY_STREAMS_PER_SERVICE_PHASE,
+                    ),
                 );
                 None
             }
@@ -906,6 +975,26 @@ mod tests {
             },
             ..VeloxityFfiSensorSnapshot::default()
         }
+    }
+
+    #[test]
+    fn receive_trace_counts_v1_and_v2_offboard_frames() {
+        let mavlink_v1 = [0xfe, 0, 1, 1, 1, 180, 0, 0];
+        let mavlink_v2 = [0xfd, 0, 0, 0, 2, 1, 1, 180, 0, 0, 0, 0];
+        let other_v1 = [0xfe, 0, 3, 1, 1, 0, 0, 0];
+        let bytes = [
+            mavlink_v1.as_slice(),
+            mavlink_v2.as_slice(),
+            other_v1.as_slice(),
+        ]
+        .concat();
+
+        assert_eq!(count_mavlink_frames(&bytes), (3, 2));
+    }
+
+    #[test]
+    fn receive_trace_ignores_truncated_frames() {
+        assert_eq!(count_mavlink_frames(&[0xfe, 10, 1, 1, 1, 180]), (0, 0));
     }
 
     #[test]

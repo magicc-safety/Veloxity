@@ -44,7 +44,6 @@ use veloxity_core::world::ControlLoopRates;
 use veloxity_core::world::RealtimeSchedulerStep;
 use veloxity_core::{
     board::BoardIo,
-    comm::TelemetryRates,
     params::Params,
     state_machine::StateManager,
     vehicle::quadrotor,
@@ -98,7 +97,6 @@ fn main() -> ! {
     let pwm_driver = BoardPwmDriver::new(&mut servos);
 
     let mut world = init_world(board, params, pwm_driver);
-    world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
     world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(PIXRACER_CONTROL_LOOP_HZ));
 
     loop {

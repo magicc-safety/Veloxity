@@ -23,6 +23,7 @@ def generate_launch_description():
     veloxity_param_dir = LaunchConfiguration("veloxity_param_dir")
     imu_update_frequency = LaunchConfiguration("imu_update_frequency")
     pwm_publish_frequency = LaunchConfiguration("pwm_publish_frequency")
+    veloxity_telemetry_profile = LaunchConfiguration("veloxity_telemetry_profile")
 
     is_c = PythonExpression(["'", firmware, "' == 'c'"])
     is_veloxity = PythonExpression(["'", firmware, "' == 'veloxity'"])
@@ -65,6 +66,11 @@ def generate_launch_description():
             description="Writable runtime parameter directory for the Veloxity FFI firmware.",
         ),
         DeclareLaunchArgument(
+            "veloxity_telemetry_profile",
+            default_value="rosplane_c_sil",
+            description="Veloxity simulation telemetry profile; use 'bounded' for the Pixracer-rate control case.",
+        ),
+        DeclareLaunchArgument(
             "dynamics_param_file",
             default_value=os.path.join(
                 rosflight_sim_dir, "params", "anaconda_dynamics.yaml"),
@@ -73,6 +79,11 @@ def generate_launch_description():
         SetEnvironmentVariable(
             "VELOXITY_SIM_PARAM_DIR",
             veloxity_param_dir,
+            condition=IfCondition(is_veloxity),
+        ),
+        SetEnvironmentVariable(
+            "VELOXITY_SIM_TELEMETRY_PROFILE",
+            veloxity_telemetry_profile,
             condition=IfCondition(is_veloxity),
         ),
         IncludeLaunchDescription(

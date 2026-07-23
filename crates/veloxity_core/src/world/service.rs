@@ -262,6 +262,15 @@ where
     }
 
     pub(super) fn apply_param_reactions(&mut self) {
+        if self.param_events.full_refresh {
+            self.comm.configure_telemetry_from_params(&self.params);
+        } else {
+            let now_us = self.board.clock_micros();
+            for change in self.param_events.changes.iter() {
+                self.comm
+                    .update_telemetry_param(&self.params, change.id, now_us);
+            }
+        }
         reactions::apply_param_reactions(&mut ParamReactionCtx {
             events: &mut self.param_events,
             params: &self.params,

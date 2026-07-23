@@ -97,9 +97,9 @@ pub fn compose_pwm_outputs<R: FlightFloat>(
         ParamValue::Int(value) => value != 0,
         _ => false,
     };
-    let motor_output_mask = match params.get_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK) {
+    let channel_output_mask = match params.get_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK) {
         ParamValue::Int(value) => value,
-        _ => -1,
+        _ => 0,
     };
 
     let mut outputs = [<R as FlightFloat>::from_f32(0.0); PWM_OUTPUT_CHANNELS];
@@ -121,10 +121,8 @@ pub fn compose_pwm_outputs<R: FlightFloat>(
 
         outputs[channel] = if !state.is_armed() {
             safe_disarmed_command(output_type)
-        } else if output_type == MixerOutputType::Motor
-            && !motor_output_enabled(motor_output_mask, channel)
-        {
-            <R as FlightFloat>::from_f32(0.0)
+        } else if !channel_output_enabled(channel_output_mask, channel) {
+            safe_disarmed_command(output_type)
         } else {
             raw_output_for_type(output_type, value, state, idle_throttle, spin_when_armed)
         };
@@ -133,7 +131,7 @@ pub fn compose_pwm_outputs<R: FlightFloat>(
     outputs
 }
 
-fn motor_output_enabled(mask: i32, channel: usize) -> bool {
+fn channel_output_enabled(mask: i32, channel: usize) -> bool {
     mask == -1 || (mask >= 0 && channel < i32::BITS as usize && (mask & (1_i32 << channel)) != 0)
 }
 
@@ -463,6 +461,7 @@ mod tests {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
         params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Int(1));
+        params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
@@ -531,11 +530,11 @@ mod tests {
     }
 
     #[test]
-    fn compose_pwm_outputs_applies_motor_output_mask_after_idle() {
+    fn compose_pwm_outputs_applies_channel_output_mask_to_every_output_type() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_MOTOR_IDLE_THROTTLE, ParamValue::Float(0.2));
         params.set_by_id(ParamId::PARAM_SPIN_MOTORS_WHEN_ARMED, ParamValue::Int(1));
-        params.set_by_id(ParamId::PARAM_MOTOR_OUTPUT_MASK, ParamValue::Int(0b0101));
+        params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(0b0101));
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
@@ -543,22 +542,22 @@ mod tests {
         state.update(Event::REQUEST_ARM, &params);
         let output_types = [
             MixerOutputType::Motor,
-            MixerOutputType::Motor,
-            MixerOutputType::Motor,
-            MixerOutputType::Motor,
+            MixerOutputType::Servo,
+            MixerOutputType::Gpio,
+            MixerOutputType::Aux,
         ];
 
         let outputs: [f64; PWM_OUTPUT_CHANNELS] =
             compose_pwm_outputs(&[0.1, 0.4, 0.3, 0.5], &output_types, None, &state, &params);
 
         assert!((outputs[0] - 0.2).abs() < 1e-6);
-        assert_eq!(outputs[1], 0.0);
-        assert_eq!(outputs[2], 0.3);
-        assert_eq!(outputs[3], 0.0);
+        assert_eq!(outputs[1], 0.5);
+        assert_eq!(outputs[2], 1.0);
+        assert_eq!(outputs[3], 0.5);
     }
 
     #[test]
-    fn compose_pwm_outputs_default_motor_output_mask_passes_all_motors() {
+    fn compose_pwm_outputs_default_channel_mask_holds_all_types_safe() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
@@ -567,15 +566,15 @@ mod tests {
         state.update(Event::REQUEST_ARM, &params);
         let output_types = [
             MixerOutputType::Motor,
-            MixerOutputType::Motor,
-            MixerOutputType::Motor,
-            MixerOutputType::Motor,
+            MixerOutputType::Servo,
+            MixerOutputType::Gpio,
+            MixerOutputType::Aux,
         ];
 
         let outputs: [f64; PWM_OUTPUT_CHANNELS] =
             compose_pwm_outputs(&[0.1, 0.2, 0.3, 0.4], &output_types, None, &state, &params);
 
-        for (output, expected) in outputs.iter().zip([0.1, 0.2, 0.3, 0.4]) {
+        for (output, expected) in outputs.iter().zip([0.0, 0.5, 0.0, 0.5]) {
             assert!((output - expected).abs() < 1e-6);
         }
     }
@@ -583,6 +582,7 @@ mod tests {
     #[test]
     fn compose_pwm_outputs_uses_aux_inside_primary_range_only_for_aux_owned_slots() {
         let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
@@ -620,6 +620,7 @@ mod tests {
     #[test]
     fn compose_pwm_outputs_clamps_servo_gpio_and_motor_ranges() {
         let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK, ParamValue::Int(-1));
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);

@@ -71,7 +71,6 @@ use static_cell::StaticCell;
 use veloxity_core::world::RealtimeSchedulerStep;
 use veloxity_core::{
     board::{BoardIo, SerialRxPriority},
-    comm::TelemetryRates,
     params::Params,
     state_machine::StateManager,
     vehicle::quadrotor,
@@ -582,7 +581,6 @@ fn init_world(
         mixer,
         pwm_driver,
     );
-    world.set_telemetry_rates(TelemetryRates::bounded_high_rate_transport());
     world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(core0.control_loop_hz));
     world
 }

@@ -72,7 +72,9 @@ export MULTIROTOR="$ROSCOPTER_SHARE/params/multirotor.yaml"
 export ESTIMATOR="$ROSCOPTER_SHARE/params/estimator.yaml"
 
 export AIRFRAME_CONFIG="$HOME/.config/veloxity/airframes/3dquad"
-export FIRMWARE_PARAMS="$AIRFRAME_CONFIG/firmware/firmware-startup.yaml"
+export VELOXITY_FIRMWARE_PARAMS="$AIRFRAME_CONFIG/firmware/firmware-startup-veloxity.yaml"
+export C_FIRMWARE_PARAMS="$AIRFRAME_CONFIG/firmware/firmware-startup-c.yaml"
+export FIRMWARE_PARAMS=""  # Empty selects from the two files above by backend.
 export EXPERIMENT="$AIRFRAME_CONFIG/ros/hardware-exp2.yaml"
 export ESTIMATOR_HW="$AIRFRAME_CONFIG/ros/estimator-hardware.yaml"
 export MISSION="$AIRFRAME_CONFIG/missions/hover-check.yaml"
