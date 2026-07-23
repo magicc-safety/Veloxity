@@ -71,7 +71,7 @@ fn main() -> ExitCode {
                 }
             }
         }
-        "build-sim-lib" => cargo(["build", "-p", "sim", "--lib"]),
+        "build-sim-lib" => cargo(["build", "-p", "sim", "--lib", "--release"]),
         "clean-generated" => clean_generated(),
         _ => {
             eprintln!("unknown command `{command}`");
