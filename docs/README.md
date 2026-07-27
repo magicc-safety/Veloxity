@@ -19,11 +19,14 @@ Because support for the Pico 2 W is experimental, we have chosen to omit includi
 
 ### I Want To Run The Simulator
 
-2. [Veloxity ROScopter sim end-to-end](tutorials/veloxity-roscopter-sim-end-to-end.md)
+1. [Veloxity with the ROSflight Simulator](tutorials/sim_devpod.md)
+
+<!-- 2. [Veloxity ROScopter sim end-to-end](tutorials/veloxity-roscopter-sim-end-to-end.md) -->
 
 ### I Want To Work On Hardware
 
 1. [Board bring-up guide](boards/README.md)
-2. [Hardware experiment 2 ROScopter startup](tutorials/hardware-exp2-roscopter-startup.md)
-3. [Pico 2 W wiring](pico2w-esc-imu-pinout.md)
-4. [STM32 board guide](boards/stm32.md)
+2. [STM32 board guide](boards/stm32.md)
+
+<!-- 3. [Hardware experiment 2 ROScopter startup](tutorials/hardware-exp2-roscopter-startup.md) -->
+<!-- 4. [Pico 2 W wiring](pico2w-esc-imu-pinout.md) -->
