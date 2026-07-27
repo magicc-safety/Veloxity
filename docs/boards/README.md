@@ -1,13 +1,14 @@
 # Board Bring-Up Guide
 
-Veloxity has two actively exercised hardware paths on this branch and one retained STM32 path that
-is kept compile-current.
+Veloxity is validated on hardware using the Pixracer Pro flight controller (STM32H7 processor) and
+compiled against the Nucleo-H753ZI for additional verification.
 
-| Board | Crate | Target | Status |
-| --- | --- | --- | --- |
-| Raspberry Pi Pico 2 W / RP2350 | `boards/pico2w` | `thumbv8m.main-none-eabihf` | Active hardware bring-up path; high-rate ISM330DHCX intake, fixed 1.5 kHz timing measurements, and ongoing IMU delay investigation. |
-| Nucleo-H753ZI | `boards/nucleo` | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed. |
+| Board                  | Crate                | Target                  | Status                                                                                                           |
+| ---------------------- | -------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Nucleo-H753ZI          | `boards/nucleo`      | `thumbv7em-none-eabihf` | Retained and compile-current target; sensor validation still needed.                                             |
 | Pixracer Pro / STM32H7 | `boards/pixracerpro` | `thumbv7em-none-eabihf` | Active STM32 validation path; fixed 400 Hz control timing and high-rate MAVLink telemetry validated on hardware. |
+
+<!-- | Raspberry Pi Pico 2 W / RP2350 | `boards/pico2w`      | `thumbv8m.main-none-eabihf` | Active hardware bring-up path; high-rate ISM330DHCX intake, fixed 1.5 kHz timing measurements, and ongoing IMU delay investigation. | -->
 
 ## Shared Firmware Shape
 
@@ -48,7 +49,8 @@ board's realtime loop.
 
 ## Board Guides
 
-- [RP2350 / Pico 2 W](rp2350-pico2w.md)
+<!-- - [RP2350 / Pico 2 W](rp2350-pico2w.md) -->
+
 - [STM32 boards: Nucleo and Pixracer Pro](stm32.md)
 
 ## Common Commands
@@ -57,25 +59,28 @@ board's realtime loop.
 rustup target add thumbv8m.main-none-eabihf
 rustup target add thumbv7em-none-eabihf
 
-cargo xtask check-board pico2w
 cargo xtask check-board nucleo
 cargo xtask check-board pixracerpro
 ```
 
+<!-- cargo xtask check-board pico2w -->
+
 Build firmware:
 
 ```bash
-cargo xtask build-board pico2w
 cargo xtask build-board nucleo
 cargo xtask build-board pixracerpro
 ```
 
+<!-- cargo xtask build-board pico2w -->
+
 Flash through the configured Cargo runner:
 
 ```bash
-cargo xtask flash-board pico2w
 cargo xtask flash-board nucleo
 cargo xtask flash-board pixracerpro
 ```
+
+<!-- cargo xtask flash-board pico2w -->
 
 For board-specific flashing notes, use the individual board guides.

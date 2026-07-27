@@ -17,9 +17,9 @@ nav = [
     # ] },
     { "Hardware" = [
         { "Board Bring-Up Guide" = "boards/README.md" },
-        { "RP2350 / Pico 2 W Guide" = "boards/rp2350-pico2w.md" },
-        { "Pico 2 W Wiring" = "pico2w-esc-imu-pinout.md" },
-        { "ESP32C5 ESP-NOW UART Bridge" = "https://github.com/magicc-safety/Veloxity/blob/main/tools/espnow_uart_bridge/README.md" },
+        # { "RP2350 / Pico 2 W Guide" = "boards/rp2350-pico2w.md" },
+        # { "Pico 2 W Wiring" = "pico2w-esc-imu-pinout.md" },
+        # { "ESP32C5 ESP-NOW UART Bridge" = "https://github.com/magicc-safety/Veloxity/blob/main/tools/espnow_uart_bridge/README.md" },
         { "STM32 Board Guide" = "boards/stm32.md" }
     ] },
     # { "Firmware" = [
@@ -33,8 +33,9 @@ nav = [
     #     { "link.rs" = "https://github.com/magicc-safety/Veloxity/blob/main/comms/veloxity_mavlink/src/link.rs" }
     # ] },
     { "Tutorials" = [
-        { "Veloxity ROScopter Sim End-to-End" = "tutorials/veloxity-roscopter-sim-end-to-end.md" },
-        { "Pico 2 W Sensor Bring-Up" = "tutorials/pico2w-sensor-bringup.md" }
+        {"Veloxity with the ROSflight Simulator" = "tutorials/sim_devpod.md"}
+        # { "Veloxity ROScopter Sim End-to-End" = "tutorials/veloxity-roscopter-sim-end-to-end.md" },
+        # { "Pico 2 W Sensor Bring-Up" = "tutorials/pico2w-sensor-bringup.md" }
     ] },
     { "API" = "api/index.md" }
 ]

@@ -1,12 +1,12 @@
 # Veloxity Documentation
 
-Veloxity is a Rust rewrite of the flight controller firmware for ROSflight. Veloxity handles the firmware-level responsibilities of an autopilot, including real time sensor ingestion/processing, state estimation, control, motor mixing, actuator output, parameter management, and MAVLink communication. 
+Veloxity is a Rust rewrite of the flight controller firmware for ROSflight. Veloxity handles the firmware-level responsibilities of an autopilot, including real time sensor ingestion/processing, state estimation, control, motor mixing, actuator output, parameter management, and MAVLink communication.
 
-This software is being developed for compatibility with the ROSflight ecosystem. The goal of this firmware is to maintain functional parity with, and be a 1:1 substitute for the c firmware while simultaneously taking advantage of the safety Rust offers. As far as the rest of the stack is concerned, the c and rust firmware are identical.
+This software is being developed for compatibility with the ROSflight ecosystem. The goal of this firmware is to maintain functional parity with, and be a 1:1 substitute for the C firmware while simultaneously taking advantage of the safety Rust offers. As far as the rest of the stack is concerned, the C and rust firmware are identical.
 
-We offer a software and a hardware path to get started. In simulation, Veloxity connects to the existing ROSflight and ROS 2 tooling through a software-in-the-loop interface. Linux is recommended. On hardware, we provide support for the ixracer Pro/STM32H7, Nucleo-H753ZI, and experimental support for the RP2350/Pico 2 W.
+We offer a software and a hardware path to get started. In simulation, Veloxity connects to the existing ROSflight and ROS 2 tooling through a software-in-the-loop interface. Linux is recommended. On hardware, we provide support for the Pixracer Pro/STM32H7, Nucleo-H753ZI, and experimental support for the RP2350/Pico 2 W.
 
-Because support for the Pico 2 W is experimental, we have chosen to omit including links to it's documentation on this website. Interested readers will find organized markdowns inside the Rust workspace folder structure where relevant detailing our current progress.
+Because support for the Pico 2 W is experimental, we have chosen to omit including links to it's documentation on this website. Interested readers will find organized markdowns inside the Rust workspace folder structure detailing our current progress.
 
 ## Reader Paths
 
