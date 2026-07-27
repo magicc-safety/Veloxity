@@ -12,15 +12,15 @@ and should still be treated as awaiting renewed hardware validation.
 
 ## Source Layout
 
-| Path | Purpose |
-| --- | --- |
-| `boards/nucleo/src/bin/veloxity.rs` | Nucleo firmware entry point and `World` construction. |
-| `boards/nucleo/src/board.rs` | Nucleo implementation of board setup and `BoardIo`. |
+| Path                                     | Purpose                                                     |
+| ---------------------------------------- | ----------------------------------------------------------- |
+| `boards/nucleo/src/bin/veloxity.rs`      | Nucleo firmware entry point and `World` construction.       |
+| `boards/nucleo/src/board.rs`             | Nucleo implementation of board setup and `BoardIo`.         |
 | `boards/pixracerpro/src/bin/veloxity.rs` | Pixracer Pro firmware entry point and `World` construction. |
-| `boards/pixracerpro/src/board.rs` | Pixracer Pro implementation of board setup and `BoardIo`. |
-| `boards/pixracerpro/src/pwm.rs` | Pixracer Pro PWM driver. |
-| `platforms/stm_32/stm32h7x3_common.rs` | Shared STM32H7 configuration. |
-| `platforms/stm_32/src/peripherals/` | Shared STM32 peripheral drivers and Embassy signal tasks. |
+| `boards/pixracerpro/src/board.rs`        | Pixracer Pro implementation of board setup and `BoardIo`.   |
+| `boards/pixracerpro/src/pwm.rs`          | Pixracer Pro PWM driver.                                    |
+| `platforms/stm_32/stm32h7x3_common.rs`   | Shared STM32H7 configuration.                               |
+| `platforms/stm_32/src/peripherals/`      | Shared STM32 peripheral drivers and Embassy signal tasks.   |
 
 ## Firmware Model
 
@@ -35,8 +35,10 @@ The STM32 boards follow the generic embedded firmware shape:
 - Nucleo keeps the ordinary `World::run_once()` firmware loop for now, while its `BoardIo` adapter
   exposes the same IMU/service sensor split so it stays compile-current.
 
-That still differs from the active Pico 2 W path. Pico 2 W uses a dual-core board runtime around the
-same core scheduler. STM32 keeps its interrupt executor model: peripheral tasks produce IMU, RC, and
+<!-- That still differs from the active Pico 2 W path. Pico 2 W uses a dual-core board runtime around the -->
+<!-- same core scheduler. -->
+
+STM32 has an interrupt executor model: peripheral tasks produce IMU, RC, and
 other sensor packets, and one high-level firmware loop owns `World`. The first Pixracer Pro port
 does not rewrite driver tasks; it changes only how board-owned packets are presented to the core
 fast path and service path.
@@ -50,7 +52,8 @@ but no accumulated IMU sample is available; otherwise stale deadline bookkeeping
 for hundreds of milliseconds to protect a control update that cannot run. Hardware diagnostics
 showed that UART baud, TX pipe drain, and final send gating were not the limiter; telemetry needed
 regular service opportunities in the measured control slack. The continuous service policy is
-Pixracer Pro-specific until RP2350/Pico 2 W is retested for consistency.
+Pixracer Pro-specific.
+ <!-- until RP2350/Pico 2 W is retested for consistency. -->
 
 ## Install
 
@@ -123,18 +126,18 @@ Use the chip name that matches the connected board.
 The STM32 platform exposes peripheral tasks that signal packet results to board code. Important
 driver files include:
 
-| File | Device/path |
-| --- | --- |
-| `platforms/stm_32/src/peripherals/adis16500.rs` | ADIS16500 IMU |
-| `platforms/stm_32/src/peripherals/bmi08x.rs` | BMI08x IMU |
-| `platforms/stm_32/src/peripherals/dps310.rs` | DPS310 barometer |
-| `platforms/stm_32/src/peripherals/iis2mdc.rs` | IIS2MDC magnetometer |
-| `platforms/stm_32/src/peripherals/ist8308.rs` | IST8308 magnetometer |
-| `platforms/stm_32/src/peripherals/ms4525.rs` | MS4525 airspeed |
-| `platforms/stm_32/src/peripherals/sbus.rs` | SBUS RC |
-| `platforms/stm_32/src/peripherals/telem.rs` | Telemetry serial path |
-| `platforms/stm_32/src/peripherals/ublox.rs` | u-blox GNSS |
-| `platforms/stm_32/src/peripherals/vcp.rs` | USB virtual COM port |
+| File                                            | Device/path           |
+| ----------------------------------------------- | --------------------- |
+| `platforms/stm_32/src/peripherals/adis16500.rs` | ADIS16500 IMU         |
+| `platforms/stm_32/src/peripherals/bmi08x.rs`    | BMI08x IMU            |
+| `platforms/stm_32/src/peripherals/dps310.rs`    | DPS310 barometer      |
+| `platforms/stm_32/src/peripherals/iis2mdc.rs`   | IIS2MDC magnetometer  |
+| `platforms/stm_32/src/peripherals/ist8308.rs`   | IST8308 magnetometer  |
+| `platforms/stm_32/src/peripherals/ms4525.rs`    | MS4525 airspeed       |
+| `platforms/stm_32/src/peripherals/sbus.rs`      | SBUS RC               |
+| `platforms/stm_32/src/peripherals/telem.rs`     | Telemetry serial path |
+| `platforms/stm_32/src/peripherals/ublox.rs`     | u-blox GNSS           |
+| `platforms/stm_32/src/peripherals/vcp.rs`       | USB virtual COM port  |
 
 The current compatibility update makes the ADIS16500 and BMI08x IMU packet signals explicit as
 `ImuPacket<f64>`, matching their existing `f64` sensor math and the current generic packet type in
@@ -144,20 +147,20 @@ The current compatibility update makes the ADIS16500 and BMI08x IMU packet signa
 
 Pixracer Pro has been validated on hardware with the bounded high-rate MAVLink profile:
 
-| Stream | Configured rate | Observed result |
-| --- | --- | --- |
-| Attitude | `50 Hz` | `50.0 Hz`. |
-| Barometer | `25 Hz` | `25.0 Hz`. |
-| Command ACK | On demand | Single response frame. |
-| GNSS | No fix expected in this run | `0.0 Hz`, no frames. |
-| Heartbeat | `1 Hz` | `1.0 Hz`. |
-| IMU | `400 Hz` | `399.5 Hz` host rate, `399.4 Hz` board timestamp rate. |
-| Output raw | `50 Hz` | `50.0 Hz`. |
-| Parameter traffic | Request/response burst | `2563.1 Hz` during the parameter burst, `334` frames. |
-| RC | `100 Hz` | `100.0 Hz`. |
-| Status | `10 Hz` | `10.0 Hz`. |
-| TIMESYNC | `5 Hz` | `5.0 Hz`. |
-| Version response | On demand | Single response frame. |
+| Stream            | Configured rate             | Observed result                                        |
+| ----------------- | --------------------------- | ------------------------------------------------------ |
+| Attitude          | `50 Hz`                     | `50.0 Hz`.                                             |
+| Barometer         | `25 Hz`                     | `25.0 Hz`.                                             |
+| Command ACK       | On demand                   | Single response frame.                                 |
+| GNSS              | No fix expected in this run | `0.0 Hz`, no frames.                                   |
+| Heartbeat         | `1 Hz`                      | `1.0 Hz`.                                              |
+| IMU               | `400 Hz`                    | `399.5 Hz` host rate, `399.4 Hz` board timestamp rate. |
+| Output raw        | `50 Hz`                     | `50.0 Hz`.                                             |
+| Parameter traffic | Request/response burst      | `2563.1 Hz` during the parameter burst, `334` frames.  |
+| RC                | `100 Hz`                    | `100.0 Hz`.                                            |
+| Status            | `10 Hz`                     | `10.0 Hz`.                                             |
+| TIMESYNC          | `5 Hz`                      | `5.0 Hz`.                                              |
+| Version response  | On demand                   | Single response frame.                                 |
 
 For messages with board timestamps, the latest run measured IMU at `399.4 Hz`, attitude at
 `50.0 Hz`, output raw at `50.0 Hz`, RC at `100.0 Hz`, and TIMESYNC at `5.0 Hz` on the board side.
