@@ -308,9 +308,14 @@ impl Rc {
         self.rc.header.status = packet.header.status;
         self.rc.num_channels = len;
 
-        let status = packet.header.status;
-        self.rc.frame_lost = (status & 1) != 0;
-        self.rc.failsafe_activated = (status & 2) != 0;
+        // Link-loss encoding is receiver-protocol-specific. Board drivers
+        // decode their protocol's status flags into RcPacket::lol, so core RC
+        // handling must use that normalized signal instead of interpreting the
+        // raw header status bits. In SBUS, status bits 0 and 1 are digital
+        // channels 17 and 18; treating them as frame-lost/failsafe flags can
+        // both miss a real link loss and falsely reject healthy RC frames.
+        self.rc.frame_lost = packet.lol;
+        self.rc.failsafe_activated = packet.lol;
     }
 
     fn process_sticks_and_switches(&mut self) {

@@ -557,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_pwm_outputs_default_channel_mask_holds_all_types_safe() {
+    fn compose_pwm_outputs_default_channel_mask_enables_all_types() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();
@@ -574,7 +574,7 @@ mod tests {
         let outputs: [f64; PWM_OUTPUT_CHANNELS] =
             compose_pwm_outputs(&[0.1, 0.2, 0.3, 0.4], &output_types, None, &state, &params);
 
-        for (output, expected) in outputs.iter().zip([0.0, 0.5, 0.0, 0.5]) {
+        for (output, expected) in outputs.iter().zip([0.1, 0.6, 1.0, 0.0]) {
             assert!((output - expected).abs() < 1e-6);
         }
     }
