@@ -1,5 +1,9 @@
 <img src="docs/assets/veloxity-logo.svg" alt="Veloxity logo" width="180" height="180">
 
+![Veloxity Flight GIF](docs/assets/veloxity.gif)
+
+_Stress test of the Veloxity Firmware_
+
 # Veloxity
 
 Veloxity is a Rust firmware implementation for the ROSflight ecosystem. The
