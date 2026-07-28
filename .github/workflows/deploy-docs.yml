@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies with uv
         run: |
           uv venv .venv
-          uv pip install --python .venv zensical
+          uv pip install --python .venv zensical markdown-gfm-admonition
 
       - name: Step 1 - Cleaning previous build artifacts
         run: |
