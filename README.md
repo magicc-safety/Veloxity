@@ -1,5 +1,7 @@
 <img src="docs/assets/veloxity-logo.svg" alt="Veloxity logo" width="180" height="180">
 
+![Veloxity Flight GIF](docs/assets/veloxity.gif)
+
 # Veloxity
 
 Veloxity is a Rust firmware implementation for the ROSflight ecosystem. The

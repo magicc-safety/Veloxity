@@ -1,5 +1,7 @@
 # Veloxity Documentation
 
+![Veloxity Flight GIF](docs/assets/veloxity.gif)
+
 Veloxity is a Rust rewrite of the flight controller firmware for ROSflight. Veloxity handles the firmware-level responsibilities of an autopilot, including real time sensor ingestion/processing, state estimation, control, motor mixing, actuator output, parameter management, and MAVLink communication.
 
 This software is being developed for compatibility with the ROSflight ecosystem. The goal of this firmware is to maintain functional parity with, and be a 1:1 substitute for the C firmware while simultaneously taking advantage of the safety Rust offers. As far as the rest of the stack is concerned, the C and Rust firmware are identical.
