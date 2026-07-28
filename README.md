@@ -1,5 +1,7 @@
 <img src="docs/assets/veloxity-logo.svg" alt="Veloxity logo" width="180" height="180">
 
+[![Website]([https://shields.io](https://magicc-safety.github.io/Veloxity/))](Documentation Here)
+
 ![Veloxity in flight (image)](docs/assets/veloxity.webp)
 
 # Veloxity
