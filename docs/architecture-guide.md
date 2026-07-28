@@ -1,258 +1,272 @@
-# Veloxity Architecture Guide
+# Veloxity Core Architecture
 
-This guide defines the vocabulary used in the current Veloxity codebase and then walks the
-architecture in the same order a reader would encounter it from `sim/`, through the ROS 2 shim,
-through the Rust FFI boundary, into `veloxity_core::World`, and back out through MAVLink and PWM.
+Veloxity separates reusable flight behavior from the code that connects it to hardware,
+communications, and simulation. The reusable flight stack lives in `veloxity_core`. Board crates
+and the simulator provide the concrete inputs and outputs.
 
-The architecture is static ECS-style Rust:
+The architecture is loosely inspired by a dynamic entity-component-system framework. However, there are no runtime entity IDs or
+component tables. `World` owns the long-lived state, systems operate on explicit context
+structures, and bounded event queues carry requests and responses between stages. The design is loosely understood as a composition of four parts:
 
 ```text
-resources + systems + events + explicit scheduler
+resources + systems + events + an explicit scheduler
 ```
 
-It is not a dynamic ECS framework. There are no runtime component tables or entity IDs in the
-flight stack. The main idea is that `World` owns long-lived resources, systems receive small context
-structs, and events move work between systems without letting every subsystem mutate every other
-subsystem directly.
 
-## Vocabulary
 
-Use these terms consistently when reading or editing this codebase.
+## Main Layers
 
-| Term | Meaning in Veloxity | Concrete examples |
-| --- | --- | --- |
-| Contract | A trait that defines replaceable behavior. Contracts let core depend on capability rather than a concrete runtime. | `BoardIo`, `CommInterface`, `Estimator`, `Controller`, `Mixer`, `PwmDriver` |
-| Resource | Long-lived state owned by `World` or by a runtime boundary. Resources are the ECS-style singleton data for the flight stack. | `Params`, `SensorBus`, `ProcessedSensors`, `Rc`, `CommandManager`, `StateManager`, `PwmOutputState` |
-| System | A function that performs one scheduled operation over a small set of resources. Systems do not receive `&mut World`; they receive a context. | `apply_param_requests`, `run_rc_command_state`, `update_sensor_health`, `run_control_pipeline_if_new_imu` |
-| Context | A struct containing the exact borrows a system needs. A context is the system's dependency list. | `ParamApplyCtx`, `RcCommandStateCtx`, `SensorHealthCtx`, `ControlPipelineCtx` |
-| Event | A small copyable message placed in a bounded queue so one stage can request work from a later stage. | `ParamSetRequested`, `ParamChanged`, `CommResponse`, `OffboardControlRequested` |
-| Event queue | A fixed-capacity FIFO queue for one event type. | `EventQueue<T, N>` |
-| Emit | Push an event into an event queue. | `EventEmitPort::emit_or_log`, `EventQueue::push_or_log` |
-| Drain | Pop events from a queue until the receiver is done. Draining consumes the events. | `EventDrainPort::next` |
-| Read | Iterate over queued events without consuming them. | `EventReadPort::iter` |
-| Port | A narrow wrapper that grants a system one kind of access to a resource or queue. | `ParamsReadPort`, `ParamsWritePort`, `EventEmitPort`, `EventDrainPort`, `EventReadPort` |
-| Producer | Code that emits an event or writes an input resource for later use. | `CommManager::act_on_messages`, ROS shim subscriptions, `FfiBoard::update_sensor_bus` |
-| Receiver | Code that drains or reads events and applies the requested work. | `params::service`, `command::service`, `companion`, `params::reactions` |
-| Scheduler | Code that owns ordering. In core, this is `World::run_once` and the stage methods it calls. | `run_communication_and_parameter_service_stage`, `run_sensor_ingestion_and_health_stage` |
-| Stage | A named scheduler section grouping related systems in order. | communication/parameter service, sensor ingestion/health, RC/state, control/mixing, telemetry |
-| Adapter | Code outside `veloxity_core` that connects core contracts to a concrete runtime or protocol. | `veloxity_mavlink`, `sim`, `pico2w`, `pixracerpro`, `nucleo`, ROS 2 shim |
-| Boundary | A place where one layer hands data to another layer through an explicit API. | ROS 2 C++ shim to Rust FFI, `CommInterface`, `BoardIo`, `PwmDriver` |
-| Wire message | Protocol-shaped data at a communication boundary. Core keeps protocol-neutral message structs; MAVLink encoding lives in `veloxity_mavlink`. | `ParamValueMsg`, `RosflightCmdMsg`, `StatustextMsg` |
-| Packet | Sensor or actuator data in Veloxity's firmware-facing representation. | `ImuPacket`, `RcPacket`, `BaroPacket`, `BatteryPacket` |
+```text
+ROS 2 simulator or physical hardware
+                │
+                ▼
+runtime adapter: sim, pixracerpro, or nucleo
+                │
+       BoardIo / PwmDriver
+                │
+                ▼
+        veloxity_core::World
+                │
+          CommInterface
+                │
+                ▼
+         veloxity_mavlink
+```
 
-## Repository Tree
+The important source locations for getting started are are:
 
 ```text
 Veloxity/
 ├── crates/
 │   └── veloxity_core/
 │       └── src/
-│           ├── lib.rs
 │           ├── world.rs
+│           ├── world/
+│           │   ├── control.rs
+│           │   ├── service.rs
+│           │   └── telemetry.rs
 │           ├── board.rs
 │           ├── comm.rs
 │           ├── comm/
-│           │   ├── interface.rs
-│           │   └── messages.rs
 │           ├── params.rs
 │           ├── params/
-│           │   ├── service.rs
-│           │   └── reactions.rs
 │           ├── command.rs
 │           ├── command/
-│           │   └── service.rs
 │           ├── companion.rs
 │           ├── sensors.rs
 │           ├── sensors/
-│           │   ├── ingestion.rs
-│           │   ├── processors.rs
-│           │   └── health.rs
 │           ├── rc.rs
 │           ├── rc/
-│           │   └── command_state.rs
 │           ├── control.rs
+│           ├── estimator.rs
+│           ├── controller.rs
+│           ├── mixer.rs
 │           ├── pwm.rs
 │           ├── pwm/
-│           │   └── output_sync.rs
-│           ├── estimator.rs
-│           ├── estimator/
-│           │   └── quad.rs
-│           ├── controller.rs
-│           ├── controller/
-│           │   └── quad.rs
-│           ├── mixer.rs
-│           ├── mixer/
-│           │   └── matrix.rs
 │           ├── state_machine.rs
-│           ├── log.rs
 │           ├── events.rs
 │           ├── ports.rs
-│           ├── packets.rs
-│           ├── errors.rs
-│           └── vehicle.rs
+│           └── log.rs
 ├── comms/
 │   └── veloxity_mavlink/
-│       └── src/
-│           ├── link.rs
-│           ├── conversions.rs
-│           └── parser.rs
 ├── platforms/
-│   ├── rp2350/
 │   └── stm_32/
-│       └── src/
-│           └── peripherals/
 ├── boards/
-│   ├── pico2w/
 │   ├── nucleo/
 │   └── pixracerpro/
-├── sim/
-│   ├── firmware/
-│   │   └── src/
-│   │       ├── ffi.rs
-│   │       ├── board.rs
-│   │       ├── pwm.rs
-│   │       └── bin/
-│   │           └── veloxity.rs
-│   └── ros2/
-│       └── veloxity_sil_board_shim/
-│           ├── src/
-│           ├── include/
-│           └── launch/
-├── docs/
-├── scripts/
-└── xtask/
+└── sim/
+    ├── firmware/
+    │   └── src/
+    │       ├── lib.rs
+    │       └── ffi.rs
+    └── ros2/
+        └── veloxity_sil_board_shim/
 ```
+
+## Vocabulary
+
+| Term | Meaning in Veloxity | Examples |
+| --- | --- | --- |
+| Contract | A trait that defines behavior supplied by an adapter. | `BoardIo`, `CommInterface`, `Estimator`, `Controller`, `Mixer`, `PwmDriver` |
+| Resource | Long-lived state owned by `World` or an adapter. | `Params`, `ProcessedSensors`, `CommandManager`, `StateManager` |
+| System | A function that performs one operation over a specific set of resources. | `service_param_events`, `run_rc_command_state`, `run_control_pipeline_if_new_imu` |
+| Context | A structure containing the references a system is allowed to use. | `ParamServiceCtx`, `RcCommandStateCtx`, `ControlPipelineCtx` |
+| Event | A small message that requests work or records an outcome for a later stage. | `ParamSetRequested`, `CalibrationRequested`, `CommResponse` |
+| Adapter | Code outside core that implements contracts for a runtime or protocol. | `pixracerpro`, `nucleo`, `sim`, `veloxity_mavlink` |
+| Stage | A named scheduler operation that runs related systems in a defined order. | communication/parameters, sensor processing, RC/state, control, telemetry |
 
 ## Dependency Direction
 
-The intended dependency direction is:
+Dependencies point toward core:
 
 ```text
 veloxity_core
-├── has contracts
-├── has resources
-├── has systems
-├── has scheduler
-└── does not know MAVLink, ROS 2, or board startup
+├── owns flight behavior and scheduling
+├── defines runtime and protocol contracts
+└── does not depend on ROS 2, MAVLink encoding, or a board crate
 
 veloxity_mavlink
 ├── depends on veloxity_core
 ├── implements CommInterface
-├── parses MAVLink frames
-├── builds MAVLink frames
-└── converts between MAVLink wire types and core comm messages
+└── converts between MAVLink frames and core messages
 
 sim
-├── depends on veloxity_core
-├── depends on veloxity_mavlink
-├── provides FFI board/PWM adapters for ROS 2 shim
-└── exposes the simulator firmware through the ROS 2 shim FFI path
+├── depends on veloxity_core and veloxity_mavlink
+├── implements BoardIo and PwmDriver
+└── exposes a C ABI used by the ROS 2 shim
 
-sim/ros2/veloxity_sil_board_shim
-├── is a ROS 2 rclcpp package in this repo
-├── subscribes/publishes ROSflight simulator topics
-├── exposes sil_board/run
-└── calls the Rust sim crate through C ABI
-
-pico2w / pixracerpro / nucleo
-├── choose board/PWM/comm concrete types
-├── instantiate World for embedded targets
-└── use platform crates for chip-family support where useful
+pixracerpro / nucleo
+├── depend on veloxity_core and veloxity_mavlink
+├── provide board and PWM implementations
+└── construct World with STM32 peripherals
 ```
 
-Core should never depend outward on `sim`, `veloxity_mavlink`, ROS 2 packages, or board crates.
+Runtime differences belong in contract implementations or in the runtime's scheduler loop.
 
-## Contracts
+## Core Contracts
 
-Contracts are the traits that let `World` remain generic:
+`World` is generic over the implementations that connect it to a runtime:
 
 ```text
-World<B, E, C, M, CI, PD>
+World<B, E, C, M, CI, PD, R>
 ├── B:  BoardIo
-├── E:  Estimator
-├── C:  Controller<State = E::State> + RcTrimCalibrator
-├── M:  Mixer<MixerInput = C::ControlOutput>
+├── E:  Estimator<R>
+├── C:  Controller<R, State = E::State> + RcTrimCalibrator
+├── M:  Mixer<R, MixerInput = C::ControlOutput>
 ├── CI: CommInterface<B>
-└── PD: PwmDriver
+├── PD: PwmDriver<R>
+└── R:  FlightFloat
 ```
 
-The contracts are the branch points for concrete runtime behavior.
+### `BoardIo`
+
+`BoardIo` is the core's connection to clocks, sensors, communication bytes, parameter storage,
+status outputs, and deferred board actions.
+
+Important method groups include:
 
 ```text
-BoardIo
+sensor input
 ├── update_sensor_bus
-├── serial_rx_read
-├── serial_tx_write
-├── clock_millis
-├── clock_micros
-├── read_params
-└── write_params
+├── imu_pending
+├── update_imu_sensor
+└── update_service_sensor_bus
 
-CommInterface
-├── handle_incoming_messages
-├── send_named_value
-├── send_cmd_ack
-├── send_statustext
-├── send_hard_error
-└── send telemetry messages
+communication transport
+├── serial_rx_read / serial_rx_frame_read
+├── serial_tx_write / serial_tx_write_priority
+├── serial_tx_enqueue_downlink
+├── serial_rx_pending
+├── serial_flush
+└── serial_flush_budgeted
 
+board services
+├── clock_millis / clock_micros
+├── read_params / write_params
+├── backup_memory_read / write / clear
+├── reboot / reboot_to_bootloader
+├── LED and test-pin methods
+└── run_deferred_board_actions
+```
+
+Most optional methods have safe defaults. A board overrides the methods supported by its runtime.
+
+### `CommInterface`
+
+`CommInterface` translates between protocol-neutral core messages and a wire protocol. The current
+implementation is `veloxity_mavlink::MavlinkInterface`.
+
+The interface:
+
+- decodes incoming transport data into `Messages`;
+- sends command acknowledgements and parameter responses;
+- sends status, sensor, control-output, and other telemetry;
+- writes encoded data through `BoardIo`.
+
+### `Estimator`, `Controller`, and `Mixer`
+
+The control components are replaceable contracts:
+
+```text
+Estimator::estimate(EstimatorCtx) -> estimator state
+Controller::control(state, ControllerCtx) -> control output
+Mixer::mix(control output, MixerCtx) -> actuator commands
+```
+
+The current vehicle wiring uses the quadrotor implementations exposed through
+`veloxity_core::vehicle::quadrotor`.
+
+### `PwmDriver`
+
+`PwmDriver` owns the runtime-specific actuator output:
+
+```text
 PwmDriver
-├── enable_all
-├── disable_all
+├── enable / disable channels
 ├── configure_output_rates
+├── set_duty_cycle
 ├── send_commands
 └── flush
 ```
 
-The core scheduler calls the board contract without checking whether the runtime is simulation or
-hardware. The concrete implementation decides what that means.
+After core composes normalized actuator commands and output state, the driver converts those commands
+into physical PWM, DShot, or simulated outputs.
 
-## Resources In `World`
+## What `World` Owns
 
-`World` owns the flight-stack resources:
+`World` is the root object for one firmware instance. Its resources fall into these groups:
 
-```text
-World
-├── board: B
-├── params: Params
-├── param_list_state: ParamListState
-├── param_events: ParamEventQueues
-├── comm_events: CommEventQueues
-├── command_events: CommandEventQueues
-├── companion_events: CompanionEventQueues
-├── companion_link: CompanionLinkState
-├── pending_hard_error: Option<RosflightHardErrorMsg>
-├── aux_commands: AuxCommandState
-├── external_attitude: ExternalAttitudeState
-├── comm: CommManager<B, CI>
-├── raw_sensors: SensorBus
-├── processed_sensors: ProcessedSensors
-├── sensor_processors: SensorProcessorSet
-├── rc: Rc
-├── command: CommandManager
-├── state: StateManager
-├── cal_flags: CalibrationFlags
-├── estimator: E
-├── controller: C
-├── mixer: M
-├── control_pipeline: ControlPipelineResource
-├── pwm_output: PwmOutputState
-├── pwm: PD
-└── last_imu_seen: u64
+| Group | Examples |
+| --- | --- |
+| Runtime | board, communication manager, PWM driver |
+| Configuration | parameters and parameter-list state |
+| Events | parameter, command, companion, and communication queues |
+| Inputs | raw and processed sensors, IMU accumulator, sensor processors |
+| Flight state | RC, command manager, state machine, calibration flags |
+| Control | estimator, controller, mixer, latest control-pipeline results |
+| Scheduling | control rate, control deadlines, service deadline, last IMU/control times |
+
+Rather than letting systems receive `&mut World`, `World` constructs a context containing the exact resources
+needed by each system. Contexts are flexible enough to be used as anything from a grab-bag of entities the function deems important to detailed lists specifying only sub-entities the function intends to modify.
+
+For example, current parameter service receives:
+
+```rust
+pub struct ParamServiceCtx<'a> {
+    pub params: &'a mut Params,
+    pub state: &'a mut ParamListState,
+    pub events: &'a mut ParamEventQueues,
+    pub comm_events: &'a mut CommEventQueues,
+}
 ```
 
-Those fields are not handed wholesale to systems. `World` creates contexts from them.
+RC, command, and state processing receive a different context:
 
-## Events And Ports
+```rust
+pub struct RcCommandStateCtx<'a> {
+    pub now_ms: u32,
+    pub fresh_rc: Option<RcPacket>,
+    pub rc: &'a mut Rc,
+    pub command: &'a mut CommandManager,
+    pub state: &'a mut StateManager,
+    pub params: &'a mut Params,
+    pub param_events: Option<&'a mut ParamEventQueues>,
+}
+```
 
-Events are declared in `crates/veloxity_core/src/events.rs`.
+These structures make data access and mutation visible at the call site.
+
+## Events And Queues
+
+Events are stored in fixed-capacity `heapless::Deque` queues (allocated at compile time)
 
 ```text
 ParamEventQueues
-├── set_requests:  EventQueue<ParamSetRequested>
-├── read_requests: EventQueue<ParamReadRequested>
-├── list_requests: EventQueue<ParamListRequested>
-└── changes:       EventQueue<ParamChanged>
+├── set_requests
+├── read_requests
+├── list_requests
+├── changes
+└── full_refresh
 
 CommandEventQueues
 ├── calibration_requests
@@ -270,897 +284,343 @@ CompanionEventQueues
 └── external_attitudes
 
 CommEventQueues
-└── responses: EventQueue<CommResponse>
+└── responses
 ```
 
-Ports restrict access:
+`CommResponse` is the shared output queue for:
 
-```text
-EventEmitPort<T>
-└── emit / emit_or_log
+- parameter values;
+- command acknowledgements;
+- version responses;
+- status text;
+- hard-error reports.
 
-EventDrainPort<T>
-└── next
+The small port types in `ports.rs` can further restrict queue or parameter access:
 
-EventReadPort<T>
-└── iter
+- `EventEmitPort` can append events;
+- `EventDrainPort` can consume events;
+- `EventReadPort` can inspect events without consuming them;
+- `ParamsReadPort` and `ParamsWritePort` limit parameter access.
 
-ParamsReadPort
-└── get / raw
+## Standard Scheduler
 
-ParamsWritePort
-├── get
-└── set
-```
-
-The difference between drain and read matters:
-
-```text
-drain
-├── receiver consumes the events
-└── used for request queues
-
-read
-├── receiver observes events without removing them
-└── used when several reactions need to observe the same event batch
-```
-
-Parameter reactions use read ports because both RC and command logic need to see the same
-`ParamChanged` batch before `World` clears it.
-
-## Contexts
-
-A context is the only thing a system receives. That makes the system's authority visible.
-
-Example:
-
-```rust
-pub struct ParamApplyCtx<'a> {
-    pub params: ParamsWritePort<'a>,
-    pub requests: EventDrainPort<'a, ParamSetRequested, PARAM_SET_REQUEST_QUEUE_CAPACITY>,
-    pub changes: EventEmitPort<'a, ParamChanged, PARAM_CHANGED_QUEUE_CAPACITY>,
-    pub responses: EventEmitPort<'a, CommResponse, COMM_RESPONSE_QUEUE_CAPACITY>,
-}
-```
-
-This means `apply_param_requests` can:
-
-```text
-├── write Params
-├── drain ParamSetRequested
-├── emit ParamChanged
-└── emit CommResponse
-```
-
-It cannot:
-
-```text
-├── touch RC directly
-├── touch CommandManager directly
-├── call board APIs
-└── send MAVLink bytes directly
-```
-
-Another example:
-
-```rust
-pub struct RcCommandStateCtx<'a> {
-    pub now_ms: u32,
-    pub sensors: &'a ProcessedSensors,
-    pub rc: &'a mut Rc,
-    pub command: &'a mut CommandManager,
-    pub state: &'a mut StateManager,
-    pub params: &'a Params,
-}
-```
-
-This tells the reader that the RC/state system is allowed to read processed sensors and params,
-mutate RC, mutate command state, and mutate the flight state machine.
-
-## Scheduler
-
-`World::run_once` is the generic scheduler entrypoint. It is used by simulation, host tests, and
-boards that do not provide a board-specific realtime loop.
+`World::run_once` is the complete sequential scheduler. Nucleo uses this path.
 
 ```text
 run_once
 ├── run_communication_and_parameter_service_stage
 ├── run_sensor_ingestion_and_health_stage
 ├── run_rc_command_state_stages
+│   ├── run_rc_command_state
+│   ├── run_pwm_output_stage
+│   └── update_board_leds
 ├── run_control_and_mixing_stage_if_new_imu
-└── run_telemetry_stage
+├── run_telemetry_stage
+├── board.serial_flush
+└── board.run_deferred_board_actions
 ```
 
-The first stage is:
-
-```text
-run_communication_and_parameter_service_stage
-├── process_comm_stage
-├── apply_companion_events
-├── apply_command_events
-├── service_param_events
-├── apply_param_reactions
-└── request_gyro_calibration_if_needed
-```
-
-The sensor stage is:
-
-```text
-run_sensor_ingestion_and_health_stage
-├── board.clock_micros
-├── run_sensor_ingestion_stage
-├── update_sensor_health_and_calibration
-└── drain_logs_and_send_responses
-```
-
-The RC/state stage is:
-
-```text
-run_rc_command_state_stages
-├── run_rc_command_state
-├── run_pwm_output_stage
-└── update_board_leds
-```
-
-The control stage is:
-
-```text
-run_control_and_mixing_stage_if_new_imu
-└── run_control_pipeline_if_new_imu
-    ├── require new IMU timestamp
-    ├── estimator.estimate_with_external_attitude
-    ├── controller.control
-    ├── mixer.mix
-    ├── pwm.configure_output_rates
-    ├── compose_pwm_outputs
-    ├── write_pwm_commands
-    └── update ControlPipelineResource
-```
-
-The telemetry stage is:
-
-```text
-run_telemetry_stage
-└── comm.send_named_telemetry_streams
-    ├── status
-    ├── attitude
-    ├── IMU
-    ├── baro/mag/range/GNSS/battery/diff pressure
-    ├── RC raw
-    └── output raw
-```
-
-The scheduler is deliberately explicit. Ordering is flight behavior.
+The order is deliberate. Incoming requests are applied before sensor and control work, fresh RC
+input reaches command/state processing before the control pipeline, and communication output is
+flushed after responses and telemetry have been queued.
 
 ## Realtime Scheduler
 
-Board crates may use the finer-grained realtime scheduler methods instead of calling `run_once`
-directly. The Pico 2 W firmware does this so an IMU data-ready event can preempt slower service
-work without removing the ECS-style stage boundaries from `World`.
+Pixracer Pro and the simulator use the finer-grained realtime scheduler. This scheduler separates
+IMU intake, fixed-rate control, and lower-priority service work.
 
-The realtime scheduler decision is:
+The decision order is:
 
 ```text
 realtime_scheduler_step
-├── ImuControl if BoardIo::imu_pending()
-├── Service if a deferred service phase is due and still early after the last control closure
-└── Idle otherwise
+├── ImuControl    if BoardIo::imu_pending()
+├── ControlUpdate if a fixed-rate control deadline is due and IMU samples are accumulated
+├── Service       if service is due and enough control slack remains
+└── Idle
 ```
 
-The IMU control path is intentionally short:
+### IMU And Control Timing
+
+`ControlLoopRates` supports two modes:
+
+| Setting | Behavior |
+| --- | --- |
+| `every_imu_sample()` | Run control for each new processed IMU sample. |
+| `fixed_rate_hz(rate)` | Accumulate IMU samples, average them, and run control at the configured rate. |
+
+`run_imu_control_tick`:
+
+1. asks the board for the pending IMU sample;
+2. processes that sample;
+3. adds it to the control IMU accumulator;
+4. updates sensor health and calibration;
+5. runs control immediately if the selected control mode is due.
+
+If a fixed-rate deadline becomes due after IMU intake, `run_control_update_tick` consumes the
+averaged samples and runs the control pipeline.
+
+### Realtime Service Work
+
+`run_prioritized_service_steps_with_policy` performs service work only while the scheduler still
+has control slack. One service step attempts, in order:
 
 ```text
-run_imu_control_tick
-├── board.update_imu_sensor
-├── sensors::ingestion::process_imu_sensor
-├── update_sensor_health_and_calibration
-└── record_control_imu_candidate
-    └── add the processed IMU sample to the fixed-rate control accumulator
+service sensor input
+communication and parameter input
+RC / command / state processing
+limited response and log drain
+a bounded number of telemetry streams
+a bounded serial flush
+deferred board actions
 ```
 
-This path drains only the IMU producer queue. It does not run communication, telemetry, parameter
-service, non-IMU sensors, RC command/state, log drain, serial flush, or deferred board actions.
-Those operations are still part of the same `World` architecture; they are sliced into service
-phases:
+The control-slack condition is checked between operations. `RealtimeServicePolicy` selects minimum
+spacing, the telemetry budget, and whether continuous polling may continue when no activity was
+observed.
+
+Pixracer Pro configures a `400 Hz` control loop and continuous polling with two telemetry streams
+per service step. Its STM32 peripheral tasks produce sensor data, while the board's main loop owns
+`World` and repeatedly executes the scheduler decision.
+
+Nucleo-H753ZI currently uses the standard `run_once` loop. Its target is compile-current, but its
+hardware behavior should be revalidated before adopting the Pixracer Pro realtime policy.
+
+## Control Pipeline
+
+The control system runs only when it receives an IMU sample with a timestamp newer than the sample
+used by the preceding control update.
 
 ```text
-run_service_step_with_deferral
-├── Input
-│   └── run_communication_and_parameter_service_stage
-├── Sensors
-│   ├── board.update_service_sensor_bus
-│   ├── process non-IMU sensor packets
-│   └── update_sensor_health_and_calibration
-├── RcCommand
-│   └── run_rc_command_state_stages
-├── Responses
-│   └── drain_logs_and_send_responses_limited
-├── Telemetry0/1/2
-│   └── run_realtime_telemetry_stage
-├── Flush
-│   └── board.serial_flush_budgeted
-└── DeferredBoard
-    └── board.run_deferred_board_actions
+run_control_pipeline_if_new_imu
+├── validate advancing IMU time
+├── calculate dt
+├── Estimator::estimate
+├── update estimator health
+├── Controller::control
+├── Mixer::mix
+├── update mixer health
+├── configure output rates when needed
+├── compose PWM outputs
+├── write PWM commands
+└── store the latest estimator, actuator, PWM, and timing results
 ```
 
-Each service call advances one phase. On the Pico 2 W, a service phase is allowed only when no IMU
-sample is pending and the loop is still within the configured post-control service window. This is
-what keeps telemetry, MAVLink command handling, RC interpretation, and board maintenance from
-starting late enough to steal time from the next IMU close-loop pass.
+External attitude is consumed as a one-shot input for the estimator. Auxiliary commands and RC
+override state are included when actuator outputs are composed.
 
-Boards that use the realtime scheduler can optionally add a board-specific post-control telemetry
-burst after a control tick returns `ran_control == true`. Use
-`World::run_realtime_telemetry_stage_budgeted(max_streams)` when ordinary due-deadline ordering is
-enough. Use `World::run_realtime_telemetry_stage_prioritized(priority_streams, max_streams)` when
-the board needs some streams to get the first opportunity in that burst. The priority list is board
-policy; each entry names a generic `NamedTelemetryStream` plus a `RealtimeTelemetryPriorityGate`.
-`DueDeadline` uses the stream's normal rate and freshness gates. `FreshSample` is for streams whose
-cadence is already enforced by the realtime/control tick; it sends a new sample once without waiting
-for the independent telemetry due timer. Both helpers return the number of streams actually sent.
+## Parameter And Command Flow
 
-These helpers do not replace the service phases; RX handling, parameter service, response drain,
-slower sensors, serial flush, and deferred board actions still belong in
-`run_service_step_with_deferral` or `run_service_step_with_deferral_and_telemetry_budget`.
-
-Use this pattern only when measurements show that the board has post-control slack but the service
-scheduler does not provide enough telemetry selection opportunities. The board entrypoint should
-own the budget as a named constant, keep it small, and document the hardware result that justifies
-it. A new board should validate the setting with:
-
-- scope timing for the control deadline and control-active pulse;
-- MAVLink load testing with expected bidirectional traffic;
-- TX enqueue/drain diagnostics or equivalent transport counters;
-- control p99/max timing with enough slack to the next deadline;
-- stream-rate checks for every high-rate stream the board enables.
-
-If the board already decouples telemetry production and transport through a mailbox or second-core
-drain path, prefer validating that existing design before copying another board's post-control
-burst. If a priority burst is needed, keep the priority list small and board-owned, for example
-`RealtimeTelemetryPriority { stream: NamedTelemetryStream::Imu, gate:
-RealtimeTelemetryPriorityGate::FreshSample }` for a board whose control tick is the measured IMU
-telemetry cadence source. Use `DueDeadline` when the telemetry rate timer, rather than the control
-tick, should remain authoritative.
-
-RC command/state is deliberately in `RcCommand`, not in `run_imu_control_tick` or
-`run_control_update_tick`. CRSF packet parsing and queuing are board work; draining the newest RC
-packet happens in `Sensors`, while interpreting it, updating the command mux, running the state
-machine, syncing PWM output enable state, and updating LEDs are core `World` work. Keeping that work
-in service phases preserves the expected ROSflight behavior while preventing variable RC packet
-arrivals from adding jitter to every control closure.
-
-On RP2350/Pico 2 W, IMU sampling, control cadence, and telemetry cadence are separate choices. The
-default firmware samples the ISM330DHCX at the high-rate output data rate (ODR), runs the full
-control pipeline at
-`1.5 kHz`, and publishes bounded high-rate MAVLink telemetry. The board entry point is
-`boards/pico2w/src/bin/veloxity.rs`; `imu-odr-1666hz` is the lower-rate hardware IMU override and
-`ism330dhcx-1k666` remains only as a compatibility alias. Core 1 owns transport and producer work,
-while the ISM330DHCX producer runs on an Embassy interrupt executor driven by `SIO_IRQ_BELL`. The
-`scope-timing-pins` family exposes GP19 for control timing plus GP22 for the selected substage.
-Barometer and magnetometer work should remain in the service-side sensor path so adding those
-sensors does not turn the IMU interrupt path into a multi-sensor polling loop.
-
-Pixracer Pro also uses the realtime scheduler, but its board runtime differs from the Pico 2 W
-dual-core path. STM32 peripheral tasks produce IMU, RC, and slower sensor packets, while one
-high-level firmware loop owns `World`. Hardware timing showed that Pixracer Pro had enough control
-slack for `400 Hz`, but stale fixed-rate deadline state could block service for hundreds of
-milliseconds when no accumulated IMU sample was available. The Pixracer Pro entrypoint therefore
-uses a board-specific continuous service policy: prioritized service work runs back-to-back while
-the control-slack guard remains satisfied, and the guard allows service when an overdue control
-deadline cannot actually run because the IMU accumulator is empty. The ordinary service phases
-continue to handle RX, responses, slower sensors, telemetry, and board maintenance.
-
-This decision is intentionally board-specific. RP2350/Pico 2 W already decouples downlink transport
-through its mailbox/core split and should be retested for consistency before porting any additional
-Pixracer Pro scheduling policy there. Nucleo-H753ZI remains compile-current and uses the ordinary
-firmware loop until renewed hardware validation justifies moving it to the realtime split.
-
-## End-To-End Flow: ROSflight Standalone Sim
-
-The active ROSflight integration path is:
+Incoming protocol messages are decoded before they reach the parameter or command systems:
 
 ```text
-rosflight_sim standalone multirotor
-├── publishes sensor topics
-├── calls sil_board/run through rosflight_sil_manager
-└── consumes sim/pwm_output
-
-sim/ros2/veloxity_sil_board_shim
-├── subscribes simulator sensor topics
-├── subscribes sim/RC
-├── exposes sil_board/run
-├── builds VeloxityFfiSensorSnapshot
-├── calls veloxity_sim_set_sensors
-├── calls veloxity_sim_run_once
-├── calls veloxity_sim_get_pwm
-└── publishes sim/pwm_output
-
-sim/firmware/src/ffi.rs
-├── owns FfiBoard
-├── owns FfiPwmDriver
-├── instantiates World<FfiBoard, QuadEstimator, QuadController, MatrixMixer, MavlinkInterface, FfiPwmDriver>
-├── maps FFI snapshots into SensorBus packets
-├── maps PwmDriver commands into shared PWM outputs
-└── owns UDP MAVLink socket for rosflight_io
-
-veloxity_core::World
-├── runs scheduler
-├── consumes BoardIo sensors
-├── processes MAVLink through CommInterface
-├── runs estimator/controller/mixer
-├── writes PWM through PwmDriver
-└── queues telemetry responses
-
-veloxity_mavlink
-├── parses incoming MAVLink from rosflight_io
-├── fills core Messages
-├── serializes outgoing core comm messages
-└── writes UDP bytes through BoardIo serial_tx_write
-
-unmodified rosflight_io
-├── sends param/command/offboard messages over UDP MAVLink
-├── receives status/params/telemetry over UDP MAVLink
-└── exposes ROS services and topics used by tests
-```
-
-## Reading `sim/firmware/src/ffi.rs`
-
-`sim/firmware/src/ffi.rs` is the Rust side used by the ROS 2 C++ shim.
-
-```text
-sim/firmware/src/ffi.rs
-├── FFI data structs
-│   ├── VeloxityFfiImu
-│   ├── VeloxityFfiMag
-│   ├── VeloxityFfiBaro
-│   ├── VeloxityFfiGnss
-│   ├── VeloxityFfiAirspeed
-│   ├── VeloxityFfiRange
-│   ├── VeloxityFfiBattery
-│   ├── VeloxityFfiRc
-│   └── VeloxityFfiSensorSnapshot
-├── FfiPwmDriver
-│   └── implements PwmDriver
-├── FfiBoard
-│   └── implements BoardIo
-├── FfiWorld type alias
-├── VeloxityFfiHandle
-├── veloxity_sim_create
-├── veloxity_sim_destroy
-├── veloxity_sim_set_sensors
-├── veloxity_sim_run_once
-└── veloxity_sim_get_pwm
-```
-
-The FFI snapshot is the input boundary from C++ into Rust:
-
-```text
-VeloxityFfiSensorSnapshot
-├── has_imu + imu
-├── has_mag + mag
-├── has_baro + baro
-├── has_gnss + gnss
-├── has_airspeed + airspeed
-├── has_range + range
-├── has_battery + battery
-└── has_rc + rc
-```
-
-`FfiBoard::update_sensor_bus` maps the latest snapshot into firmware packets:
-
-```text
-VeloxityFfiSensorSnapshot
-└── FfiBoard::update_sensor_bus
-    ├── ImuPacket
-    ├── MagPacket
-    ├── BaroPacket
-    ├── GNSSPacket
-    ├── PitotPacket
-    ├── RangePacket
-    ├── BatteryPacket
-    └── RcPacket
-```
-
-`FfiBoard` also owns the MAVLink UDP socket:
-
-```text
-FfiBoard
-├── serial_rx_read  -> UDP recv from rosflight_io
-└── serial_tx_write -> UDP send to rosflight_io
-```
-
-That is why core still sees "serial" methods: `BoardIo` is the firmware contract, while the sim
-adapter implements that contract using UDP.
-
-`FfiPwmDriver` maps core PWM commands to shared output storage:
-
-```text
-World/control/pwm system
-└── PwmDriver::send_commands
-    └── FfiPwmDriver
-        └── outputs: Arc<Mutex<[u16; 14]>>
-```
-
-The C++ shim later calls `veloxity_sim_get_pwm` and publishes those values as ROS 2
-`sim/pwm_output`.
-
-## Reading `sim/ros2/veloxity_sil_board_shim/src/veloxity_sil_board.cpp`
-
-The C++ shim is the ROS 2 node boundary. It does not implement flight logic.
-
-```text
-VeloxitySilBoard node
-├── node name: veloxity_sil_board
-├── service: sil_board/run
-├── publisher: sim/pwm_output
-├── subscriptions
-│   ├── sim/sensors/imu/data
-│   ├── sim/sensors/imu/temperature
-│   ├── sim/sensors/mag
-│   ├── sim/sensors/baro
-│   ├── sim/sensors/gnss
-│   ├── sim/sensors/diff_pressure
-│   ├── sim/sensors/range
-│   ├── sim/sensors/battery
-│   └── sim/RC
-└── firmware_: VeloxityFfiHandle
-```
-
-Each subscription stores the latest ROS message and marks it available:
-
-```text
-ROS topic callback
-├── latest_* = message
-└── *_available = true
-```
-
-IMU is intentionally handled as a latest-sample latch. Once the shim has seen the first
-`sim/sensors/imu/data` message, every `sil_board/run` call includes the latest IMU sample instead
-of consuming it as a one-shot. This matches the C SIL behavior more closely: the simulator's IMU
-publisher and the SIL manager both run at 400 Hz, but they are separate ROS timers and can phase
-slip. Treating IMU as one-shot can create artificial 5 ms gaps when `sil_board/run` fires just
-before the next IMU callback. Lower-rate sensors still use availability flags so mag, baro, GNSS,
-airspeed, range, battery, and RC updates are admitted when fresh data arrives.
-
-When `rosflight_sil_manager` calls `sil_board/run`, the shim executes:
-
-```text
-run_once
-├── build_sensor_snapshot
-├── veloxity_sim_set_sensors
-├── veloxity_sim_run_once
-├── veloxity_sim_get_pwm
-└── publish_pwm
-```
-
-The shim uses a monotonic FCU clock for sensor timestamps:
-
-```text
-fcu_clock_micros
-└── steady_clock since boot_time_
-```
-
-That prevents wall-clock jumps from becoming firmware time-backwards errors.
-
-The shim also logs diagnostic warnings if `sil_board/run` itself is not being called for more than
-10 ms or if a firmware service step takes more than 4 ms. These warnings are meant to separate SIL
-service-cadence problems from downstream `rosflight_io` or ROScopter estimator behavior.
-
-The FFI simulator requires `VELOXITY_SIM_PARAM_DIR` to point at a writable runtime directory before
-`veloxity_sim_create` is called. The multirotor standalone launch defaults this to
-`/tmp/veloxity-sim-params/multirotor`, and the launch argument `veloxity_param_dir:=...` can move it
-to a persistent path.
-
-## Simulator Integration Boundary
-
-The simulator firmware package intentionally exposes only the FFI/staticlib path. Older direct
-simulator experiments that subscribed to CDR messages on Zenoh from Rust were removed so the repo
-has one supported ROSflight SIL path:
-
-```text
-ROSflight simulator topics
-└── sim/ros2/veloxity_sil_board_shim
-    └── sim/firmware/src/ffi.rs
-        └── veloxity_core::World
-```
-
-`rmw_zenoh_cpp` may still be used as the ROS 2 middleware for the surrounding ROS graph, but the
-Rust firmware crate does not depend on the Rust `zenoh` crate or start its own Zenoh session.
-
-## End-To-End Flow: Parameter Set
-
-This is the clearest example of events and contexts.
-
-```text
-rosflight_io
-└── sends PARAM_SET over MAVLink
-    └── veloxity_mavlink parses frame
-        └── CommManager has msgs.param_set
-            └── CommManager::act_on_messages
-                └── emits ParamSetRequested
-                    └── World::service_param_events
-                        └── params::service::apply_param_requests
-                            ├── drains ParamSetRequested
-                            ├── writes Params
-                            ├── emits ParamChanged
-                            └── emits CommResponse::ParamValue
-                                └── World::apply_param_reactions
-                                    ├── rc_on_param_changed reads ParamChanged
-                                    └── command_on_param_changed reads ParamChanged
-                                        └── World::drain_logs_and_send_responses
-                                            └── CommManager::send_comm_responses
-                                                └── CommInterface::send_named_value
-                                                    └── veloxity_mavlink writes MAVLink bytes
-```
-
-Ownership is split:
-
-```text
-comm.rs
-└── translates decoded messages into events
-
-params/service.rs
-└── owns parameter request behavior
-
-params/reactions.rs
-└── owns consequences of parameter changes
-
-comm.rs
-└── owns sending queued communication responses
-
-world.rs
-└── owns ordering
-```
-
-## End-To-End Flow: Calibration Command
-
-```text
-rosflight_io
-└── sends ROSFLIGHT_CMD_ACCEL_CALIBRATION or GYRO_CALIBRATION
+transport bytes
+└── MavlinkInterface::handle_incoming_messages
     └── CommManager::act_on_messages
-        └── emits CalibrationRequested
-            └── World::apply_command_events
-                └── command::service::apply_calibration_requests
-                    ├── checks StateManager
-                    ├── sets CalibrationFlags
-                    ├── zeros relevant bias params
-                    └── queues immediate ROSFLIGHT_CMD_ACK when calibration starts
-                        └── sensor processors run calibration while sensor packets arrive
-                            └── completion or failure updates calibration state/logs
+        ├── ParamEventQueues
+        ├── CommandEventQueues
+        └── CompanionEventQueues
 ```
 
-The command service starts calibration and ACKs acceptance immediately, matching ROSflight 2.0.
-The sensor processors finish calibration later and report completion/failure through state and logs,
-not through a second command ACK.
-
-## End-To-End Flow: RC And Arming
+A parameter-set request follows this path:
 
 ```text
-ROS /sim/RC
-└── C++ shim latest_rc_
-    └── build_sensor_snapshot
-        └── VeloxityFfiRc
-            └── FfiBoard::update_sensor_bus
-                └── RcPacket in SensorBus
-                    └── sensors::ingestion::process_sensor_bus
-                        └── ProcessedSensors.rc
-                            └── rc::command_state::run_rc_command_state
-                                ├── Rc::receive
-                                ├── Rc::run
-                                ├── CommandManager::run
-                                └── StateManager::run
-                                    └── World::run_pwm_output_stage
-                                        └── pwm::output_sync::sync_pwm_output_state
+ParamSetRequested
+└── params::service::service_param_events
+    ├── validate parameter name, type, and allowed value
+    ├── update Params
+    ├── emit ParamChanged
+    └── queue CommResponse::ParamValue
+        └── params::reactions updates dependent resources
 ```
 
-RC arming is not handled in the ROS shim. The shim only passes RC input through. The firmware logic
-inside `Rc`, `CommandManager`, and `StateManager` decides whether the vehicle arms.
+Command service handles calibration, parameter defaults, board commands, RC trim, version,
+origin-reset, and configuration requests. It queues acknowledgements as `CommResponse` values
+instead of writing protocol bytes directly.
 
-## End-To-End Flow: Control And PWM
+## Sensor, RC, And State Flow
 
 ```text
-new IMU packet
-└── sensors::ingestion
-    └── ProcessedSensors.imu
-        └── control::run_control_pipeline_if_new_imu
-            ├── reject non-advancing IMU time
-            ├── estimator.estimate_with_external_attitude
-            ├── update estimator health error
-            ├── controller.control
-            ├── mixer.mix
-            ├── update mixer health error
-            ├── pwm.configure_output_rates
-            ├── pwm::output_sync::compose_pwm_outputs
-            ├── pwm::output_sync::write_pwm_commands
-            └── ControlPipelineResource::set_latest
-                └── telemetry later reads latest estimator/control/PWM state
+BoardIo sensor update
+└── SensorBus
+    └── sensors::ingestion
+        └── ProcessedSensors
+            ├── sensor health and calibration
+            ├── RcCommandStateCtx for a fresh RC packet
+            └── ControlPipelineCtx for a fresh control IMU sample
 ```
 
-`ControlPipelineCtx` is intentionally large because control is the point where estimator,
-controller, mixer, state, sensors, auxiliary commands, and PWM meet. Even there, the dependencies
-are explicit.
+`Rc` interprets channels and switches. `CommandManager` combines RC and offboard control sources.
+`StateManager` owns arming, failsafe, calibration, and error state. The PWM synchronization stage
+enables or disables outputs based on that state and the configured output-kill behavior.
 
-## End-To-End Flow: Telemetry And Logs
+## Telemetry And Logs
+
+Core systems queue protocol-neutral responses and logs. The communication adapter encodes them
+later.
 
 ```text
-systems
-├── emit CommResponse events
-└── write logs through log macros
+logs
+└── log::drain
+    └── CommResponse::Statustext
 
-World::drain_logs_and_send_responses
-├── log::drain::drain_logs_to_comm_responses
-│   └── emits CommResponse::Statustext when companion is connected
-├── CommManager::send_comm_responses
-│   └── sends queued response messages through CommInterface
-├── board.serial_flush
-└── board.run_deferred_board_actions
+CommEventQueues.responses
+└── CommManager::send_comm_responses
+    └── CommInterface
 
-World::run_telemetry_stage
+run_telemetry_stage
 └── CommManager::send_named_telemetry_streams
-    └── sends periodic telemetry through CommInterface
+    └── CommInterface
 ```
 
-`CommResponse` is the common event type for deferred communication output:
+The realtime scheduler can send a bounded number of due streams at a time. Board policy controls
+the budget; core still owns the stream definitions, rates, and freshness checks.
+
+## Simulator Architecture
+
+The simulator is an adapter around the same `World` used by hardware targets.
 
 ```text
-CommResponse
-├── ParamValue
-├── CmdAck
-├── Version
-├── Statustext
-└── HardError
+ROS 2 topics
+└── veloxity_sil_board C++ callbacks
+    └── veloxity_sim_set_sensors
+        └── shared Rust sensor state
+            └── Rust firmware worker thread
+                ├── realtime_scheduler_step
+                ├── estimator / controller / mixer
+                └── shared PWM outputs
+                    └── sil_board/run
+                        ├── veloxity_sim_sync_latest_imu
+                        ├── veloxity_sim_get_pwm
+                        └── publish sim/pwm_output
 ```
 
-## Branching Rules
+### Rust FFI Handle
 
-When reading code, classify each branch by where it belongs:
+`veloxity_sim_create`:
 
-```text
-Runtime branch
-├── belongs outside core
-├── examples: sim vs pixracerpro, MAVLink vs another comm implementation
-└── implemented by choosing concrete contract implementations
+1. creates shared sensor and PWM storage;
+2. constructs `FfiBoard`, `FfiPwmDriver`, and `World`;
+3. configures the simulator control loop for `400 Hz`;
+4. starts the `veloxity-sim-firmware` worker thread;
+5. returns an opaque `VeloxityFfiHandle` to C++.
 
-Flight-behavior branch
-├── belongs in core systems/resources
-├── examples: armed vs disarmed, failsafe vs normal, new IMU vs no new IMU
-└── implemented in systems such as state_machine, rc/command_state, control, pwm/output_sync
+The current C ABI is:
 
-Protocol branch
-├── belongs in comm adapter or comm manager
-├── examples: PARAM_SET vs ROSFLIGHT_CMD vs OFFBOARD_CONTROL
-└── decoded into protocol-neutral core events/messages
+| Function | Purpose |
+| --- | --- |
+| `veloxity_sim_create` | Creates one simulator firmware instance and starts its worker thread. |
+| `veloxity_sim_destroy` | Stops the worker and destroys the instance. |
+| `veloxity_sim_set_sensors` | Merges a sensor snapshot into shared firmware input. |
+| `veloxity_sim_sync_latest_imu` | Waits until the worker has processed the latest submitted IMU generation. |
+| `veloxity_sim_get_pwm` | Copies the most recent PWM outputs into a caller-provided array. |
+| `veloxity_sim_clock_micros` | Returns the firmware instance's monotonic time since creation. |
 
-Scheduler branch
-├── belongs in World
-├── examples: which stage runs before another stage
-└── should stay explicit
-```
+The C++ shim does not call a Rust “run once” function. Firmware scheduling runs continuously on the
+Rust worker. The ROS service synchronizes with that worker before reading PWM.
 
-Do not add runtime-specific branches to `veloxity_core` when a contract can express the same thing.
+### ROS 2 Shim
 
-## Adding A New System
+`veloxity_sil_board` provides:
 
-Use this checklist:
+- the `sil_board/run` service expected by `rosflight_sil_manager`;
+- a `sim/pwm_output` publisher;
+- subscriptions for IMU, IMU temperature, magnetometer, barometer, GNSS, differential pressure,
+  range, battery, and RC.
 
-```text
-1. Identify the owning domain.
-   └── params, command, sensors, rc, pwm, log, etc.
+Each primary sensor callback constructs a zero-initialized `VeloxityFfiSensorSnapshot`, marks the
+newly received sensor as present, and submits it to the Rust firmware input. Sensor timestamps come
+from the firmware instance's monotonic clock—the same clock used by `FfiBoard`—so they are not
+affected by changes to the computer's wall clock. The IMU-temperature callback is the exception: it
+caches the latest temperature for the next IMU snapshot.
 
-2. Decide whether the behavior is a resource method or a system.
-   ├── resource method: intrinsic behavior of one resource
-   └── system: scheduled behavior involving multiple resources/events
+When `sil_board/run` is called, the shim waits for the newest IMU to be processed, retrieves the
+latest PWM array, and publishes it. Warnings report long service gaps, slow synchronization, or
+unexpected output sizes.
 
-3. Define events if the work is requested by another stage.
-   └── add event type and queue in events.rs
+`VELOXITY_SIM_PARAM_DIR` must identify a writable parameter directory before the firmware instance
+is created.
 
-4. Define a context.
-   └── include only the needed borrows/ports
+## Adding Or Changing Core Behavior
 
-5. Implement the system.
-   └── no &mut World
+Use this sequence:
 
-6. Wire the context in World.
-   └── choose the exact scheduler stage
+1. Identify the domain that owns the behavior.
+2. Decide whether it belongs in a resource method or a multi-resource system.
+3. Add an event if another stage requests the work.
+4. Define or update a context with only the required references.
+5. Implement the system without passing `&mut World`.
+6. Wire the system into the correct scheduler stage.
+7. Add focused system tests and a `World` ordering test when scheduling changes.
 
-7. Add focused tests.
-   ├── system test with local resources/queues
-   └── World handoff test if ordering changed
-```
+Runtime-specific behavior should normally be implemented through `BoardIo`, `PwmDriver`,
+`CommInterface`, or the runtime's outer scheduler loop.
 
 ## File Ownership Map
 
+| Path | Responsibility |
+| --- | --- |
+| `board.rs` | Runtime I/O contract |
+| `comm.rs` | Protocol-neutral communication manager and telemetry scheduling |
+| `comm/interface.rs` | Communication-adapter contract |
+| `comm/messages.rs` | Protocol-neutral communication message types |
+| `events.rs` | Bounded event types and queue groups |
+| `ports.rs` | Narrow event and parameter access wrappers |
+| `params.rs` | Parameter definitions, defaults, values, and storage |
+| `params/service.rs` | Parameter read, list, and set processing |
+| `params/reactions.rs` | Updates caused by parameter changes |
+| `command.rs` | Command resource and control-source selection |
+| `command/service.rs` | Command request handling and acknowledgement generation |
+| `companion.rs` | Companion heartbeat, auxiliary command, and external-attitude handling |
+| `sensors.rs` | Raw and processed sensor resources |
+| `sensors/ingestion.rs` | Raw-to-processed sensor conversion |
+| `sensors/processors.rs` | Sensor calibration and correction |
+| `sensors/health.rs` | Sensor health and calibration progress |
+| `rc.rs` | RC channel and switch interpretation |
+| `rc/command_state.rs` | RC, command manager, and state-machine handoff |
+| `control.rs` | Estimator/controller/mixer/PWM control pipeline |
+| `pwm.rs` | PWM driver contract and protocol helpers |
+| `pwm/output_sync.rs` | Output enable state, composition, and writes |
+| `state_machine.rs` | Arming, failsafe, calibration, and error state |
+| `world.rs` | Resource ownership and shared scheduler state |
+| `world/control.rs` | Standard and realtime control scheduling |
+| `world/service.rs` | Communication, sensors, responses, and realtime service policy |
+| `world/telemetry.rs` | Normal and budgeted telemetry scheduling |
+
+## Recommended Reading Paths
+
+### Core Flight Update
+
 ```text
-board.rs
-└── core board contract
-
-comm.rs
-├── protocol-neutral communication manager
-├── decoded message handling
-├── event emission from incoming messages
-└── outgoing communication response sending
-
-comm/interface.rs
-└── communication contract implemented by adapters
-
-comm/messages.rs
-└── protocol-neutral ROSflight-shaped message structs/enums
-
-params.rs
-└── parameter definitions, IDs, defaults, storage
-
-params/service.rs
-└── parameter read/list/set request systems
-
-params/reactions.rs
-└── systems reacting to ParamChanged events
-
-command.rs
-└── command resource and control-source muxing
-
-command/service.rs
-└── command request systems and ACK emission
-
-companion.rs
-└── companion heartbeat, aux command, external attitude resources/systems
-
-sensors.rs
-└── SensorBus and ProcessedSensors resources
-
-sensors/ingestion.rs
-└── raw SensorBus to ProcessedSensors system
-
-sensors/processors.rs
-└── per-packet sensor correction/calibration processors
-
-sensors/health.rs
-└── sensor health and IMU calibration health system
-
-rc.rs
-└── RC resource and channel interpretation
-
-rc/command_state.rs
-└── processed RC packet, RC resource, command manager, state machine handoff
-
-control.rs
-└── estimator/controller/mixer/PWM control pipeline system
-
-pwm.rs
-└── PWM driver contract and protocol/rate helpers
-
-pwm/output_sync.rs
-└── PWM enable state, output composition, command writing
-
-state_machine.rs
-└── armed/failsafe/error/calibrating state resource
-
-log.rs
-└── fixed-capacity global log queue and logging macros
-
-log/drain.rs
-└── log-to-CommResponse drain system
-
-world.rs
-└── resource owner and scheduler
+1. crates/veloxity_core/src/world.rs
+2. crates/veloxity_core/src/world/control.rs
+3. crates/veloxity_core/src/sensors/ingestion.rs
+4. crates/veloxity_core/src/rc/command_state.rs
+5. crates/veloxity_core/src/control.rs
+6. crates/veloxity_core/src/pwm/output_sync.rs
 ```
 
-## Code Reading Path For `sim/`
-
-Use this order when stepping through the simulator integration:
+### Simulator
 
 ```text
 1. sim/ros2/veloxity_sil_board_shim/src/veloxity_sil_board.cpp
-   ├── node construction
-   ├── ROS subscriptions
-   ├── sil_board/run service
-   ├── build_sensor_snapshot
-   └── publish_pwm
-
 2. sim/ros2/veloxity_sil_board_shim/include/veloxity_sil_board_shim/veloxity_ffi.h
-   └── C ABI declarations
-
 3. sim/firmware/src/ffi.rs
-   ├── FFI structs
-   ├── FfiBoard::update_sensor_bus
-   ├── FfiBoard serial_rx_read / serial_tx_write
-   ├── FfiPwmDriver
-   ├── veloxity_sim_create
-   ├── veloxity_sim_set_sensors
-   ├── veloxity_sim_run_once
-   └── veloxity_sim_get_pwm
-
-4. crates/veloxity_core/src/world.rs
-   ├── World resources
-   ├── run_once
-   └── stage methods
-
-5. crates/veloxity_core/src/comm.rs
-   ├── process_incoming_messages
-   ├── act_on_messages
-   └── send_comm_responses
-
-6. crates/veloxity_core/src/sensors/
-   ├── ingestion.rs
-   ├── processors.rs
-   └── health.rs
-
-7. crates/veloxity_core/src/rc/
-   └── command_state.rs
-
-8. crates/veloxity_core/src/control.rs
-
-9. crates/veloxity_core/src/pwm/
-   └── output_sync.rs
-
-10. comms/veloxity_mavlink/src/
-    ├── parser.rs
-    ├── conversions.rs
-    └── link.rs
+4. crates/veloxity_core/src/world/control.rs
+5. crates/veloxity_core/src/world/service.rs
+6. crates/veloxity_core/src/control.rs
+7. comms/veloxity_mavlink/src/
 ```
 
-That path follows one simulator tick from ROS sensor input to firmware update to PWM output.
-
-## Code Reading Path For `boards/pico2w`
-
-Use this order when stepping through the active RP2350/Pico 2 W firmware:
-
-```text
-1. boards/pico2w/src/bin/veloxity.rs
-   ├── default feature-driven hardware setup
-   ├── core 0 realtime scheduler loop
-   ├── core 1 Embassy executor tasks
-   ├── ISM330DHCX interrupt executor startup
-   └── telemetry-rate selection
-
-2. boards/pico2w/src/board.rs
-   ├── BoardIo implementation
-   ├── newest-packet sensor queue drains
-   ├── serial mailbox bridge
-   ├── serial flush budget
-   └── deferred board actions
-
-3. boards/pico2w/src/ism330dhcx.rs
-   └── IMU packet queue and data-ready bookkeeping
-
-4. boards/pico2w/src/rc_receiver.rs
-   └── CRSF packet parsing and RC queueing
-
-5. boards/pico2w/src/gps.rs
-   └── GPS PIO UART and magnetometer-facing path
-
-6. crates/veloxity_core/src/world.rs
-   ├── realtime_scheduler_step
-   ├── run_imu_control_tick
-   └── run_service_step_with_deferral
-```
-
-Use [RP2350 / Pico 2 W](boards/rp2350-pico2w.md) for exact feature choices, scope-pin meanings,
-timing results, and flash commands.
-
-## Code Reading Path For STM32 Boards
-
-Use this order when renewing Nucleo-H753ZI or Pixracer Pro validation:
+### STM32 Boards
 
 ```text
 1. boards/nucleo/src/bin/veloxity.rs
-   └── Nucleo World construction and firmware loop
-
 2. boards/nucleo/src/board.rs
-   └── Nucleo BoardIo and board setup
-
 3. boards/pixracerpro/src/bin/veloxity.rs
-   └── Pixracer Pro World construction and firmware loop
-
 4. boards/pixracerpro/src/board.rs
-   └── Pixracer Pro BoardIo and board setup
-
-5. platforms/stm_32/src/peripherals/
-   ├── IMU drivers
-   ├── barometer and magnetometer drivers
-   ├── serial/RC drivers
-   └── Embassy signal tasks
-
-6. crates/veloxity_core/src/world.rs
-   └── generic run_once scheduler and stage methods
+5. boards/pixracerpro/src/pwm.rs
+6. platforms/stm_32/src/peripherals/
+7. crates/veloxity_core/src/world/
 ```
 
-Use [STM32 boards](boards/stm32.md) for the retained-target status and the validation order.
+See [STM32 boards](boards/stm32.md) for board status, builds, flashing, and hardware validation.
