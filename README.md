@@ -1,6 +1,7 @@
 <img src="docs/assets/veloxity-logo.svg" alt="Veloxity logo" width="180" height="180">
 
 ![Veloxity Flight GIF](docs/assets/veloxity.gif)
+Stress test of the Veloxity Firmware
 
 # Veloxity
 
