@@ -2,7 +2,7 @@
 
 ![Veloxity in flight (image)](docs/assets/veloxity.webp)
 
-[![Documentation](https://img.shields.io/badge/Documentation-Website-blue)](https://magicc-safety.github.io/veloxity/)
+[![Documentation](https://img.shields.io/badge/Documentation-Website-blue)](https://magicc-safety.github.io/Veloxity/)
 
 # Veloxity
 
