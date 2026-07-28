@@ -1,7 +1,5 @@
 # Rust Crate API Reference
 
-These links open the Rustdoc generated for the host and STM32 crates by `./build_docs_local.sh`; they return 404 in the high-level-only `.venv/bin/zensical serve` preview.
-
 ---
 
 <div class="grid cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-top: 1.5rem;">
