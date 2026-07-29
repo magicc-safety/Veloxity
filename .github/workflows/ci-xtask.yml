@@ -19,6 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        command: [check-board, build-board]
+        board: [pixracerpro, nucleo, pico2w]
         include:
           # You will need to replace the `target` strings below with the exact 
           # targets your boards use (e.g., thumbv7em-none-eabihf).
@@ -28,7 +30,6 @@ jobs:
             target: thumbv7em-none-eabi
           - board: pico2w
             target: thumbv8m.main-none-eabihf
-        command: [check-board, build-board]
     steps:
       - uses: actions/checkout@v7
       - run: |
