@@ -1,0 +1,26 @@
+name: cargo xtask CI
+
+on:
+  pull_request:
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        command: [check-host, test-host, build-sim-lib, clean-generated]
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo xtask ${{ matrix.command }}
+
+  board:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [nucleo, pixracerpro] # pico2w # the pico2w is experimental, do not test against it for now
+        command: [check-board, build-board]
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo xtask ${{ matrix.command }} ${{ matrix.board }}
