@@ -38,11 +38,9 @@ use embassy_stm32::peripherals::USB_OTG_FS;
 use embassy_stm32::usb::{Driver, Instance};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pipe::Pipe;
-use embassy_time::{Duration, with_timeout};
 use embassy_usb::Builder;
-use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
+use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use veloxity_core::comm::interface::EmbeddedComInterface;
-use veloxity_core::errors::SensorError;
 
 pub const VCP_TX_BUFF_SIZE: usize = 2048;
 pub const VCP_RX_BUFF_SIZE: usize = 2048;
@@ -95,46 +93,56 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
         );
 
         // Create classes on the builder.
-        let mut class = CdcAcmClass::new(&mut builder, &mut state, 64);
+        let class = CdcAcmClass::new(&mut builder, &mut state, 64);
         // Build the builder.
         let mut usb = builder.build();
         // Run the USB device.
         let usb_fut = usb.run();
 
+        // Keep both USB endpoints armed independently. A single alternating RX/TX
+        // loop can block RX indefinitely while it waits for outbound pipe data.
+        let (mut sender, mut receiver) = class.split();
         let vcp_fut = async {
-            loop {
-                class.wait_connection().await;
-                let result = Self::tx_rx(&mut byte_processor, &mut class).await;
-                if let Err(_) = result {}
-            }
+            join(
+                Self::run_rx(&mut byte_processor, &mut receiver),
+                Self::run_tx(&mut sender),
+            )
+            .await;
         };
 
         join(usb_fut, vcp_fut).await;
     }
 
-    async fn tx_rx<'d, T: Instance + 'd>(
+    async fn run_rx<'d, T: Instance + 'd>(
         byte_processor: &mut ECI,
-        class: &mut CdcAcmClass<'d, Driver<'d, T>>,
-    ) -> Result<(), SensorError> {
-        let mut tx_buf = [0u8; VCP_TX_BUFF_SIZE];
+        receiver: &mut Receiver<'d, Driver<'d, T>>,
+    ) {
         let mut rx_buf = [0u8; VCP_RX_BUFF_SIZE];
 
         loop {
-            match with_timeout(Duration::from_micros(100), class.read_packet(&mut rx_buf)).await {
-                Ok(Ok(n)) if n > 0 => {
-                    byte_processor.process_bytes(&rx_buf[..n], n).await;
+            receiver.wait_connection().await;
+            loop {
+                match receiver.read_packet(&mut rx_buf).await {
+                    Ok(n) if n > 0 => {
+                        byte_processor.process_bytes(&rx_buf[..n], n).await;
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
                 }
-                Ok(Err(_)) => {
-                    return Err(SensorError::GenericSensorError("VCP RX failed")); // Assume disconnect, return to outer loop
-                }
-                _ => {}
             }
+        }
+    }
 
-            let n = VCP_TX.read(&mut tx_buf).await;
-            if n > 0 {
+    async fn run_tx<'d, T: Instance + 'd>(sender: &mut Sender<'d, Driver<'d, T>>) {
+        let mut tx_buf = [0u8; VCP_TX_BUFF_SIZE];
+
+        loop {
+            sender.wait_connection().await;
+            'connected: loop {
+                let n = VCP_TX.read(&mut tx_buf).await;
                 for packet in tx_buf[..n].chunks(USB_CDC_FS_PACKET_SIZE) {
-                    if let Err(_) = class.write_packet(packet).await {
-                        return Err(SensorError::GenericSensorError("VCP TX failed")); // Assume disconnect, return to outer loop
+                    if sender.write_packet(packet).await.is_err() {
+                        break 'connected;
                     }
                 }
             }
