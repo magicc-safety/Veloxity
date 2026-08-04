@@ -603,8 +603,9 @@ impl UbloxSensor {
                                         unsafe { pvt.packet }.sec,
                                     ),
                                     unix_nanos: unsafe { pvt.packet }.nano,
-                                    lat: (unsafe { pvt.packet }.lat as f64) * 1.7453292519943296e-9,
-                                    lon: (unsafe { pvt.packet }.lon as f64) * 1.7453292519943296e-9,
+                                    // UBX NAV-PVT and ROSFLIGHT_GNSS both use decimal degrees.
+                                    lat: (unsafe { pvt.packet }.lat as f64) * 1.0e-7,
+                                    lon: (unsafe { pvt.packet }.lon as f64) * 1.0e-7,
                                     height: (unsafe { pvt.packet }.height as f32) / 1000.0,
                                     vel_n: (unsafe { pvt.packet }.vel_n as f32) / 1000.0,
                                     vel_e: (unsafe { pvt.packet }.vel_e as f32) / 1000.0,
