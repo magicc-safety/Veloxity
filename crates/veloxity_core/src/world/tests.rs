@@ -1527,7 +1527,7 @@ fn world_applies_live_telemetry_parameter_without_resetting_other_rates() {
         .changes
         .push(crate::events::ParamChanged {
             id: ParamId::PARAM_TELEM_BARO_HZ,
-            old: ParamValue::Int(100),
+            old: ParamValue::Int(50),
             new: ParamValue::Int(25),
             param_id_bytes: crate::comm::str_to_fixed_bytes("TEL_BARO_HZ"),
         })

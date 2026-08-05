@@ -377,7 +377,7 @@ mod tests {
 
         assert_eq!(
             params.get_by_id(ParamId::PARAM_TELEM_BARO_HZ),
-            ParamValue::Int(100)
+            ParamValue::Int(50)
         );
         assert!(events.changes.is_empty());
         assert!(comm_events.responses.is_empty());
