@@ -186,6 +186,74 @@ struct TelemetryRateState {
     rc_us: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TelemetryFreshnessState {
+    imu: Option<u64>,
+    attitude: Option<u64>,
+    output_raw: Option<u64>,
+    diff_pressure: Option<u64>,
+    baro: Option<u64>,
+    mag: Option<u64>,
+    range: Option<u64>,
+    battery: Option<u64>,
+    gnss: Option<u64>,
+    rc: Option<u64>,
+}
+
+impl TelemetryFreshnessState {
+    fn last_sent(&self, stream: NamedTelemetryStream) -> Option<u64> {
+        match stream {
+            NamedTelemetryStream::Imu => self.imu,
+            NamedTelemetryStream::Attitude => self.attitude,
+            NamedTelemetryStream::OutputRaw => self.output_raw,
+            NamedTelemetryStream::DiffPressure => self.diff_pressure,
+            NamedTelemetryStream::Baro => self.baro,
+            NamedTelemetryStream::Mag => self.mag,
+            NamedTelemetryStream::Range => self.range,
+            NamedTelemetryStream::Battery => self.battery,
+            NamedTelemetryStream::Gnss => self.gnss,
+            NamedTelemetryStream::Rc => self.rc,
+            NamedTelemetryStream::Heartbeat | NamedTelemetryStream::Status => None,
+        }
+    }
+
+    fn mark_sent(&mut self, stream: NamedTelemetryStream, timestamp: u64) {
+        let slot = match stream {
+            NamedTelemetryStream::Imu => &mut self.imu,
+            NamedTelemetryStream::Attitude => &mut self.attitude,
+            NamedTelemetryStream::OutputRaw => &mut self.output_raw,
+            NamedTelemetryStream::DiffPressure => &mut self.diff_pressure,
+            NamedTelemetryStream::Baro => &mut self.baro,
+            NamedTelemetryStream::Mag => &mut self.mag,
+            NamedTelemetryStream::Range => &mut self.range,
+            NamedTelemetryStream::Battery => &mut self.battery,
+            NamedTelemetryStream::Gnss => &mut self.gnss,
+            NamedTelemetryStream::Rc => &mut self.rc,
+            NamedTelemetryStream::Heartbeat | NamedTelemetryStream::Status => return,
+        };
+        *slot = Some(timestamp);
+    }
+}
+
+fn telemetry_stream_sample_timestamp<R: FlightFloat>(
+    stream: NamedTelemetryStream,
+    sensors: &ProcessedSensors<R>,
+) -> Option<u64> {
+    match stream {
+        NamedTelemetryStream::Imu
+        | NamedTelemetryStream::Attitude
+        | NamedTelemetryStream::OutputRaw => sensors.imu.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::Rc => sensors.rc.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::Gnss => sensors.gnss.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::DiffPressure => sensors.pitot.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::Baro => sensors.baro.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::Mag => sensors.mag.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::Range => sensors.range.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::Battery => sensors.battery.map(|packet| packet.header.timestamp),
+        NamedTelemetryStream::Heartbeat | NamedTelemetryStream::Status => None,
+    }
+}
+
 fn stream_due(now_us: u64, last_us: &mut u64, rate_hz: u16) -> bool {
     if rate_hz == TELEMETRY_RATE_DISABLED {
         return false;
@@ -303,7 +371,7 @@ where
     output_raw_imu_count: u64,
     telemetry_rates: TelemetryRates,
     telemetry_rate_state: TelemetryRateState,
-    last_realtime_imu_telemetry_timestamp: Option<u64>,
+    telemetry_freshness: TelemetryFreshnessState,
 
     pub sysid: u8,
     comm_link: T,
@@ -323,7 +391,7 @@ where
             output_raw_imu_count: 0,
             telemetry_rates: TelemetryRates::upstream(),
             telemetry_rate_state: TelemetryRateState::default(),
-            last_realtime_imu_telemetry_timestamp: None,
+            telemetry_freshness: TelemetryFreshnessState::default(),
 
             sysid: 1,
             comm_link,
@@ -347,10 +415,10 @@ where
     }
 
     pub fn set_telemetry_rates(&mut self, telemetry_rates: TelemetryRates) {
+        // Preserve freshness: rate changes must not make a retained packet fresh again.
         self.telemetry_rates = telemetry_rates;
         self.telemetry_rate_state = TelemetryRateState::default();
         self.output_raw_imu_count = 0;
-        self.last_realtime_imu_telemetry_timestamp = None;
     }
 
     pub fn configure_telemetry_from_params(&mut self, params: &Params) {
@@ -377,7 +445,6 @@ where
             NamedTelemetryStream::Imu => {
                 self.telemetry_rates.imu_hz = rate_hz;
                 self.telemetry_rate_state.imu_us = now_us;
-                self.last_realtime_imu_telemetry_timestamp = None;
             }
             NamedTelemetryStream::Rc => {
                 self.telemetry_rates.rc_hz = rate_hz;
@@ -554,6 +621,16 @@ where
     where
         R: FlightFloat,
     {
+        if !matches!(
+            stream,
+            NamedTelemetryStream::Heartbeat | NamedTelemetryStream::Status
+        ) {
+            let timestamp = telemetry_stream_sample_timestamp(stream, processed_sensors)?;
+            if self.telemetry_freshness.last_sent(stream) == Some(timestamp) {
+                return None;
+            }
+        }
+
         match stream {
             NamedTelemetryStream::Heartbeat => fixed_rate_due_deadline_us(
                 now_us,
@@ -565,18 +642,11 @@ where
                 self.last_status_send_us,
                 self.telemetry_rates.status_hz,
             ),
-            NamedTelemetryStream::Imu => {
-                let imu_packet = processed_sensors.imu?;
-                if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
-                    None
-                } else {
-                    stream_due_deadline_us(
-                        now_us,
-                        self.telemetry_rate_state.imu_us,
-                        self.telemetry_rates.imu_hz,
-                    )
-                }
-            }
+            NamedTelemetryStream::Imu => stream_due_deadline_us(
+                now_us,
+                self.telemetry_rate_state.imu_us,
+                self.telemetry_rates.imu_hz,
+            ),
             NamedTelemetryStream::Rc => processed_sensors.rc.as_ref().and_then(|_| {
                 stream_due_deadline_us(
                     now_us,
@@ -718,11 +788,17 @@ where
         }
 
         if let Some(imu_packet) = processed_sensors.imu {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.imu_us,
-                self.telemetry_rates.imu_hz,
-            ) {
+            let imu_timestamp = imu_packet.header.timestamp;
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::Imu)
+                != Some(imu_timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.imu_us,
+                    self.telemetry_rates.imu_hz,
+                )
+            {
                 self.send_rosflight_small_imu(
                     board,
                     SmallImuMsg {
@@ -736,6 +812,8 @@ where
                         zgyro: imu_packet.gyro[2].to_f32_lossy(),
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Imu, imu_timestamp);
             }
 
             let q = estimator_state.q();
@@ -744,11 +822,16 @@ where
             let pitchspeed = 2.0 * (q[0] * qd[2] - q[1] * qd[3] - q[2] * qd[0] + q[3] * qd[1]);
             let yawspeed = 2.0 * (q[0] * qd[3] - q[1] * qd[2] - q[2] * qd[1] + q[3] * qd[0]);
 
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.attitude_us,
-                self.telemetry_rates.attitude_hz,
-            ) {
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::Attitude)
+                != Some(imu_timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.attitude_us,
+                    self.telemetry_rates.attitude_hz,
+                )
+            {
                 self.send_rosflight_attitude_quaternion(
                     board,
                     AttitudeQuaternionMsg {
@@ -762,30 +845,53 @@ where
                         yawspeed,
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Attitude, imu_timestamp);
             }
 
-            let output_raw_due = if self.telemetry_rates.output_raw_hz == 0 {
-                self.telemetry_rates.output_raw_imu_divisor != 0
-                    && self.output_raw_imu_count % self.telemetry_rates.output_raw_imu_divisor == 0
-            } else {
-                stream_due(
-                    now_us,
-                    &mut self.telemetry_rate_state.output_raw_us,
-                    self.telemetry_rates.output_raw_hz,
-                )
-            };
-            if output_raw_due {
-                self.send_output_raw(board, actuator_commands);
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::OutputRaw)
+                != Some(imu_timestamp)
+            {
+                if self.telemetry_rates.output_raw_hz == 0 {
+                    let output_raw_due = self.telemetry_rates.output_raw_imu_divisor != 0
+                        && self.output_raw_imu_count % self.telemetry_rates.output_raw_imu_divisor
+                            == 0;
+                    if output_raw_due {
+                        self.send_output_raw(board, actuator_commands);
+                    }
+                    // Divisor-based output intentionally consumes every fresh IMU sample,
+                    // including samples for which no OUTPUT_RAW message is emitted.
+                    self.telemetry_freshness
+                        .mark_sent(NamedTelemetryStream::OutputRaw, imu_timestamp);
+                    self.output_raw_imu_count = self.output_raw_imu_count.wrapping_add(1);
+                } else {
+                    let output_raw_due = stream_due(
+                        now_us,
+                        &mut self.telemetry_rate_state.output_raw_us,
+                        self.telemetry_rates.output_raw_hz,
+                    );
+                    if output_raw_due {
+                        self.send_output_raw(board, actuator_commands);
+                        self.telemetry_freshness
+                            .mark_sent(NamedTelemetryStream::OutputRaw, imu_timestamp);
+                    }
+                }
             }
-            self.output_raw_imu_count = self.output_raw_imu_count.wrapping_add(1);
         }
 
         if let Some(packet) = processed_sensors.pitot {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.diff_pressure_us,
-                self.telemetry_rates.diff_pressure_hz,
-            ) {
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::DiffPressure)
+                != Some(packet.header.timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.diff_pressure_us,
+                    self.telemetry_rates.diff_pressure_hz,
+                )
+            {
                 self.send_rosflight_diff_pressure(
                     board,
                     DiffPressureMsg {
@@ -794,15 +900,22 @@ where
                         temperature: packet.temperature,
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::DiffPressure, packet.header.timestamp);
             }
         }
 
         if let Some(packet) = processed_sensors.baro {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.baro_us,
-                self.telemetry_rates.baro_hz,
-            ) {
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::Baro)
+                != Some(packet.header.timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.baro_us,
+                    self.telemetry_rates.baro_hz,
+                )
+            {
                 self.send_rosflight_small_baro(
                     board,
                     SmallBaroMsg {
@@ -811,15 +924,22 @@ where
                         temperature: packet.temperature,
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Baro, packet.header.timestamp);
             }
         }
 
         if let Some(packet) = processed_sensors.mag {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.mag_us,
-                self.telemetry_rates.mag_hz,
-            ) {
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::Mag)
+                != Some(packet.header.timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.mag_us,
+                    self.telemetry_rates.mag_hz,
+                )
+            {
                 self.send_rosflight_small_mag(
                     board,
                     SmallMagMsg {
@@ -828,15 +948,22 @@ where
                         zmag: packet.flux[2],
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Mag, packet.header.timestamp);
             }
         }
 
         if let Some(packet) = processed_sensors.range {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.range_us,
-                self.telemetry_rates.range_hz,
-            ) {
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::Range)
+                != Some(packet.header.timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.range_us,
+                    self.telemetry_rates.range_hz,
+                )
+            {
                 self.send_rosflight_small_range(
                     board,
                     SmallRangeMsg {
@@ -849,15 +976,22 @@ where
                         min_range: packet.min_range,
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Range, packet.header.timestamp);
             }
         }
 
         if let Some(packet) = processed_sensors.battery {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.battery_us,
-                self.telemetry_rates.battery_hz,
-            ) {
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::Battery)
+                != Some(packet.header.timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.battery_us,
+                    self.telemetry_rates.battery_hz,
+                )
+            {
                 self.send_rosflight_battery_status(
                     board,
                     BatteryStatusMsg {
@@ -865,15 +999,22 @@ where
                         battery_current: packet.current,
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Battery, packet.header.timestamp);
             }
         }
 
         if let Some(packet) = processed_sensors.gnss {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.gnss_us,
-                self.telemetry_rates.gnss_hz,
-            ) {
+            if self
+                .telemetry_freshness
+                .last_sent(NamedTelemetryStream::Gnss)
+                != Some(packet.header.timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.gnss_us,
+                    self.telemetry_rates.gnss_hz,
+                )
+            {
                 self.send_rosflight_gnss(
                     board,
                     RosflightGnssMsg {
@@ -893,15 +1034,20 @@ where
                         v_acc: packet.v_acc,
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Gnss, packet.header.timestamp);
             }
         }
 
         if let Some(packet) = processed_sensors.rc {
-            if stream_due(
-                now_us,
-                &mut self.telemetry_rate_state.rc_us,
-                self.telemetry_rates.rc_hz,
-            ) {
+            if self.telemetry_freshness.last_sent(NamedTelemetryStream::Rc)
+                != Some(packet.header.timestamp)
+                && stream_due(
+                    now_us,
+                    &mut self.telemetry_rate_state.rc_us,
+                    self.telemetry_rates.rc_hz,
+                )
+            {
                 let mut channels = [0u16; RC_PACKET_CHANNELS];
                 let count = (packet.n_chan as usize).min(8).min(RC_PACKET_CHANNELS);
                 for (dst, src) in channels.iter_mut().zip(packet.chan.iter()).take(count) {
@@ -917,6 +1063,8 @@ where
                         rssi: 0,
                     },
                 );
+                self.telemetry_freshness
+                    .mark_sent(NamedTelemetryStream::Rc, packet.header.timestamp);
             }
         }
     }
@@ -1265,6 +1413,11 @@ where
                 None => false,
             },
         };
+        if sent {
+            if let Some(timestamp) = telemetry_stream_sample_timestamp(stream, ctx.sensors) {
+                self.telemetry_freshness.mark_sent(stream, timestamp);
+            }
+        }
         sent
     }
 
@@ -1280,7 +1433,11 @@ where
         let Some(imu_packet) = processed_sensors.imu else {
             return false;
         };
-        if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
+        if self
+            .telemetry_freshness
+            .last_sent(NamedTelemetryStream::Imu)
+            == Some(imu_packet.header.timestamp)
+        {
             return false;
         }
         if !stream_due(
@@ -1303,7 +1460,6 @@ where
                 zgyro: imu_packet.gyro[2].to_f32_lossy(),
             },
         );
-        self.last_realtime_imu_telemetry_timestamp = Some(imu_packet.header.timestamp);
         true
     }
 
@@ -1319,7 +1475,11 @@ where
         let Some(imu_packet) = processed_sensors.imu else {
             return false;
         };
-        if self.last_realtime_imu_telemetry_timestamp == Some(imu_packet.header.timestamp) {
+        if self
+            .telemetry_freshness
+            .last_sent(NamedTelemetryStream::Imu)
+            == Some(imu_packet.header.timestamp)
+        {
             return false;
         }
         self.send_rosflight_small_imu(
@@ -1336,7 +1496,6 @@ where
             },
         );
         self.telemetry_rate_state.imu_us = now_us;
-        self.last_realtime_imu_telemetry_timestamp = Some(imu_packet.header.timestamp);
         true
     }
 
@@ -2699,6 +2858,261 @@ mod tests {
     }
 
     #[test]
+    fn bulk_telemetry_sends_each_sensor_timestamp_once_and_keeps_periodic_streams_running() {
+        let mut board = TestBoard {
+            current_time_us: 1_100_000,
+            ..Default::default()
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let actuator_commands = [0.0; 4];
+        let mut sensors = ProcessedSensors::<f64>::default();
+        sensors.imu = Some(crate::packets::ImuPacket::default());
+        sensors.pitot = Some(crate::packets::PitotPacket::default());
+        sensors.baro = Some(crate::packets::BaroPacket::default());
+        sensors.mag = Some(crate::packets::MagPacket::default());
+        sensors.range = Some(crate::packets::RangePacket::default());
+        sensors.battery = Some(crate::packets::BatteryPacket::default());
+        sensors.gnss = Some(crate::packets::GNSSPacket::default());
+        sensors.rc = Some(crate::packets::RcPacket::default());
+
+        let send = |manager: &mut CommManager<TestBoard, RecordingCommLink>,
+                    board: &mut TestBoard| {
+            let now_us = board.clock_micros();
+            manager.send_named_telemetry_streams(telemetry_ctx(
+                board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                &sensors,
+                &actuator_commands,
+            ));
+        };
+
+        // Timestamp zero is a valid first sample and must be sent once.
+        send(&mut manager, &mut board);
+        send(&mut manager, &mut board);
+
+        assert_eq!(manager.comm_link().imu_count, 1);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
+        assert_eq!(manager.comm_link().diff_pressure_count, 1);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().mag_count, 1);
+        assert_eq!(manager.comm_link().range_count, 1);
+        assert_eq!(manager.comm_link().battery_count, 1);
+        assert_eq!(manager.comm_link().gnss_count, 1);
+        assert_eq!(manager.comm_link().rc_channels_count, 1);
+        assert_eq!(manager.comm_link().heartbeat_count, 1);
+        assert_eq!(manager.comm_link().status_count, 1);
+
+        // Heartbeat and status are timer-driven and continue without fresh sensors.
+        board.current_time_us += 1_000_000;
+        send(&mut manager, &mut board);
+        assert_eq!(manager.comm_link().heartbeat_count, 2);
+        assert_eq!(manager.comm_link().status_count, 2);
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().mag_count, 1);
+    }
+
+    #[test]
+    fn budgeted_telemetry_filters_stale_streams_without_starving_fresh_ones() {
+        let mut board = TestBoard {
+            current_time_us: 1_000,
+            ..Default::default()
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        let mut rates = TelemetryRates::upstream();
+        rates.heartbeat_hz = TELEMETRY_RATE_DISABLED;
+        rates.status_hz = TELEMETRY_RATE_DISABLED;
+        manager.set_telemetry_rates(rates);
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let actuator_commands = [0.0; 4];
+        let mut sensors = ProcessedSensors::<f64>::default();
+        sensors.baro = Some(crate::packets::BaroPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 10,
+                status: 0,
+            },
+            ..Default::default()
+        });
+        sensors.mag = Some(crate::packets::MagPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 20,
+                status: 0,
+            },
+            ..Default::default()
+        });
+
+        let send_one = |manager: &mut CommManager<TestBoard, RecordingCommLink>,
+                        board: &mut TestBoard,
+                        sensors: &ProcessedSensors<f64>| {
+            let now_us = board.clock_micros();
+            manager.send_one_named_telemetry_stream(telemetry_ctx(
+                board,
+                now_us,
+                &state_manager,
+                &command_manager,
+                &params,
+                &estimator_state,
+                sensors,
+                &actuator_commands,
+            ))
+        };
+
+        assert!(send_one(&mut manager, &mut board, &sensors));
+        assert!(send_one(&mut manager, &mut board, &sensors));
+        assert!(!send_one(&mut manager, &mut board, &sensors));
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().mag_count, 1);
+
+        sensors.mag.as_mut().unwrap().header.timestamp = 21;
+        assert!(send_one(&mut manager, &mut board, &sensors));
+        assert!(!send_one(&mut manager, &mut board, &sensors));
+        assert_eq!(manager.comm_link().baro_count, 1);
+        assert_eq!(manager.comm_link().mag_count, 2);
+    }
+
+    #[test]
+    fn rate_limited_sensor_retains_latest_unsent_sample_until_due() {
+        let mut board = TestBoard {
+            current_time_us: 1_000,
+            ..Default::default()
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        let mut rates = TelemetryRates::upstream();
+        rates.heartbeat_hz = TELEMETRY_RATE_DISABLED;
+        rates.status_hz = TELEMETRY_RATE_DISABLED;
+        rates.baro_hz = 10;
+        manager.set_telemetry_rates(rates);
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let actuator_commands = [0.0; 4];
+        let mut sensors = ProcessedSensors::<f64>::default();
+        sensors.baro = Some(crate::packets::BaroPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            altitude: 1.0,
+            ..Default::default()
+        });
+
+        let send_baro = |manager: &mut CommManager<TestBoard, RecordingCommLink>,
+                         board: &mut TestBoard,
+                         sensors: &ProcessedSensors<f64>| {
+            let now_us = board.clock_micros();
+            manager.send_named_telemetry_stream_if_due(
+                NamedTelemetryStream::Baro,
+                telemetry_ctx(
+                    board,
+                    now_us,
+                    &state_manager,
+                    &command_manager,
+                    &params,
+                    &estimator_state,
+                    sensors,
+                    &actuator_commands,
+                ),
+            )
+        };
+
+        assert!(send_baro(&mut manager, &mut board, &sensors));
+        sensors.baro.as_mut().unwrap().header.timestamp = 2;
+        sensors.baro.as_mut().unwrap().altitude = 2.0;
+        board.current_time_us = 50_000;
+        assert!(!send_baro(&mut manager, &mut board, &sensors));
+        sensors.baro.as_mut().unwrap().header.timestamp = 3;
+        sensors.baro.as_mut().unwrap().altitude = 3.0;
+        board.current_time_us = 101_000;
+        assert!(send_baro(&mut manager, &mut board, &sensors));
+        assert_eq!(manager.comm_link().baro_count, 2);
+        assert_eq!(manager.comm_link().last_baro.unwrap().altitude, 3.0);
+
+        manager.set_telemetry_rates(rates);
+        board.current_time_us = 201_000;
+        assert!(!send_baro(&mut manager, &mut board, &sensors));
+        assert_eq!(manager.comm_link().baro_count, 2);
+    }
+
+    #[test]
+    fn imu_attitude_and_output_track_the_same_source_timestamp_independently() {
+        let mut board = TestBoard {
+            current_time_us: 1_000,
+            ..Default::default()
+        };
+        let mut manager = CommManager::new(RecordingCommLink::new(), 0);
+        let mut rates = TelemetryRates::upstream();
+        rates.heartbeat_hz = TELEMETRY_RATE_DISABLED;
+        rates.status_hz = TELEMETRY_RATE_DISABLED;
+        rates.output_raw_hz = 1_000;
+        rates.output_raw_imu_divisor = 0;
+        manager.set_telemetry_rates(rates);
+        let state_manager = StateManager::new();
+        let command_manager = CommandManager::new();
+        let params = Params::new();
+        let estimator_state = crate::estimator::quad::AttitudeState::<f64>::default();
+        let actuator_commands = [0.0; 4];
+        let mut sensors = ProcessedSensors::<f64>::default();
+        sensors.imu = Some(crate::packets::ImuPacket::default());
+
+        for stream in [
+            NamedTelemetryStream::Imu,
+            NamedTelemetryStream::Attitude,
+            NamedTelemetryStream::OutputRaw,
+        ] {
+            let now_us = board.clock_micros();
+            assert!(manager.send_named_telemetry_stream_if_due(
+                stream,
+                telemetry_ctx(
+                    &mut board,
+                    now_us,
+                    &state_manager,
+                    &command_manager,
+                    &params,
+                    &estimator_state,
+                    &sensors,
+                    &actuator_commands,
+                ),
+            ));
+        }
+        assert_eq!(manager.comm_link().imu_count, 1);
+        assert_eq!(manager.comm_link().attitude_count, 1);
+        assert_eq!(manager.comm_link().output_raw_count, 1);
+
+        for stream in [
+            NamedTelemetryStream::Imu,
+            NamedTelemetryStream::Attitude,
+            NamedTelemetryStream::OutputRaw,
+        ] {
+            let now_us = board.clock_micros();
+            assert!(!manager.send_named_telemetry_stream_if_due(
+                stream,
+                telemetry_ctx(
+                    &mut board,
+                    now_us,
+                    &state_manager,
+                    &command_manager,
+                    &params,
+                    &estimator_state,
+                    &sensors,
+                    &actuator_commands,
+                ),
+            ));
+        }
+    }
+
+    #[test]
     fn named_telemetry_matches_upstream_output_raw_every_eighth_imu_sample() {
         let mut board = TestBoard {
             current_time_us: 1_100_000,
@@ -2715,6 +3129,7 @@ mod tests {
         let actuator_commands = [0.0; 4];
 
         for i in 0..8 {
+            processed_sensors.imu.as_mut().unwrap().header.timestamp = i;
             board.current_time_us = 1_100_000 + i;
             let now_us = board.clock_micros();
             manager.send_named_telemetry_streams(telemetry_ctx(
@@ -2734,6 +3149,7 @@ mod tests {
         assert_eq!(manager.comm_link().output_raw_count, 1);
 
         board.current_time_us += 1;
+        processed_sensors.imu.as_mut().unwrap().header.timestamp = 8;
         let now_us = board.clock_micros();
         manager.send_named_telemetry_streams(telemetry_ctx(
             &mut board,
@@ -2769,8 +3185,11 @@ mod tests {
 
         let send_at = |manager: &mut CommManager<TestBoard, RecordingCommLink>,
                        board: &mut TestBoard,
+                       processed_sensors: &mut ProcessedSensors<f64>,
                        now_us: u64| {
             board.current_time_us = now_us;
+            processed_sensors.imu.as_mut().unwrap().header.timestamp = now_us;
+            processed_sensors.baro.as_mut().unwrap().header.timestamp = now_us;
             manager.send_named_telemetry_streams(telemetry_ctx(
                 board,
                 now_us,
@@ -2783,37 +3202,37 @@ mod tests {
             ));
         };
 
-        send_at(&mut manager, &mut board, 1_000);
+        send_at(&mut manager, &mut board, &mut processed_sensors, 1_000);
         assert_eq!(manager.comm_link().imu_count, 1);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
         assert_eq!(manager.comm_link().output_raw_count, 1);
 
-        send_at(&mut manager, &mut board, 2_000);
+        send_at(&mut manager, &mut board, &mut processed_sensors, 2_000);
         assert_eq!(manager.comm_link().imu_count, 1);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
         assert_eq!(manager.comm_link().output_raw_count, 1);
 
-        send_at(&mut manager, &mut board, 3_500);
+        send_at(&mut manager, &mut board, &mut processed_sensors, 3_500);
         assert_eq!(manager.comm_link().imu_count, 2);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
         assert_eq!(manager.comm_link().output_raw_count, 1);
 
-        send_at(&mut manager, &mut board, 11_000);
+        send_at(&mut manager, &mut board, &mut processed_sensors, 11_000);
         assert_eq!(manager.comm_link().imu_count, 3);
         assert_eq!(manager.comm_link().attitude_count, 1);
         assert_eq!(manager.comm_link().baro_count, 1);
         assert_eq!(manager.comm_link().output_raw_count, 1);
 
-        send_at(&mut manager, &mut board, 21_000);
+        send_at(&mut manager, &mut board, &mut processed_sensors, 21_000);
         assert_eq!(manager.comm_link().imu_count, 4);
         assert_eq!(manager.comm_link().attitude_count, 2);
         assert_eq!(manager.comm_link().baro_count, 1);
         assert_eq!(manager.comm_link().output_raw_count, 2);
 
-        send_at(&mut manager, &mut board, 41_000);
+        send_at(&mut manager, &mut board, &mut processed_sensors, 41_000);
         assert_eq!(manager.comm_link().imu_count, 5);
         assert_eq!(manager.comm_link().attitude_count, 3);
         assert_eq!(manager.comm_link().baro_count, 2);
