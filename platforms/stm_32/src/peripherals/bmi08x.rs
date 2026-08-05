@@ -518,6 +518,8 @@ pub struct Bmi08xSensor {
 
     pub range_a: AccelRange,
     pub range_g: GyroRange,
+    /// Fixed sensor-to-board axis signs, applied before configurable IMU rotation and calibration.
+    pub board_axis_signs: [f64; 3],
 }
 
 impl Bmi08xSensor {
@@ -779,6 +781,11 @@ impl Bmi08xSensor {
             gyro[0] = scale_factor_g * (((rx[2] as i16) << 8 | (rx[1] as i16)) as f64);
             gyro[1] = scale_factor_g * (((rx[4] as i16) << 8 | (rx[3] as i16)) as f64);
             gyro[2] = scale_factor_g * (((rx[6] as i16) << 8 | (rx[5] as i16)) as f64);
+
+            for axis in 0..3 {
+                accel[axis] *= self.board_axis_signs[axis];
+                gyro[axis] *= self.board_axis_signs[axis];
+            }
 
             let status = 0u16; // dummy value
             let header = packets::RosflightPacketHeader {

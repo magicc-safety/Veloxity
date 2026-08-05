@@ -489,6 +489,7 @@ impl Board {
             ),
             range_g: peripherals::bmi08x::GyroRange::Max500dps,
             sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
+            board_axis_signs: [1.0, 1.0, 1.0],
         };
 
         // P2 Priority Task for Gyros

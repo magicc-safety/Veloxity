@@ -608,6 +608,8 @@ impl Board {
             ),
             range_g: peripherals::bmi08x::GyroRange::Max500dps,
             sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
+            // Match ROSflight C's BMI088_ROTATION: diag(-1, -1, +1).
+            board_axis_signs: [-1.0, -1.0, 1.0],
         };
 
         // Detect GPIO input.
