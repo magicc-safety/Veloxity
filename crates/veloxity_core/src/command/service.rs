@@ -301,7 +301,7 @@ where
             continue;
         }
 
-        let version_str = "Veloxity 1.0";
+        let version_str = "v2.0.0-veloxity-1.0";
         let mut version_bytes = [0u8; 50];
         let len = version_str.len().min(version_bytes.len());
         version_bytes[..len].copy_from_slice(version_str.as_bytes());
@@ -1005,7 +1005,7 @@ mod tests {
 
         match comm_events.responses.pop().unwrap() {
             CommResponse::Version(version) => {
-                assert_eq!(&version.version[..12], b"Veloxity 1.0");
+                assert_eq!(&version.version[..19], b"v2.0.0-veloxity-1.0");
             }
             _ => panic!("expected version response"),
         }
