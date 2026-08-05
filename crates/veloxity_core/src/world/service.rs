@@ -310,6 +310,7 @@ where
     }
 
     pub(super) fn process_sensor_bus_after_update(&mut self) {
+        let now_ms = self.board.clock_millis();
         let calibration_flags_before = self.cal_flags;
         let baro_bias_before = self.params.get_by_id(ParamId::PARAM_BARO_BIAS);
         let ground_level_before = self.params.get_by_id(ParamId::PARAM_GROUND_LEVEL);
@@ -319,6 +320,7 @@ where
             processors: &mut self.sensor_processors,
             flags: &mut self.cal_flags,
             params: &mut self.params,
+            now_ms,
         });
         if calibration_flags_before.contains(CalibrationFlags::BARO)
             && !self.cal_flags.contains(CalibrationFlags::BARO)
@@ -357,6 +359,7 @@ where
     }
 
     pub(super) fn process_imu_sensor_after_update(&mut self) {
+        let now_ms = self.board.clock_millis();
         let calibration_flags_before = self.cal_flags;
         process_imu_sensor(SensorIngestionCtx {
             raw: &mut self.raw_sensors,
@@ -364,6 +367,7 @@ where
             processors: &mut self.sensor_processors,
             flags: &mut self.cal_flags,
             params: &mut self.params,
+            now_ms,
         });
         if calibration_flags_before.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO)
