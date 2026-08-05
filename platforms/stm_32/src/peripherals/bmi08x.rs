@@ -495,6 +495,7 @@ pub enum SampleRate {
 
 const SPI_READ: u8 = 0x80;
 const SPI_WRITE: u8 = 0x00;
+const CELSIUS_TO_KELVIN: f32 = 273.15;
 
 pub struct Bmi08xSensor {
     pub dev_a: SpiDevice<
@@ -753,7 +754,7 @@ impl Bmi08xSensor {
             }
 
             temperature *= 0.125;
-            temperature += 23.0; // + 273.15; // K
+            temperature += 23.0 + CELSIUS_TO_KELVIN;
 
             let mut accel = [0f64; 3];
             accel[0] = scale_factor_a * (((rx[15] as i16) << 8 | (rx[14] as i16)) as f64);
