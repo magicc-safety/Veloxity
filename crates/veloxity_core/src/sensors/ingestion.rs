@@ -232,7 +232,9 @@ where
         processed.baro = None;
     }
     if raw.pitot.is_some() {
-        processed.pitot = processors.pitot().process(&mut raw.pitot, flags, params);
+        processed.pitot = processors
+            .pitot()
+            .process_at(&mut raw.pitot, flags, params, now_ms);
     } else {
         processed.pitot = None;
     }

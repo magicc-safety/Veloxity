@@ -565,6 +565,7 @@ impl PitotProcessor {
         packet: &mut Option<Result<PitotPacket, errors::SensorError>>,
         flags: &mut CalibrationFlags,
         params: &mut Params,
+        now_ms: u32,
     ) -> Option<PitotPacket> {
         if let Some(Ok(mut packet)) = packet.take() {
             if flags.contains(CalibrationFlags::PITOT) && !self.calibration_state.request_active {
@@ -572,7 +573,7 @@ impl PitotProcessor {
                 self.calibration_state.request_active = true;
             }
             if !self.calibration_state.calibrated {
-                self.calibrate(&packet, flags, params);
+                self.calibrate(&packet, flags, params, now_ms);
             }
 
             packet.differential_pressure -= param_float(params, ParamId::PARAM_DIFF_PRESS_BIAS);
@@ -591,8 +592,8 @@ impl PitotProcessor {
         packet: &PitotPacket,
         flags: &mut CalibrationFlags,
         params: &mut Params,
+        now_ms: u32,
     ) {
-        let now_ms = (packet.header.timestamp / 1000) as u32;
         if now_ms <= self.calibration_state.last_iter_ms + 20 {
             return;
         }
@@ -636,7 +637,21 @@ impl SensorPacketProcessor<PitotPacket> for PitotProcessor {
         flags: &mut CalibrationFlags,
         params: &mut Params,
     ) -> Option<PitotPacket> {
-        self.process_packet(packet, flags, params)
+        let packet_time_ms = match packet.as_ref() {
+            Some(Ok(packet)) => (packet.header.timestamp / 1000) as u32,
+            _ => 0,
+        };
+        self.process_packet(packet, flags, params, packet_time_ms)
+    }
+
+    fn process_at(
+        &mut self,
+        packet: &mut Option<Result<PitotPacket, errors::SensorError>>,
+        flags: &mut CalibrationFlags,
+        params: &mut Params,
+        now_ms: u32,
+    ) -> Option<PitotPacket> {
+        self.process_packet(packet, flags, params, now_ms)
     }
 }
 
@@ -1099,7 +1114,7 @@ mod tests {
     }
 
     #[test]
-    fn pitot_processor_calibrates_then_corrects_pressure_and_airspeed() {
+    fn pitot_processor_calibrates_from_board_clock_then_corrects_pressure_and_airspeed() {
         let mut params = Params::new();
         let mut processor = PitotProcessor::new();
         let mut flags = CalibrationFlags::PITOT;
@@ -1107,13 +1122,16 @@ mod tests {
         for sample in 0..=SENSOR_CAL_DELAY_CYCLES + SENSOR_CAL_CYCLES {
             let mut raw = Some(Ok(PitotPacket {
                 header: RosflightPacketHeader {
-                    timestamp: (sample as u64 + 1) * 21_000,
+                    // Deliberately fixed: calibration cadence must come from
+                    // the board clock, not the sensor packet timestamp.
+                    timestamp: 1,
                     status: 0,
                 },
                 differential_pressure: 4.0,
                 ..Default::default()
             }));
-            let _ = processor.process(&mut raw, &mut flags, &mut params);
+            let now_ms = (sample as u32 + 1) * 21;
+            let _ = processor.process_at(&mut raw, &mut flags, &mut params, now_ms);
         }
 
         assert!(!flags.contains(CalibrationFlags::PITOT));
