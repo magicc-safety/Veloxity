@@ -45,20 +45,16 @@ use embassy_sync::signal::Signal;
 
 use veloxity_core::errors;
 use veloxity_core::packets::{self, PARAM_PACKET_SIZE, ParamPacket};
-use veloxity_core::params::{PARAM_DEFINITIONS, PARAMS_COUNT, ParamDefinition, ParamValue, Params};
+use veloxity_core::params::Params;
+use veloxity_core::params::storage::{
+    ROSFLIGHT_C_PARAM_STORAGE_SIZE, decode_rosflight_c_params, encode_rosflight_c_params,
+};
 
 const BLOCK_SIZE: usize = 512;
 const CHECKSUM_SIZE: usize = size_of::<u32>();
 const MAX_BLOCKS: usize = 16;
 const MAX_PAYLOAD_SIZE: usize = MAX_BLOCKS * BLOCK_SIZE - CHECKSUM_SIZE;
-const PARAM_STORAGE_MAGIC: [u8; 4] = *b"VLXP";
-const PARAM_STORAGE_VERSION: u16 = 1;
-const PARAM_STORAGE_HEADER_SIZE: usize = 12;
-const PARAM_STORAGE_VALUE_SIZE: usize = size_of::<u32>();
-
-const _: () = assert!(
-    PARAM_STORAGE_HEADER_SIZE + PARAMS_COUNT * PARAM_STORAGE_VALUE_SIZE <= PARAM_PACKET_SIZE
-);
+const _: () = assert!(ROSFLIGHT_C_PARAM_STORAGE_SIZE == PARAM_PACKET_SIZE);
 
 pub static SD_WRITE_SIGNAL: Signal<
     CriticalSectionRawMutex,
@@ -92,94 +88,19 @@ impl From<Error> for SdCardError {
     }
 }
 
-fn param_type_tag(value: ParamValue) -> u8 {
-    match value {
-        ParamValue::Float(_) => 1,
-        ParamValue::Int(_) => 2,
-        ParamValue::Uint(_) => 3,
-        ParamValue::Bool(_) => 4,
-    }
-}
-
-fn hash_byte(hash: u32, byte: u8) -> u32 {
-    (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
-}
-
-fn param_schema_hash() -> u32 {
-    let mut hash = 0x811C_9DC5;
-
-    for definition in PARAM_DEFINITIONS.iter() {
-        for byte in definition.name.as_bytes() {
-            hash = hash_byte(hash, *byte);
-        }
-        hash = hash_byte(hash, 0);
-        hash = hash_byte(hash, param_type_tag(definition.default));
-    }
-
-    hash
-}
-
-fn encode_param_value(value: ParamValue, definition: &ParamDefinition) -> Option<[u8; 4]> {
-    match (value, definition.default) {
-        (ParamValue::Float(value), ParamValue::Float(_)) => Some(value.to_bits().to_le_bytes()),
-        (ParamValue::Int(value), ParamValue::Int(_)) => Some(value.to_le_bytes()),
-        (ParamValue::Uint(value), ParamValue::Uint(_)) => Some(value.to_le_bytes()),
-        (ParamValue::Bool(value), ParamValue::Bool(_)) => Some(u32::from(value).to_le_bytes()),
-        _ => None,
-    }
-}
-
-fn decode_param_value(bytes: [u8; 4], definition: &ParamDefinition) -> Option<ParamValue> {
-    Some(match definition.default {
-        ParamValue::Float(_) => ParamValue::Float(f32::from_bits(u32::from_le_bytes(bytes))),
-        ParamValue::Int(_) => ParamValue::Int(i32::from_le_bytes(bytes)),
-        ParamValue::Uint(_) => ParamValue::Uint(u32::from_le_bytes(bytes)),
-        ParamValue::Bool(_) => match u32::from_le_bytes(bytes) {
-            0 => ParamValue::Bool(false),
-            1 => ParamValue::Bool(true),
-            _ => return None,
-        },
-    })
-}
-
-/// Encodes the current parameter table into the versioned STM32 storage image.
+/// Encodes the C-compatible subset into ROSflight 2.0's persisted `params_t`.
 pub fn encode_params(params: &Params) -> Option<ParamPacket> {
     let mut packet = ParamPacket::default();
-    packet.values[..4].copy_from_slice(&PARAM_STORAGE_MAGIC);
-    packet.values[4..6].copy_from_slice(&PARAM_STORAGE_VERSION.to_le_bytes());
-    packet.values[6..8].copy_from_slice(&(PARAMS_COUNT as u16).to_le_bytes());
-    packet.values[8..12].copy_from_slice(&param_schema_hash().to_le_bytes());
-
-    for (index, definition) in PARAM_DEFINITIONS.iter().enumerate() {
-        let offset = PARAM_STORAGE_HEADER_SIZE + index * PARAM_STORAGE_VALUE_SIZE;
-        let encoded = encode_param_value(params.get_by_id(definition.id), definition)?;
-        packet.values[offset..offset + PARAM_STORAGE_VALUE_SIZE].copy_from_slice(&encoded);
-    }
-
-    Some(packet)
+    encode_rosflight_c_params(params, &mut packet.values).then_some(packet)
 }
 
-/// Decodes an SD response after validating its format and parameter schema.
+/// Decodes ROSflight 2.0's persisted `params_t` into the Rust parameter table.
+/// Rust-only parameters retain their defaults because they are absent on disk.
 pub fn decode_params(packet: &ParamPacket) -> Option<Params> {
-    if packet.header.status != 1
-        || packet.values[..4] != PARAM_STORAGE_MAGIC
-        || u16::from_le_bytes(packet.values[4..6].try_into().ok()?) != PARAM_STORAGE_VERSION
-        || usize::from(u16::from_le_bytes(packet.values[6..8].try_into().ok()?)) != PARAMS_COUNT
-        || u32::from_le_bytes(packet.values[8..12].try_into().ok()?) != param_schema_hash()
-    {
+    if packet.header.status != 1 {
         return None;
     }
-
-    let mut params = Params::default();
-    for (index, definition) in PARAM_DEFINITIONS.iter().enumerate() {
-        let offset = PARAM_STORAGE_HEADER_SIZE + index * PARAM_STORAGE_VALUE_SIZE;
-        let bytes = packet.values[offset..offset + PARAM_STORAGE_VALUE_SIZE]
-            .try_into()
-            .ok()?;
-        params.set_by_id(definition.id, decode_param_value(bytes, definition)?);
-    }
-
-    Some(params)
+    decode_rosflight_c_params(&packet.values)
 }
 
 pub struct SdCard {
@@ -376,7 +297,6 @@ pub async fn task(mut sd_card: SdCard) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use veloxity_core::params::ParamId;
 
     #[test]
     fn crc_matches_stm32_default_crc_for_standard_vector() {
@@ -389,34 +309,5 @@ mod tests {
         assert_eq!(image_blocks(508), 1);
         assert_eq!(image_blocks(509), 2);
         assert_eq!(image_blocks(2048), 5);
-    }
-
-    #[test]
-    fn parameter_storage_format_round_trips_values() {
-        let mut params = Params::default();
-        params.set_by_id(ParamId::PARAM_SYSTEM_ID, ParamValue::Int(42));
-        params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(-0.25));
-
-        let mut packet = encode_params(&params).expect("parameter table must fit");
-        packet.header.status = 1;
-        let decoded = decode_params(&packet).expect("valid packet must decode");
-
-        assert_eq!(
-            decoded.get_by_id(ParamId::PARAM_SYSTEM_ID),
-            ParamValue::Int(42)
-        );
-        assert_eq!(
-            decoded.get_by_id(ParamId::PARAM_GYRO_X_BIAS),
-            ParamValue::Float(-0.25)
-        );
-    }
-
-    #[test]
-    fn parameter_storage_format_rejects_schema_mismatch() {
-        let mut packet = encode_params(&Params::default()).expect("parameter table must fit");
-        packet.header.status = 1;
-        packet.values[8] ^= 1;
-
-        assert!(decode_params(&packet).is_none());
     }
 }

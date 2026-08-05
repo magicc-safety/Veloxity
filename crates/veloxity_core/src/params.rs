@@ -2,6 +2,7 @@
 
 pub mod reactions;
 pub mod service;
+pub mod storage;
 
 //=================================================================================
 // 1. Core Data Types

@@ -1,4 +1,6 @@
-pub static PARAM_PACKET_SIZE: usize = 2048;
+// ROSflight 2.0's persisted ARM `params_t` occupies 7,004 bytes. The SD driver
+// appends its four-byte CRC after this payload.
+pub static PARAM_PACKET_SIZE: usize = crate::params::storage::ROSFLIGHT_C_PARAM_STORAGE_SIZE;
 
 use crate::math::FlightFloat;
 
