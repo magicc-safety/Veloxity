@@ -84,6 +84,7 @@ const DPS310_READ_T_CMD: u8 = 0x03;
 
 const K1: f64 = 524288.0;
 const K8: f64 = 7864320.0; //
+const CELSIUS_TO_KELVIN: f64 = 273.15;
 
 impl Dps310Sensor {
     async fn read_register(&mut self, reg_addr: u8) -> Result<u8, errors::SensorError> {
@@ -283,7 +284,9 @@ impl Dps310Sensor {
     ) -> (f64, f64) {
         *raw_t_previous += (raw_t - *raw_t_previous) / 16; // filter temperature a bit (1/127 is cutoff frequenc of 100Hz * (1/16)/(2*pi) around 1 sec to 1/e)
         let raw_t_f64 = f64::from(*raw_t_previous) / K1;
-        let temperature = cal[0] * 0.5 + cal[1] * raw_t_f64; // K
+        // The DPS310 compensation formula returns degrees Celsius. ROSflight's
+        // BaroPacket and SMALL_BARO telemetry carry absolute temperature.
+        let temperature = cal[0] * 0.5 + cal[1] * raw_t_f64 + CELSIUS_TO_KELVIN;
 
         (raw_t_f64, temperature)
     }

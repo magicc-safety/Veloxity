@@ -239,7 +239,8 @@ impl Ist8308Sensor {
                 let flux = [
                     f32::from((((data[2] as u16) << 8) | (data[1] as u16)) as i16) * 1.5e-7,
                     f32::from((((data[4] as u16) << 8) | (data[3] as u16)) as i16) * 1.5e-7,
-                    f32::from((((data[6] as u16) << 8) | (data[5] as u16)) as i16) * 1.5e-7,
+                    // Match the ROSflight C Pixracer driver coordinate convention.
+                    -f32::from((((data[6] as u16) << 8) | (data[5] as u16)) as i16) * 1.5e-7,
                 ]; // Units of Tesla
 
                 let timestamp_us = timestamp.as_micros();
