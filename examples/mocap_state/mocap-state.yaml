@@ -1,0 +1,81 @@
+/mocap_state_publisher:
+  ros__parameters:
+    # Confirmed real-room VRPN rigid-body pose.
+    mocap_topic: /vrpn_mocap/vd/pose
+    mocap_message_type: geometry_msgs/msg/PoseStamped
+    # 50 samples provide about 208 ms of queue capacity at 240 Hz. Staleness
+    # limits below still stop output; this prevents normal bursts dropping data.
+    mocap_qos_depth: 50
+
+    output_topic: /estimated_state
+    firmware_attitude_topic: /attitude
+    firmware_imu_topic: /imu/data
+    frame_id: NED
+
+    # Mocap-corrected alpha-beta filter. Firmware acceleration supplies the
+    # prediction term, addressing the 180-220 ms velocity lag measured in the
+    # fourth hover while mocap remains the absolute position authority.
+    alpha: 0.25
+    beta: 0.01
+    minimum_valid_samples: 30
+
+    # Observed VRPN delivery is bursty with intervals up to about 20 ms.
+    max_mocap_age_ms: 30.0
+    max_filter_gap_ms: 150.0
+    # The VRPN source batches extra samples tens of microseconds apart. Only
+    # meaningful source-time intervals update the alpha-beta velocity filter.
+    minimum_filter_dt_ms: 1.0
+    max_position_innovation_m: 0.25
+    max_orientation_jump_rad: 0.35
+    # Reject a tracking system that advances timestamps while repeating the
+    # exact same pose, as occurred during the third flight's tracking loss.
+    identical_pose_position_epsilon_m: 1.0e-7
+    identical_pose_orientation_epsilon_rad: 1.0e-7
+    max_identical_pose_age_ms: 100.0
+    allow_zero_timestamp: false
+
+    # Firmware never corrects mocap pose. Its fresh angular rates fill State.p/q/r.
+    use_firmware_body_rates: true
+    max_firmware_attitude_age_ms: 20.0
+
+    # The IMU specific force is rotated into the mocap-aligned NED frame and
+    # gravity is restored before it predicts velocity. Mocap residuals bound
+    # accelerometer drift. Bias remains explicit so it can be calibrated later.
+    use_firmware_imu: true
+    max_firmware_imu_age_ms: 20.0
+    gravity_mps2: 9.80665
+    accelerometer_bias_body_mps2: [0.0, 0.0, 0.0]
+    imu_accel_lpf_alpha: 0.20
+
+    # Bridge only a tightly bounded network delivery gap. Prediction uses the
+    # fresh onboard IMU and relative firmware attitude; a frozen mocap pose can
+    # never enter this path. Longer gaps stop /estimated_state.
+    bridge_with_firmware_attitude: true
+    max_bridge_age_ms: 120.0
+    bridge_publish_hz: 100.0
+
+    # This room reports (x, y, z) = (north, up, east). Rotate it to
+    # ROSflight NED as (north, east, down) = (x, z, -y).
+    # q_NED_ROOM is a -90 degree rotation about room X.
+    room_to_ned_quaternion_xyzw: [-0.7071067811865476, 0.0, 0.0, 0.7071067811865476]
+
+    # The supplied pose is approximately identity for a level, north-facing
+    # vehicle. Its marker basis follows the room basis, so q_MARKER_BODY is
+    # the inverse basis change (+90 degrees about X). The two fixed rotations
+    # cancel at that reference attitude, yielding an identity body-to-NED pose.
+    # The small roll/pitch correction below was measured from the steady part
+    # of fourth_autonomy.csv. The measured 10.4-degree yaw difference was not
+    # applied because firmware yaw zero is not a reliable marker-mount datum.
+    # Recalibrate this if the rigid-body definition or marker mount changes.
+    body_to_marker_quaternion_xyzw: [0.7025834092190519, -0.015775154137001222, -0.015969684211449092, 0.7112472613573109]
+    body_origin_in_marker_m: [0.0, 0.0, 0.0]
+
+    # Use the room origin so room-bounded mission coordinates remain fixed and
+    # do not depend on where the node happens to receive its first sample.
+    origin_at_first_sample: false
+    ned_origin_in_room_m: [0.0, 0.0, 0.0]
+
+    # Only needed when missions use LLA conversion.
+    initial_lat: 0.0
+    initial_lon: 0.0
+    initial_alt: 0.0

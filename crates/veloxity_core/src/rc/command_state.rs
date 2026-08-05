@@ -52,7 +52,7 @@ mod tests {
         events::ParamEventQueues,
         packets::{RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
         params::{ParamId, ParamValue},
-        state_machine::ErrorFlag,
+        state_machine::{ErrorFlag, Event},
     };
 
     #[test]
@@ -92,7 +92,39 @@ mod tests {
         let fresh_rc = Some(RcPacket {
             header: RosflightPacketHeader {
                 timestamp: 1,
-                status: 1,
+                status: 0,
+            },
+            n_chan: 1,
+            chan: [0.5; RC_PACKET_CHANNELS],
+            lol: true,
+        });
+        let mut rc = Rc::new();
+        let mut command = CommandManager::new();
+        let mut state = StateManager::new();
+
+        run_rc_command_state(RcCommandStateCtx {
+            now_ms: 1,
+            fresh_rc,
+            rc: &mut rc,
+            command: &mut command,
+            state: &mut state,
+            params: &mut params,
+            param_events: None,
+        });
+
+        assert!(state.get_errors().contains(ErrorFlag::RC_LOST));
+        assert!(!rc.new_command());
+    }
+
+    #[test]
+    fn rc_command_state_does_not_treat_protocol_status_bits_as_link_loss() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(1));
+        let fresh_rc = Some(RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                // SBUS uses bits 0 and 1 for digital channels 17 and 18.
+                status: 0x03,
             },
             n_chan: 1,
             chan: [0.5; RC_PACKET_CHANNELS],
@@ -112,8 +144,50 @@ mod tests {
             param_events: None,
         });
 
+        assert!(!state.get_errors().contains(ErrorFlag::RC_LOST));
+    }
+
+    #[test]
+    fn lost_frame_with_arm_channel_low_enters_failsafe_without_disarming() {
+        let mut params = Params::new();
+        params.set_by_id(ParamId::PARAM_RC_NUM_CHANNELS, ParamValue::Int(8));
+        params.set_by_id(ParamId::PARAM_RC_ARM_CHANNEL, ParamValue::Int(4));
+
+        let mut channels = [0.5; RC_PACKET_CHANNELS];
+        channels[2] = 0.0;
+        channels[4] = 0.0;
+        let fresh_rc = Some(RcPacket {
+            header: RosflightPacketHeader {
+                timestamp: 1,
+                status: 0,
+            },
+            n_chan: 8,
+            chan: channels,
+            lol: true,
+        });
+
+        let mut rc = Rc::new();
+        rc.init(&params);
+        let mut command = CommandManager::new();
+        let mut state = StateManager::new();
+        state.update(Event::INITIALIZED, &params);
+        state.update_arming_safety(true, true);
+        state.update(Event::REQUEST_ARM, &params);
+        assert!(state.is_armed());
+
+        run_rc_command_state(RcCommandStateCtx {
+            now_ms: 1,
+            fresh_rc,
+            rc: &mut rc,
+            command: &mut command,
+            state: &mut state,
+            params: &mut params,
+            param_events: None,
+        });
+
+        assert!(state.is_armed());
+        assert!(state.is_in_failsafe());
         assert!(state.get_errors().contains(ErrorFlag::RC_LOST));
-        assert!(!rc.new_command());
     }
 
     #[test]

@@ -341,8 +341,10 @@ fn nav_pvt_packet(payload: &[u8], now_us: u64) -> GNSSPacket {
             u8_at(payload, 10),
         ),
         unix_nanos: i32_at(payload, 16),
-        lat: i32_at(payload, 28) as f64 * 1.745_329_251_994_329_6e-9,
-        lon: i32_at(payload, 24) as f64 * 1.745_329_251_994_329_6e-9,
+        // UBX NAV-PVT latitude/longitude are signed degrees scaled by 1e-7.
+        // ROSFLIGHT_GNSS also specifies decimal degrees, so do not convert to radians here.
+        lat: i32_at(payload, 28) as f64 * 1.0e-7,
+        lon: i32_at(payload, 24) as f64 * 1.0e-7,
         height: i32_at(payload, 32) as f32 / 1000.0,
         vel_n: i32_at(payload, 48) as f32 / 1000.0,
         vel_e: i32_at(payload, 52) as f32 / 1000.0,

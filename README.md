@@ -1,5 +1,9 @@
 <img src="docs/assets/veloxity-logo.svg" alt="Veloxity logo" width="180" height="180">
 
+![Veloxity in flight (image)](docs/assets/veloxity.webp)
+
+[![Documentation](https://img.shields.io/badge/Documentation-Website-blue)](https://magicc-safety.github.io/Veloxity/)
+
 # Veloxity
 
 Veloxity is a Rust firmware implementation for the ROSflight ecosystem. The
@@ -99,7 +103,7 @@ cargo xtask clean-generated
 
 ## License
 
-This project is licensed under the [NO IDEA](LICENSE).
+See the [LICENSE](LICENSE.md) file for license rights and limitations (BSD 3).
 
 ## Upstream Context
 

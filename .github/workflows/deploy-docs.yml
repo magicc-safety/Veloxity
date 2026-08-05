@@ -1,9 +1,9 @@
 name: Deploy Documentation
 
 on:
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -44,14 +44,14 @@ jobs:
       - name: Install dependencies with uv
         run: |
           uv venv .venv
-          uv pip install --python .venv zensical
+          uv pip install --python .venv zensical markdown-gfm-admonition
 
-      - name: Step 1: Cleaning previous build artifacts
+      - name: Step 1 - Cleaning previous build artifacts
         run: |
           rm -rf site/
           cargo clean --doc
 
-      - name: Step 2: Compiling Rust API documentation
+      - name: Step 2 - Compiling Rust API documentation
         run: |
           echo "-> Building host-native API docs (sim)..."
           cargo doc --no-deps -p sim
@@ -59,11 +59,11 @@ jobs:
           echo "-> Building ARM-specific embedded API docs..."
           cargo doc --no-deps -p veloxity_core -p stm_32 -p nucleo -p pixracerpro --target thumbv7em-none-eabihf
 
-      - name: Step 3: Building high-level Zensical site
+      - name: Step 3 - Building high-level Zensical site
         run: |
           .venv/bin/zensical build
 
-      - name: Step 4: Merging API documentation into site/api/
+      - name: Step 4 - Merging API documentation into site/api/
         run: |
           mkdir -p site/api
           if [ -d "target/doc" ]; then

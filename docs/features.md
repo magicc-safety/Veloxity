@@ -1,67 +1,69 @@
 # Feature Flags
 
 Cargo features are compile-time switches. They can include optional dependencies, select alternate
-hardware paths, or enable diagnostics that should not be present in normal flight builds.
+hardware behavior, or add diagnostics to a firmware image.
 
-Use features explicitly with `--features 'feature-a feature-b'`.
+Features belong to individual Cargo packages. Specify the package when enabling a feature:
+
+```bash
+cargo build -p pixracerpro --target thumbv7em-none-eabihf --bin veloxity --release \
+  --features 'usb-vcp-serial'
+```
 
 ## Core Features
 
-These live in `crates/veloxity_core/Cargo.toml`.
+These features are declared in `crates/veloxity_core/Cargo.toml`. Board packages may expose
+matching features that enable the corresponding core feature.
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `scope-timing-pins` | Enables compile-time paths that let board crates drive logic-analyzer timing pins around selected core stages. | No; measurement-only. |
-| `pre-control-scope` | Marks the pre-control portion of a control tick when paired with board scope pins. | No. |
-| `rc-command-scope` | Marks RC command/state handling timing when paired with board scope pins. | No. |
-| `control-scope-estimator` | Selects estimator timing as the scoped control substage. | No. |
-| `control-scope-controller` | Selects controller timing as the scoped control substage. | No. |
-| `control-scope-mixer` | Selects mixer timing as the scoped control substage. | No. |
-| `control-scope-pwm` | Selects PWM output composition/write timing as the scoped control substage. | No. |
+| `scope-timing-pins` | Disables the core's default full-control test-pin pulse so a board can use its test pins for targeted timing instrumentation. The board must provide the physical pin behavior. | No; measurement-only. |
+| `pre-control-scope` | Pulses test pin 3 while the IMU sample is read, processed, and checked before the control pipeline runs. | No; measurement-only. |
+| `rc-command-scope` | Reserved for RC command/state timing. The current core code does not emit a timing pulse for this feature. | No; currently unimplemented. |
+| `control-scope-estimator` | Pulses test pin 3 while the estimator runs. | No; measurement-only. |
+| `control-scope-controller` | Pulses test pin 3 while the controller runs. | No; measurement-only. |
+| `control-scope-mixer` | Pulses test pin 3 while the mixer runs. | No; measurement-only. |
+| `control-scope-pwm` | Pulses test pin 3 while PWM outputs are configured, composed, and written. | No; measurement-only. |
 
-## Pico 2 W Features
-
-These live in `boards/pico2w/Cargo.toml`.
-
-The default Pico feature set is `ism330dhcx-driver` plus `imu-producer-interrupt-executor`.
-
-| Feature | Purpose | Normal flight build? |
-| --- | --- | --- |
-| `ism330dhcx-driver` | Enables the real ISM330DHCX SPI/data-ready IMU path and keeps the optional `ism330dhcx-rs` dependency in the build graph. The current hot IMU setup/read path uses board-local register transactions, not the driver's high-level API. | Yes; default. |
-| `imu-producer-interrupt-executor` | Runs the IMU producer on the core 1 Embassy interrupt executor. | Yes; default. |
-| `imu-odr-1666hz` | Selects the lower `1.666 kHz` ISM330DHCX output data rate. ODR means output data rate: the hardware sample production rate. | No; comparison/bring-up. |
-| `ism330dhcx-1k666` | Backward-compatible alias for `imu-odr-1666hz`. | No; prefer `imu-odr-1666hz`. |
-| `imu-400hz` | Legacy GY-91 MPU sample throttle used by old probe paths. It is not the current ISM330DHCX flight IMU path. | No. |
-| `scope-timing-pins` | Enables board GPIO timing pulses for Saleae/logic-analyzer captures and `veloxity_core/scope-timing-pins`. | No; measurement-only. |
-| `imu-producer-scope` | Uses the scope pin for IMU producer timing. | No. |
-| `pre-control-scope` | Uses the scope pin for pre-control timing and enables the matching core feature. | No. |
-| `rc-command-scope` | Uses the scope pin for RC command service timing and enables the matching core feature. | No. |
-| `control-scope-estimator` | Selects estimator timing inside the control pipeline. | No. |
-| `control-scope-controller` | Selects controller timing inside the control pipeline. | No. |
-| `control-scope-mixer` | Selects mixer timing inside the control pipeline. | No. |
-| `control-scope-pwm` | Selects PWM output timing inside the control pipeline. | No. |
-| `core1-disable-heartbeat` | Disables core 1 heartbeat work to isolate timing effects. | No; isolation diagnostic. |
-| `core1-disable-mavlink-tx` | Disables core 1 MAVLink transmit work to isolate timing effects. | No. |
-| `core1-disable-mavlink-rx` | Disables core 1 MAVLink receive work to isolate timing effects. | No. |
-| `core1-disable-crsf` | Disables core 1 CRSF receiver work to isolate timing effects. | No. |
-| `core1-disable-gps` | Disables core 1 GPS work to isolate timing effects. | No. |
+Enable at most one `control-scope-*` feature at a time. The core rejects builds that select more
+than one because all four features use the same test pin. These features are useful only on a board
+that implements the corresponding test-pin output.
 
 ## Pixracer Pro Features
 
-These live in `boards/pixracerpro/Cargo.toml`.
+These features are declared in `boards/pixracerpro/Cargo.toml`.
 
 | Feature | Purpose | Normal flight build? |
 | --- | --- | --- |
-| `usb-vcp-serial` | Uses USB VCP instead of the companion-computer UART for MAVLink. | No; opt in with `cargo xtask flash-board pixracerpro --vcp`. |
-| `scope-timing-pins` | Enables Pixracer Pro logic-analyzer timing outputs. | No; measurement-only. |
-| `sensor-poll-diagnostics` | Enables board sensor-poll diagnostics. | No; diagnostic-only. |
+| `usb-vcp-serial` | Uses USB virtual COM port (VCP) instead of the companion-computer UART for MAVLink receive and transmit. | No; optional transport. |
+| `scope-timing-pins` | Leaves the Pixracer Pro test pins available for targeted timing instrumentation and disables their built-in indicator pulses. It does not assign a permanent meaning to those pins by itself. | No; measurement-only. |
+| `sensor-poll-diagnostics` | Records sensor-poll success and error counters that can be inspected with a debugger, and periodically logs SBUS receiver diagnostics. | No; diagnostic-only. |
 
-`cargo xtask flash-board pixracerpro` builds in release mode with no Cargo features, so UART is the
-default transport. The other Pixracer Pro features require their corresponding explicit flash
-flags.
+The standard Pixracer Pro flash command builds an optimized firmware image with UART MAVLink and no
+optional features:
+
+```bash
+cargo xtask flash-board pixracerpro
+```
+
+Use the matching flash options to enable individual features:
+
+```bash
+cargo xtask flash-board pixracerpro --vcp
+cargo xtask flash-board pixracerpro --scope-timing-pins
+cargo xtask flash-board pixracerpro --sensor-poll-diagnostics
+```
+
+The options can be combined when more than one behavior is needed:
+
+```bash
+cargo xtask flash-board pixracerpro --vcp --sensor-poll-diagnostics
+```
+
+The Nucleo-H753ZI package does not currently declare any board-specific Cargo features.
 
 ## Why Features Matter
 
-Feature flags change the compiled firmware image. When reporting a timing result, always record the
-exact feature set, target, optimization mode, and board. A build with timing pins is not identical
-to a clean flight build.
+Feature flags change the compiled firmware image. When reporting a test or timing result, record the
+exact feature set, target, optimization mode, and board. A diagnostic build is not identical to the
+standard flight build.
