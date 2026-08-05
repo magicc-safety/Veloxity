@@ -55,6 +55,14 @@ pub static MAG_SIGNAL: Signal<
     Result<packets::MagPacket, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::MagPacket, errors::SensorError>>::new();
 
+// ROSflight C compatibility scales for the Pixracer Pro IST8308 driver. The
+// sensor datasheet specifies a nominal 1.5e-7 T/LSB in the configured ±500 µT
+// range, but C uses these axis-specific values. Preserve them here so raw and
+// calibrated measurements, including persisted calibration parameters, remain
+// interchangeable between the C and Rust firmware.
+const ROSFLIGHT_C_SCALE_X_T_PER_LSB: f32 = 1.515e-7;
+const ROSFLIGHT_C_SCALE_YZ_T_PER_LSB: f32 = 1.1515e-7;
+
 pub struct Ist8308Sensor {
     pub dev: I2cDevice<
         'static,
@@ -237,10 +245,13 @@ impl Ist8308Sensor {
             let data_ready = (status & STAT1_VAL_DRDY) != 0;
             if data_ready {
                 let flux = [
-                    f32::from((((data[2] as u16) << 8) | (data[1] as u16)) as i16) * 1.5e-7,
-                    f32::from((((data[4] as u16) << 8) | (data[3] as u16)) as i16) * 1.5e-7,
+                    f32::from((((data[2] as u16) << 8) | (data[1] as u16)) as i16)
+                        * ROSFLIGHT_C_SCALE_X_T_PER_LSB,
+                    f32::from((((data[4] as u16) << 8) | (data[3] as u16)) as i16)
+                        * ROSFLIGHT_C_SCALE_YZ_T_PER_LSB,
                     // Match the ROSflight C Pixracer driver coordinate convention.
-                    -f32::from((((data[6] as u16) << 8) | (data[5] as u16)) as i16) * 1.5e-7,
+                    -f32::from((((data[6] as u16) << 8) | (data[5] as u16)) as i16)
+                        * ROSFLIGHT_C_SCALE_YZ_T_PER_LSB,
                 ]; // Units of Tesla
 
                 let timestamp_us = timestamp.as_micros();
