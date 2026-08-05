@@ -452,10 +452,10 @@ impl BaroProcessor {
                 self.calibration_state.calibrated = true;
                 flags.remove(CalibrationFlags::BARO);
                 self.calibration_state.request_active = false;
-                log_info!("Baro calibration complete");
+                log_info!("Baro ground pressure cal successful!");
             } else {
                 flags.insert(CalibrationFlags::BARO_FAILED);
-                log_error!("Baro calibration failed");
+                log_error!("Too much movement for barometer ground pressure cal");
             }
 
             self.calibration_state.mean = 0.0;
@@ -1037,6 +1037,8 @@ mod tests {
 
     #[test]
     fn baro_processor_calibration_uses_rosflight_timing_and_mean() {
+        while crate::log::Logger::pop().is_some() {}
+
         let mut params = Params::new();
         let mut processor = BaroProcessor::new();
         let mut flags = CalibrationFlags::BARO;
@@ -1057,6 +1059,14 @@ mod tests {
         assert_eq!(
             params.get_by_id(ParamId::PARAM_BARO_BIAS),
             ParamValue::Float(90_000.0)
+        );
+        assert_eq!(
+            params.get_by_id(ParamId::PARAM_GROUND_LEVEL),
+            ParamValue::Float(pressure_to_altitude(90_000.0))
+        );
+        assert_eq!(
+            crate::log::Logger::pop().unwrap().message.as_str(),
+            "Baro ground pressure cal successful!"
         );
     }
 
