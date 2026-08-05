@@ -428,6 +428,39 @@ fn world_init_reconciles_reflected_mixer_params_from_persisted_mixer_choice() {
     );
 }
 
+#[test]
+fn world_init_blocks_arming_when_persisted_imu_biases_are_all_zero() {
+    let mut world = test_world();
+
+    assert!(
+        world
+            .state
+            .get_errors()
+            .contains(ErrorFlag::UNCALIBRATED_IMU)
+    );
+
+    world.state.update_arming_safety(true, true);
+    world.state.update(Event::REQUEST_ARM, &world.params);
+
+    assert!(!world.state.is_armed());
+    assert!(world.state.is_in_error_state());
+}
+
+#[test]
+fn world_init_accepts_persisted_imu_calibration() {
+    let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(0.01));
+
+    let world = test_world_with_params(params);
+
+    assert!(
+        !world
+            .state
+            .get_errors()
+            .contains(ErrorFlag::UNCALIBRATED_IMU)
+    );
+}
+
 fn armed_test_world_with_params(params: Params) -> TestWorld {
     let mut state = StateManager::new();
     state.update(Event::INITIALIZED, &params);

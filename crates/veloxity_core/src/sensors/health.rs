@@ -26,7 +26,7 @@ pub fn update_sensor_health<R: FlightFloat>(ctx: SensorHealthCtx<'_, R>) {
     }
 }
 
-fn update_imu_calibration_error(state: &mut StateManager, params: &Params) {
+pub(crate) fn update_imu_calibration_error(state: &mut StateManager, params: &Params) {
     let error = ErrorFlag::UNCALIBRATED_IMU;
     if imu_bias_params_are_all_zero(params) {
         state.set_error_flag(error, true, params);
