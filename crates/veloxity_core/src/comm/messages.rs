@@ -294,7 +294,7 @@ pub mod messages {
         pub num_sat: u8,
         pub lat: f64,                 // deg DDS format
         pub lon: f64,                 // deg DDS format
-        pub height: f32,              // (m)
+        pub height_msl: f32,          // (m) above mean sea level
         pub vel_n: f32,               // (m/s)
         pub vel_e: f32,               // (m/s)
         pub vel_d: f32,               // (m/s)

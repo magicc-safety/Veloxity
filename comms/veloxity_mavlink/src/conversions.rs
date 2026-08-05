@@ -385,7 +385,9 @@ impl From<core_messages::RosflightGnssMsg> for mav_messages::RosflightGnss {
             num_sat: msg.num_sat,
             lat: msg.lat,
             lon: msg.lon,
-            height: msg.height,
+            // ROSFLIGHT_GNSS names this wire field `height`, but ROSflight C and
+            // rosflight_msgs define its value as altitude above mean sea level.
+            height: msg.height_msl,
             vel_n: msg.vel_n,
             vel_e: msg.vel_e,
             vel_d: msg.vel_d,
@@ -595,6 +597,28 @@ impl From<comm_enums::Severity> for mav_enums::MavSeverity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gnss_msl_altitude_uses_existing_mavlink_height_field() {
+        let converted = mav_messages::RosflightGnss::from(core_messages::RosflightGnssMsg {
+            seconds: 1_700_000_000,
+            nanos: 123,
+            fix_type: packets::GNSSFixType::ThreeD,
+            num_sat: 12,
+            lat: 40.0,
+            lon: -111.0,
+            height_msl: 1_402.25,
+            vel_n: 0.0,
+            vel_e: 0.0,
+            vel_d: 0.0,
+            h_acc: 0.9,
+            v_acc: 1.2,
+            s_acc: 0.1,
+            rosflight_timestamp: 42,
+        });
+
+        assert_eq!(converted.height, 1_402.25);
+    }
 
     #[test]
     fn offboard_control_conversion_preserves_roll_pitch_mode() {

@@ -606,7 +606,8 @@ impl UbloxSensor {
                                     // UBX NAV-PVT and ROSFLIGHT_GNSS both use decimal degrees.
                                     lat: (unsafe { pvt.packet }.lat as f64) * 1.0e-7,
                                     lon: (unsafe { pvt.packet }.lon as f64) * 1.0e-7,
-                                    height: (unsafe { pvt.packet }.height as f32) / 1000.0,
+                                    // Match ROSflight C: publish NAV-PVT hMSL, not ellipsoid height.
+                                    height_msl: (unsafe { pvt.packet }.h_msl as f32) / 1000.0,
                                     vel_n: (unsafe { pvt.packet }.vel_n as f32) / 1000.0,
                                     vel_e: (unsafe { pvt.packet }.vel_e as f32) / 1000.0,
                                     vel_d: (unsafe { pvt.packet }.vel_d as f32) / 1000.0,

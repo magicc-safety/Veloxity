@@ -111,7 +111,7 @@ impl GnssQueue {
                 unix_nanos: 0,
                 lat: 0.0,
                 lon: 0.0,
-                height: 0.0,
+                height_msl: 0.0,
                 vel_n: 0.0,
                 vel_e: 0.0,
                 vel_d: 0.0,
@@ -345,7 +345,8 @@ fn nav_pvt_packet(payload: &[u8], now_us: u64) -> GNSSPacket {
         // ROSFLIGHT_GNSS also specifies decimal degrees, so do not convert to radians here.
         lat: i32_at(payload, 28) as f64 * 1.0e-7,
         lon: i32_at(payload, 24) as f64 * 1.0e-7,
-        height: i32_at(payload, 32) as f32 / 1000.0,
+        // UBX NAV-PVT hMSL is at byte 36; byte 32 is ellipsoid height.
+        height_msl: i32_at(payload, 36) as f32 / 1000.0,
         vel_n: i32_at(payload, 48) as f32 / 1000.0,
         vel_e: i32_at(payload, 52) as f32 / 1000.0,
         vel_d: i32_at(payload, 56) as f32 / 1000.0,

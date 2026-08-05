@@ -516,7 +516,7 @@ impl FfiBoard {
                 unix_nanos: snapshot.gnss.unix_nanos,
                 lat: snapshot.gnss.lat_degrees,
                 lon: snapshot.gnss.lon_degrees,
-                height: snapshot.gnss.alt,
+                height_msl: snapshot.gnss.alt,
                 vel_n: snapshot.gnss.vel_n,
                 vel_e: snapshot.gnss.vel_e,
                 vel_d: snapshot.gnss.vel_d,

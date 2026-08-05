@@ -884,7 +884,7 @@ where
                         num_sat: packet.num_sats,
                         lat: packet.lat,
                         lon: packet.lon,
-                        height: packet.height,
+                        height_msl: packet.height_msl,
                         vel_n: packet.vel_n,
                         vel_e: packet.vel_e,
                         vel_d: packet.vel_d,
@@ -1137,7 +1137,7 @@ where
                                 num_sat: packet.num_sats,
                                 lat: packet.lat,
                                 lon: packet.lon,
-                                height: packet.height,
+                                height_msl: packet.height_msl,
                                 vel_n: packet.vel_n,
                                 vel_e: packet.vel_e,
                                 vel_d: packet.vel_d,
@@ -2387,6 +2387,7 @@ mod tests {
             },
             unix_seconds: 1_700_000_001,
             unix_nanos: 123_456_789,
+            height_msl: 1_402.25,
             num_sats: 9,
             ..Default::default()
         });
@@ -2429,6 +2430,7 @@ mod tests {
         let gnss = manager.comm_link().last_gnss.unwrap();
         assert_eq!(gnss.seconds, 1_700_000_001);
         assert_eq!(gnss.nanos, 123_456_789);
+        assert_eq!(gnss.height_msl, 1_402.25);
 
         let output = manager.comm_link().last_output_raw.unwrap();
         assert_eq!(output.stamp, 1100);
