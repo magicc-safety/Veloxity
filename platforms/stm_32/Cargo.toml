@@ -40,6 +40,7 @@ edition = "2024"
 
 [features]
 default = []
+runtime-diagnostics = []
 
 [dependencies]
 veloxity_core = { workspace = true }

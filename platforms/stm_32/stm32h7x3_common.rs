@@ -91,7 +91,7 @@ pub static I2C3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static,
 pub static I2C4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async, i2c::mode::Master>>> =
     StaticCell::new();
 
-bind_interrupts!(struct BoardIrqs {
+bind_interrupts!(pub(crate) struct BoardIrqs {
     I2C1_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C1>;
     I2C1_ER => i2c::ErrorInterruptHandler<EMBASSY_peripherals::I2C1>;
     I2C2_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C2>;

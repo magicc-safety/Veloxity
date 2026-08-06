@@ -37,6 +37,8 @@
 use embassy_time::{Duration, Instant};
 
 pub mod peripherals;
+#[cfg(feature = "runtime-diagnostics")]
+pub mod runtime_diagnostics;
 
 pub fn synch_at(slot_rate: Duration) -> Instant {
     let dt = slot_rate.as_micros();

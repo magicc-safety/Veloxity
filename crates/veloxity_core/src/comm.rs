@@ -19,6 +19,34 @@ use crate::sensors::ProcessedSensors;
 use crate::state_machine::StateManager;
 use core::marker::PhantomData;
 
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(feature = "runtime-diagnostics")]
+macro_rules! telemetry_sent_counter {
+    ($name:ident) => {
+        #[unsafe(no_mangle)]
+        pub static $name: AtomicU32 = AtomicU32::new(0);
+    };
+}
+
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_IMU_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_MAG_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_BARO_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_PITOT_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_RANGE_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_GNSS_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_BATTERY_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TELEM_RC_SENT);
+
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
 const OUTPUT_RAW_IMU_DIVISOR: u64 = 8;
@@ -503,6 +531,15 @@ where
     {
         self.select_due_named_telemetry_stream(now_us, processed_sensors)
             .is_some()
+    }
+
+    #[cfg(feature = "runtime-diagnostics")]
+    pub(crate) fn telemetry_sample_was_sent(
+        &self,
+        stream: NamedTelemetryStream,
+        timestamp: u64,
+    ) -> bool {
+        self.telemetry_freshness.last_sent(stream) == Some(timestamp)
     }
 
     fn select_due_named_telemetry_stream<R>(
@@ -1414,6 +1451,37 @@ where
             },
         };
         if sent {
+            #[cfg(feature = "runtime-diagnostics")]
+            match stream {
+                NamedTelemetryStream::Imu => {
+                    VELOXITY_DIAG_TELEM_IMU_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::Mag => {
+                    VELOXITY_DIAG_TELEM_MAG_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::Baro => {
+                    VELOXITY_DIAG_TELEM_BARO_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::DiffPressure => {
+                    VELOXITY_DIAG_TELEM_PITOT_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::Range => {
+                    VELOXITY_DIAG_TELEM_RANGE_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::Gnss => {
+                    VELOXITY_DIAG_TELEM_GNSS_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::Battery => {
+                    VELOXITY_DIAG_TELEM_BATTERY_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::Rc => {
+                    VELOXITY_DIAG_TELEM_RC_SENT.fetch_add(1, Ordering::Relaxed)
+                }
+                NamedTelemetryStream::Heartbeat
+                | NamedTelemetryStream::Status
+                | NamedTelemetryStream::Attitude
+                | NamedTelemetryStream::OutputRaw => 0,
+            };
             if let Some(timestamp) = telemetry_stream_sample_timestamp(stream, ctx.sensors) {
                 self.telemetry_freshness.mark_sent(stream, timestamp);
             }

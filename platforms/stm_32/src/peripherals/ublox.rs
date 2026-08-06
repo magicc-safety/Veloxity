@@ -65,6 +65,16 @@ pub static GNSS_SIGNAL: Signal<
     Result<packets::GNSSPacket, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::GNSSPacket, errors::SensorError>>::new();
 
+fn publish_gnss(result: Result<packets::GNSSPacket, errors::SensorError>) {
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_signal_publish(
+        crate::runtime_diagnostics::SensorKind::Gnss,
+        GNSS_SIGNAL.signaled(),
+        result.is_err(),
+    );
+    GNSS_SIGNAL.signal(result);
+}
+
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
 pub struct PvtPayload {
@@ -629,7 +639,7 @@ impl UbloxSensor {
                                         * 1.7453292519943296e-4,
                                     time_correction: dt,
                                 };
-                                GNSS_SIGNAL.signal(Ok(pvt_packet));
+                                publish_gnss(Ok(pvt_packet));
                             }
                         }
                     }

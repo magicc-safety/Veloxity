@@ -6,17 +6,39 @@
 
 use stm_32::embassy_stm32::{
     Peri,
-    adc::{Adc, AdcConfig, Resolution, SampleTime},
+    adc::{Adc, AdcChannel, AdcConfig, AnyAdcChannel, Resolution, SampleTime},
     pac,
-    peripherals::{ADC1, ADC3, PA2, PA3},
+    peripherals::{ADC1, ADC3, DMA2_CH0, DMA2_CH1, PA2, PA3},
 };
 use stm_32::embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
-use stm_32::embassy_time::{Duration, Instant, Timer, block_for};
+use stm_32::embassy_time::{Duration, Instant, Timer, block_for, with_timeout};
 use veloxity_core::{
     battery::BatteryMonitorCalibration,
     errors::SensorError,
     packets::{BatteryPacket, RosflightPacketHeader},
 };
+
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BATTERY_SAMPLE_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BATTERY_SAMPLE_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BATTERY_SAMPLE_MAX_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BATTERY_PUBLISH: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BATTERY_ERROR_PUBLISH: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BATTERY_SIGNAL_OVERWRITE: AtomicU32 = AtomicU32::new(0);
 
 const SAMPLE_PERIOD: Duration = Duration::from_millis(100);
 const ADC_CONVERSION_TIMEOUT: Duration = Duration::from_millis(5);
@@ -31,8 +53,6 @@ const BOARD_CALIBRATION: BatteryMonitorCalibration =
 // ROSflight C firmware for this board.
 const VREFINT_CAL_ADDR: *const u16 = 0x1FF1_E860 as *const u16;
 const VREFINT_CAL_VDDA: f32 = 3.3;
-const VREFINT_CHANNEL: usize = 19;
-
 #[derive(Debug, Clone, Copy)]
 pub struct BatteryMultipliers {
     pub voltage: f32,
@@ -50,12 +70,12 @@ pub fn configure_multipliers(voltage: f32, current: f32) {
 
 pub struct PixracerBatteryMonitor {
     adc1: Adc<'static, ADC1>,
-    // Retain ownership after initialization; VREFINT conversion uses PAC access
-    // because Embassy 0.6 reports the wrong internal-channel number for this
-    // legacy STM32H7 ADC3 variant.
-    _adc3: Adc<'static, ADC3>,
-    voltage_pin: Peri<'static, PA2>,
-    current_pin: Peri<'static, PA3>,
+    adc3: Adc<'static, ADC3>,
+    adc1_dma: Peri<'static, DMA2_CH0>,
+    adc3_dma: Peri<'static, DMA2_CH1>,
+    voltage_channel: AnyAdcChannel<'static, ADC1>,
+    current_channel: AnyAdcChannel<'static, ADC1>,
+    vref_channel: AnyAdcChannel<'static, ADC3>,
     calibration: BatteryMonitorCalibration,
 }
 
@@ -65,6 +85,8 @@ impl PixracerBatteryMonitor {
         adc3: Peri<'static, ADC3>,
         voltage_pin: Peri<'static, PA2>,
         current_pin: Peri<'static, PA3>,
+        adc1_dma: Peri<'static, DMA2_CH0>,
+        adc3_dma: Peri<'static, DMA2_CH1>,
     ) -> Self {
         let config = AdcConfig {
             resolution: Some(Resolution::BITS16),
@@ -80,33 +102,65 @@ impl PixracerBatteryMonitor {
         );
 
         configure_adc_hardware();
+        let voltage_channel: AnyAdcChannel<'static, ADC1> = voltage_pin.degrade_adc();
+        let current_channel: AnyAdcChannel<'static, ADC1> = current_pin.degrade_adc();
+        // Embassy's STM32H7 ADC v4 mapping correctly selects ADC3 channel 19.
+        // Keep VREFINT on ADC3, as required by the STM32H753/Pixracer Pro.
+        let vref_channel: AnyAdcChannel<'static, ADC3> = adc3.enable_vrefint().degrade_adc();
 
         Self {
             adc1,
-            _adc3: adc3,
-            voltage_pin,
-            current_pin,
+            adc3,
+            adc1_dma,
+            adc3_dma,
+            voltage_channel,
+            current_channel,
+            vref_channel,
             calibration: BOARD_CALIBRATION,
         }
     }
 
-    fn sample(&mut self) -> Result<BatteryPacket, SensorError> {
+    async fn sample(&mut self) -> Result<BatteryPacket, SensorError> {
         if let Some(multipliers) = MULTIPLIER_SIGNAL.try_take() {
             self.calibration
                 .apply_multipliers(multipliers.voltage, multipliers.current);
         }
 
         let started_us = Instant::now().as_micros();
-        let vref_count = read_adc3_vrefint().ok_or(SensorError::GenericSensorError(
-            "ADC VREFINT conversion timed out",
-        ))?;
-        let voltage_count = self
-            .adc1
-            .blocking_read(&mut self.voltage_pin, ADC_SAMPLE_TIME);
-        let current_count = self
-            .adc1
-            .blocking_read(&mut self.current_pin, ADC_SAMPLE_TIME);
+        let mut vref_reading = [0u16; 1];
+        with_timeout(
+            ADC_CONVERSION_TIMEOUT,
+            self.adc3.read(
+                self.adc3_dma.reborrow(),
+                crate::board::BoardIrqs,
+                [(&mut self.vref_channel, ADC_SAMPLE_TIME)].into_iter(),
+                &mut vref_reading,
+            ),
+        )
+        .await
+        .map_err(|_| SensorError::GenericSensorError("ADC VREFINT DMA conversion timed out"))?;
+
+        let mut battery_readings = [0u16; 2];
+        with_timeout(
+            ADC_CONVERSION_TIMEOUT,
+            self.adc1.read(
+                self.adc1_dma.reborrow(),
+                crate::board::BoardIrqs,
+                [
+                    (&mut self.voltage_channel, ADC_SAMPLE_TIME),
+                    (&mut self.current_channel, ADC_SAMPLE_TIME),
+                ]
+                .into_iter(),
+                &mut battery_readings,
+            ),
+        )
+        .await
+        .map_err(|_| SensorError::GenericSensorError("ADC1 DMA conversion timed out"))?;
         let completed_us = Instant::now().as_micros();
+
+        let vref_count = vref_reading[0];
+        let voltage_count = battery_readings[0];
+        let current_count = battery_readings[1];
 
         let vdda = measured_vdda(vref_count).ok_or(SensorError::GenericSensorError(
             "ADC VREFINT conversion failed",
@@ -130,7 +184,24 @@ impl PixracerBatteryMonitor {
     async fn run(&mut self) -> ! {
         loop {
             Timer::at(stm_32::synch_at(SAMPLE_PERIOD)).await;
-            BATTERY_SIGNAL.signal(self.sample());
+            #[cfg(feature = "runtime-diagnostics")]
+            let started = Instant::now();
+            let sample = self.sample().await;
+            #[cfg(feature = "runtime-diagnostics")]
+            {
+                let elapsed_us = started.elapsed().as_micros().min(u32::MAX as u64) as u32;
+                VELOXITY_DIAG_BATTERY_SAMPLE_COUNT.fetch_add(1, Ordering::Relaxed);
+                VELOXITY_DIAG_BATTERY_SAMPLE_SUM_US.fetch_add(elapsed_us, Ordering::Relaxed);
+                VELOXITY_DIAG_BATTERY_SAMPLE_MAX_US.fetch_max(elapsed_us, Ordering::Relaxed);
+                VELOXITY_DIAG_BATTERY_PUBLISH.fetch_add(1, Ordering::Relaxed);
+                if sample.is_err() {
+                    VELOXITY_DIAG_BATTERY_ERROR_PUBLISH.fetch_add(1, Ordering::Relaxed);
+                }
+                if BATTERY_SIGNAL.signaled() {
+                    VELOXITY_DIAG_BATTERY_SIGNAL_OVERWRITE.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            BATTERY_SIGNAL.signal(sample);
         }
     }
 }
@@ -158,58 +229,6 @@ fn configure_adc_hardware() {
 
     // STM32H753 datasheet maximum VREFINT startup time is below 15 us.
     block_for(Duration::from_micros(15));
-}
-
-/// Read ADC3 internal channel 19. ADC3 has already had its regulator enabled
-/// and offset calibration performed by `Adc::new_with_config`.
-fn read_adc3_vrefint() -> Option<u16> {
-    use pac::adc::vals::{Dmngt, Pcsel};
-
-    let adc = pac::ADC3;
-    let wait_started = Instant::now();
-    while adc.cr().read().addis() {
-        if wait_started.elapsed() >= ADC_CONVERSION_TIMEOUT {
-            return None;
-        }
-        core::hint::spin_loop();
-    }
-    if !adc.cr().read().aden() {
-        adc.isr().write(|register| register.set_adrdy(true));
-        adc.cr().modify(|register| register.set_aden(true));
-        let wait_started = Instant::now();
-        while !adc.isr().read().adrdy() {
-            if wait_started.elapsed() >= ADC_CONVERSION_TIMEOUT {
-                return None;
-            }
-            core::hint::spin_loop();
-        }
-    }
-
-    adc.cfgr().modify(|register| {
-        register.set_cont(false);
-        register.set_dmngt(Dmngt::DR);
-        register.set_res(Resolution::BITS16);
-    });
-    adc.cfgr2().modify(|register| register.set_lshift(0));
-    adc.pcsel()
-        .write(|register| register.set_pcsel(VREFINT_CHANNEL, Pcsel::PRESELECTED));
-    adc.smpr(VREFINT_CHANNEL / 10)
-        .modify(|register| register.set_smp(VREFINT_CHANNEL % 10, ADC_SAMPLE_TIME));
-    adc.sqr1().modify(|register| {
-        register.set_l(0);
-        register.set_sq(0, VREFINT_CHANNEL as u8);
-    });
-
-    adc.isr().write(|register| register.set_eoc(true));
-    adc.cr().modify(|register| register.set_adstart(true));
-    let wait_started = Instant::now();
-    while !adc.isr().read().eoc() {
-        if wait_started.elapsed() >= ADC_CONVERSION_TIMEOUT {
-            return None;
-        }
-        core::hint::spin_loop();
-    }
-    Some(adc.dr().read().rdata())
 }
 
 fn measured_vdda(vref_count: u16) -> Option<f32> {

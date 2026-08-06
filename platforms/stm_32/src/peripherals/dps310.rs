@@ -58,6 +58,16 @@ pub static BARO_SIGNAL: Signal<
     Result<packets::BaroPacket, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::BaroPacket, errors::SensorError>>::new();
 
+fn publish_baro(result: Result<packets::BaroPacket, errors::SensorError>) {
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_signal_publish(
+        crate::runtime_diagnostics::SensorKind::Baro,
+        BARO_SIGNAL.signaled(),
+        result.is_err(),
+    );
+    BARO_SIGNAL.signal(result);
+}
+
 pub struct Dps310Sensor {
     pub dev: SpiDevice<
         'static,
@@ -304,20 +314,20 @@ impl Dps310Sensor {
         let mut cal = match self.initialize_sensor().await {
             Ok(cal) => cal,
             Err(e) => {
-                BARO_SIGNAL.signal(Err(e));
+                publish_baro(Err(e));
                 return;
             }
         };
         if let Err(e) = self.pressure_config().await {
-            BARO_SIGNAL.signal(Err(e));
+            publish_baro(Err(e));
             return;
         }
         if let Err(e) = self.temperature_config().await {
-            BARO_SIGNAL.signal(Err(e));
+            publish_baro(Err(e));
             return;
         }
         if let Err(e) = self.measurement_configuration().await {
-            BARO_SIGNAL.signal(Err(e));
+            publish_baro(Err(e));
             return;
         }
         //////////////////////////////////////////////////////////////////////////////////////
@@ -333,14 +343,14 @@ impl Dps310Sensor {
             let (raw_p, status_high) = match self.get_pressure_data().await {
                 Ok(data) => data,
                 Err(e) => {
-                    BARO_SIGNAL.signal(Err(e));
+                    publish_baro(Err(e));
                     continue;
                 }
             };
             let (raw_t, status_low) = match self.get_temperature_data().await {
                 Ok(data) => data,
                 Err(e) => {
-                    BARO_SIGNAL.signal(Err(e));
+                    publish_baro(Err(e));
                     continue;
                 }
             };
@@ -363,9 +373,9 @@ impl Dps310Sensor {
                     temperature: temperature as f32,
                     ..Default::default()
                 };
-                BARO_SIGNAL.signal(Ok(baro_packet)); // make data available for other tasks.
+                publish_baro(Ok(baro_packet)); // make data available for other tasks.
             } else {
-                BARO_SIGNAL.signal(Err(errors::SensorError::GenericSensorError("Bad status")));
+                publish_baro(Err(errors::SensorError::GenericSensorError("Bad status")));
             }
         }
     }

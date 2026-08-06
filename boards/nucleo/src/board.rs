@@ -169,7 +169,7 @@ impl BoardIo for Board {
         sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
-        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_CHANNEL.try_receive().ok();
     }
 
     fn imu_pending(&self) -> bool {
@@ -189,7 +189,7 @@ impl BoardIo for Board {
         sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
-        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_CHANNEL.try_receive().ok();
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {

@@ -163,6 +163,7 @@ pub struct RealtimeServicePolicy {
     pub min_spacing_us: u64,
     pub telemetry_streams_per_phase: usize,
     pub continue_when_idle: bool,
+    pub drain_telemetry_with_available_slack: bool,
 }
 
 impl RealtimeServicePolicy {
@@ -171,6 +172,7 @@ impl RealtimeServicePolicy {
             min_spacing_us,
             telemetry_streams_per_phase,
             continue_when_idle: false,
+            drain_telemetry_with_available_slack: false,
         }
     }
 
@@ -179,6 +181,7 @@ impl RealtimeServicePolicy {
             min_spacing_us: 0,
             telemetry_streams_per_phase,
             continue_when_idle: false,
+            drain_telemetry_with_available_slack: false,
         }
     }
 
@@ -187,6 +190,18 @@ impl RealtimeServicePolicy {
             min_spacing_us: 0,
             telemetry_streams_per_phase,
             continue_when_idle: true,
+            drain_telemetry_with_available_slack: false,
+        }
+    }
+
+    /// Continuously services the board and sends every due telemetry stream
+    /// that fits inside the measured control-deadline slack.
+    pub const fn continuous_slack_driven() -> Self {
+        Self {
+            min_spacing_us: 0,
+            telemetry_streams_per_phase: 0,
+            continue_when_idle: true,
+            drain_telemetry_with_available_slack: true,
         }
     }
 }

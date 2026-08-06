@@ -42,6 +42,7 @@ edition = "2024"
 default = []
 scope-timing-pins = ["veloxity_core/scope-timing-pins"]
 sensor-poll-diagnostics = []
+runtime-diagnostics = ["veloxity_core/runtime-diagnostics", "stm_32/runtime-diagnostics"]
 usb-vcp-serial = []
 
 [dependencies]

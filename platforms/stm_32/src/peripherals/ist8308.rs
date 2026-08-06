@@ -55,6 +55,16 @@ pub static MAG_SIGNAL: Signal<
     Result<packets::MagPacket, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::MagPacket, errors::SensorError>>::new();
 
+fn publish_mag(result: Result<packets::MagPacket, errors::SensorError>) {
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_signal_publish(
+        crate::runtime_diagnostics::SensorKind::Mag,
+        MAG_SIGNAL.signaled(),
+        result.is_err(),
+    );
+    MAG_SIGNAL.signal(result);
+}
+
 // ROSflight C compatibility scales for the Pixracer Pro IST8308 driver. The
 // sensor datasheet specifies a nominal 1.5e-7 T/LSB in the configured ±500 µT
 // range, but C uses these axis-specific values. Preserve them here so raw and
@@ -106,14 +116,14 @@ impl Ist8308Sensor {
             .await
             .is_err()
         {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: reading WAI_REG",
             )));
             return;
         }
         const DEVICE_ID: u8 = 0x08;
         if device_id[0] != DEVICE_ID {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: bad device ID",
             )));
             return;
@@ -129,7 +139,7 @@ impl Ist8308Sensor {
             .await
             .is_err()
         {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: writing CNTL3_REG",
             )));
             return;
@@ -143,34 +153,21 @@ impl Ist8308Sensor {
             .await
             .is_err()
         {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: reading CNTL3_REG",
             )));
             return;
         }
         if (cntrl3[0] & 0x01) != 0 {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: bad status CNTL3_REG",
             )));
             return;
         }
 
-        // Configure
-
-        // Enable DRDY (None Connected)
-        const CNTL3_VAL_DRDY_EN: u8 = 1 << 3;
-
-        if self
-            .dev
-            .write(ADDRESS, &[CNTL3_REG, CNTL3_VAL_DRDY_EN])
-            .await
-            .is_err()
-        {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
-                "IST8308 Mag failed: writing CNTL4_REG",
-            )));
-            return;
-        }
+        // Configure. The Pixracer Pro does not route IST8308 DRDY to the MCU,
+        // so leave its output disabled and use ROSflight C's timed
+        // command/wait/read sequence.
 
         const CNTL4_REG: u8 = 0x34;
         const CNTL4_VAL_DYNAMIC_RANGE_500: u8 = 0;
@@ -181,7 +178,7 @@ impl Ist8308Sensor {
             .await
             .is_err()
         {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: writing CNTL4_REG",
             )));
             return;
@@ -200,49 +197,82 @@ impl Ist8308Sensor {
             .await
             .is_err()
         {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: writing OSRCNTL_REG",
             )));
             return;
         }
 
-        // Set ODR
+        // ROSflight C operates the IST8308 in single-conversion mode. Trigger
+        // once here as C does during initialization; each acquisition period
+        // below explicitly triggers the next conversion.
         const CNTL2_REG: u8 = 0x31;
-        const CNTL2_VAL_CONT_ODR100_MODE: u8 = 0x08; //Continuous (100Hz) mode
+        const CNTL2_VAL_SINGLE_MODE: u8 = 0x01;
         if self
             .dev
-            .write(ADDRESS, &[CNTL2_REG, CNTL2_VAL_CONT_ODR100_MODE])
+            .write(ADDRESS, &[CNTL2_REG, CNTL2_VAL_SINGLE_MODE])
             .await
             .is_err()
         {
-            MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_mag(Err(errors::SensorError::GenericSensorError(
                 "IST8308 Mag failed: writing CNTL2_REG",
             )));
             return;
         }
 
+        const STAT1_REG: u8 = 0x10;
+        const STAT1_VAL_DRDY: u8 = 0x01;
         let loop_period = Duration::from_hz(100);
         loop {
-            let timestamp = synch_at(loop_period) + Duration::from_micros(900);
-            Timer::at(timestamp).await;
+            // Match C's 10 kHz polling-state phases: command at 0.0 ms,
+            // select STAT1 at 8.9 ms, and receive seven bytes at 9.2 ms.
+            let period_start = synch_at(loop_period);
+            Timer::at(period_start).await;
 
-            // Read Data
-            const STAT1_REG: u8 = 0x10;
-            let mut data = [0u8; 7];
             if self
-                .write_read(ADDRESS, &[STAT1_REG], &mut data)
+                .dev
+                .write(ADDRESS, &[CNTL2_REG, CNTL2_VAL_SINGLE_MODE])
                 .await
                 .is_err()
             {
-                MAG_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+                #[cfg(feature = "runtime-diagnostics")]
+                crate::runtime_diagnostics::record_mag_i2c_error();
+                publish_mag(Err(errors::SensorError::GenericSensorError(
+                    "IST8308 Mag failed: commanding single conversion",
+                )));
+                continue;
+            }
+            #[cfg(feature = "runtime-diagnostics")]
+            crate::runtime_diagnostics::record_mag_conversion_command();
+
+            let timestamp = period_start + Duration::from_micros(8_900);
+            Timer::at(timestamp).await;
+            if self.dev.write(ADDRESS, &[STAT1_REG]).await.is_err() {
+                #[cfg(feature = "runtime-diagnostics")]
+                crate::runtime_diagnostics::record_mag_i2c_error();
+                publish_mag(Err(errors::SensorError::GenericSensorError(
+                    "IST8308 Mag failed: selecting STAT1_REG",
+                )));
+                continue;
+            }
+
+            Timer::at(period_start + Duration::from_micros(9_200)).await;
+
+            // Read Data
+            let mut data = [0u8; 7];
+            if self.dev.read(ADDRESS, &mut data).await.is_err() {
+                #[cfg(feature = "runtime-diagnostics")]
+                crate::runtime_diagnostics::record_mag_i2c_error();
+                publish_mag(Err(errors::SensorError::GenericSensorError(
                     "IST8308 Mag failed: reading STAT1_REG",
                 )));
                 continue;
             }
 
-            const STAT1_VAL_DRDY: u8 = 0x01;
             let status = data[0];
-            let data_ready = (status & STAT1_VAL_DRDY) != 0;
+            let data_ready = status == STAT1_VAL_DRDY;
+            #[cfg(feature = "runtime-diagnostics")]
+            crate::runtime_diagnostics::record_mag_drdy(data_ready);
             if data_ready {
                 let flux = [
                     f32::from((((data[2] as u16) << 8) | (data[1] as u16)) as i16)
@@ -266,7 +296,7 @@ impl Ist8308Sensor {
                     flux,
                     temperature: 0.0f32,
                 };
-                MAG_SIGNAL.signal(Ok(mag_packet)); // make data available for other tasks
+                publish_mag(Ok(mag_packet)); // make data available for other tasks
                 // previous_timestamp_us = timestamp_us;
             }
         }

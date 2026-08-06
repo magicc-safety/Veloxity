@@ -42,6 +42,9 @@ use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 use embassy_time::Timer;
 
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use veloxity_core::errors;
 use veloxity_core::packets;
 
@@ -52,6 +55,40 @@ pub static IMU_SIGNAL: Signal<
     CriticalSectionRawMutex,
     Result<packets::ImuPacket<f64>, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::ImuPacket<f64>, errors::SensorError>>::new();
+
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_DRDY: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_DRDY_INTERVALS: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_DRDY_INTERVAL_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_DRDY_INTERVAL_MAX_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_SAMPLE_COMPLETE: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_SAMPLE_TIME_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_SAMPLE_TIME_MAX_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_SENSOR_GAP_EVENTS: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_SENSOR_MISSING: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_SIGNAL_OVERWRITE: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_BMI_SIGNAL_PUBLISH: AtomicU32 = AtomicU32::new(0);
 
 // 3 blocks of 2048 bytes
 // 192 blocks of 32 bytes
@@ -728,8 +765,31 @@ impl Bmi08xSensor {
         let scale_factor_a = accel_range / 32767f64 / 4.0f64; // m/s^2
         let scale_factor_g = gyro_range / 32767f64; // to rad/s
 
+        #[cfg(feature = "runtime-diagnostics")]
+        let mut previous_drdy: Option<Instant> = None;
+        #[cfg(feature = "runtime-diagnostics")]
+        let mut previous_sensor_time_us: Option<u32> = None;
+
         loop {
             self.drdy_g.wait_for_rising_edge().await;
+
+            #[cfg(feature = "runtime-diagnostics")]
+            let drdy_time = Instant::now();
+            #[cfg(feature = "runtime-diagnostics")]
+            {
+                VELOXITY_DIAG_BMI_DRDY.fetch_add(1, Ordering::Relaxed);
+                if let Some(previous) = previous_drdy.replace(drdy_time) {
+                    let interval_us = drdy_time
+                        .duration_since(previous)
+                        .as_micros()
+                        .min(u32::MAX as u64) as u32;
+                    VELOXITY_DIAG_BMI_DRDY_INTERVALS.fetch_add(1, Ordering::Relaxed);
+                    VELOXITY_DIAG_BMI_DRDY_INTERVAL_SUM_US
+                        .fetch_add(interval_us, Ordering::Relaxed);
+                    VELOXITY_DIAG_BMI_DRDY_INTERVAL_MAX_US
+                        .fetch_max(interval_us, Ordering::Relaxed);
+                }
+            }
 
             self.jumper.set_high();
             Timer::after_micros(60).await;
@@ -747,6 +807,18 @@ impl Bmi08xSensor {
 
             let seq = ((rx[8] as u64 | (rx[9] as u64) << 8 | (rx[10] as u64) << 16) * 625u64
                 / 16u64) as u32; // 625/64 = 39.0625us/count
+            #[cfg(feature = "runtime-diagnostics")]
+            if let Some(previous) = previous_sensor_time_us.replace(seq) {
+                let interval_us = seq.wrapping_sub(previous);
+                // Data-sync mode is nominally 400 Hz. Allow half an interval
+                // of tolerance before classifying a sensor-clock discontinuity.
+                if interval_us > 3_750 {
+                    let elapsed_samples = interval_us.saturating_add(1_250) / 2_500;
+                    VELOXITY_DIAG_BMI_SENSOR_GAP_EVENTS.fetch_add(1, Ordering::Relaxed);
+                    VELOXITY_DIAG_BMI_SENSOR_MISSING
+                        .fetch_add(elapsed_samples.saturating_sub(1), Ordering::Relaxed);
+                }
+            }
             let mut temperature = ((rx[18] as u32) << 3 | (((rx[19] as u32) >> 6) & 0x0003)) as f32;
 
             if temperature > 1023.0 {
@@ -800,6 +872,20 @@ impl Bmi08xSensor {
                 temperature,
                 seq,
             };
+            #[cfg(feature = "runtime-diagnostics")]
+            {
+                let sample_time_us = Instant::now()
+                    .duration_since(drdy_time)
+                    .as_micros()
+                    .min(u32::MAX as u64) as u32;
+                VELOXITY_DIAG_BMI_SAMPLE_COMPLETE.fetch_add(1, Ordering::Relaxed);
+                VELOXITY_DIAG_BMI_SAMPLE_TIME_SUM_US.fetch_add(sample_time_us, Ordering::Relaxed);
+                VELOXITY_DIAG_BMI_SAMPLE_TIME_MAX_US.fetch_max(sample_time_us, Ordering::Relaxed);
+                if IMU_SIGNAL.signaled() {
+                    VELOXITY_DIAG_BMI_SIGNAL_OVERWRITE.fetch_add(1, Ordering::Relaxed);
+                }
+                VELOXITY_DIAG_BMI_SIGNAL_PUBLISH.fetch_add(1, Ordering::Relaxed);
+            }
             IMU_SIGNAL.signal(Ok(imu_packet));
         }
     }

@@ -260,7 +260,7 @@ mod tests {
         );
         assert_eq!(
             decoded.get_by_id(ParamId::PARAM_TELEM_BARO_HZ),
-            ParamValue::Int(50)
+            ParamValue::Int(0)
         );
     }
 

@@ -55,6 +55,16 @@ pub static PITOT_SIGNAL: Signal<
     Result<packets::PitotPacket, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::PitotPacket, errors::SensorError>>::new();
 
+fn publish_pitot(result: Result<packets::PitotPacket, errors::SensorError>) {
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_signal_publish(
+        crate::runtime_diagnostics::SensorKind::Pitot,
+        PITOT_SIGNAL.signaled(),
+        result.is_err(),
+    );
+    PITOT_SIGNAL.signal(result);
+}
+
 pub struct Ms4525Sensor {
     pub dev: I2cDevice<
         'static,
@@ -71,7 +81,7 @@ impl Ms4525Sensor {
         // Start a read
         let mut data = [0u8; 2];
         if self.dev.read(ADDRESS, &mut data).await.is_err() {
-            PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_pitot(Err(errors::SensorError::GenericSensorError(
                 "MS4525 Pitot failed: reading data",
             )));
             return;
@@ -82,7 +92,7 @@ impl Ms4525Sensor {
         // Check if read OK.
         let mut data = [0u8; 2];
         if self.dev.read(ADDRESS, &mut data).await.is_err() {
-            PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_pitot(Err(errors::SensorError::GenericSensorError(
                 "MS4525 Pitot failed: reading data",
             )));
             return;
@@ -90,7 +100,7 @@ impl Ms4525Sensor {
 
         let status = (data[0] >> 6) & 0x03;
         if status != NO_ERROR {
-            PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_pitot(Err(errors::SensorError::GenericSensorError(
                 "MS4525 Pitot failed: bad status",
             )));
             return;
@@ -109,7 +119,7 @@ impl Ms4525Sensor {
 
             let mut data = [0u8; 4];
             if self.dev.read(ADDRESS, &mut data).await.is_err() {
-                PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+                publish_pitot(Err(errors::SensorError::GenericSensorError(
                     "MS4525 Pitot failed: reading data",
                 )));
                 continue;
@@ -148,9 +158,9 @@ impl Ms4525Sensor {
                         temperature: avg_temperature as f32,
                         ..Default::default()
                     };
-                    PITOT_SIGNAL.signal(Ok(pitot_packet)); // make data available for other tasks.
+                    publish_pitot(Ok(pitot_packet)); // make data available for other tasks.
                 } else {
-                    PITOT_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+                    publish_pitot(Err(errors::SensorError::GenericSensorError(
                         "MS4525 Pitot failed: no valid data",
                     )));
                 }

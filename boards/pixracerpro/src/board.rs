@@ -48,9 +48,159 @@ use stm_32::peripherals;
 use stm_32::peripherals::pwm::PixRacerProServoMonstrosity;
 use stm_32::*;
 
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
 include!("../../../platforms/stm_32/stm32h7x3_common.rs");
 
 const PARAM_STORAGE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_CONSUME: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_CONSUME_ERROR: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_CONSUME_AGE_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_CONSUME_AGE_MAX_US: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(feature = "runtime-diagnostics")]
+mod runtime_sensor_diagnostics {
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    use veloxity_core::{errors::SensorError, math::FlightFloat, sensors::SensorBus};
+
+    macro_rules! consume_counters {
+        ($count:ident, $errors:ident, $age_sum:ident, $age_max:ident) => {
+            #[unsafe(no_mangle)]
+            pub static $count: AtomicU32 = AtomicU32::new(0);
+            #[unsafe(no_mangle)]
+            pub static $errors: AtomicU32 = AtomicU32::new(0);
+            #[unsafe(no_mangle)]
+            pub static $age_sum: AtomicU32 = AtomicU32::new(0);
+            #[unsafe(no_mangle)]
+            pub static $age_max: AtomicU32 = AtomicU32::new(0);
+        };
+    }
+
+    consume_counters!(
+        VELOXITY_DIAG_MAG_CONSUME,
+        VELOXITY_DIAG_MAG_CONSUME_ERROR,
+        VELOXITY_DIAG_MAG_CONSUME_AGE_SUM_US,
+        VELOXITY_DIAG_MAG_CONSUME_AGE_MAX_US
+    );
+    consume_counters!(
+        VELOXITY_DIAG_BARO_CONSUME,
+        VELOXITY_DIAG_BARO_CONSUME_ERROR,
+        VELOXITY_DIAG_BARO_CONSUME_AGE_SUM_US,
+        VELOXITY_DIAG_BARO_CONSUME_AGE_MAX_US
+    );
+    consume_counters!(
+        VELOXITY_DIAG_PITOT_CONSUME,
+        VELOXITY_DIAG_PITOT_CONSUME_ERROR,
+        VELOXITY_DIAG_PITOT_CONSUME_AGE_SUM_US,
+        VELOXITY_DIAG_PITOT_CONSUME_AGE_MAX_US
+    );
+    consume_counters!(
+        VELOXITY_DIAG_RANGE_CONSUME,
+        VELOXITY_DIAG_RANGE_CONSUME_ERROR,
+        VELOXITY_DIAG_RANGE_CONSUME_AGE_SUM_US,
+        VELOXITY_DIAG_RANGE_CONSUME_AGE_MAX_US
+    );
+    consume_counters!(
+        VELOXITY_DIAG_GNSS_CONSUME,
+        VELOXITY_DIAG_GNSS_CONSUME_ERROR,
+        VELOXITY_DIAG_GNSS_CONSUME_AGE_SUM_US,
+        VELOXITY_DIAG_GNSS_CONSUME_AGE_MAX_US
+    );
+    consume_counters!(
+        VELOXITY_DIAG_BATTERY_CONSUME,
+        VELOXITY_DIAG_BATTERY_CONSUME_ERROR,
+        VELOXITY_DIAG_BATTERY_CONSUME_AGE_SUM_US,
+        VELOXITY_DIAG_BATTERY_CONSUME_AGE_MAX_US
+    );
+    consume_counters!(
+        VELOXITY_DIAG_RC_CONSUME,
+        VELOXITY_DIAG_RC_CONSUME_ERROR,
+        VELOXITY_DIAG_RC_CONSUME_AGE_SUM_US,
+        VELOXITY_DIAG_RC_CONSUME_AGE_MAX_US
+    );
+
+    pub fn record_bus<R: FlightFloat>(sensors: &SensorBus<R>, now_us: u64) {
+        macro_rules! record {
+            ($field:ident, $count:ident, $errors:ident, $age_sum:ident, $age_max:ident) => {
+                if let Some(result) = &sensors.$field {
+                    $count.fetch_add(1, Ordering::Relaxed);
+                    match result {
+                        Ok(packet) => {
+                            let age = now_us
+                                .saturating_sub(packet.header.timestamp)
+                                .min(u32::MAX as u64) as u32;
+                            $age_sum.fetch_add(age, Ordering::Relaxed);
+                            $age_max.fetch_max(age, Ordering::Relaxed);
+                        }
+                        Err(SensorError::GenericSensorError(_)) => {
+                            $errors.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                }
+            };
+        }
+        record!(
+            mag,
+            VELOXITY_DIAG_MAG_CONSUME,
+            VELOXITY_DIAG_MAG_CONSUME_ERROR,
+            VELOXITY_DIAG_MAG_CONSUME_AGE_SUM_US,
+            VELOXITY_DIAG_MAG_CONSUME_AGE_MAX_US
+        );
+        record!(
+            baro,
+            VELOXITY_DIAG_BARO_CONSUME,
+            VELOXITY_DIAG_BARO_CONSUME_ERROR,
+            VELOXITY_DIAG_BARO_CONSUME_AGE_SUM_US,
+            VELOXITY_DIAG_BARO_CONSUME_AGE_MAX_US
+        );
+        record!(
+            pitot,
+            VELOXITY_DIAG_PITOT_CONSUME,
+            VELOXITY_DIAG_PITOT_CONSUME_ERROR,
+            VELOXITY_DIAG_PITOT_CONSUME_AGE_SUM_US,
+            VELOXITY_DIAG_PITOT_CONSUME_AGE_MAX_US
+        );
+        record!(
+            range,
+            VELOXITY_DIAG_RANGE_CONSUME,
+            VELOXITY_DIAG_RANGE_CONSUME_ERROR,
+            VELOXITY_DIAG_RANGE_CONSUME_AGE_SUM_US,
+            VELOXITY_DIAG_RANGE_CONSUME_AGE_MAX_US
+        );
+        record!(
+            gnss,
+            VELOXITY_DIAG_GNSS_CONSUME,
+            VELOXITY_DIAG_GNSS_CONSUME_ERROR,
+            VELOXITY_DIAG_GNSS_CONSUME_AGE_SUM_US,
+            VELOXITY_DIAG_GNSS_CONSUME_AGE_MAX_US
+        );
+        record!(
+            battery,
+            VELOXITY_DIAG_BATTERY_CONSUME,
+            VELOXITY_DIAG_BATTERY_CONSUME_ERROR,
+            VELOXITY_DIAG_BATTERY_CONSUME_AGE_SUM_US,
+            VELOXITY_DIAG_BATTERY_CONSUME_AGE_MAX_US
+        );
+        record!(
+            rc,
+            VELOXITY_DIAG_RC_CONSUME,
+            VELOXITY_DIAG_RC_CONSUME_ERROR,
+            VELOXITY_DIAG_RC_CONSUME_AGE_SUM_US,
+            VELOXITY_DIAG_RC_CONSUME_AGE_MAX_US
+        );
+    }
+}
 
 fn wait_for_sd_response(request_id: u64) -> Option<ParamPacket> {
     let start = Instant::now();
@@ -201,7 +351,9 @@ impl BoardIo for Board {
         sensors.range = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.battery = crate::battery::BATTERY_SIGNAL.try_take();
-        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_CHANNEL.try_receive().ok();
+        #[cfg(feature = "runtime-diagnostics")]
+        runtime_sensor_diagnostics::record_bus(sensors, self.clock_micros());
         #[cfg(feature = "sensor-poll-diagnostics")]
         self.record_sbus_rc_drain(&sensors.rc);
         #[cfg(feature = "sensor-poll-diagnostics")]
@@ -226,6 +378,24 @@ impl BoardIo for Board {
         sensors.imu = peripherals::bmi08x::IMU_SIGNAL
             .try_take()
             .map(|result| result.map(|packet| packet.cast()));
+        #[cfg(feature = "runtime-diagnostics")]
+        if sensors.imu.is_some() {
+            VELOXITY_DIAG_IMU_CONSUME.fetch_add(1, Ordering::Relaxed);
+            match &sensors.imu {
+                Some(Ok(packet)) => {
+                    let age = self
+                        .clock_micros()
+                        .saturating_sub(packet.header.timestamp)
+                        .min(u32::MAX as u64) as u32;
+                    VELOXITY_DIAG_IMU_CONSUME_AGE_SUM_US.fetch_add(age, Ordering::Relaxed);
+                    VELOXITY_DIAG_IMU_CONSUME_AGE_MAX_US.fetch_max(age, Ordering::Relaxed);
+                }
+                Some(Err(_)) => {
+                    VELOXITY_DIAG_IMU_CONSUME_ERROR.fetch_add(1, Ordering::Relaxed);
+                }
+                None => {}
+            }
+        }
         #[cfg(feature = "sensor-poll-diagnostics")]
         sensor_poll_diagnostics::record_bus(sensors);
         #[cfg(not(feature = "scope-timing-pins"))]
@@ -245,7 +415,9 @@ impl BoardIo for Board {
         sensors.range = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
         sensors.battery = crate::battery::BATTERY_SIGNAL.try_take();
-        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_CHANNEL.try_receive().ok();
+        #[cfg(feature = "runtime-diagnostics")]
+        runtime_sensor_diagnostics::record_bus(sensors, self.clock_micros());
         #[cfg(feature = "sensor-poll-diagnostics")]
         self.record_sbus_rc_drain(&sensors.rc);
         #[cfg(feature = "sensor-poll-diagnostics")]
@@ -286,6 +458,10 @@ impl BoardIo for Board {
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         #[cfg(feature = "usb-vcp-serial")]
         {
+            #[cfg(feature = "runtime-diagnostics")]
+            let message_id = (bytes.len() > 5 && bytes[0] == 0xFE).then_some(bytes[5]);
+            #[cfg(feature = "runtime-diagnostics")]
+            peripherals::vcp::record_frame_attempt(message_id);
             let mut n = 0;
             let len = bytes.len();
             loop {
@@ -298,12 +474,16 @@ impl BoardIo for Board {
                         }
                     }
                     Err(_) => {
+                        #[cfg(feature = "runtime-diagnostics")]
+                        peripherals::vcp::record_frame_rejected(message_id, n != 0);
                         return Some(Err(errors::TelemError::GenericTelemError(
                             "Error Writing USB VCP Packet!",
                         )));
                     }
                 }
             }
+            #[cfg(feature = "runtime-diagnostics")]
+            peripherals::vcp::record_frame_enqueued(message_id);
             return Some(Ok(len));
         }
 
@@ -401,8 +581,9 @@ impl Board {
 
         let start_time = embassy_time::Instant::now();
 
-        let battery_monitor =
-            crate::battery::PixracerBatteryMonitor::new(p.ADC1, p.ADC3, p.PA2, p.PA3);
+        let battery_monitor = crate::battery::PixracerBatteryMonitor::new(
+            p.ADC1, p.ADC3, p.PA2, p.PA3, p.DMA2_CH0, p.DMA2_CH1,
+        );
 
         // SPI1 (ROSflight uses for internal ICM, unused here)
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();

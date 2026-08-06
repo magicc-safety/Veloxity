@@ -29,6 +29,7 @@ struct SensorStageBoard {
     serial_flush_count: usize,
     deferred_board_action_count: usize,
     rx_pending: bool,
+    service_poll_time_advance_us: u64,
 }
 
 impl BoardIo for SensorStageBoard {
@@ -61,6 +62,9 @@ impl BoardIo for SensorStageBoard {
     ) {
         sensors.clear();
         self.update_count += 1;
+        self.current_time_us = self
+            .current_time_us
+            .saturating_add(self.service_poll_time_advance_us);
         if let Some(rc) = self.rc.take() {
             sensors.rc = Some(Ok(rc));
         }
@@ -104,6 +108,8 @@ impl BoardIo for SensorStageBoard {
 #[derive(Default)]
 struct SensorStageCommLink {
     baro_count: usize,
+    imu_count: usize,
+    mag_count: usize,
 }
 
 impl CommInterface<SensorStageBoard> for SensorStageCommLink {
@@ -188,6 +194,7 @@ impl CommInterface<SensorStageBoard> for SensorStageCommLink {
         _system_id: u8,
         _msg: crate::comm::messages::messages::SmallImuMsg,
     ) {
+        self.imu_count += 1;
     }
 
     fn send_mag(
@@ -196,6 +203,7 @@ impl CommInterface<SensorStageBoard> for SensorStageCommLink {
         _system_id: u8,
         _msg: crate::comm::messages::messages::SmallMagMsg,
     ) {
+        self.mag_count += 1;
     }
 
     fn send_rc_raw(
@@ -621,6 +629,7 @@ fn world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture() {
         serial_flush_count: 0,
         deferred_board_action_count: 0,
         rx_pending: false,
+        service_poll_time_advance_us: 0,
     };
     let state = StateManager::new();
     let mixer = quadrotor::mixer::<f64>(&params);
@@ -780,6 +789,125 @@ fn prioritized_service_runs_service_sensors_comm_telemetry_and_board_service() {
     assert_eq!(world.board.serial_flush_count, 1);
     assert_eq!(world.board.deferred_board_action_count, 1);
     assert_eq!(world.comm.comm_link().baro_count, 1);
+}
+
+#[test]
+fn prioritized_service_sends_telemetry_before_variable_service_work_closes_slack() {
+    let params = Params::new();
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard {
+            current_time_us: 10_000,
+            service_poll_time_advance_us: 300,
+            ..Default::default()
+        },
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
+    world.last_control_update_us = 10_000;
+    world.control_imu_accumulator.push(ImuPacket {
+        header: RosflightPacketHeader {
+            timestamp: 9_999,
+            status: 0,
+        },
+        accel: [0.0, 0.0, -9.80665],
+        gyro: [0.0; 3],
+        temperature: 294.15,
+        seq: 1,
+    });
+    world.processed_sensors.baro = Some(crate::packets::BaroPacket {
+        header: RosflightPacketHeader {
+            timestamp: 9_999,
+            status: 0,
+        },
+        altitude: 42.0,
+        pressure: 90_000.0,
+        temperature: 294.15,
+    });
+
+    let report =
+        world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 1));
+
+    assert!(report.telemetry_due);
+    assert_eq!(world.comm.comm_link().baro_count, 1);
+    assert_eq!(world.board.update_count, 1);
+    assert!(!world.realtime_service_has_control_slack(world.board.current_time_us));
+}
+
+#[test]
+fn slack_driven_service_sends_all_due_streams_without_a_stream_count_limit() {
+    let params = Params::new();
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard {
+            current_time_us: 1_100_000,
+            ..Default::default()
+        },
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+    world.processed_sensors.imu = Some(ImuPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_099_000,
+            status: 0,
+        },
+        accel: [0.0, 0.0, -9.80665],
+        gyro: [0.0; 3],
+        temperature: 294.15,
+        seq: 1,
+    });
+    world.processed_sensors.baro = Some(crate::packets::BaroPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_098_000,
+            status: 0,
+        },
+        altitude: 42.0,
+        pressure: 90_000.0,
+        temperature: 294.15,
+    });
+    world.processed_sensors.mag = Some(crate::packets::MagPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_097_000,
+            status: 0,
+        },
+        flux: [1.0, 2.0, 3.0],
+        temperature: 294.15,
+    });
+
+    let report =
+        world.run_prioritized_service_step(RealtimeServicePolicy::continuous_slack_driven());
+
+    assert!(report.telemetry_due);
+    assert_eq!(world.comm.comm_link().imu_count, 1);
+    assert_eq!(world.comm.comm_link().baro_count, 1);
+    assert_eq!(world.comm.comm_link().mag_count, 1);
 }
 
 #[test]
@@ -984,7 +1112,7 @@ fn fixed_control_rate_blocks_service_inside_control_deadline_guard() {
     world.last_control_update_us = 10_000;
     world.last_realtime_control_us = 10_200;
     world.next_realtime_service_us = 0;
-    world.processed_sensors.imu = Some(ImuPacket {
+    let pending_imu = ImuPacket {
         header: RosflightPacketHeader {
             timestamp: 10_000,
             status: 0,
@@ -993,7 +1121,9 @@ fn fixed_control_rate_blocks_service_inside_control_deadline_guard() {
         gyro: [0.0, 0.0, 0.0],
         temperature: 25.0,
         seq: 1,
-    });
+    };
+    world.processed_sensors.imu = Some(pending_imu);
+    world.control_imu_accumulator.push(pending_imu);
 
     assert_eq!(
         world.realtime_scheduler_step(),
@@ -1002,6 +1132,42 @@ fn fixed_control_rate_blocks_service_inside_control_deadline_guard() {
 
     world.board.current_time_us = 10_300;
     assert_eq!(world.realtime_scheduler_step(), RealtimeSchedulerStep::Idle);
+}
+
+#[test]
+fn fixed_control_rate_allows_service_inside_nominal_guard_without_accumulated_imu() {
+    let params = Params::new();
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard {
+            current_time_us: 10_300,
+            ..Default::default()
+        },
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
+    world.last_control_update_us = 10_000;
+
+    assert!(!world.control_imu_accumulator.has_samples());
+    assert!(world.realtime_service_has_control_slack(10_300));
+    assert_eq!(
+        world.realtime_scheduler_step(),
+        RealtimeSchedulerStep::Service
+    );
 }
 
 #[test]
@@ -1600,7 +1766,7 @@ fn world_applies_live_telemetry_parameter_without_resetting_other_rates() {
         .changes
         .push(crate::events::ParamChanged {
             id: ParamId::PARAM_TELEM_BARO_HZ,
-            old: ParamValue::Int(50),
+            old: ParamValue::Int(0),
             new: ParamValue::Int(25),
             param_id_bytes: crate::comm::str_to_fixed_bytes("TEL_BARO_HZ"),
         })
