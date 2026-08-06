@@ -21,8 +21,11 @@ echo "Step 2: Compiling Rust API documentation..."
 echo "-> Building host-native API docs (sim)..."
 cargo doc --no-deps -p sim
 
-echo "-> Building ARM-specific embedded API docs (core, stm_32, nucleo, pixracerpro)..."
-cargo doc --no-deps -p veloxity_core -p stm_32 -p nucleo -p pixracerpro --target thumbv7em-none-eabihf
+echo "-> Building Nucleo ARM API docs..."
+cargo doc --no-deps -p veloxity_core -p stm_32 -p nucleo --target thumbv7em-none-eabihf
+
+echo "-> Building Pixracer Pro ARM API docs..."
+cargo doc --no-deps -p veloxity_core -p stm_32 -p pixracerpro --target thumbv7em-none-eabihf
 
 # Ensure virtual environment and zensical are installed using uv
 if [ ! -d ".venv" ] || [ ! -f ".venv/bin/zensical" ]; then

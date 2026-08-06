@@ -12,16 +12,22 @@ pub const PWM_OUTPUT_CHANNELS: usize = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PwmOutputState {
-    enabled: bool,
+    enabled_mask: u32,
 }
 
 impl PwmOutputState {
     pub fn new(enabled: bool) -> Self {
-        Self { enabled }
+        Self {
+            enabled_mask: if enabled { u32::MAX } else { 0 },
+        }
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.enabled
+        self.enabled_mask != 0
+    }
+
+    pub fn enabled_mask(&self) -> u32 {
+        self.enabled_mask
     }
 }
 
@@ -33,6 +39,7 @@ where
     pub pwm: &'a mut P,
     pub output: &'a mut PwmOutputState,
     pub output_kill_active: bool,
+    pub channel_output_mask: i32,
 }
 
 pub fn sync_pwm_output_state<B, P, R>(ctx: PwmSyncCtx<'_, B, P>) -> Result<bool, PwmError>
@@ -41,19 +48,65 @@ where
     P: PwmDriver<R>,
     R: FlightFloat,
 {
-    let desired_enabled = !ctx.output_kill_active;
-    if desired_enabled == ctx.output.enabled {
+    let channel_count = ctx.pwm.len().min(u32::BITS as usize);
+    let available_mask = if channel_count == u32::BITS as usize {
+        u32::MAX
+    } else {
+        (1_u32 << channel_count) - 1
+    };
+    let desired_mask = if ctx.output_kill_active {
+        0
+    } else if ctx.channel_output_mask == -1 {
+        available_mask
+    } else if ctx.channel_output_mask >= 0 {
+        ctx.channel_output_mask as u32 & available_mask
+    } else {
+        0
+    };
+    let current_mask = ctx.output.enabled_mask & available_mask;
+
+    if desired_mask == current_mask {
+        ctx.output.enabled_mask = current_mask;
         return Ok(false);
     }
 
-    if desired_enabled {
+    if desired_mask == available_mask && current_mask == 0 {
         ctx.pwm.enable_all()?;
-    } else {
+        ctx.output.enabled_mask = desired_mask;
+        return Ok(true);
+    }
+
+    if desired_mask == 0 {
         ctx.pwm.disable_all();
+        ctx.pwm.flush(ctx.board);
+        ctx.output.enabled_mask = 0;
+        return Ok(true);
+    }
+
+    let mut applied_mask = current_mask;
+    let disable_mask = current_mask & !desired_mask;
+    for channel in 0..channel_count {
+        let bit = 1_u32 << channel;
+        if disable_mask & bit != 0 {
+            ctx.pwm.disable(channel)?;
+            applied_mask &= !bit;
+            ctx.output.enabled_mask = applied_mask;
+        }
+    }
+    if disable_mask != 0 {
         ctx.pwm.flush(ctx.board);
     }
 
-    ctx.output.enabled = desired_enabled;
+    let enable_mask = desired_mask & !current_mask;
+    for channel in 0..channel_count {
+        let bit = 1_u32 << channel;
+        if enable_mask & bit != 0 {
+            ctx.pwm.enable(channel)?;
+            applied_mask |= bit;
+            ctx.output.enabled_mask = applied_mask;
+        }
+    }
+
     Ok(true)
 }
 
@@ -227,7 +280,7 @@ mod tests {
     }
 
     struct TestPwm {
-        enabled: bool,
+        enabled_mask: u32,
         enable_all_count: usize,
         disable_all_count: usize,
         flush_count: usize,
@@ -237,7 +290,7 @@ mod tests {
     impl TestPwm {
         fn new(enabled: bool) -> Self {
             Self {
-                enabled,
+                enabled_mask: if enabled { 0b1111 } else { 0 },
                 enable_all_count: 0,
                 disable_all_count: 0,
                 flush_count: 0,
@@ -252,27 +305,27 @@ mod tests {
         }
 
         fn is_enabled(&self) -> bool {
-            self.enabled
+            self.enabled_mask == 0b1111
         }
 
-        fn enable(&mut self, _channel: usize) -> Result<(), PwmError> {
-            self.enabled = true;
+        fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
+            self.enabled_mask |= 1 << channel;
             Ok(())
         }
 
-        fn disable(&mut self, _channel: usize) -> Result<(), PwmError> {
-            self.enabled = false;
+        fn disable(&mut self, channel: usize) -> Result<(), PwmError> {
+            self.enabled_mask &= !(1 << channel);
             Ok(())
         }
 
         fn enable_all(&mut self) -> Result<(), PwmError> {
-            self.enabled = true;
+            self.enabled_mask = 0b1111;
             self.enable_all_count += 1;
             Ok(())
         }
 
         fn disable_all(&mut self) {
-            self.enabled = false;
+            self.enabled_mask = 0;
             self.disable_all_count += 1;
         }
 
@@ -310,6 +363,7 @@ mod tests {
                 pwm: &mut pwm,
                 output: &mut output,
                 output_kill_active: false,
+                channel_output_mask: -1,
             })
             .unwrap()
         );
@@ -326,6 +380,7 @@ mod tests {
                 pwm: &mut pwm,
                 output: &mut output,
                 output_kill_active: false,
+                channel_output_mask: -1,
             })
             .unwrap()
         );
@@ -338,6 +393,7 @@ mod tests {
                 pwm: &mut pwm,
                 output: &mut output,
                 output_kill_active: false,
+                channel_output_mask: -1,
             })
             .unwrap()
         );
@@ -351,12 +407,48 @@ mod tests {
                 pwm: &mut pwm,
                 output: &mut output,
                 output_kill_active: false,
+                channel_output_mask: -1,
             })
             .unwrap()
         );
         assert!(output.is_enabled());
         assert_eq!(pwm.disable_all_count, 0);
         assert_eq!(pwm.flush_count, 0);
+    }
+
+    #[test]
+    fn pwm_output_state_physically_applies_channel_mask() {
+        let mut board = TestBoard { now_us: 0 };
+        let mut pwm = TestPwm::new(false);
+        let mut output = PwmOutputState::new(false);
+
+        assert!(
+            sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                output_kill_active: false,
+                channel_output_mask: 0b0011,
+            })
+            .unwrap()
+        );
+        assert_eq!(pwm.enabled_mask, 0b0011);
+        assert_eq!(output.enabled_mask(), 0b0011);
+        assert_eq!(pwm.enable_all_count, 0);
+
+        assert!(
+            sync_pwm_output_state(PwmSyncCtx {
+                board: &mut board,
+                pwm: &mut pwm,
+                output: &mut output,
+                output_kill_active: false,
+                channel_output_mask: 0b0101,
+            })
+            .unwrap()
+        );
+        assert_eq!(pwm.enabled_mask, 0b0101);
+        assert_eq!(output.enabled_mask(), 0b0101);
+        assert_eq!(pwm.flush_count, 1);
     }
 
     #[test]
@@ -377,6 +469,7 @@ mod tests {
                 pwm: &mut pwm,
                 output: &mut output,
                 output_kill_active: false,
+                channel_output_mask: -1,
             })
             .unwrap()
         );
@@ -388,6 +481,7 @@ mod tests {
                 pwm: &mut pwm,
                 output: &mut output,
                 output_kill_active: true,
+                channel_output_mask: -1,
             })
             .unwrap()
         );
@@ -401,6 +495,7 @@ mod tests {
                 pwm: &mut pwm,
                 output: &mut output,
                 output_kill_active: false,
+                channel_output_mask: -1,
             })
             .unwrap()
         );
@@ -557,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_pwm_outputs_default_channel_mask_enables_all_types() {
+    fn compose_pwm_outputs_default_channel_mask_enables_first_four_channels() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_GYRO_X_BIAS, ParamValue::Float(0.1));
         let mut state = StateManager::new();

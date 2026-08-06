@@ -208,6 +208,8 @@ pub fn clock_config(mhz: u32) -> Config {
             source: PllSource::HSE,   // 50MHz
             prediv: hsi_prediv,       // 50MHz OSC / 25 = 2 MHz
             mul: PllMul::MUL400,      // 800 MHz
+            #[cfg(feature = "mcu-h743ii")]
+            fracn: None,
             divp: Some(PllDiv::DIV2), // 400 MHz for System Clock
             divq: Some(PllDiv::DIV8), // 100 MHz for SDMMC
             divr: Some(PllDiv::DIV2), // 400 MHz (not used)
@@ -217,6 +219,8 @@ pub fn clock_config(mhz: u32) -> Config {
             source: PllSource::HSE,    // 50MHz
             prediv: hsi_prediv,        // 50MHz OSC / 25 = 2 MHz
             mul: PllMul::MUL240,       // 480 MHz
+            #[cfg(feature = "mcu-h743ii")]
+            fracn: None,
             divp: Some(PllDiv::DIV30), // 16 MHz for SPI 1,2,3
             divq: Some(PllDiv::DIV30), // 16 MHz for SPI 4,5, and FDCAN
             divr: Some(PllDiv::DIV5),  // 96 MHz (not used)
@@ -226,6 +230,8 @@ pub fn clock_config(mhz: u32) -> Config {
             source: PllSource::HSE,    // 50MHz
             prediv: hsi_prediv,        // 50MHz OSC / 25 = 2 MHz
             mul: PllMul::MUL480,       // 960 MHz
+            #[cfg(feature = "mcu-h743ii")]
+            fracn: None,
             divp: Some(PllDiv::DIV48), // 20 MHz (not used)
             divq: Some(PllDiv::DIV20), // 48 MHz for USB
             divr: Some(PllDiv::DIV15), // 64 MHz for ADC

@@ -110,15 +110,16 @@ fn flash_args(board: &str, target: &str, options: &[String]) -> Result<Vec<Strin
     }
 
     // The flight firmware baseline is optimized and contains no diagnostic or
-    // alternate-transport features. With no feature selected, Pixracer Pro's
-    // MAVLink transport is the companion-computer UART.
+    // alternate-transport features. With no optional feature selected, Pixracer
+    // Pro's MAVLink transport is the companion-computer UART. The required MCU
+    // feature is added explicitly below because defaults are disabled here.
     args.extend(["--release".to_owned(), "--no-default-features".to_owned()]);
     // Pixracer flashing is completed below with `probe-rs download` followed
     // by a detached reset. `cargo run` would invoke the configured probe-rs
     // runner and leave a live debug session attached to the flight controller.
     args[0] = "build".to_owned();
 
-    let mut features = Vec::new();
+    let mut features = vec!["mcu-h743ii"];
     for option in options {
         let feature = match option.as_str() {
             "--vcp" => "usb-vcp-serial",
@@ -138,10 +139,8 @@ fn flash_args(board: &str, target: &str, options: &[String]) -> Result<Vec<Strin
         }
     }
 
-    if !features.is_empty() {
-        args.push("--features".to_owned());
-        args.push(features.join(","));
-    }
+    args.push("--features".to_owned());
+    args.push(features.join(","));
 
     Ok(args)
 }
@@ -154,6 +153,10 @@ fn flash_pixracerpro_detached(target: &str) -> Result<(), u8> {
             "download",
             "--chip",
             "STM32H743IIKx",
+            "--protocol",
+            "swd",
+            "--speed",
+            "4000",
             "--verify",
             elf.as_str(),
         ],
@@ -305,13 +308,13 @@ mod tests {
     const TARGET: &str = "thumbv7em-none-eabihf";
 
     #[test]
-    fn pixracerpro_flash_defaults_to_release_without_features() {
+    fn pixracerpro_flash_keeps_required_mcu_feature() {
         let args = flash_args("pixracerpro", TARGET, &[]).unwrap();
 
         assert!(args.iter().any(|arg| arg == "--release"));
         assert_eq!(args.first().map(String::as_str), Some("build"));
         assert!(args.iter().any(|arg| arg == "--no-default-features"));
-        assert!(!args.iter().any(|arg| arg == "--features"));
+        assert_eq!(args.last().map(String::as_str), Some("mcu-h743ii"));
     }
 
     #[test]
@@ -326,7 +329,7 @@ mod tests {
 
         assert_eq!(
             args.last().unwrap(),
-            "usb-vcp-serial,scope-timing-pins,sensor-poll-diagnostics,runtime-diagnostics"
+            "mcu-h743ii,usb-vcp-serial,scope-timing-pins,sensor-poll-diagnostics,runtime-diagnostics"
         );
     }
 

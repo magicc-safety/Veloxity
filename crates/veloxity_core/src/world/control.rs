@@ -154,22 +154,24 @@ where
     }
 
     pub fn run_pwm_output_stage(&mut self) -> bool {
-        let channel_outputs_disabled = matches!(
-            self.params
-                .get_by_id(crate::params::ParamId::PARAM_CHANNEL_OUTPUT_MASK),
-            crate::params::ParamValue::Int(0)
-        );
+        let channel_output_mask = match self
+            .params
+            .get_by_id(crate::params::ParamId::PARAM_CHANNEL_OUTPUT_MASK)
+        {
+            crate::params::ParamValue::Int(value) => value,
+            _ => 0,
+        };
+        let output_kill_active = self.rc.switch_mapped(crate::rc::Switch::OutputKill)
+            && self.rc.switch_on(crate::rc::Switch::OutputKill);
         sync_pwm_output_state(PwmSyncCtx {
             board: &mut self.board,
             pwm: &mut self.pwm,
             output: &mut self.pwm_output,
-            output_kill_active: channel_outputs_disabled
-                || (self.rc.switch_mapped(crate::rc::Switch::OutputKill)
-                    && self.rc.switch_on(crate::rc::Switch::OutputKill)),
+            output_kill_active,
+            channel_output_mask,
         })
         .unwrap_or(false)
     }
-
     pub fn run_control_stages_if_new_imu(&mut self) -> bool {
         self.run_control_and_mixing_stage_if_new_imu()
     }

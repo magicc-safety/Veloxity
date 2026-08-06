@@ -397,7 +397,7 @@ declare_params! {
     // Physical output-channel allow mask. Bit N controls channel N regardless
     // of whether the mixer labels it as a motor, servo, GPIO, or auxiliary
     // output. Zero is also a global hardware-output inhibit.
-    PARAM_CHANNEL_OUTPUT_MASK, "CHN_OUTPUT_MASK", Int(-1);
+    PARAM_CHANNEL_OUTPUT_MASK, "CHN_OUTPUT_MASK", Int(0x0f);
     PARAM_INIT_TIME, "FILT_INIT_T", Int(3000);
     PARAM_FILTER_KP_ACC, "FILT_ACC_KP", Float(0.5);
     PARAM_FILTER_KI, "FILT_KI", Float(0.01);
@@ -565,7 +565,7 @@ mod tests {
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK),
-            ParamValue::Int(-1)
+            ParamValue::Int(0x0f)
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL),

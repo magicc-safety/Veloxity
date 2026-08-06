@@ -39,7 +39,9 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = []
+default = ["mcu-h743ii"]
+mcu-h743ii = ["stm_32/pixracerpro-h743ii"]
+mcu-h753zi = ["stm_32/nucleo-h753zi"]
 scope-timing-pins = ["veloxity_core/scope-timing-pins"]
 sensor-poll-diagnostics = []
 runtime-diagnostics = ["veloxity_core/runtime-diagnostics", "stm_32/runtime-diagnostics"]

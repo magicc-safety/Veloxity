@@ -41,6 +41,8 @@ edition = "2024"
 [features]
 default = []
 runtime-diagnostics = []
+nucleo-h753zi = ["embassy-stm32/stm32h753zi"]
+pixracerpro-h743ii = ["embassy-stm32/stm32h743ii"]
 
 [dependencies]
 veloxity_core = { workspace = true }
@@ -55,7 +57,6 @@ embedded-hal-async = { version = "1.0" }
 embedded-io-async = { version = "0.7.0" }
 embedded-hal-nb = { version = "1.0.0" }
 embassy-stm32 = { version = "0.6.0", features = [
-  "stm32h753zi",
   "time-driver-tim5",
   "exti",
   "unstable-pac",

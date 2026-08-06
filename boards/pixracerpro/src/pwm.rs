@@ -38,7 +38,7 @@ use veloxity_core::board::BoardIo;
 use veloxity_core::mixer::MixerOutputType;
 use veloxity_core::pwm::{PwmDriver, PwmError, PwmOutputProtocol};
 
-const NUM_HW_CHANNELS: usize = 4;
+const NUM_HW_CHANNELS: usize = 8;
 
 pub struct BoardPwmDriver<'a> {
     servos: &'a mut PixRacerProServoMonstrosity,

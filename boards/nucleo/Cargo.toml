@@ -38,6 +38,11 @@ name = "nucleo"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["mcu-h753zi"]
+mcu-h743ii = ["stm_32/pixracerpro-h743ii"]
+mcu-h753zi = ["stm_32/nucleo-h753zi"]
+
 [dependencies]
 stm_32 = { workspace = true }
 veloxity_core = { workspace = true }

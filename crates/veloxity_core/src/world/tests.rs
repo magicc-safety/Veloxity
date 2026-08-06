@@ -14,7 +14,7 @@ use crate::{
     estimator::AttitudeEstimate,
     packets::{ImuPacket, RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
     params::{ParamId, ParamValue},
-    pwm::{PwmDriver, PwmError},
+    pwm::{PwmDriver, PwmError, output_sync::PWM_OUTPUT_CHANNELS},
     state_machine::ErrorFlag,
     test_support::{RecordingCommLink, TestBoard},
     vehicle::quadrotor,
@@ -279,7 +279,7 @@ impl CommInterface<SensorStageBoard> for SensorStageCommLink {
 }
 
 pub struct TestPwm {
-    enabled: bool,
+    enabled_mask: u32,
     enable_all_count: usize,
     disable_all_count: usize,
     flush_count: usize,
@@ -294,7 +294,7 @@ pub struct TestPwm {
 impl TestPwm {
     fn new() -> Self {
         Self {
-            enabled: false,
+            enabled_mask: 0,
             enable_all_count: 0,
             disable_all_count: 0,
             flush_count: 0,
@@ -310,31 +310,31 @@ impl TestPwm {
 
 impl PwmDriver<f64> for TestPwm {
     fn len(&self) -> usize {
-        0
+        PWM_OUTPUT_CHANNELS
     }
 
     fn is_enabled(&self) -> bool {
-        self.enabled
+        self.enabled_mask == (1_u32 << PWM_OUTPUT_CHANNELS) - 1
     }
 
-    fn enable(&mut self, _channel: usize) -> Result<(), PwmError> {
-        self.enabled = true;
+    fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
+        self.enabled_mask |= 1_u32 << channel;
         Ok(())
     }
 
-    fn disable(&mut self, _channel: usize) -> Result<(), PwmError> {
-        self.enabled = false;
+    fn disable(&mut self, channel: usize) -> Result<(), PwmError> {
+        self.enabled_mask &= !(1_u32 << channel);
         Ok(())
     }
 
     fn enable_all(&mut self) -> Result<(), PwmError> {
-        self.enabled = true;
+        self.enabled_mask = (1_u32 << PWM_OUTPUT_CHANNELS) - 1;
         self.enable_all_count += 1;
         Ok(())
     }
 
     fn disable_all(&mut self) {
-        self.enabled = false;
+        self.enabled_mask = 0;
         self.disable_all_count += 1;
     }
 
@@ -2156,6 +2156,16 @@ fn world_sends_calibration_ack_when_calibration_starts() {
         ack.success,
         RosflightCmdResponse::RosflightCmdSuccess
     ));
+}
+
+#[test]
+fn world_default_channel_output_mask_physically_enables_only_first_four_channels() {
+    let mut world = test_world_with_params(Params::new());
+
+    assert!(world.run_pwm_output_stage());
+    assert_eq!(world.pwm.enabled_mask, 0x0f);
+    assert_eq!(world.pwm_output.enabled_mask(), 0x0f);
+    assert_eq!(world.pwm.enable_all_count, 0);
 }
 
 #[test]

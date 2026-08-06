@@ -244,7 +244,7 @@ mod tests {
         );
         assert_eq!(
             decoded.get_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK),
-            ParamValue::Int(-1)
+            ParamValue::Int(0x0f)
         );
         assert_eq!(
             decoded.get_by_id(ParamId::PARAM_ALLOW_UNHEALTHY_ESTIMATOR),

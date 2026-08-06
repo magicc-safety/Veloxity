@@ -842,8 +842,9 @@ impl Board {
         spawn_task(&spawner4, peripherals::telem::task_tx(telem3_tx));
         spawn_task(&spawner4, peripherals::sd_card::task(usd_card));
 
-        // Only the four TIM1 motor outputs are mapped. PA15 is the Pixracer Pro
-        // buzzer PWM pin, and TIM4 aux outputs are intentionally left unmapped.
+        // Match the ROSflight C logical-to-physical PWM mapping from the
+        // Pixracer Pro BoardConfig.h: PWM1-4 use TIM1 CH4-CH1, PWM5-6 use
+        // TIM4 CH2-CH3, and PWM7-8 use TIM8 CH1-CH2.
         let tim1_ch1_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PE9, OutputType::PushPull);
         let tim1_ch2_pin =
             PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PE11, OutputType::PushPull);
@@ -851,6 +852,12 @@ impl Board {
             PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PE13, OutputType::PushPull);
         let tim1_ch4_pin =
             PwmPin::<_, embassy_stm32::timer::Ch4>::new(p.PE14, OutputType::PushPull);
+        let tim4_ch2_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PD13, OutputType::PushPull);
+        let tim4_ch3_pin =
+            PwmPin::<_, embassy_stm32::timer::Ch3>::new(p.PD14, OutputType::PushPull);
+        let tim8_ch1_pin = PwmPin::<_, embassy_stm32::timer::Ch1>::new(p.PI5, OutputType::PushPull);
+        let tim8_ch2_pin = PwmPin::<_, embassy_stm32::timer::Ch2>::new(p.PI6, OutputType::PushPull);
 
         let timer1 = SimplePwm::new(
             p.TIM1,
@@ -864,16 +871,16 @@ impl Board {
         let timer4 = SimplePwm::new(
             p.TIM4,
             None,
-            None,
-            None,
+            Some(tim4_ch2_pin),
+            Some(tim4_ch3_pin),
             None,
             Hertz::hz(400),
             Default::default(),
         );
-        let timer2 = SimplePwm::new(
-            p.TIM2,
-            None,
-            None,
+        let timer8 = SimplePwm::new(
+            p.TIM8,
+            Some(tim8_ch1_pin),
+            Some(tim8_ch2_pin),
             None,
             None,
             Hertz::hz(400),
@@ -882,20 +889,21 @@ impl Board {
 
         let timer1 = peripherals::pwm::TimerEnum::TIM1(timer1);
         let timer4 = peripherals::pwm::TimerEnum::TIM4(timer4);
-        let timer2 = peripherals::pwm::TimerEnum::TIM2(timer2);
+        let timer8 = peripherals::pwm::TimerEnum::TIM8(timer8);
 
-        let timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer2, timer4];
+        let timers: [peripherals::pwm::TimerEnum; 3] = [timer1, timer4, timer8];
 
         let servos = peripherals::pwm::PixRacerProServoMonstrosity::with_timer_kinds_and_dma(
             timers,
             [
-                (0, peripherals::pwm::TimerChannel::Ch1), // TIM1, channels 1-4
-                (0, peripherals::pwm::TimerChannel::Ch2), // -
-                (0, peripherals::pwm::TimerChannel::Ch3), // -
-                (0, peripherals::pwm::TimerChannel::Ch4), // -
-                (1, peripherals::pwm::TimerChannel::Ch1), // TIM2, channel 1
-                (2, peripherals::pwm::TimerChannel::Ch2), // TIM4, channels 2 and 3
-                (2, peripherals::pwm::TimerChannel::Ch3), // -
+                (0, peripherals::pwm::TimerChannel::Ch4), // PWM1: TIM1 CH4, PE14
+                (0, peripherals::pwm::TimerChannel::Ch3), // PWM2: TIM1 CH3, PE13
+                (0, peripherals::pwm::TimerChannel::Ch2), // PWM3: TIM1 CH2, PE11
+                (0, peripherals::pwm::TimerChannel::Ch1), // PWM4: TIM1 CH1, PE9
+                (1, peripherals::pwm::TimerChannel::Ch2), // PWM5: TIM4 CH2, PD13
+                (1, peripherals::pwm::TimerChannel::Ch3), // PWM6: TIM4 CH3, PD14
+                (2, peripherals::pwm::TimerChannel::Ch1), // PWM7: TIM8 CH1, PI5
+                (2, peripherals::pwm::TimerChannel::Ch2), // PWM8: TIM8 CH2, PI6
             ],
             [
                 peripherals::pwm::PwmTimerBlockKind::StandardOnly,
