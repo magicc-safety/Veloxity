@@ -490,7 +490,7 @@ declare_params! {
     PARAM_TELEM_OUTPUT_RAW_HZ, "TEL_OUT_HZ", Int(50);
     PARAM_TELEM_DIFF_PRESSURE_HZ, "TEL_DIFF_HZ", Int(100);
     PARAM_TELEM_BARO_HZ, "TEL_BARO_HZ", Int(50);
-    PARAM_TELEM_MAG_HZ, "TEL_MAG_HZ", Int(50);
+    PARAM_TELEM_MAG_HZ, "TEL_MAG_HZ", Int(100);
     PARAM_TELEM_RANGE_HZ, "TEL_RANGE_HZ", Int(50);
     PARAM_TELEM_BATTERY_HZ, "TEL_BATT_HZ", Int(200);
     PARAM_TELEM_GNSS_HZ, "TEL_GNSS_HZ", Int(10);
@@ -578,6 +578,10 @@ mod tests {
         assert_eq!(
             p.get_by_id(ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER),
             ParamValue::Float(1.0)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_TELEM_MAG_HZ),
+            ParamValue::Int(100)
         );
     }
 
