@@ -201,6 +201,12 @@ normal operation, reuse a known-good calibration only when the hardware, tempera
 and mounting remain trustworthy. Recalibrate after remounting, large temperature
 changes, suspicious bias, or maintenance—not necessarily after every reboot.
 
+The startup decision is latched to match C. If the firmware boots with all-zero biases,
+neither a live parameter-file load nor automatic/gyro-only calibration clears the error.
+A successful full accelerometer/IMU calibration clears it. Alternatively, save valid
+calibration values to the onboard SD image and reboot; startup then accepts those
+persisted values without entering the calibrating state.
+
 ## Fresh samples and telemetry rates
 
 Sensor telemetry freshness is keyed by each packet's acquisition timestamp. Core tracks

@@ -27,13 +27,13 @@ use crate::{
     pwm::output_sync::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
     rc::command_state::{RcCommandStateCtx, run_rc_command_state},
-    sensors::health::{SensorHealthCtx, update_imu_calibration_error, update_sensor_health},
+    sensors::health::{SensorHealthCtx, initialize_imu_calibration_error, update_sensor_health},
     sensors::ingestion::{
         SensorIngestionCtx, SensorProcessorSet, process_imu_sensor, process_sensor_bus,
     },
     sensors::processors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
-    state_machine::{Event, StateManager},
+    state_machine::{ErrorFlag, Event, StateManager},
 };
 
 const IMU_TIMEOUT_US: u64 = 100_000;
@@ -308,7 +308,7 @@ where
         // Match ROSflight C's Sensors::init_imu(): establish the calibration
         // interlock from persisted parameters before the first IMU sample or
         // arming request can be processed.
-        update_imu_calibration_error(&mut state, &params);
+        initialize_imu_calibration_error(&mut state, &params);
 
         let mut rc = Rc::new();
         rc.init(&params);

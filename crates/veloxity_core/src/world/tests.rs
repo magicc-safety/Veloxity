@@ -2045,7 +2045,7 @@ fn world_sensor_health_sets_uncalibrated_imu_when_all_bias_params_are_zero() {
 }
 
 #[test]
-fn world_sensor_health_clears_uncalibrated_imu_when_any_bias_param_is_nonzero() {
+fn world_sensor_health_keeps_uncalibrated_imu_latched_after_live_bias_change() {
     let mut world = test_world();
     world.state.update(
         crate::state_machine::Event::ERROR_OCCURRED(
@@ -2069,6 +2069,67 @@ fn world_sensor_health_clears_uncalibrated_imu_when_any_bias_param_is_nonzero() 
 
     world.update_sensor_health_and_calibration(world.board.clock_micros());
 
+    assert!(
+        world
+            .state
+            .get_errors()
+            .contains(crate::state_machine::ErrorFlag::UNCALIBRATED_IMU)
+    );
+}
+
+#[test]
+fn world_gyro_only_calibration_does_not_clear_latched_imu_error() {
+    let mut world = test_world();
+    world.cal_flags.insert(CalibrationFlags::GYRO);
+
+    for seq in 0..=1000 {
+        world.raw_sensors.imu = Some(Ok(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: u64::from(seq) + 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.02, -0.01, 0.03],
+            temperature: 298.15,
+            seq,
+        }));
+        world.process_imu_sensor_after_update();
+    }
+
+    assert!(!world.cal_flags.contains(CalibrationFlags::GYRO));
+    assert!(
+        world
+            .state
+            .get_errors()
+            .contains(crate::state_machine::ErrorFlag::UNCALIBRATED_IMU)
+    );
+}
+
+#[test]
+fn world_successful_full_imu_calibration_clears_latched_error() {
+    let mut world = test_world();
+    world.cal_flags.insert(CalibrationFlags::IMU);
+
+    for seq in 0..=1000 {
+        world.raw_sensors.imu = Some(Ok(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: u64::from(seq) + 1,
+                status: 0,
+            },
+            accel: [0.1, -0.2, -9.50665],
+            gyro: [0.02, -0.01, 0.03],
+            temperature: 298.15,
+            seq,
+        }));
+        world.process_imu_sensor_after_update();
+    }
+
+    assert!(!world.cal_flags.intersects(CalibrationFlags::IMU));
+    assert!(
+        !world
+            .cal_flags
+            .intersects(CalibrationFlags::GYRO_FAILED | CalibrationFlags::ACCEL_FAILED)
+    );
     assert!(
         !world
             .state

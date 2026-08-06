@@ -605,6 +605,11 @@ where
             && !self.cal_flags.contains(CalibrationFlags::ACCEL)
             && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
         {
+            // Match ROSflight C: only a successful full accelerometer/IMU
+            // calibration clears an uncalibrated error that was latched at
+            // startup. Gyro-only calibration and live bias changes do not.
+            self.state
+                .set_error_flag(ErrorFlag::UNCALIBRATED_IMU, false, &self.params);
             self.estimator.reset();
             self.control_pipeline = ControlPipelineResource::default();
         }
@@ -658,6 +663,10 @@ where
             && !self.cal_flags.contains(CalibrationFlags::ACCEL)
             && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
         {
+            // See process_sensor_bus_after_update(): this is the high-rate
+            // IMU path for the same successful full-calibration transition.
+            self.state
+                .set_error_flag(ErrorFlag::UNCALIBRATED_IMU, false, &self.params);
             self.estimator.reset();
             self.control_pipeline = ControlPipelineResource::default();
         }
