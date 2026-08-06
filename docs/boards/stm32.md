@@ -93,6 +93,8 @@ This flashes an optimized release build with UART MAVLink transport and no optio
 Pixracer Pro diagnostic and USB options are documented in [Feature Flags](../features.md).
 Use the [BMI08x identity probe](../pixracerpro-bmi08x-id-probe.md) to distinguish the onboard
 BMI085 and BMI088 variants before selecting an accelerometer range configuration.
+For the external 3DR NEO-M9N/IST8308 module, see the
+[magnetometer orientation and validation guide](../pixracerpro-3dr-m9n-ist8308-orientation.md).
 
 ## Hardware And Peripheral Map
 
