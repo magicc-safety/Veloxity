@@ -49,6 +49,11 @@ stm_32 = { workspace = true }
 veloxity_core = { workspace = true }
 veloxity_mavlink = { workspace = true }
 heapless = { version = "0.8.0", default-features = false }
+embassy-executor = { version = "0.10.0", features = [
+  "platform-cortex-m",
+  "executor-thread",
+  "executor-interrupt",
+] }
 
 panic-halt = "1.0.0"
 

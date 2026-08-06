@@ -89,6 +89,7 @@ fn main() -> ! {
     let (mut board, mut servos) = board::Board::new();
     let mut params = Params::default();
     if !board.read_params(&mut params) {
+        veloxity_core::log_warn!("Unable to load parameters; using default values");
         params.set_defaults();
         let _ = board.write_params(&params);
     }

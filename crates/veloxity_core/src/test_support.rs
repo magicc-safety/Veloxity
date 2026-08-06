@@ -14,9 +14,16 @@ pub struct TestBoard {
     pub backup_clear_count: usize,
     pub led0_high: bool,
     pub led1_high: bool,
+    pub battery_configure_count: usize,
+    pub battery_multipliers: Option<(f32, f32)>,
 }
 
 impl BoardIo for TestBoard {
+    fn configure_battery_monitor(&mut self, voltage_multiplier: f32, current_multiplier: f32) {
+        self.battery_configure_count += 1;
+        self.battery_multipliers = Some((voltage_multiplier, current_multiplier));
+    }
+
     fn serial_rx_read(&mut self, _buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
         None
     }

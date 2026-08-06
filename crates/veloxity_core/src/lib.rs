@@ -1,4 +1,5 @@
 #![no_std]
+pub mod battery;
 pub mod board;
 pub mod comm;
 pub mod command;

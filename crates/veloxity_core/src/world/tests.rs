@@ -387,6 +387,46 @@ fn test_world() -> TestWorld {
     test_world_with_params(Params::new())
 }
 
+#[test]
+fn world_configures_battery_monitor_from_persisted_params_at_init() {
+    let mut params = Params::new();
+    params.set_by_id(
+        ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER,
+        ParamValue::Float(7.675),
+    );
+    params.set_by_id(
+        ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER,
+        ParamValue::Float(0.0),
+    );
+
+    let world = test_world_with_params(params);
+
+    assert_eq!(world.board.battery_configure_count, 1);
+    assert_eq!(world.board.battery_multipliers, Some((7.675, 0.0)));
+}
+
+#[test]
+fn world_reconfigures_battery_monitor_after_live_param_change() {
+    let mut world = test_world();
+    param_service::set_param_and_emit_change(
+        &mut world.params,
+        &mut world.param_events.changes,
+        ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER,
+        ParamValue::Float(8.25),
+    );
+    param_service::set_param_and_emit_change(
+        &mut world.params,
+        &mut world.param_events.changes,
+        ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER,
+        ParamValue::Float(51.0),
+    );
+
+    world.apply_param_reactions();
+
+    assert_eq!(world.board.battery_configure_count, 2);
+    assert_eq!(world.board.battery_multipliers, Some((8.25, 51.0)));
+}
+
 fn seed_healthy_rc(world: &mut TestWorld) {
     let mut channels = [0.5; RC_PACKET_CHANNELS];
     channels[2] = 0.0;

@@ -8,6 +8,9 @@ pub const ROSFLIGHT_C_PARAM_STORAGE_SIZE: usize = 7004;
 // This is the eight-digit hash compiled into current upstream C main
 // (a46527bd). C rejects parameter images from any other firmware hash.
 const ROSFLIGHT_C_VERSION: u32 = 0xA465_27BD;
+// Images written while Veloxity targeted the immediately preceding C commit
+// have the same parameter schema and can be migrated without losing values.
+const PREVIOUS_ROSFLIGHT_C_VERSION: u32 = 0xC3A2_33B8;
 const ROSFLIGHT_C_PARAM_COUNT: usize = 333;
 const ROSFLIGHT_C_PARAM_NAME_SIZE: usize = 16;
 const PARAM_STORAGE_VALUE_SIZE: usize = size_of::<u32>();
@@ -22,6 +25,13 @@ const PARAM_STORAGE_MAGIC_EF_OFFSET: usize =
     PARAM_STORAGE_TYPES_OFFSET + ROSFLIGHT_C_PARAM_COUNT * PARAM_STORAGE_TYPE_SIZE;
 const PARAM_STORAGE_CHECKSUM_OFFSET: usize = PARAM_STORAGE_MAGIC_EF_OFFSET + 1;
 const RUST_ONLY_PARAM_COUNT: usize = 16;
+const ROSFLIGHT_C_TAIL_ORDER: [ParamId; 5] = [
+    ParamId::PARAM_OFFBOARD_TIMEOUT,
+    ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER,
+    ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER,
+    ParamId::PARAM_BATTERY_VOLTAGE_ALPHA,
+    ParamId::PARAM_BATTERY_CURRENT_ALPHA,
+];
 
 const _: () = assert!(PARAMS_COUNT - RUST_ONLY_PARAM_COUNT == ROSFLIGHT_C_PARAM_COUNT);
 const _: () = assert!(PARAM_STORAGE_CHECKSUM_OFFSET < ROSFLIGHT_C_PARAM_STORAGE_SIZE);
@@ -56,10 +66,27 @@ fn rosflight_c_param_type(value: ParamValue) -> Option<u8> {
     }
 }
 
+fn is_rosflight_c_tail_param(id: ParamId) -> bool {
+    ROSFLIGHT_C_TAIL_ORDER.contains(&id)
+}
+
+/// Iterates parameters in the exact order of ROSflight C's `ParamId` enum.
+///
+/// Rust declares the battery parameters before `OFFBOARD_TIMEOUT`, matching
+/// C's default-initialization order but not its persisted enum layout. Keep
+/// the common prefix in declaration order and append the divergent C tail
+/// explicitly so names, types, and values occupy the IDs C uses at runtime.
 fn rosflight_c_params() -> impl Iterator<Item = &'static ParamDefinition> {
     PARAM_DEFINITIONS
         .iter()
-        .filter(|definition| is_rosflight_c_param(definition.id))
+        .filter(|definition| {
+            is_rosflight_c_param(definition.id) && !is_rosflight_c_tail_param(definition.id)
+        })
+        .chain(
+            ROSFLIGHT_C_TAIL_ORDER
+                .iter()
+                .map(|id| &PARAM_DEFINITIONS[*id as usize]),
+        )
 }
 
 fn rosflight_c_checksum(bytes: &[u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE]) -> u8 {
@@ -125,22 +152,13 @@ pub fn encode_rosflight_c_params(
     true
 }
 
-/// Decodes ROSflight 2.0's persisted `params_t` into the Rust parameter table.
-/// Rust-only parameters retain their defaults because they are absent on disk.
-pub fn decode_rosflight_c_params(bytes: &[u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE]) -> Option<Params> {
-    if u32::from_le_bytes(bytes[..4].try_into().ok()?) != ROSFLIGHT_C_VERSION
-        || usize::from(u16::from_le_bytes(bytes[4..6].try_into().ok()?))
-            != ROSFLIGHT_C_PARAM_STORAGE_SIZE
-        || bytes[6] != 0xBE
-        || bytes[PARAM_STORAGE_MAGIC_EF_OFFSET] != 0xEF
-        || bytes[PARAM_STORAGE_CHECKSUM_OFFSET] != rosflight_c_checksum(bytes)
-    {
-        return None;
-    }
-
+fn decode_rosflight_c_params_in_order(
+    bytes: &[u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE],
+    definitions: impl Iterator<Item = &'static ParamDefinition>,
+) -> Option<Params> {
     let mut params = Params::default();
     let mut count = 0;
-    for (index, definition) in rosflight_c_params().enumerate() {
+    for (index, definition) in definitions.enumerate() {
         count += 1;
         let name_offset = PARAM_STORAGE_NAMES_OFFSET + index * ROSFLIGHT_C_PARAM_NAME_SIZE;
         let stored_name = &bytes[name_offset..name_offset + ROSFLIGHT_C_PARAM_NAME_SIZE];
@@ -170,9 +188,36 @@ pub fn decode_rosflight_c_params(bytes: &[u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE]) -
     (count == ROSFLIGHT_C_PARAM_COUNT).then_some(params)
 }
 
+/// Decodes ROSflight 2.0's persisted `params_t` into the Rust parameter table.
+/// Rust-only parameters retain their defaults because they are absent on disk.
+pub fn decode_rosflight_c_params(bytes: &[u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE]) -> Option<Params> {
+    let version = u32::from_le_bytes(bytes[..4].try_into().ok()?);
+    if !matches!(version, ROSFLIGHT_C_VERSION | PREVIOUS_ROSFLIGHT_C_VERSION)
+        || usize::from(u16::from_le_bytes(bytes[4..6].try_into().ok()?))
+            != ROSFLIGHT_C_PARAM_STORAGE_SIZE
+        || bytes[6] != 0xBE
+        || bytes[PARAM_STORAGE_MAGIC_EF_OFFSET] != 0xEF
+        || bytes[PARAM_STORAGE_CHECKSUM_OFFSET] != rosflight_c_checksum(bytes)
+    {
+        return None;
+    }
+
+    decode_rosflight_c_params_in_order(bytes, rosflight_c_params())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stored_name(bytes: &[u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE], index: usize) -> &str {
+        let offset = PARAM_STORAGE_NAMES_OFFSET + index * ROSFLIGHT_C_PARAM_NAME_SIZE;
+        let field = &bytes[offset..offset + ROSFLIGHT_C_PARAM_NAME_SIZE];
+        let length = field
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(field.len());
+        core::str::from_utf8(&field[..length]).unwrap()
+    }
 
     #[test]
     fn storage_format_round_trips_only_c_parameters() {
@@ -241,6 +286,57 @@ mod tests {
             b"BAUD_RATE\0"
         );
         assert_eq!(bytes[PARAM_STORAGE_TYPES_OFFSET], 0);
+    }
+
+    #[test]
+    fn storage_tail_matches_rosflight_c_param_ids() {
+        let mut bytes = [0; ROSFLIGHT_C_PARAM_STORAGE_SIZE];
+        assert!(encode_rosflight_c_params(&Params::default(), &mut bytes));
+
+        let expected = [
+            (328, "OFFBOARD_TIMEOUT", 0),
+            (329, "BATT_VOLT_MULT", 1),
+            (330, "BATT_CURR_MULT", 1),
+            (331, "BATT_VOLT_LPF", 1),
+            (332, "BATT_CURR_LPF", 1),
+        ];
+        for (index, name, param_type) in expected {
+            assert_eq!(stored_name(&bytes, index), name);
+            assert_eq!(bytes[PARAM_STORAGE_TYPES_OFFSET + index], param_type);
+        }
+    }
+
+    #[test]
+    fn storage_rejects_misordered_tail() {
+        let mut bytes = [0; ROSFLIGHT_C_PARAM_STORAGE_SIZE];
+        assert!(encode_rosflight_c_params(&Params::default(), &mut bytes));
+
+        let first = PARAM_STORAGE_NAMES_OFFSET + 328 * ROSFLIGHT_C_PARAM_NAME_SIZE;
+        let second = PARAM_STORAGE_NAMES_OFFSET + 329 * ROSFLIGHT_C_PARAM_NAME_SIZE;
+        let mut first_name = [0; ROSFLIGHT_C_PARAM_NAME_SIZE];
+        let mut second_name = [0; ROSFLIGHT_C_PARAM_NAME_SIZE];
+        first_name.copy_from_slice(&bytes[first..first + ROSFLIGHT_C_PARAM_NAME_SIZE]);
+        second_name.copy_from_slice(&bytes[second..second + ROSFLIGHT_C_PARAM_NAME_SIZE]);
+        bytes[first..first + ROSFLIGHT_C_PARAM_NAME_SIZE].copy_from_slice(&second_name);
+        bytes[second..second + ROSFLIGHT_C_PARAM_NAME_SIZE].copy_from_slice(&first_name);
+        bytes[PARAM_STORAGE_CHECKSUM_OFFSET] = rosflight_c_checksum(&bytes);
+
+        assert!(decode_rosflight_c_params(&bytes).is_none());
+    }
+
+    #[test]
+    fn storage_accepts_previous_c_hash_with_correct_layout() {
+        let mut previous = [0; ROSFLIGHT_C_PARAM_STORAGE_SIZE];
+        assert!(encode_rosflight_c_params(&Params::default(), &mut previous));
+        previous[..4].copy_from_slice(&PREVIOUS_ROSFLIGHT_C_VERSION.to_le_bytes());
+
+        let loaded = decode_rosflight_c_params(&previous)
+            .expect("previous C hash with unchanged schema must load");
+        let mut current = [0; ROSFLIGHT_C_PARAM_STORAGE_SIZE];
+        assert!(encode_rosflight_c_params(&loaded, &mut current));
+        assert_eq!(&current[..4], &ROSFLIGHT_C_VERSION.to_le_bytes());
+        assert_eq!(stored_name(&current, 328), "OFFBOARD_TIMEOUT");
+        assert_eq!(stored_name(&current, 329), "BATT_VOLT_MULT");
     }
 
     #[test]

@@ -200,6 +200,7 @@ impl BoardIo for Board {
         sensors.pitot = peripherals::ms4525::PITOT_SIGNAL.try_take();
         sensors.range = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.battery = crate::battery::BATTERY_SIGNAL.try_take();
         sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
         #[cfg(feature = "sensor-poll-diagnostics")]
         self.record_sbus_rc_drain(&sensors.rc);
@@ -243,6 +244,7 @@ impl BoardIo for Board {
         sensors.pitot = peripherals::ms4525::PITOT_SIGNAL.try_take();
         sensors.range = peripherals::llv3hp::RANGE_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
+        sensors.battery = crate::battery::BATTERY_SIGNAL.try_take();
         sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
         #[cfg(feature = "sensor-poll-diagnostics")]
         self.record_sbus_rc_drain(&sensors.rc);
@@ -276,6 +278,10 @@ impl BoardIo for Board {
                 return Some(Ok(0));
             }
         }
+    }
+
+    fn configure_battery_monitor(&mut self, voltage_multiplier: f32, current_multiplier: f32) {
+        crate::battery::configure_multipliers(voltage_multiplier, current_multiplier);
     }
     fn serial_tx_write(&mut self, bytes: &[u8]) -> Option<Result<usize, errors::TelemError>> {
         #[cfg(feature = "usb-vcp-serial")]
@@ -394,6 +400,9 @@ impl Board {
         let p: EMBASSY_Peripherals = embassy_stm32::init(clock_config(24));
 
         let start_time = embassy_time::Instant::now();
+
+        let battery_monitor =
+            crate::battery::PixracerBatteryMonitor::new(p.ADC1, p.ADC3, p.PA2, p.PA3);
 
         // SPI1 (ROSflight uses for internal ICM, unused here)
         let mut spi1_config: embassy_stm32::spi::Config = spi::Config::default();
@@ -608,8 +617,10 @@ impl Board {
             ),
             range_g: peripherals::bmi08x::GyroRange::Max500dps,
             sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
-            // Match ROSflight C's BMI088_ROTATION: diag(-1, -1, +1).
-            board_axis_signs: [-1.0, -1.0, 1.0],
+            // The Pixracer Pro IMU samples already use the board's physical
+            // axis directions. Aircraft mounting is handled separately by
+            // IMU_ROLL, IMU_PITCH, and IMU_YAW.
+            board_axis_signs: [1.0, 1.0, 1.0],
         };
 
         // Detect GPIO input.
@@ -642,6 +653,7 @@ impl Board {
         spawn_task(&spawner3, peripherals::pps::task(pps_sensor));
         spawn_task(&spawner3, peripherals::sbus::task(sbus_rx));
         spawn_task(&spawner3, peripherals::llv3hp::task(llv3hp_sensor));
+        spawn_task(&spawner3, crate::battery::task(battery_monitor));
 
         // P4 Priority for Tx Telemetry
         interrupt::SAI4.set_priority(Priority::P4);

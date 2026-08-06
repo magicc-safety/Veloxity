@@ -301,6 +301,16 @@ where
         let mut command = CommandManager::new();
         command.init(&params, &mut state);
 
+        let voltage_multiplier = match params.get_by_id(ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER) {
+            ParamValue::Float(value) => value,
+            _ => 0.0,
+        };
+        let current_multiplier = match params.get_by_id(ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER) {
+            ParamValue::Float(value) => value,
+            _ => 0.0,
+        };
+        board.configure_battery_monitor(voltage_multiplier, current_multiplier);
+
         let now_us = board.clock_micros();
         let mut comm = CommManager::new(comm_link, now_us);
         comm.configure_telemetry_from_params(&params);

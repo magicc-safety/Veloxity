@@ -262,6 +262,32 @@ where
     }
 
     pub(super) fn apply_param_reactions(&mut self) {
+        let battery_monitor_changed = self.param_events.full_refresh
+            || self.param_events.changes.iter().any(|change| {
+                matches!(
+                    change.id,
+                    ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER
+                        | ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER
+                )
+            });
+        if battery_monitor_changed {
+            let voltage_multiplier = match self
+                .params
+                .get_by_id(ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER)
+            {
+                ParamValue::Float(value) => value,
+                _ => 0.0,
+            };
+            let current_multiplier = match self
+                .params
+                .get_by_id(ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER)
+            {
+                ParamValue::Float(value) => value,
+                _ => 0.0,
+            };
+            self.board
+                .configure_battery_monitor(voltage_multiplier, current_multiplier);
+        }
         if self.param_events.full_refresh {
             self.comm.configure_telemetry_from_params(&self.params);
         } else {
