@@ -23,6 +23,15 @@ pub static VELOXITY_DIAG_SERVICE_PHASE_SUM_US: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "runtime-diagnostics")]
 #[unsafe(no_mangle)]
 pub static VELOXITY_DIAG_SERVICE_PHASE_MAX_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_ARMED_SERVICE_PHASE_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_ARMED_SERVICE_PHASE_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_ARMED_SERVICE_PHASE_MAX_US: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(feature = "runtime-diagnostics")]
 macro_rules! sensor_pipeline_counters {
@@ -139,6 +148,13 @@ where
                 .fetch_add(result.elapsed_after_control_us, Ordering::Relaxed);
             VELOXITY_DIAG_SERVICE_PHASE_MAX_US
                 .fetch_max(result.elapsed_after_control_us, Ordering::Relaxed);
+            if self.state.is_armed() {
+                VELOXITY_DIAG_ARMED_SERVICE_PHASE_COUNT.fetch_add(1, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_SERVICE_PHASE_SUM_US
+                    .fetch_add(result.elapsed_after_control_us, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_SERVICE_PHASE_MAX_US
+                    .fetch_max(result.elapsed_after_control_us, Ordering::Relaxed);
+            }
         }
         result
     }

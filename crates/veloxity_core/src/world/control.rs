@@ -18,6 +18,12 @@ diagnostic_counter!(VELOXITY_DIAG_IMU_TICK_SUM_US);
 #[cfg(feature = "runtime-diagnostics")]
 diagnostic_counter!(VELOXITY_DIAG_IMU_TICK_MAX_US);
 #[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_ARMED_IMU_TICK_COUNT);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_ARMED_IMU_TICK_SUM_US);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_ARMED_IMU_TICK_MAX_US);
+#[cfg(feature = "runtime-diagnostics")]
 diagnostic_counter!(VELOXITY_DIAG_POST_IMU_SERVICE_AVAILABLE);
 #[cfg(feature = "runtime-diagnostics")]
 diagnostic_counter!(VELOXITY_DIAG_POST_IMU_BLOCKED_PENDING_IMU);
@@ -114,6 +120,11 @@ where
             VELOXITY_DIAG_IMU_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
             VELOXITY_DIAG_IMU_TICK_SUM_US.fetch_add(elapsed_us, Ordering::Relaxed);
             VELOXITY_DIAG_IMU_TICK_MAX_US.fetch_max(elapsed_us, Ordering::Relaxed);
+            if self.state.is_armed() {
+                VELOXITY_DIAG_ARMED_IMU_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_IMU_TICK_SUM_US.fetch_add(elapsed_us, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_IMU_TICK_MAX_US.fetch_max(elapsed_us, Ordering::Relaxed);
+            }
 
             if self.imu_pending() {
                 VELOXITY_DIAG_POST_IMU_BLOCKED_PENDING_IMU.fetch_add(1, Ordering::Relaxed);

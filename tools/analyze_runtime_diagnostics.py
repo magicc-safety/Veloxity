@@ -46,6 +46,51 @@ def sensor_map(record: dict) -> dict[str, dict]:
     return {row["sensor"]: row for row in record["sensors"]}
 
 
+def print_scheduler_transport(values: dict[str, int]) -> None:
+    prefix = "VELOXITY_DIAG_"
+    armed_imu_count = values.get(f"{prefix}ARMED_IMU_TICK_COUNT")
+    armed_service_count = values.get(f"{prefix}ARMED_SERVICE_PHASE_COUNT")
+    if armed_imu_count is not None or armed_service_count is not None:
+        imu_sum = values.get(f"{prefix}ARMED_IMU_TICK_SUM_US", 0)
+        service_sum = values.get(f"{prefix}ARMED_SERVICE_PHASE_SUM_US", 0)
+        print("\nArmed scheduler headroom")
+        print(
+            f"  imu_ticks={armed_imu_count or 0} "
+            f"avg_us={imu_sum / armed_imu_count if armed_imu_count else 0.0:.1f} "
+            f"max_us={values.get(f'{prefix}ARMED_IMU_TICK_MAX_US', 0)}"
+        )
+        print(
+            f"  service_phases={armed_service_count or 0} "
+            f"avg_us={service_sum / armed_service_count if armed_service_count else 0.0:.1f} "
+            f"max_us={values.get(f'{prefix}ARMED_SERVICE_PHASE_MAX_US', 0)}"
+        )
+
+    requests = values.get(f"{prefix}TIMESYNC_REQUEST_RECEIVED")
+    if requests is not None:
+        print("\nTIMESYNC handling")
+        print(
+            f"  requests={requests} "
+            f"overwrites={values.get(f'{prefix}TIMESYNC_REQUEST_OVERWRITE', 0)} "
+            f"responses={values.get(f'{prefix}TIMESYNC_RESPONSE_SENT', 0)}"
+        )
+
+    rx_packets = values.get(f"{prefix}VCP_RX_USB_PACKETS")
+    if rx_packets is not None:
+        waits = values.get(f"{prefix}VCP_RX_WAIT_COUNT", 0)
+        wait_sum = values.get(f"{prefix}VCP_RX_WAIT_SUM_US", 0)
+        print("\nVCP receive path")
+        print(
+            f"  usb_packets={rx_packets} "
+            f"usb_bytes={values.get(f'{prefix}VCP_RX_USB_BYTES', 0)} "
+            f"pipe_min_free={values.get(f'{prefix}VCP_RX_PIPE_MIN_FREE', 0)}"
+        )
+        print(
+            f"  pipe_waits={waits} "
+            f"wait_avg_us={wait_sum / waits if waits else 0.0:.1f} "
+            f"wait_max_us={values.get(f'{prefix}VCP_RX_WAIT_MAX_US', 0)}"
+        )
+
+
 def summary(path: pathlib.Path, record: dict) -> None:
     print(f"{path}: {record['duration_seconds']:.3f} s, {record['captured_at_utc']}")
     columns = ("sensor", "publish_hz", "published", "signal_overwrites", "queue_full_waits", "queue_depth_max", "consumed", "processed_out", "unsent_overwrites", "telemetry_sent")
@@ -65,6 +110,7 @@ def summary(path: pathlib.Path, record: dict) -> None:
             f"drdy_misses={mag['drdy_misses']} "
             f"i2c_errors={mag['i2c_errors']}"
         )
+    print_scheduler_transport(record.get("observed", {}))
 
 
 def stats(paths: list[pathlib.Path]) -> None:

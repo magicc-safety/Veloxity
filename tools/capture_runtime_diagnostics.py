@@ -50,7 +50,13 @@ def snapshot(symbol_table: dict[str, int], probe: str, chip: str) -> dict[str, i
         output = command(
             probe, "read", "--chip", chip, "b32", hex(start), str(words)
         )
-        values = [int(value, 16) for value in re.findall(r"\b[0-9a-fA-F]{8}\b", output)]
+        values = [
+            int(value, 16)
+            for line in output.splitlines()
+            for value in re.findall(
+                r"\b[0-9a-fA-F]{8}\b", line.split(":", 1)[-1]
+            )
+        ]
         if len(values) != words:
             raise SystemExit(
                 f"expected {words} words at {start:#x}, received {len(values)}"
@@ -131,6 +137,51 @@ def sensor_rows(values: dict[str, int], seconds: float) -> list[dict[str, object
     return rows
 
 
+def print_scheduler_transport(values: dict[str, int]) -> None:
+    """Print optional counters added after the original sensor report format."""
+    armed_imu_count = values.get(f"{PREFIX}ARMED_IMU_TICK_COUNT")
+    armed_service_count = values.get(f"{PREFIX}ARMED_SERVICE_PHASE_COUNT")
+    if armed_imu_count is not None or armed_service_count is not None:
+        imu_sum = values.get(f"{PREFIX}ARMED_IMU_TICK_SUM_US", 0)
+        service_sum = values.get(f"{PREFIX}ARMED_SERVICE_PHASE_SUM_US", 0)
+        print("\nArmed scheduler headroom")
+        print(
+            f"  imu_ticks={armed_imu_count or 0} "
+            f"avg_us={imu_sum / armed_imu_count if armed_imu_count else 0.0:.1f} "
+            f"max_us={values.get(f'{PREFIX}ARMED_IMU_TICK_MAX_US', 0)}"
+        )
+        print(
+            f"  service_phases={armed_service_count or 0} "
+            f"avg_us={service_sum / armed_service_count if armed_service_count else 0.0:.1f} "
+            f"max_us={values.get(f'{PREFIX}ARMED_SERVICE_PHASE_MAX_US', 0)}"
+        )
+
+    requests = values.get(f"{PREFIX}TIMESYNC_REQUEST_RECEIVED")
+    if requests is not None:
+        print("\nTIMESYNC handling")
+        print(
+            f"  requests={requests} "
+            f"overwrites={values.get(f'{PREFIX}TIMESYNC_REQUEST_OVERWRITE', 0)} "
+            f"responses={values.get(f'{PREFIX}TIMESYNC_RESPONSE_SENT', 0)}"
+        )
+
+    rx_packets = values.get(f"{PREFIX}VCP_RX_USB_PACKETS")
+    if rx_packets is not None:
+        waits = values.get(f"{PREFIX}VCP_RX_WAIT_COUNT", 0)
+        wait_sum = values.get(f"{PREFIX}VCP_RX_WAIT_SUM_US", 0)
+        print("\nVCP receive path")
+        print(
+            f"  usb_packets={rx_packets} "
+            f"usb_bytes={values.get(f'{PREFIX}VCP_RX_USB_BYTES', 0)} "
+            f"pipe_min_free={values.get(f'{PREFIX}VCP_RX_PIPE_MIN_FREE', 0)}"
+        )
+        print(
+            f"  pipe_waits={waits} "
+            f"wait_avg_us={wait_sum / waits if waits else 0.0:.1f} "
+            f"wait_max_us={values.get(f'{PREFIX}VCP_RX_WAIT_MAX_US', 0)}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--duration", type=float, default=60.0)
@@ -142,8 +193,15 @@ def main() -> None:
     args = parser.parse_args()
 
     table = symbols(args.elf, args.nm)
-    print(f"Capturing {len(table)} counters for {args.duration:.1f} seconds...")
+    print(
+        f"Reading baseline for {len(table)} counters; measurement has not started...",
+        flush=True,
+    )
     before = snapshot(table, args.probe_rs, args.chip)
+    print(
+        f"Baseline complete; starting {args.duration:.1f}-second measurement now.",
+        flush=True,
+    )
     started = time.monotonic()
     time.sleep(args.duration)
     after = snapshot(table, args.probe_rs, args.chip)
@@ -171,6 +229,8 @@ def main() -> None:
             f"drdy_misses={mag['drdy_misses']} "
             f"i2c_errors={mag['i2c_errors']}"
         )
+
+    print_scheduler_transport(values)
 
     print("\nNonzero loss/error counters")
     loss_words = ("OVERWRITE", "REJECTED", "ERROR", "MISSING", "GAP", "PARTIAL")

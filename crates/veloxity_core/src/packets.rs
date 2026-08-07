@@ -46,6 +46,26 @@ pub struct RosflightPacketHeader {
     pub status: u16,
 }
 
+/// Match ROSflight C's GNSS validity timestamp: use the receiver's signed UTC
+/// fractional second relative to the latest PPS edge, or estimate measurement
+/// time as 22 ms before packet completion when PPS/time validity is unavailable.
+pub fn rosflight_c_gnss_timestamp(
+    pps_timestamp_us: u64,
+    completion_timestamp_us: u64,
+    utc_nanos: i32,
+    time_and_fix_valid: bool,
+) -> u64 {
+    if pps_timestamp_us != 0 && pps_timestamp_us < completion_timestamp_us && time_and_fix_valid {
+        if utc_nanos < 0 {
+            pps_timestamp_us.saturating_sub(u64::from(utc_nanos.unsigned_abs()) / 1_000)
+        } else {
+            pps_timestamp_us.saturating_add(utc_nanos as u64 / 1_000)
+        }
+    } else {
+        completion_timestamp_us.saturating_sub(22_000)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AdcPacket {
     pub header: RosflightPacketHeader,
@@ -188,6 +208,30 @@ impl Default for ParamPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn c_gnss_timestamp_adds_positive_fraction_to_pps() {
+        assert_eq!(
+            rosflight_c_gnss_timestamp(2_000_000, 2_915_000, 900_000_000, true),
+            2_900_000
+        );
+    }
+
+    #[test]
+    fn c_gnss_timestamp_subtracts_negative_fraction_from_pps() {
+        assert_eq!(
+            rosflight_c_gnss_timestamp(3_000_000, 3_015_000, -100_000_000, true),
+            2_900_000
+        );
+    }
+
+    #[test]
+    fn c_gnss_timestamp_falls_back_without_valid_pps_time() {
+        assert_eq!(
+            rosflight_c_gnss_timestamp(0, 3_015_000, 0, false),
+            2_993_000
+        );
+    }
 
     #[test]
     fn imu_packet_cast_preserves_values_across_flight_float_types() {

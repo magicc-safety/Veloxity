@@ -167,6 +167,36 @@ The report also prints every nonzero counter containing `OVERWRITE`, `REJECTED`,
 maxima such as IMU tick, service phase, telemetry drain, acquisition age, BMI088 sample
 time, battery ADC wall time, and VCP byte/packet throughput.
 
+### Armed scheduler and TIMESYNC diagnostics
+
+The original sensor pipeline report and saved fields remain unchanged. New diagnostic
+images add optional sections for armed-only timing, TIMESYNC handling, and VCP receive
+pressure. Older JSON captures do not contain these counters and remain valid inputs to
+all analyzer commands.
+
+- `ARMED_IMU_TICK_*` and `ARMED_SERVICE_PHASE_*` are subsets of the existing timing
+  counters, accumulated only while the state machine reports armed. Compare their
+  averages and maxima with the whole-run values to test whether arming changes headroom.
+- `TIMESYNC_REQUEST_RECEIVED`, `TIMESYNC_REQUEST_OVERWRITE`, and
+  `TIMESYNC_RESPONSE_SENT` show whether the single pending-request slot is keeping up.
+  Requests and responses should agree apart from a possible capture-boundary item;
+  an overwrite proves that thread-mode service did not consume one request before the
+  next arrived.
+- `VCP_RX_USB_*` counts host-to-board USB input. `VCP_RX_PIPE_MIN_FREE` is the lowest
+  remaining capacity in the 2048-byte receive pipe. `VCP_RX_WAIT_*` records packets
+  whose producer had to wait for the flight thread to make room.
+
+For an armed bench capture, remove the props and secure the aircraft. Start exactly one
+`rosflight_io`, begin the capture, wait for `Baseline complete`, and arm/disarm using
+the normal operator controls; the capture tool does not arm the vehicle. Avoid
+interpreting timing maxima that include an SWD snapshot boundary as natural worst cases.
+
+Host-side parameter snapshots are not persistent firmware writes. In particular,
+`sensor_param_snapshot.py save` reads the parameter table already synchronized into
+`rosflight_io` and writes a YAML file on the host, so it can succeed while armed. A live
+parameter set and the persistent `PARAM_WRITE` command are separate operations; the
+firmware rejects persistent parameter storage while armed.
+
 ## Flash normal release firmware
 
 Do not pass `--runtime-diagnostics`:

@@ -2,15 +2,11 @@
 
 use super::{PARAM_DEFINITIONS, PARAMS_COUNT, ParamDefinition, ParamId, ParamValue, Params};
 
+include!(concat!(env!("OUT_DIR"), "/veloxity_version.rs"));
+
 /// Byte size of ROSflight 2.0's ARM C++ `params_t`.
 pub const ROSFLIGHT_C_PARAM_STORAGE_SIZE: usize = 7004;
 
-// This is the eight-digit hash compiled into current upstream C main
-// (a46527bd). C rejects parameter images from any other firmware hash.
-const ROSFLIGHT_C_VERSION: u32 = 0xA465_27BD;
-// Images written while Veloxity targeted the immediately preceding C commit
-// have the same parameter schema and can be migrated without losing values.
-const PREVIOUS_ROSFLIGHT_C_VERSION: u32 = 0xC3A2_33B8;
 const ROSFLIGHT_C_PARAM_COUNT: usize = 333;
 const ROSFLIGHT_C_PARAM_NAME_SIZE: usize = 16;
 const PARAM_STORAGE_VALUE_SIZE: usize = size_of::<u32>();
@@ -117,7 +113,7 @@ pub fn encode_rosflight_c_params(
     bytes: &mut [u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE],
 ) -> bool {
     bytes.fill(0);
-    bytes[..4].copy_from_slice(&ROSFLIGHT_C_VERSION.to_le_bytes());
+    bytes[..4].copy_from_slice(&VELOXITY_VERSION.to_le_bytes());
     bytes[4..6].copy_from_slice(&(ROSFLIGHT_C_PARAM_STORAGE_SIZE as u16).to_le_bytes());
     bytes[6] = 0xBE;
 
@@ -192,7 +188,7 @@ fn decode_rosflight_c_params_in_order(
 /// Rust-only parameters retain their defaults because they are absent on disk.
 pub fn decode_rosflight_c_params(bytes: &[u8; ROSFLIGHT_C_PARAM_STORAGE_SIZE]) -> Option<Params> {
     let version = u32::from_le_bytes(bytes[..4].try_into().ok()?);
-    if !matches!(version, ROSFLIGHT_C_VERSION | PREVIOUS_ROSFLIGHT_C_VERSION)
+    if version != VELOXITY_VERSION
         || usize::from(u16::from_le_bytes(bytes[4..6].try_into().ok()?))
             != ROSFLIGHT_C_PARAM_STORAGE_SIZE
         || bytes[6] != 0xBE
@@ -269,7 +265,7 @@ mod tests {
         let mut bytes = [0; ROSFLIGHT_C_PARAM_STORAGE_SIZE];
         assert!(encode_rosflight_c_params(&Params::default(), &mut bytes));
 
-        assert_eq!(&bytes[..4], &ROSFLIGHT_C_VERSION.to_le_bytes());
+        assert_eq!(&bytes[..4], &VELOXITY_VERSION.to_le_bytes());
         assert_eq!(
             &bytes[4..6],
             &(ROSFLIGHT_C_PARAM_STORAGE_SIZE as u16).to_le_bytes()
@@ -322,21 +318,6 @@ mod tests {
         bytes[PARAM_STORAGE_CHECKSUM_OFFSET] = rosflight_c_checksum(&bytes);
 
         assert!(decode_rosflight_c_params(&bytes).is_none());
-    }
-
-    #[test]
-    fn storage_accepts_previous_c_hash_with_correct_layout() {
-        let mut previous = [0; ROSFLIGHT_C_PARAM_STORAGE_SIZE];
-        assert!(encode_rosflight_c_params(&Params::default(), &mut previous));
-        previous[..4].copy_from_slice(&PREVIOUS_ROSFLIGHT_C_VERSION.to_le_bytes());
-
-        let loaded = decode_rosflight_c_params(&previous)
-            .expect("previous C hash with unchanged schema must load");
-        let mut current = [0; ROSFLIGHT_C_PARAM_STORAGE_SIZE];
-        assert!(encode_rosflight_c_params(&loaded, &mut current));
-        assert_eq!(&current[..4], &ROSFLIGHT_C_VERSION.to_le_bytes());
-        assert_eq!(stored_name(&current, 328), "OFFBOARD_TIMEOUT");
-        assert_eq!(stored_name(&current, 329), "BATT_VOLT_MULT");
     }
 
     #[test]

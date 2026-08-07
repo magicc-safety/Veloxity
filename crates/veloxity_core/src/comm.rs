@@ -46,6 +46,8 @@ telemetry_sent_counter!(VELOXITY_DIAG_TELEM_GNSS_SENT);
 telemetry_sent_counter!(VELOXITY_DIAG_TELEM_BATTERY_SENT);
 #[cfg(feature = "runtime-diagnostics")]
 telemetry_sent_counter!(VELOXITY_DIAG_TELEM_RC_SENT);
+#[cfg(feature = "runtime-diagnostics")]
+telemetry_sent_counter!(VELOXITY_DIAG_TIMESYNC_RESPONSE_SENT);
 
 const MAV_TYPE_FIXED_WING: u8 = 1;
 const MAV_TYPE_QUADROTOR: u8 = 2;
@@ -1660,6 +1662,8 @@ where
             if msg.tc1 == 0 {
                 msg.tc1 = (board.clock_micros() * 1000) as i64;
                 self.send_timesync(board, msg);
+                #[cfg(feature = "runtime-diagnostics")]
+                VELOXITY_DIAG_TIMESYNC_RESPONSE_SENT.fetch_add(1, Ordering::Relaxed);
             }
         }
 
