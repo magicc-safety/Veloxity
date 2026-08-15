@@ -56,8 +56,20 @@ jobs:
           echo "-> Building host-native API docs (sim)..."
           cargo doc --no-deps -p sim
           
-          echo "-> Building ARM-specific embedded API docs..."
-          cargo doc --no-deps -p veloxity_core -p stm_32 -p nucleo -p pixracerpro --target thumbv7em-none-eabihf
+          echo "-> Building MCU-independent embedded API docs..."
+          cargo doc --no-deps -p veloxity_core --target thumbv7em-none-eabihf
+
+          # Each command must resolve a single STM32 model. Cargo unifies
+          # dependency features within one invocation, while stm32-metapac
+          # intentionally rejects simultaneous H743II and H753ZI features.
+          echo "-> Building STM32 platform API docs for H743II..."
+          cargo doc --no-deps -p stm_32 --features pixracerpro-h743ii --target thumbv7em-none-eabihf
+
+          echo "-> Building Nucleo H753ZI API docs..."
+          cargo doc --no-deps -p nucleo --target thumbv7em-none-eabihf
+
+          echo "-> Building Pixracer Pro H743II API docs..."
+          cargo doc --no-deps -p pixracerpro --target thumbv7em-none-eabihf
 
       - name: Step 3 - Building high-level Zensical site
         run: |
