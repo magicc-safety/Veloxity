@@ -39,9 +39,12 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = []
+default = ["mcu-h743ii"]
+mcu-h743ii = ["stm_32/pixracerpro-h743ii"]
+mcu-h753zi = ["stm_32/nucleo-h753zi"]
 scope-timing-pins = ["veloxity_core/scope-timing-pins"]
 sensor-poll-diagnostics = []
+runtime-diagnostics = ["veloxity_core/runtime-diagnostics", "stm_32/runtime-diagnostics"]
 usb-vcp-serial = []
 
 [dependencies]
@@ -49,6 +52,11 @@ stm_32 = { workspace = true }
 veloxity_core = { workspace = true }
 veloxity_mavlink = { workspace = true }
 heapless = { version = "0.8.0", default-features = false }
+embassy-executor = { version = "0.10.0", features = [
+  "platform-cortex-m",
+  "executor-thread",
+  "executor-interrupt",
+] }
 
 panic-halt = "1.0.0"
 

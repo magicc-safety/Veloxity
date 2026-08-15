@@ -14,7 +14,7 @@ use crate::{
     estimator::AttitudeEstimate,
     packets::{ImuPacket, RC_PACKET_CHANNELS, RcPacket, RosflightPacketHeader},
     params::{ParamId, ParamValue},
-    pwm::{PwmDriver, PwmError},
+    pwm::{PwmDriver, PwmError, output_sync::PWM_OUTPUT_CHANNELS},
     state_machine::ErrorFlag,
     test_support::{RecordingCommLink, TestBoard},
     vehicle::quadrotor,
@@ -29,6 +29,7 @@ struct SensorStageBoard {
     serial_flush_count: usize,
     deferred_board_action_count: usize,
     rx_pending: bool,
+    service_poll_time_advance_us: u64,
 }
 
 impl BoardIo for SensorStageBoard {
@@ -61,6 +62,9 @@ impl BoardIo for SensorStageBoard {
     ) {
         sensors.clear();
         self.update_count += 1;
+        self.current_time_us = self
+            .current_time_us
+            .saturating_add(self.service_poll_time_advance_us);
         if let Some(rc) = self.rc.take() {
             sensors.rc = Some(Ok(rc));
         }
@@ -104,6 +108,8 @@ impl BoardIo for SensorStageBoard {
 #[derive(Default)]
 struct SensorStageCommLink {
     baro_count: usize,
+    imu_count: usize,
+    mag_count: usize,
 }
 
 impl CommInterface<SensorStageBoard> for SensorStageCommLink {
@@ -188,6 +194,7 @@ impl CommInterface<SensorStageBoard> for SensorStageCommLink {
         _system_id: u8,
         _msg: crate::comm::messages::messages::SmallImuMsg,
     ) {
+        self.imu_count += 1;
     }
 
     fn send_mag(
@@ -196,6 +203,7 @@ impl CommInterface<SensorStageBoard> for SensorStageCommLink {
         _system_id: u8,
         _msg: crate::comm::messages::messages::SmallMagMsg,
     ) {
+        self.mag_count += 1;
     }
 
     fn send_rc_raw(
@@ -271,7 +279,7 @@ impl CommInterface<SensorStageBoard> for SensorStageCommLink {
 }
 
 pub struct TestPwm {
-    enabled: bool,
+    enabled_mask: u32,
     enable_all_count: usize,
     disable_all_count: usize,
     flush_count: usize,
@@ -286,7 +294,7 @@ pub struct TestPwm {
 impl TestPwm {
     fn new() -> Self {
         Self {
-            enabled: false,
+            enabled_mask: 0,
             enable_all_count: 0,
             disable_all_count: 0,
             flush_count: 0,
@@ -302,31 +310,31 @@ impl TestPwm {
 
 impl PwmDriver<f64> for TestPwm {
     fn len(&self) -> usize {
-        0
+        PWM_OUTPUT_CHANNELS
     }
 
     fn is_enabled(&self) -> bool {
-        self.enabled
+        self.enabled_mask == (1_u32 << PWM_OUTPUT_CHANNELS) - 1
     }
 
-    fn enable(&mut self, _channel: usize) -> Result<(), PwmError> {
-        self.enabled = true;
+    fn enable(&mut self, channel: usize) -> Result<(), PwmError> {
+        self.enabled_mask |= 1_u32 << channel;
         Ok(())
     }
 
-    fn disable(&mut self, _channel: usize) -> Result<(), PwmError> {
-        self.enabled = false;
+    fn disable(&mut self, channel: usize) -> Result<(), PwmError> {
+        self.enabled_mask &= !(1_u32 << channel);
         Ok(())
     }
 
     fn enable_all(&mut self) -> Result<(), PwmError> {
-        self.enabled = true;
+        self.enabled_mask = (1_u32 << PWM_OUTPUT_CHANNELS) - 1;
         self.enable_all_count += 1;
         Ok(())
     }
 
     fn disable_all(&mut self) {
-        self.enabled = false;
+        self.enabled_mask = 0;
         self.disable_all_count += 1;
     }
 
@@ -387,6 +395,46 @@ fn test_world() -> TestWorld {
     test_world_with_params(Params::new())
 }
 
+#[test]
+fn world_configures_battery_monitor_from_persisted_params_at_init() {
+    let mut params = Params::new();
+    params.set_by_id(
+        ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER,
+        ParamValue::Float(7.675),
+    );
+    params.set_by_id(
+        ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER,
+        ParamValue::Float(0.0),
+    );
+
+    let world = test_world_with_params(params);
+
+    assert_eq!(world.board.battery_configure_count, 1);
+    assert_eq!(world.board.battery_multipliers, Some((7.675, 0.0)));
+}
+
+#[test]
+fn world_reconfigures_battery_monitor_after_live_param_change() {
+    let mut world = test_world();
+    param_service::set_param_and_emit_change(
+        &mut world.params,
+        &mut world.param_events.changes,
+        ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER,
+        ParamValue::Float(8.25),
+    );
+    param_service::set_param_and_emit_change(
+        &mut world.params,
+        &mut world.param_events.changes,
+        ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER,
+        ParamValue::Float(51.0),
+    );
+
+    world.apply_param_reactions();
+
+    assert_eq!(world.board.battery_configure_count, 2);
+    assert_eq!(world.board.battery_multipliers, Some((8.25, 51.0)));
+}
+
 fn seed_healthy_rc(world: &mut TestWorld) {
     let mut channels = [0.5; RC_PACKET_CHANNELS];
     channels[2] = 0.0;
@@ -425,6 +473,39 @@ fn world_init_reconciles_reflected_mixer_params_from_persisted_mixer_choice() {
     assert_eq!(
         world.params.get_by_id(ParamId::PARAM_PRIMARY_MIXER_3_0),
         ParamValue::Float(1.0)
+    );
+}
+
+#[test]
+fn world_init_blocks_arming_when_persisted_imu_biases_are_all_zero() {
+    let mut world = test_world();
+
+    assert!(
+        world
+            .state
+            .get_errors()
+            .contains(ErrorFlag::UNCALIBRATED_IMU)
+    );
+
+    world.state.update_arming_safety(true, true);
+    world.state.update(Event::REQUEST_ARM, &world.params);
+
+    assert!(!world.state.is_armed());
+    assert!(world.state.is_in_error_state());
+}
+
+#[test]
+fn world_init_accepts_persisted_imu_calibration() {
+    let mut params = Params::new();
+    params.set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(0.01));
+
+    let world = test_world_with_params(params);
+
+    assert!(
+        !world
+            .state
+            .get_errors()
+            .contains(ErrorFlag::UNCALIBRATED_IMU)
     );
 }
 
@@ -548,6 +629,7 @@ fn world_sensor_stage_ingests_board_sensor_bus_without_hlist_fixture() {
         serial_flush_count: 0,
         deferred_board_action_count: 0,
         rx_pending: false,
+        service_poll_time_advance_us: 0,
     };
     let state = StateManager::new();
     let mixer = quadrotor::mixer::<f64>(&params);
@@ -707,6 +789,125 @@ fn prioritized_service_runs_service_sensors_comm_telemetry_and_board_service() {
     assert_eq!(world.board.serial_flush_count, 1);
     assert_eq!(world.board.deferred_board_action_count, 1);
     assert_eq!(world.comm.comm_link().baro_count, 1);
+}
+
+#[test]
+fn prioritized_service_sends_telemetry_before_variable_service_work_closes_slack() {
+    let params = Params::new();
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard {
+            current_time_us: 10_000,
+            service_poll_time_advance_us: 300,
+            ..Default::default()
+        },
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
+    world.last_control_update_us = 10_000;
+    world.control_imu_accumulator.push(ImuPacket {
+        header: RosflightPacketHeader {
+            timestamp: 9_999,
+            status: 0,
+        },
+        accel: [0.0, 0.0, -9.80665],
+        gyro: [0.0; 3],
+        temperature: 294.15,
+        seq: 1,
+    });
+    world.processed_sensors.baro = Some(crate::packets::BaroPacket {
+        header: RosflightPacketHeader {
+            timestamp: 9_999,
+            status: 0,
+        },
+        altitude: 42.0,
+        pressure: 90_000.0,
+        temperature: 294.15,
+    });
+
+    let report =
+        world.run_prioritized_service_steps_with_policy(RealtimeServicePolicy::with_spacing(1, 1));
+
+    assert!(report.telemetry_due);
+    assert_eq!(world.comm.comm_link().baro_count, 1);
+    assert_eq!(world.board.update_count, 1);
+    assert!(!world.realtime_service_has_control_slack(world.board.current_time_us));
+}
+
+#[test]
+fn slack_driven_service_sends_all_due_streams_without_a_stream_count_limit() {
+    let params = Params::new();
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard {
+            current_time_us: 1_100_000,
+            ..Default::default()
+        },
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+    world.processed_sensors.imu = Some(ImuPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_099_000,
+            status: 0,
+        },
+        accel: [0.0, 0.0, -9.80665],
+        gyro: [0.0; 3],
+        temperature: 294.15,
+        seq: 1,
+    });
+    world.processed_sensors.baro = Some(crate::packets::BaroPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_098_000,
+            status: 0,
+        },
+        altitude: 42.0,
+        pressure: 90_000.0,
+        temperature: 294.15,
+    });
+    world.processed_sensors.mag = Some(crate::packets::MagPacket {
+        header: RosflightPacketHeader {
+            timestamp: 1_097_000,
+            status: 0,
+        },
+        flux: [1.0, 2.0, 3.0],
+        temperature: 294.15,
+    });
+
+    let report =
+        world.run_prioritized_service_step(RealtimeServicePolicy::continuous_slack_driven());
+
+    assert!(report.telemetry_due);
+    assert_eq!(world.comm.comm_link().imu_count, 1);
+    assert_eq!(world.comm.comm_link().baro_count, 1);
+    assert_eq!(world.comm.comm_link().mag_count, 1);
 }
 
 #[test]
@@ -911,7 +1112,7 @@ fn fixed_control_rate_blocks_service_inside_control_deadline_guard() {
     world.last_control_update_us = 10_000;
     world.last_realtime_control_us = 10_200;
     world.next_realtime_service_us = 0;
-    world.processed_sensors.imu = Some(ImuPacket {
+    let pending_imu = ImuPacket {
         header: RosflightPacketHeader {
             timestamp: 10_000,
             status: 0,
@@ -920,7 +1121,9 @@ fn fixed_control_rate_blocks_service_inside_control_deadline_guard() {
         gyro: [0.0, 0.0, 0.0],
         temperature: 25.0,
         seq: 1,
-    });
+    };
+    world.processed_sensors.imu = Some(pending_imu);
+    world.control_imu_accumulator.push(pending_imu);
 
     assert_eq!(
         world.realtime_scheduler_step(),
@@ -929,6 +1132,42 @@ fn fixed_control_rate_blocks_service_inside_control_deadline_guard() {
 
     world.board.current_time_us = 10_300;
     assert_eq!(world.realtime_scheduler_step(), RealtimeSchedulerStep::Idle);
+}
+
+#[test]
+fn fixed_control_rate_allows_service_inside_nominal_guard_without_accumulated_imu() {
+    let params = Params::new();
+    let mixer = quadrotor::mixer::<f64>(&params);
+    let mut world = World::<
+        SensorStageBoard,
+        quadrotor::Estimator<f64>,
+        quadrotor::Controller<f64>,
+        quadrotor::Mixer<f64>,
+        SensorStageCommLink,
+        TestPwm,
+        f64,
+    >::init(
+        SensorStageBoard {
+            current_time_us: 10_300,
+            ..Default::default()
+        },
+        params,
+        SensorStageCommLink::default(),
+        StateManager::new(),
+        Default::default(),
+        Default::default(),
+        mixer,
+        TestPwm::new(),
+    );
+    world.set_control_loop_rates(ControlLoopRates::fixed_rate_hz(2_000));
+    world.last_control_update_us = 10_000;
+
+    assert!(!world.control_imu_accumulator.has_samples());
+    assert!(world.realtime_service_has_control_slack(10_300));
+    assert_eq!(
+        world.realtime_scheduler_step(),
+        RealtimeSchedulerStep::Service
+    );
 }
 
 #[test]
@@ -1527,7 +1766,7 @@ fn world_applies_live_telemetry_parameter_without_resetting_other_rates() {
         .changes
         .push(crate::events::ParamChanged {
             id: ParamId::PARAM_TELEM_BARO_HZ,
-            old: ParamValue::Int(100),
+            old: ParamValue::Int(0),
             new: ParamValue::Int(25),
             param_id_bytes: crate::comm::str_to_fixed_bytes("TEL_BARO_HZ"),
         })
@@ -1806,7 +2045,7 @@ fn world_sensor_health_sets_uncalibrated_imu_when_all_bias_params_are_zero() {
 }
 
 #[test]
-fn world_sensor_health_clears_uncalibrated_imu_when_any_bias_param_is_nonzero() {
+fn world_sensor_health_keeps_uncalibrated_imu_latched_after_live_bias_change() {
     let mut world = test_world();
     world.state.update(
         crate::state_machine::Event::ERROR_OCCURRED(
@@ -1830,6 +2069,67 @@ fn world_sensor_health_clears_uncalibrated_imu_when_any_bias_param_is_nonzero() 
 
     world.update_sensor_health_and_calibration(world.board.clock_micros());
 
+    assert!(
+        world
+            .state
+            .get_errors()
+            .contains(crate::state_machine::ErrorFlag::UNCALIBRATED_IMU)
+    );
+}
+
+#[test]
+fn world_gyro_only_calibration_does_not_clear_latched_imu_error() {
+    let mut world = test_world();
+    world.cal_flags.insert(CalibrationFlags::GYRO);
+
+    for seq in 0..=1000 {
+        world.raw_sensors.imu = Some(Ok(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: u64::from(seq) + 1,
+                status: 0,
+            },
+            accel: [0.0, 0.0, -9.80665],
+            gyro: [0.02, -0.01, 0.03],
+            temperature: 298.15,
+            seq,
+        }));
+        world.process_imu_sensor_after_update();
+    }
+
+    assert!(!world.cal_flags.contains(CalibrationFlags::GYRO));
+    assert!(
+        world
+            .state
+            .get_errors()
+            .contains(crate::state_machine::ErrorFlag::UNCALIBRATED_IMU)
+    );
+}
+
+#[test]
+fn world_successful_full_imu_calibration_clears_latched_error() {
+    let mut world = test_world();
+    world.cal_flags.insert(CalibrationFlags::IMU);
+
+    for seq in 0..=1000 {
+        world.raw_sensors.imu = Some(Ok(crate::packets::ImuPacket {
+            header: crate::packets::RosflightPacketHeader {
+                timestamp: u64::from(seq) + 1,
+                status: 0,
+            },
+            accel: [0.1, -0.2, -9.50665],
+            gyro: [0.02, -0.01, 0.03],
+            temperature: 298.15,
+            seq,
+        }));
+        world.process_imu_sensor_after_update();
+    }
+
+    assert!(!world.cal_flags.intersects(CalibrationFlags::IMU));
+    assert!(
+        !world
+            .cal_flags
+            .intersects(CalibrationFlags::GYRO_FAILED | CalibrationFlags::ACCEL_FAILED)
+    );
     assert!(
         !world
             .state
@@ -1856,6 +2156,16 @@ fn world_sends_calibration_ack_when_calibration_starts() {
         ack.success,
         RosflightCmdResponse::RosflightCmdSuccess
     ));
+}
+
+#[test]
+fn world_default_channel_output_mask_physically_enables_only_first_four_channels() {
+    let mut world = test_world_with_params(Params::new());
+
+    assert!(world.run_pwm_output_stage());
+    assert_eq!(world.pwm.enabled_mask, 0x0f);
+    assert_eq!(world.pwm_output.enabled_mask(), 0x0f);
+    assert_eq!(world.pwm.enable_all_count, 0);
 }
 
 #[test]

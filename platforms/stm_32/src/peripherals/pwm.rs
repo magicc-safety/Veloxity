@@ -215,23 +215,23 @@ impl ServoMonstrosity {
 
 pub struct PixRacerProServoMonstrosity {
     pub timers: [TimerEnum; 3],
-    pub chan_list: [(usize, TimerChannel); 7],
+    pub chan_list: [(usize, TimerChannel); 8],
     timer_kinds: [PwmTimerBlockKind; 3],
     timer_dmas: [Option<DshotDma>; 3],
     timer_protocols: [PwmOutputProtocol; 3],
-    output_protocols: [PwmOutputProtocol; 7],
-    output_rates_hz: [f64; 7],
-    dshot_frames: [[u16; DSHOT_FRAME_WORDS]; 7],
+    output_protocols: [PwmOutputProtocol; 8],
+    output_rates_hz: [f64; 8],
+    dshot_frames: [[u16; DSHOT_FRAME_WORDS]; 8],
 }
 
 impl PixRacerProServoMonstrosity {
-    pub fn new(timers: [TimerEnum; 3], chan_list: [(usize, TimerChannel); 7]) -> Self {
+    pub fn new(timers: [TimerEnum; 3], chan_list: [(usize, TimerChannel); 8]) -> Self {
         Self::with_timer_kinds(timers, chan_list, [PwmTimerBlockKind::StandardOnly; 3])
     }
 
     pub fn with_timer_kinds(
         timers: [TimerEnum; 3],
-        chan_list: [(usize, TimerChannel); 7],
+        chan_list: [(usize, TimerChannel); 8],
         timer_kinds: [PwmTimerBlockKind; 3],
     ) -> Self {
         Self::with_timer_kinds_and_dma(timers, chan_list, timer_kinds, [const { None }; 3])
@@ -239,7 +239,7 @@ impl PixRacerProServoMonstrosity {
 
     pub fn with_timer_kinds_and_dma(
         timers: [TimerEnum; 3],
-        chan_list: [(usize, TimerChannel); 7],
+        chan_list: [(usize, TimerChannel); 8],
         timer_kinds: [PwmTimerBlockKind; 3],
         timer_dmas: [Option<DshotDma>; 3],
     ) -> Self {
@@ -249,9 +249,9 @@ impl PixRacerProServoMonstrosity {
             timer_kinds,
             timer_dmas,
             timer_protocols: [PwmOutputProtocol::StandardPwm; 3],
-            output_protocols: [PwmOutputProtocol::StandardPwm; 7],
-            output_rates_hz: [50.0; 7],
-            dshot_frames: [[0; DSHOT_FRAME_WORDS]; 7],
+            output_protocols: [PwmOutputProtocol::StandardPwm; 8],
+            output_rates_hz: [50.0; 8],
+            dshot_frames: [[0; DSHOT_FRAME_WORDS]; 8],
         }
     }
 

@@ -42,6 +42,12 @@ use embassy_usb::Builder;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use veloxity_core::comm::interface::EmbeddedComInterface;
 
+#[cfg(feature = "runtime-diagnostics")]
+use embassy_time::Instant;
+
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
 pub const VCP_TX_BUFF_SIZE: usize = 2048;
 pub const VCP_RX_BUFF_SIZE: usize = 2048;
 const USB_CDC_FS_PACKET_SIZE: usize = 64;
@@ -49,11 +55,110 @@ const USB_CDC_FS_PACKET_SIZE: usize = 64;
 pub static VCP_TX: Pipe<CriticalSectionRawMutex, VCP_TX_BUFF_SIZE> = Pipe::new();
 pub static VCP_RX: Pipe<CriticalSectionRawMutex, VCP_RX_BUFF_SIZE> = Pipe::new();
 
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_FRAME_ATTEMPT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_FRAME_ENQUEUED: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_FRAME_REJECTED: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_PARTIAL_FRAME_FAILURE: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_TX_MIN_FREE: AtomicU32 = AtomicU32::new(VCP_TX_BUFF_SIZE as u32);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_IMU_ATTEMPT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_IMU_ENQUEUED: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_IMU_REJECTED: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_DEQUEUE_CALLS: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_DEQUEUE_BYTES: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_USB_PACKETS: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_USB_BYTES: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_USB_ERRORS: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_RX_USB_PACKETS: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_RX_USB_BYTES: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_RX_PIPE_MIN_FREE: AtomicU32 = AtomicU32::new(VCP_RX_BUFF_SIZE as u32);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_RX_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_RX_WAIT_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_VCP_RX_WAIT_MAX_US: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(feature = "runtime-diagnostics")]
+pub fn record_frame_attempt(message_id: Option<u8>) {
+    VELOXITY_DIAG_VCP_FRAME_ATTEMPT.fetch_add(1, Ordering::Relaxed);
+    VELOXITY_DIAG_VCP_TX_MIN_FREE.fetch_min(VCP_TX.free_capacity() as u32, Ordering::Relaxed);
+    if message_id == Some(181) {
+        VELOXITY_DIAG_VCP_IMU_ATTEMPT.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(feature = "runtime-diagnostics")]
+pub fn record_frame_enqueued(message_id: Option<u8>) {
+    VELOXITY_DIAG_VCP_FRAME_ENQUEUED.fetch_add(1, Ordering::Relaxed);
+    if message_id == Some(181) {
+        VELOXITY_DIAG_VCP_IMU_ENQUEUED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(feature = "runtime-diagnostics")]
+pub fn record_frame_rejected(message_id: Option<u8>, partial: bool) {
+    VELOXITY_DIAG_VCP_FRAME_REJECTED.fetch_add(1, Ordering::Relaxed);
+    if partial {
+        VELOXITY_DIAG_VCP_PARTIAL_FRAME_FAILURE.fetch_add(1, Ordering::Relaxed);
+    }
+    if message_id == Some(181) {
+        VELOXITY_DIAG_VCP_IMU_REJECTED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 pub struct BasicProcessor;
 
 impl EmbeddedComInterface for BasicProcessor {
     async fn process_bytes(&mut self, buf: &[u8], num_bytes: usize) {
+        #[cfg(feature = "runtime-diagnostics")]
+        let (started, had_to_wait) = (Instant::now(), VCP_RX.free_capacity() < num_bytes);
         VCP_RX.write_all(&buf[0..num_bytes]).await;
+        #[cfg(feature = "runtime-diagnostics")]
+        {
+            VELOXITY_DIAG_VCP_RX_PIPE_MIN_FREE
+                .fetch_min(VCP_RX.free_capacity() as u32, Ordering::Relaxed);
+            if had_to_wait {
+                let elapsed_us = started.elapsed().as_micros().min(u32::MAX as u64) as u32;
+                VELOXITY_DIAG_VCP_RX_WAIT_COUNT.fetch_add(1, Ordering::Relaxed);
+                VELOXITY_DIAG_VCP_RX_WAIT_SUM_US.fetch_add(elapsed_us, Ordering::Relaxed);
+                VELOXITY_DIAG_VCP_RX_WAIT_MAX_US.fetch_max(elapsed_us, Ordering::Relaxed);
+            }
+        }
     }
 }
 
@@ -124,6 +229,11 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
             loop {
                 match receiver.read_packet(&mut rx_buf).await {
                     Ok(n) if n > 0 => {
+                        #[cfg(feature = "runtime-diagnostics")]
+                        {
+                            VELOXITY_DIAG_VCP_RX_USB_PACKETS.fetch_add(1, Ordering::Relaxed);
+                            VELOXITY_DIAG_VCP_RX_USB_BYTES.fetch_add(n as u32, Ordering::Relaxed);
+                        }
                         byte_processor.process_bytes(&rx_buf[..n], n).await;
                     }
                     Ok(_) => {}
@@ -140,9 +250,22 @@ impl<ECI: EmbeddedComInterface> Vcp<ECI> {
             sender.wait_connection().await;
             'connected: loop {
                 let n = VCP_TX.read(&mut tx_buf).await;
+                #[cfg(feature = "runtime-diagnostics")]
+                {
+                    VELOXITY_DIAG_VCP_DEQUEUE_CALLS.fetch_add(1, Ordering::Relaxed);
+                    VELOXITY_DIAG_VCP_DEQUEUE_BYTES.fetch_add(n as u32, Ordering::Relaxed);
+                }
                 for packet in tx_buf[..n].chunks(USB_CDC_FS_PACKET_SIZE) {
                     if sender.write_packet(packet).await.is_err() {
+                        #[cfg(feature = "runtime-diagnostics")]
+                        VELOXITY_DIAG_VCP_USB_ERRORS.fetch_add(1, Ordering::Relaxed);
                         break 'connected;
+                    }
+                    #[cfg(feature = "runtime-diagnostics")]
+                    {
+                        VELOXITY_DIAG_VCP_USB_PACKETS.fetch_add(1, Ordering::Relaxed);
+                        VELOXITY_DIAG_VCP_USB_BYTES
+                            .fetch_add(packet.len() as u32, Ordering::Relaxed);
                     }
                 }
             }

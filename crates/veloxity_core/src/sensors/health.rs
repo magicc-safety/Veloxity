@@ -19,20 +19,21 @@ pub fn update_sensor_health<R: FlightFloat>(ctx: SensorHealthCtx<'_, R>) {
         *ctx.last_imu_seen = ctx.now_us;
         ctx.state
             .set_error_flag(ErrorFlag::IMU_NOT_RESPONDING, false, ctx.params);
-        update_imu_calibration_error(ctx.state, ctx.params);
     } else if ctx.now_us > *ctx.last_imu_seen + ctx.imu_timeout_us {
         ctx.state
             .set_error_flag(ErrorFlag::IMU_NOT_RESPONDING, true, ctx.params);
     }
 }
 
-fn update_imu_calibration_error(state: &mut StateManager, params: &Params) {
+/// Establishes ROSflight C's startup IMU-calibration interlock.
+///
+/// This must only be evaluated during initialization. Once an all-zero bias
+/// table latches the error, live parameter changes and gyro-only calibration
+/// must not clear it. ROSflight C clears the latch only when a full
+/// accelerometer/IMU calibration succeeds.
+pub(crate) fn initialize_imu_calibration_error(state: &mut StateManager, params: &Params) {
     let error = ErrorFlag::UNCALIBRATED_IMU;
-    if imu_bias_params_are_all_zero(params) {
-        state.set_error_flag(error, true, params);
-    } else {
-        state.set_error_flag(error, false, params);
-    }
+    state.set_error_flag(error, imu_bias_params_are_all_zero(params), params);
 }
 
 fn imu_bias_params_are_all_zero(params: &Params) -> bool {
@@ -72,10 +73,11 @@ mod tests {
     }
 
     #[test]
-    fn imu_calibration_health_sets_uncalibrated_error_when_all_bias_params_are_zero() {
+    fn imu_calibration_startup_latch_survives_sensor_health_updates() {
         let params = Params::new();
         let mut state = StateManager::new();
         state.update(Event::INITIALIZED, &params);
+        initialize_imu_calibration_error(&mut state, &params);
         let mut last_imu_seen = 0;
         let sensors = ProcessedSensors {
             imu: Some(imu_packet(1)),
@@ -96,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn imu_calibration_health_clears_uncalibrated_error_when_any_bias_param_is_nonzero() {
+    fn imu_calibration_health_does_not_clear_latched_error_after_live_bias_change() {
         let mut params = Params::new();
         params.set_by_id(ParamId::PARAM_ACC_X_BIAS, ParamValue::Float(0.01));
         let mut state = StateManager::new();
@@ -117,7 +119,7 @@ mod tests {
             imu_timeout_us: TEST_IMU_TIMEOUT_US,
         });
 
-        assert!(!state.get_errors().contains(ErrorFlag::UNCALIBRATED_IMU));
+        assert!(state.get_errors().contains(ErrorFlag::UNCALIBRATED_IMU));
     }
 
     #[test]

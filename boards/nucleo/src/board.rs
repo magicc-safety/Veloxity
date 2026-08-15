@@ -169,7 +169,7 @@ impl BoardIo for Board {
         sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
-        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_CHANNEL.try_receive().ok();
     }
 
     fn imu_pending(&self) -> bool {
@@ -189,7 +189,7 @@ impl BoardIo for Board {
         sensors.baro = peripherals::dps310::BARO_SIGNAL.try_take();
         sensors.pitot = peripherals::dlhrl20g::PITOT_SIGNAL.try_take();
         sensors.gnss = peripherals::ublox::GNSS_SIGNAL.try_take();
-        sensors.rc = peripherals::sbus::RC_SIGNAL.try_take();
+        sensors.rc = peripherals::sbus::RC_CHANNEL.try_receive().ok();
     }
 
     fn serial_rx_read(&mut self, buf: &mut [u8]) -> Option<Result<usize, errors::TelemError>> {
@@ -489,6 +489,7 @@ impl Board {
             ),
             range_g: peripherals::bmi08x::GyroRange::Max500dps,
             sample_rate: peripherals::bmi08x::SampleRate::Odr400Hz,
+            board_axis_signs: [1.0, 1.0, 1.0],
         };
 
         // P2 Priority Task for Gyros

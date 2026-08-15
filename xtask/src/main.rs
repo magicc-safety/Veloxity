@@ -64,6 +64,9 @@ fn main() -> ExitCode {
             };
             let extra_args = args.collect::<Vec<_>>();
             match flash_args(&board, target, &extra_args) {
+                Ok(cargo_args) if board == "pixracerpro" => cargo(cargo_args)
+                    .and_then(|_| flash_pixracerpro_detached(target))
+                    .and_then(|_| reset_pixracerpro()),
                 Ok(cargo_args) => cargo(cargo_args),
                 Err(message) => {
                     eprintln!("{message}");
@@ -107,20 +110,27 @@ fn flash_args(board: &str, target: &str, options: &[String]) -> Result<Vec<Strin
     }
 
     // The flight firmware baseline is optimized and contains no diagnostic or
-    // alternate-transport features. With no feature selected, Pixracer Pro's
-    // MAVLink transport is the companion-computer UART.
+    // alternate-transport features. With no optional feature selected, Pixracer
+    // Pro's MAVLink transport is the companion-computer UART. The required MCU
+    // feature is added explicitly below because defaults are disabled here.
     args.extend(["--release".to_owned(), "--no-default-features".to_owned()]);
+    // Pixracer flashing is completed below with `probe-rs download` followed
+    // by a detached reset. `cargo run` would invoke the configured probe-rs
+    // runner and leave a live debug session attached to the flight controller.
+    args[0] = "build".to_owned();
 
-    let mut features = Vec::new();
+    let mut features = vec!["mcu-h743ii"];
     for option in options {
         let feature = match option.as_str() {
             "--vcp" => "usb-vcp-serial",
             "--scope-timing-pins" => "scope-timing-pins",
             "--sensor-poll-diagnostics" => "sensor-poll-diagnostics",
+            "--runtime-diagnostics" => "runtime-diagnostics",
             _ => {
                 return Err(format!(
                     "unknown Pixracer Pro flash option `{option}`; expected `--vcp`, \
-                     `--scope-timing-pins`, or `--sensor-poll-diagnostics`"
+                     `--scope-timing-pins`, `--sensor-poll-diagnostics`, or \
+                     `--runtime-diagnostics`"
                 ));
             }
         };
@@ -129,12 +139,49 @@ fn flash_args(board: &str, target: &str, options: &[String]) -> Result<Vec<Strin
         }
     }
 
-    if !features.is_empty() {
-        args.push("--features".to_owned());
-        args.push(features.join(","));
-    }
+    args.push("--features".to_owned());
+    args.push(features.join(","));
 
     Ok(args)
+}
+
+fn flash_pixracerpro_detached(target: &str) -> Result<(), u8> {
+    let elf = format!("target/{target}/release/veloxity");
+    command_status(
+        "probe-rs",
+        [
+            "download",
+            "--chip",
+            "STM32H743IIKx",
+            "--protocol",
+            "swd",
+            "--speed",
+            "4000",
+            "--verify",
+            elf.as_str(),
+        ],
+    )
+}
+
+fn reset_pixracerpro() -> Result<(), u8> {
+    command_status("probe-rs", ["reset", "--chip", "STM32H743IIKx"])
+}
+
+fn command_status<I, S>(program: &str, args: I) -> Result<(), u8>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let status = Command::new(program).args(args).status().map_err(|err| {
+        eprintln!("failed to run {program}: {err}");
+        1
+    })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(status.code().unwrap_or(1).try_into().unwrap_or(1))
+    }
 }
 
 fn clean_generated() -> Result<(), u8> {
@@ -247,7 +294,8 @@ fn print_usage() {
            build-board      build embedded firmware: nucleo | pixracerpro | pico2w\n\
            flash-board      build and flash embedded firmware with probe-rs\n\
                             Pixracer Pro: release UART by default; opt in with\n\
-                            --vcp, --scope-timing-pins, or --sensor-poll-diagnostics\n\
+                            --vcp, --scope-timing-pins, --sensor-poll-diagnostics,\n\
+                            or --runtime-diagnostics\n\
            build-sim-lib    build the simulator static library for ROS 2\n\
            clean-generated  remove ignored local build/runtime artifacts"
     );
@@ -260,12 +308,13 @@ mod tests {
     const TARGET: &str = "thumbv7em-none-eabihf";
 
     #[test]
-    fn pixracerpro_flash_defaults_to_release_without_features() {
+    fn pixracerpro_flash_keeps_required_mcu_feature() {
         let args = flash_args("pixracerpro", TARGET, &[]).unwrap();
 
         assert!(args.iter().any(|arg| arg == "--release"));
+        assert_eq!(args.first().map(String::as_str), Some("build"));
         assert!(args.iter().any(|arg| arg == "--no-default-features"));
-        assert!(!args.iter().any(|arg| arg == "--features"));
+        assert_eq!(args.last().map(String::as_str), Some("mcu-h743ii"));
     }
 
     #[test]
@@ -274,12 +323,13 @@ mod tests {
             "--vcp".to_owned(),
             "--scope-timing-pins".to_owned(),
             "--sensor-poll-diagnostics".to_owned(),
+            "--runtime-diagnostics".to_owned(),
         ];
         let args = flash_args("pixracerpro", TARGET, &options).unwrap();
 
         assert_eq!(
             args.last().unwrap(),
-            "usb-vcp-serial,scope-timing-pins,sensor-poll-diagnostics"
+            "mcu-h743ii,usb-vcp-serial,scope-timing-pins,sensor-poll-diagnostics,runtime-diagnostics"
         );
     }
 

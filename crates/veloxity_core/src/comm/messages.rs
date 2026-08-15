@@ -2,6 +2,16 @@ use bitflags::bitflags;
 use heapless::Deque;
 use messages::*;
 
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_TIMESYNC_REQUEST_RECEIVED: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_TIMESYNC_REQUEST_OVERWRITE: AtomicU32 = AtomicU32::new(0);
+
 // PARAM_SET has a two-stage path: decoded MAVLink ingress waits here, then the
 // comm system admits work into the ECS event queue while that queue has room.
 // Keep enough room for a companion computer to send a full parameter-table load
@@ -88,7 +98,22 @@ impl Store<ParamSetMsg> for Messages {
         self.param_set.pop_front()
     }
 }
-impl_store!(TimesyncMsg, timesync, "timesync");
+impl Store<TimesyncMsg> for Messages {
+    fn store(&mut self, msg: TimesyncMsg) {
+        #[cfg(feature = "runtime-diagnostics")]
+        if msg.tc1 == 0 {
+            VELOXITY_DIAG_TIMESYNC_REQUEST_RECEIVED.fetch_add(1, Ordering::Relaxed);
+            if self.timesync.is_some() {
+                VELOXITY_DIAG_TIMESYNC_REQUEST_OVERWRITE.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let _ = self.timesync.insert(msg);
+    }
+
+    fn take(&mut self) -> Option<TimesyncMsg> {
+        self.timesync.take()
+    }
+}
 impl_store!(OffboardControlMsg, offboard_control, "offboard_control");
 impl_store!(RosflightCmdMsg, cmd, "cmd");
 impl_store!(RosflightAuxCmdMsg, aux_cmd, "aux_cmd");
@@ -294,7 +319,7 @@ pub mod messages {
         pub num_sat: u8,
         pub lat: f64,                 // deg DDS format
         pub lon: f64,                 // deg DDS format
-        pub height: f32,              // (m)
+        pub height_msl: f32,          // (m) above mean sea level
         pub vel_n: f32,               // (m/s)
         pub vel_e: f32,               // (m/s)
         pub vel_d: f32,               // (m/s)

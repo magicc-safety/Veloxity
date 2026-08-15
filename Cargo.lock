@@ -1640,6 +1640,7 @@ dependencies = [
 name = "pixracerpro"
 version = "0.1.0"
 dependencies = [
+ "embassy-executor",
  "heapless 0.8.0",
  "panic-halt",
  "stm_32",

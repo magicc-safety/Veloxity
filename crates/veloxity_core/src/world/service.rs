@@ -1,5 +1,99 @@
 use super::*;
 
+#[cfg(feature = "runtime-diagnostics")]
+use crate::comm::NamedTelemetryStream;
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_UNSENT_OVERWRITE: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_UNSENT_AGE_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_UNSENT_AGE_MAX_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_SERVICE_PHASE_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_SERVICE_PHASE_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_SERVICE_PHASE_MAX_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_ARMED_SERVICE_PHASE_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_ARMED_SERVICE_PHASE_SUM_US: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_ARMED_SERVICE_PHASE_MAX_US: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(feature = "runtime-diagnostics")]
+macro_rules! sensor_pipeline_counters {
+    ($input:ident, $output:ident, $unsent:ident) => {
+        #[unsafe(no_mangle)]
+        pub static $input: AtomicU32 = AtomicU32::new(0);
+        #[unsafe(no_mangle)]
+        pub static $output: AtomicU32 = AtomicU32::new(0);
+        #[unsafe(no_mangle)]
+        pub static $unsent: AtomicU32 = AtomicU32::new(0);
+    };
+}
+
+#[cfg(feature = "runtime-diagnostics")]
+sensor_pipeline_counters!(
+    VELOXITY_DIAG_MAG_PROCESS_INPUT,
+    VELOXITY_DIAG_MAG_PROCESS_OUTPUT,
+    VELOXITY_DIAG_MAG_UNSENT_OVERWRITE
+);
+#[cfg(feature = "runtime-diagnostics")]
+sensor_pipeline_counters!(
+    VELOXITY_DIAG_BARO_PROCESS_INPUT,
+    VELOXITY_DIAG_BARO_PROCESS_OUTPUT,
+    VELOXITY_DIAG_BARO_UNSENT_OVERWRITE
+);
+#[cfg(feature = "runtime-diagnostics")]
+sensor_pipeline_counters!(
+    VELOXITY_DIAG_PITOT_PROCESS_INPUT,
+    VELOXITY_DIAG_PITOT_PROCESS_OUTPUT,
+    VELOXITY_DIAG_PITOT_UNSENT_OVERWRITE
+);
+#[cfg(feature = "runtime-diagnostics")]
+sensor_pipeline_counters!(
+    VELOXITY_DIAG_RANGE_PROCESS_INPUT,
+    VELOXITY_DIAG_RANGE_PROCESS_OUTPUT,
+    VELOXITY_DIAG_RANGE_UNSENT_OVERWRITE
+);
+#[cfg(feature = "runtime-diagnostics")]
+sensor_pipeline_counters!(
+    VELOXITY_DIAG_GNSS_PROCESS_INPUT,
+    VELOXITY_DIAG_GNSS_PROCESS_OUTPUT,
+    VELOXITY_DIAG_GNSS_UNSENT_OVERWRITE
+);
+#[cfg(feature = "runtime-diagnostics")]
+sensor_pipeline_counters!(
+    VELOXITY_DIAG_BATTERY_PROCESS_INPUT,
+    VELOXITY_DIAG_BATTERY_PROCESS_OUTPUT,
+    VELOXITY_DIAG_BATTERY_UNSENT_OVERWRITE
+);
+#[cfg(feature = "runtime-diagnostics")]
+sensor_pipeline_counters!(
+    VELOXITY_DIAG_RC_PROCESS_INPUT,
+    VELOXITY_DIAG_RC_PROCESS_OUTPUT,
+    VELOXITY_DIAG_RC_UNSENT_OVERWRITE
+);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_PROCESS_INPUT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-diagnostics")]
+#[unsafe(no_mangle)]
+pub static VELOXITY_DIAG_IMU_PROCESS_OUTPUT: AtomicU32 = AtomicU32::new(0);
+
 impl<B, E, C, M, CI, PD, R> World<B, E, C, M, CI, PD, R>
 where
     B: BoardIo,
@@ -47,6 +141,21 @@ where
             .clock_micros()
             .saturating_sub(pass_start_us)
             .min(u32::MAX as u64) as u32;
+        #[cfg(feature = "runtime-diagnostics")]
+        {
+            VELOXITY_DIAG_SERVICE_PHASE_COUNT.fetch_add(1, Ordering::Relaxed);
+            VELOXITY_DIAG_SERVICE_PHASE_SUM_US
+                .fetch_add(result.elapsed_after_control_us, Ordering::Relaxed);
+            VELOXITY_DIAG_SERVICE_PHASE_MAX_US
+                .fetch_max(result.elapsed_after_control_us, Ordering::Relaxed);
+            if self.state.is_armed() {
+                VELOXITY_DIAG_ARMED_SERVICE_PHASE_COUNT.fetch_add(1, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_SERVICE_PHASE_SUM_US
+                    .fetch_add(result.elapsed_after_control_us, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_SERVICE_PHASE_MAX_US
+                    .fetch_max(result.elapsed_after_control_us, Ordering::Relaxed);
+            }
+        }
         result
     }
 
@@ -56,7 +165,24 @@ where
     ) -> WorldReport {
         let mut result = WorldReport::default();
 
-        let sensor_result = self.run_service_sensor_stage();
+        // Telemetry is the only service work that can lose a retained sample
+        // when the next producer update replaces it. Give it the slack that
+        // was established when this service opportunity began,
+        // before variable-duration sensor, input, RC, and response work can
+        // close the control-deadline guard.
+        if self.realtime_service_can_continue() {
+            result.telemetry_due |= if policy.drain_telemetry_with_available_slack {
+                self.run_realtime_telemetry_stage_with_available_slack() != 0
+            } else {
+                self.run_realtime_telemetry_stage_budgeted(policy.telemetry_streams_per_phase) != 0
+            };
+        }
+
+        let sensor_result = if self.realtime_service_can_continue() {
+            self.run_service_sensor_stage()
+        } else {
+            WorldReport::default()
+        };
         result.merge_from(sensor_result);
 
         if self.realtime_service_can_continue() {
@@ -77,11 +203,6 @@ where
 
         if self.realtime_service_can_continue() {
             self.drain_logs_and_send_responses_limited(REALTIME_SERVICE_RESPONSE_BUDGET);
-        }
-
-        if self.realtime_service_can_continue() {
-            result.telemetry_due |=
-                self.run_realtime_telemetry_stage_budgeted(policy.telemetry_streams_per_phase) != 0;
         }
 
         if self.realtime_service_can_continue() {
@@ -122,6 +243,127 @@ where
         let had_raw_rc = self.raw_sensors.rc.is_some();
         let had_raw_attitude = self.raw_sensors.attitude.is_some();
         self.process_sensor_bus_after_update();
+
+        #[cfg(feature = "runtime-diagnostics")]
+        {
+            macro_rules! record_pipeline {
+                ($had_raw:ident, $field:ident, $input:ident, $output:ident) => {
+                    if $had_raw {
+                        $input.fetch_add(1, Ordering::Relaxed);
+                        if self.processed_sensors.$field.is_some() {
+                            $output.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                };
+            }
+            record_pipeline!(
+                had_raw_mag,
+                mag,
+                VELOXITY_DIAG_MAG_PROCESS_INPUT,
+                VELOXITY_DIAG_MAG_PROCESS_OUTPUT
+            );
+            record_pipeline!(
+                had_raw_baro,
+                baro,
+                VELOXITY_DIAG_BARO_PROCESS_INPUT,
+                VELOXITY_DIAG_BARO_PROCESS_OUTPUT
+            );
+            record_pipeline!(
+                had_raw_pitot,
+                pitot,
+                VELOXITY_DIAG_PITOT_PROCESS_INPUT,
+                VELOXITY_DIAG_PITOT_PROCESS_OUTPUT
+            );
+            record_pipeline!(
+                had_raw_range,
+                range,
+                VELOXITY_DIAG_RANGE_PROCESS_INPUT,
+                VELOXITY_DIAG_RANGE_PROCESS_OUTPUT
+            );
+            record_pipeline!(
+                had_raw_gnss,
+                gnss,
+                VELOXITY_DIAG_GNSS_PROCESS_INPUT,
+                VELOXITY_DIAG_GNSS_PROCESS_OUTPUT
+            );
+            record_pipeline!(
+                had_raw_battery,
+                battery,
+                VELOXITY_DIAG_BATTERY_PROCESS_INPUT,
+                VELOXITY_DIAG_BATTERY_PROCESS_OUTPUT
+            );
+            record_pipeline!(
+                had_raw_rc,
+                rc,
+                VELOXITY_DIAG_RC_PROCESS_INPUT,
+                VELOXITY_DIAG_RC_PROCESS_OUTPUT
+            );
+
+            macro_rules! record_unsent {
+                ($had_raw:ident, $before:ident, $field:ident, $stream:ident, $counter:ident) => {
+                    if $had_raw
+                        && let (Some(previous), Some(current)) =
+                            ($before, self.processed_sensors.$field)
+                        && previous.header.timestamp != current.header.timestamp
+                        && !self.comm.telemetry_sample_was_sent(
+                            NamedTelemetryStream::$stream,
+                            previous.header.timestamp,
+                        )
+                    {
+                        $counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                };
+            }
+            record_unsent!(
+                had_raw_mag,
+                latest_mag,
+                mag,
+                Mag,
+                VELOXITY_DIAG_MAG_UNSENT_OVERWRITE
+            );
+            record_unsent!(
+                had_raw_baro,
+                latest_baro,
+                baro,
+                Baro,
+                VELOXITY_DIAG_BARO_UNSENT_OVERWRITE
+            );
+            record_unsent!(
+                had_raw_pitot,
+                latest_pitot,
+                pitot,
+                DiffPressure,
+                VELOXITY_DIAG_PITOT_UNSENT_OVERWRITE
+            );
+            record_unsent!(
+                had_raw_range,
+                latest_range,
+                range,
+                Range,
+                VELOXITY_DIAG_RANGE_UNSENT_OVERWRITE
+            );
+            record_unsent!(
+                had_raw_gnss,
+                latest_gnss,
+                gnss,
+                Gnss,
+                VELOXITY_DIAG_GNSS_UNSENT_OVERWRITE
+            );
+            record_unsent!(
+                had_raw_battery,
+                latest_battery,
+                battery,
+                Battery,
+                VELOXITY_DIAG_BATTERY_UNSENT_OVERWRITE
+            );
+            record_unsent!(
+                had_raw_rc,
+                latest_rc,
+                rc,
+                Rc,
+                VELOXITY_DIAG_RC_UNSENT_OVERWRITE
+            );
+        }
 
         if !had_raw_imu {
             self.processed_sensors.imu = latest_imu;
@@ -262,6 +504,32 @@ where
     }
 
     pub(super) fn apply_param_reactions(&mut self) {
+        let battery_monitor_changed = self.param_events.full_refresh
+            || self.param_events.changes.iter().any(|change| {
+                matches!(
+                    change.id,
+                    ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER
+                        | ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER
+                )
+            });
+        if battery_monitor_changed {
+            let voltage_multiplier = match self
+                .params
+                .get_by_id(ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER)
+            {
+                ParamValue::Float(value) => value,
+                _ => 0.0,
+            };
+            let current_multiplier = match self
+                .params
+                .get_by_id(ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER)
+            {
+                ParamValue::Float(value) => value,
+                _ => 0.0,
+            };
+            self.board
+                .configure_battery_monitor(voltage_multiplier, current_multiplier);
+        }
         if self.param_events.full_refresh {
             self.comm.configure_telemetry_from_params(&self.params);
         } else {
@@ -310,6 +578,7 @@ where
     }
 
     pub(super) fn process_sensor_bus_after_update(&mut self) {
+        let now_ms = self.board.clock_millis();
         let calibration_flags_before = self.cal_flags;
         let baro_bias_before = self.params.get_by_id(ParamId::PARAM_BARO_BIAS);
         let ground_level_before = self.params.get_by_id(ParamId::PARAM_GROUND_LEVEL);
@@ -319,6 +588,7 @@ where
             processors: &mut self.sensor_processors,
             flags: &mut self.cal_flags,
             params: &mut self.params,
+            now_ms,
         });
         if calibration_flags_before.contains(CalibrationFlags::BARO)
             && !self.cal_flags.contains(CalibrationFlags::BARO)
@@ -351,12 +621,22 @@ where
             && !self.cal_flags.contains(CalibrationFlags::ACCEL)
             && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
         {
+            // Match ROSflight C: only a successful full accelerometer/IMU
+            // calibration clears an uncalibrated error that was latched at
+            // startup. Gyro-only calibration and live bias changes do not.
+            self.state
+                .set_error_flag(ErrorFlag::UNCALIBRATED_IMU, false, &self.params);
             self.estimator.reset();
             self.control_pipeline = ControlPipelineResource::default();
         }
     }
 
     pub(super) fn process_imu_sensor_after_update(&mut self) {
+        #[cfg(feature = "runtime-diagnostics")]
+        let previous_imu = self.processed_sensors.imu;
+        #[cfg(feature = "runtime-diagnostics")]
+        let had_raw_imu = self.raw_sensors.imu.is_some();
+        let now_ms = self.board.clock_millis();
         let calibration_flags_before = self.cal_flags;
         process_imu_sensor(SensorIngestionCtx {
             raw: &mut self.raw_sensors,
@@ -364,7 +644,31 @@ where
             processors: &mut self.sensor_processors,
             flags: &mut self.cal_flags,
             params: &mut self.params,
+            now_ms,
         });
+        #[cfg(feature = "runtime-diagnostics")]
+        if had_raw_imu {
+            VELOXITY_DIAG_IMU_PROCESS_INPUT.fetch_add(1, Ordering::Relaxed);
+            if self.processed_sensors.imu.is_some() {
+                VELOXITY_DIAG_IMU_PROCESS_OUTPUT.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        #[cfg(feature = "runtime-diagnostics")]
+        if let (Some(previous), Some(current)) = (previous_imu, self.processed_sensors.imu)
+            && previous.header.timestamp != current.header.timestamp
+            && !self
+                .comm
+                .telemetry_sample_was_sent(NamedTelemetryStream::Imu, previous.header.timestamp)
+        {
+            VELOXITY_DIAG_IMU_UNSENT_OVERWRITE.fetch_add(1, Ordering::Relaxed);
+            let age_us = self
+                .board
+                .clock_micros()
+                .saturating_sub(previous.header.timestamp)
+                .min(u32::MAX as u64) as u32;
+            VELOXITY_DIAG_IMU_UNSENT_AGE_SUM_US.fetch_add(age_us, Ordering::Relaxed);
+            VELOXITY_DIAG_IMU_UNSENT_AGE_MAX_US.fetch_max(age_us, Ordering::Relaxed);
+        }
         if calibration_flags_before.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO)
             && !self.cal_flags.contains(CalibrationFlags::GYRO_FAILED)
@@ -375,6 +679,10 @@ where
             && !self.cal_flags.contains(CalibrationFlags::ACCEL)
             && !self.cal_flags.contains(CalibrationFlags::ACCEL_FAILED)
         {
+            // See process_sensor_bus_after_update(): this is the high-rate
+            // IMU path for the same successful full-calibration transition.
+            self.state
+                .set_error_flag(ErrorFlag::UNCALIBRATED_IMU, false, &self.params);
             self.estimator.reset();
             self.control_pipeline = ControlPipelineResource::default();
         }

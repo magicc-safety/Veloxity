@@ -1,5 +1,37 @@
 use super::*;
 
+#[cfg(feature = "runtime-diagnostics")]
+use core::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(feature = "runtime-diagnostics")]
+macro_rules! diagnostic_counter {
+    ($name:ident) => {
+        #[unsafe(no_mangle)]
+        pub static $name: AtomicU32 = AtomicU32::new(0);
+    };
+}
+
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_IMU_TICK_COUNT);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_IMU_TICK_SUM_US);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_IMU_TICK_MAX_US);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_ARMED_IMU_TICK_COUNT);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_ARMED_IMU_TICK_SUM_US);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_ARMED_IMU_TICK_MAX_US);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_POST_IMU_SERVICE_AVAILABLE);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_POST_IMU_BLOCKED_PENDING_IMU);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_POST_IMU_BLOCKED_CONTROL_DUE);
+#[cfg(feature = "runtime-diagnostics")]
+diagnostic_counter!(VELOXITY_DIAG_POST_IMU_BLOCKED_GUARD);
+
 impl<B, E, C, M, CI, PD, R> World<B, E, C, M, CI, PD, R>
 where
     B: BoardIo,
@@ -81,6 +113,29 @@ where
         if ran_control {
             self.last_realtime_control_us = self.board.clock_micros();
         }
+        #[cfg(feature = "runtime-diagnostics")]
+        {
+            let finished_us = self.board.clock_micros();
+            let elapsed_us = finished_us.saturating_sub(now_us).min(u32::MAX as u64) as u32;
+            VELOXITY_DIAG_IMU_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+            VELOXITY_DIAG_IMU_TICK_SUM_US.fetch_add(elapsed_us, Ordering::Relaxed);
+            VELOXITY_DIAG_IMU_TICK_MAX_US.fetch_max(elapsed_us, Ordering::Relaxed);
+            if self.state.is_armed() {
+                VELOXITY_DIAG_ARMED_IMU_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_IMU_TICK_SUM_US.fetch_add(elapsed_us, Ordering::Relaxed);
+                VELOXITY_DIAG_ARMED_IMU_TICK_MAX_US.fetch_max(elapsed_us, Ordering::Relaxed);
+            }
+
+            if self.imu_pending() {
+                VELOXITY_DIAG_POST_IMU_BLOCKED_PENDING_IMU.fetch_add(1, Ordering::Relaxed);
+            } else if self.control_update_can_run_at(finished_us) {
+                VELOXITY_DIAG_POST_IMU_BLOCKED_CONTROL_DUE.fetch_add(1, Ordering::Relaxed);
+            } else if !self.realtime_service_has_control_slack(finished_us) {
+                VELOXITY_DIAG_POST_IMU_BLOCKED_GUARD.fetch_add(1, Ordering::Relaxed);
+            } else {
+                VELOXITY_DIAG_POST_IMU_SERVICE_AVAILABLE.fetch_add(1, Ordering::Relaxed);
+            }
+        }
         ran_control
     }
 
@@ -110,22 +165,24 @@ where
     }
 
     pub fn run_pwm_output_stage(&mut self) -> bool {
-        let channel_outputs_disabled = matches!(
-            self.params
-                .get_by_id(crate::params::ParamId::PARAM_CHANNEL_OUTPUT_MASK),
-            crate::params::ParamValue::Int(0)
-        );
+        let channel_output_mask = match self
+            .params
+            .get_by_id(crate::params::ParamId::PARAM_CHANNEL_OUTPUT_MASK)
+        {
+            crate::params::ParamValue::Int(value) => value,
+            _ => 0,
+        };
+        let output_kill_active = self.rc.switch_mapped(crate::rc::Switch::OutputKill)
+            && self.rc.switch_on(crate::rc::Switch::OutputKill);
         sync_pwm_output_state(PwmSyncCtx {
             board: &mut self.board,
             pwm: &mut self.pwm,
             output: &mut self.pwm_output,
-            output_kill_active: channel_outputs_disabled
-                || (self.rc.switch_mapped(crate::rc::Switch::OutputKill)
-                    && self.rc.switch_on(crate::rc::Switch::OutputKill)),
+            output_kill_active,
+            channel_output_mask,
         })
         .unwrap_or(false)
     }
-
     pub fn run_control_stages_if_new_imu(&mut self) -> bool {
         self.run_control_and_mixing_stage_if_new_imu()
     }
@@ -162,7 +219,11 @@ where
         if rate_hz == 0 {
             return true;
         }
-        if self.control_update_due_at(now_us) && !self.control_imu_accumulator.has_samples() {
+        // A fixed-rate control update cannot run without accumulated IMU data.
+        // Do not reserve the nominal deadline's guard window for impossible
+        // work: service can use that time and will stop as soon as a new IMU
+        // interrupt makes control work possible again.
+        if !self.control_imu_accumulator.has_samples() {
             return true;
         }
 

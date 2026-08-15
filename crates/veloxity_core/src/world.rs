@@ -27,13 +27,13 @@ use crate::{
     pwm::output_sync::{PwmOutputState, PwmSyncCtx, sync_pwm_output_state},
     rc::Rc,
     rc::command_state::{RcCommandStateCtx, run_rc_command_state},
-    sensors::health::{SensorHealthCtx, update_sensor_health},
+    sensors::health::{SensorHealthCtx, initialize_imu_calibration_error, update_sensor_health},
     sensors::ingestion::{
         SensorIngestionCtx, SensorProcessorSet, process_imu_sensor, process_sensor_bus,
     },
     sensors::processors::CalibrationFlags,
     sensors::{ProcessedSensors, SensorBus},
-    state_machine::{Event, StateManager},
+    state_machine::{ErrorFlag, Event, StateManager},
 };
 
 const IMU_TIMEOUT_US: u64 = 100_000;
@@ -163,6 +163,7 @@ pub struct RealtimeServicePolicy {
     pub min_spacing_us: u64,
     pub telemetry_streams_per_phase: usize,
     pub continue_when_idle: bool,
+    pub drain_telemetry_with_available_slack: bool,
 }
 
 impl RealtimeServicePolicy {
@@ -171,6 +172,7 @@ impl RealtimeServicePolicy {
             min_spacing_us,
             telemetry_streams_per_phase,
             continue_when_idle: false,
+            drain_telemetry_with_available_slack: false,
         }
     }
 
@@ -179,6 +181,7 @@ impl RealtimeServicePolicy {
             min_spacing_us: 0,
             telemetry_streams_per_phase,
             continue_when_idle: false,
+            drain_telemetry_with_available_slack: false,
         }
     }
 
@@ -187,6 +190,18 @@ impl RealtimeServicePolicy {
             min_spacing_us: 0,
             telemetry_streams_per_phase,
             continue_when_idle: true,
+            drain_telemetry_with_available_slack: false,
+        }
+    }
+
+    /// Continuously services the board and sends every due telemetry stream
+    /// that fits inside the measured control-deadline slack.
+    pub const fn continuous_slack_driven() -> Self {
+        Self {
+            min_spacing_us: 0,
+            telemetry_streams_per_phase: 0,
+            continue_when_idle: true,
+            drain_telemetry_with_available_slack: true,
         }
     }
 }
@@ -290,12 +305,26 @@ where
         );
 
         state.update(Event::INITIALIZED, &params);
+        // Match ROSflight C's Sensors::init_imu(): establish the calibration
+        // interlock from persisted parameters before the first IMU sample or
+        // arming request can be processed.
+        initialize_imu_calibration_error(&mut state, &params);
 
         let mut rc = Rc::new();
         rc.init(&params);
 
         let mut command = CommandManager::new();
         command.init(&params, &mut state);
+
+        let voltage_multiplier = match params.get_by_id(ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER) {
+            ParamValue::Float(value) => value,
+            _ => 0.0,
+        };
+        let current_multiplier = match params.get_by_id(ParamId::PARAM_BATTERY_CURRENT_MULTIPLIER) {
+            ParamValue::Float(value) => value,
+            _ => 0.0,
+        };
+        board.configure_battery_monitor(voltage_multiplier, current_multiplier);
 
         let now_us = board.clock_micros();
         let mut comm = CommManager::new(comm_link, now_us);

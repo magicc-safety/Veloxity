@@ -197,6 +197,7 @@ pub struct SensorIngestionCtx<'a, R: FlightFloat, Processors = SensorProcessorSe
     pub processors: &'a mut Processors,
     pub flags: &'a mut CalibrationFlags,
     pub params: &'a mut Params,
+    pub now_ms: u32,
 }
 
 pub fn process_sensor_bus<R, Processors>(ctx: SensorIngestionCtx<'_, R, Processors>)
@@ -210,6 +211,7 @@ where
         processors,
         flags,
         params,
+        now_ms,
     } = ctx;
 
     if raw.imu.is_some() {
@@ -223,12 +225,16 @@ where
         processed.mag = None;
     }
     if raw.baro.is_some() {
-        processed.baro = processors.baro().process(&mut raw.baro, flags, params);
+        processed.baro = processors
+            .baro()
+            .process_at(&mut raw.baro, flags, params, now_ms);
     } else {
         processed.baro = None;
     }
     if raw.pitot.is_some() {
-        processed.pitot = processors.pitot().process(&mut raw.pitot, flags, params);
+        processed.pitot = processors
+            .pitot()
+            .process_at(&mut raw.pitot, flags, params, now_ms);
     } else {
         processed.pitot = None;
     }
@@ -272,6 +278,7 @@ where
         processors,
         flags,
         params,
+        now_ms: _,
     } = ctx;
 
     if raw.imu.is_some() {
@@ -327,6 +334,7 @@ mod tests {
             processors: &mut processors,
             flags: &mut flags,
             params: &mut params,
+            now_ms: 0,
         });
 
         assert!(raw.rc.is_none());
@@ -376,6 +384,7 @@ mod tests {
             processors: &mut processors,
             flags: &mut flags,
             params: &mut params,
+            now_ms: 0,
         });
 
         assert!(processed.imu.is_none());
@@ -426,6 +435,7 @@ mod tests {
             processors: &mut processors,
             flags: &mut flags,
             params: &mut params,
+            now_ms: 0,
         });
 
         assert!(raw.imu.is_none());

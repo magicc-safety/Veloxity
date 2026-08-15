@@ -81,7 +81,7 @@ async fn main(_spawner: Spawner) -> ! {
             let _ = writeln!(
                 writer,
                 "navpvt fix={:?} sats={} lat={:.7} lon={:.7} h={:.1}",
-                packet.fix_type, packet.num_sats, packet.lat, packet.lon, packet.height
+                packet.fix_type, packet.num_sats, packet.lat, packet.lon, packet.height_msl
             );
         }
         if now_us >= next_poll_us {

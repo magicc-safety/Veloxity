@@ -55,6 +55,16 @@ pub static RANGE_SIGNAL: Signal<
     Result<packets::RangePacket, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::RangePacket, errors::SensorError>>::new();
 
+fn publish_range(result: Result<packets::RangePacket, errors::SensorError>) {
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_signal_publish(
+        crate::runtime_diagnostics::SensorKind::Range,
+        RANGE_SIGNAL.signaled(),
+        result.is_err(),
+    );
+    RANGE_SIGNAL.signal(result);
+}
+
 pub struct Llv3hpSensor {
     pub dev: I2cDevice<
         'static,
@@ -106,7 +116,7 @@ impl Llv3hpSensor {
             .await
             .is_err()
         {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: reading STATUS",
             )));
             return;
@@ -116,14 +126,14 @@ impl Llv3hpSensor {
             .await
             .is_err()
         {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: reading STATUS",
             )));
             return;
         }
 
         if (status[0] & 0x30) != 0x30 {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: bad STATUS",
             )));
             return;
@@ -136,14 +146,14 @@ impl Llv3hpSensor {
             .await
             .is_err()
         {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: reading HEALTH_STATUS",
             )));
             return;
         }
 
         if (health[0] & 0x17) != 0x17 {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: bad HEALTH_STATUS",
             )));
             return;
@@ -160,7 +170,7 @@ impl Llv3hpSensor {
             .await
             .is_err()
         {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: writing SIG_COUNT_VAL",
             )));
             return;
@@ -171,7 +181,7 @@ impl Llv3hpSensor {
             .await
             .is_err()
         {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: writing ACQ_CONFIG_REG",
             )));
             return;
@@ -182,7 +192,7 @@ impl Llv3hpSensor {
             .await
             .is_err()
         {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: writing REF_COUNT_VAL",
             )));
             return;
@@ -193,7 +203,7 @@ impl Llv3hpSensor {
             .await
             .is_err()
         {
-            RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+            publish_range(Err(errors::SensorError::GenericSensorError(
                 "LLV3HP Lidar failed: writing THRESHOLD_BYPASS",
             )));
             return;
@@ -208,7 +218,7 @@ impl Llv3hpSensor {
                 .await
                 .is_err()
             {
-                RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+                publish_range(Err(errors::SensorError::GenericSensorError(
                     "LLV3HP Lidar failed: writing ACQ_COMMAND",
                 )));
             }
@@ -219,7 +229,7 @@ impl Llv3hpSensor {
             // Read Data
             let mut data = [0u8; 2];
             if self.write_read(ADDRESS, &[DATA], &mut data).await.is_err() {
-                RANGE_SIGNAL.signal(Err(errors::SensorError::GenericSensorError(
+                publish_range(Err(errors::SensorError::GenericSensorError(
                     "LLV3HP Lidar failed: reading DATA",
                 )));
             } else {
@@ -240,7 +250,7 @@ impl Llv3hpSensor {
                     max_range: 40f32,
                     range_type: packets::RangeType::Lidar,
                 };
-                RANGE_SIGNAL.signal(Ok(range_packet)); // make data available for other tasks
+                publish_range(Ok(range_packet)); // make data available for other tasks
             }
         }
     }

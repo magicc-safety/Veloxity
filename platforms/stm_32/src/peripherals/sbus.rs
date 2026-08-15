@@ -38,17 +38,34 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_stm32::mode::Async;
 use embassy_stm32::usart::UartRx;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
+use embassy_sync::channel::Channel;
 use embassy_time::Duration;
 use embassy_time::Instant;
 
 use veloxity_core::errors;
 use veloxity_core::packets;
 
-pub static RC_SIGNAL: Signal<
+const RC_QUEUE_CAPACITY: usize = 8;
+
+pub static RC_CHANNEL: Channel<
     CriticalSectionRawMutex,
     Result<packets::RcPacket, errors::SensorError>,
-> = Signal::<CriticalSectionRawMutex, Result<packets::RcPacket, errors::SensorError>>::new();
+    RC_QUEUE_CAPACITY,
+> = Channel::new();
+
+async fn publish_rc(result: Result<packets::RcPacket, errors::SensorError>) {
+    #[cfg(feature = "runtime-diagnostics")]
+    let error = result.is_err();
+    #[cfg(feature = "runtime-diagnostics")]
+    let wait_started = RC_CHANNEL.is_full().then(Instant::now);
+    RC_CHANNEL.send(result).await;
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_rc_queue_publish(
+        error,
+        wait_started.map(|started| started.elapsed().as_micros().min(u32::MAX as u64) as u32),
+        RC_CHANNEL.len(),
+    );
+}
 
 pub const SBUS_11_BIT_CHANNELS: usize = 16;
 pub const SBUS_BINARY_CHANNELS: usize = 2; // does not include status information
@@ -176,7 +193,7 @@ impl SbusRC {
                         lol: (dig & 0x0C) != 0, // either bit 2 or 3 will signal a loss of link.
                     };
                     SBUS_SIGNAL.fetch_add(1, Ordering::Relaxed);
-                    RC_SIGNAL.signal(Ok(rc_packet));
+                    publish_rc(Ok(rc_packet)).await;
                 } else {
                     if !valid_header {
                         SBUS_BAD_HEADER.fetch_add(1, Ordering::Relaxed);
@@ -205,7 +222,7 @@ impl SbusRC {
                     lol: (dig & 0x1C) != 0, // signal a loss of link bits
                 };
                 SBUS_SIGNAL.fetch_add(1, Ordering::Relaxed);
-                RC_SIGNAL.signal(Ok(rc_packet));
+                publish_rc(Ok(rc_packet)).await;
             }
         }
     }

@@ -44,6 +44,16 @@ use veloxity_core::packets;
 pub static PPS_SIGNAL: Signal<CriticalSectionRawMutex, packets::PpsPacket> =
     Signal::<CriticalSectionRawMutex, packets::PpsPacket>::new();
 
+fn publish_pps(packet: packets::PpsPacket) {
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_signal_publish(
+        crate::runtime_diagnostics::SensorKind::Pps,
+        PPS_SIGNAL.signaled(),
+        false,
+    );
+    PPS_SIGNAL.signal(packet);
+}
+
 pub struct PpsSensor {
     pub pps: ExtiInput<'static, Async>,
 }
@@ -59,7 +69,7 @@ impl PpsSensor {
                 status,
             };
             let pps_packet = packets::PpsPacket { header };
-            PPS_SIGNAL.signal(pps_packet);
+            publish_pps(pps_packet);
         }
     }
 }

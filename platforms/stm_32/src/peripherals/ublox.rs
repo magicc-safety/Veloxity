@@ -65,6 +65,16 @@ pub static GNSS_SIGNAL: Signal<
     Result<packets::GNSSPacket, errors::SensorError>,
 > = Signal::<CriticalSectionRawMutex, Result<packets::GNSSPacket, errors::SensorError>>::new();
 
+fn publish_gnss(result: Result<packets::GNSSPacket, errors::SensorError>) {
+    #[cfg(feature = "runtime-diagnostics")]
+    crate::runtime_diagnostics::record_signal_publish(
+        crate::runtime_diagnostics::SensorKind::Gnss,
+        GNSS_SIGNAL.signaled(),
+        result.is_err(),
+    );
+    GNSS_SIGNAL.signal(result);
+}
+
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
 pub struct PvtPayload {
@@ -525,6 +535,7 @@ impl UbloxSensor {
                                 let flags = unsafe { pvt.packet }.flags;
                                 let flags2 = unsafe { pvt.packet }.flags2;
                                 let flags3 = unsafe { pvt.packet }.flags3;
+                                let utc_nanos = unsafe { pvt.packet }.nano;
 
                                 if (valid & 0x01) != 0 {
                                     status |= 0x0001
@@ -572,19 +583,24 @@ impl UbloxSensor {
                                     status |= 0x1000
                                 }; // lastCorrectionAge
 
-                                // put in terms of microseconds
-                                let t0 = pps_timestamp as u64; // top of seconds
-                                let t1 = end_of_packet_timestamp.as_micros();
-                                let nav_dt = (self.nav_period_ms as u64) * 1000;
-
-                                // phase offset from t0, doesn't matter if its a little old
-                                // we are just counting off how many nav times we are behind the time pulse.
-                                let dt = ((t1 - t0) / nav_dt) * nav_dt;
-
-                                let timestamp = Instant::from_micros(t0 + dt);
+                                // PPS may arrive while the UART read is pending;
+                                // consume it again here so the C-compatible timing
+                                // calculation uses the latest edge.
+                                if let Some(packet) = pps::PPS_SIGNAL.try_take() {
+                                    pps_timestamp = packet.header.timestamp;
+                                }
+                                let completion_timestamp_us = end_of_packet_timestamp.as_micros();
+                                let time_and_fix_valid =
+                                    (valid & 0x07) == 0x07 && (flags & 0x01) == 0x01;
+                                let timestamp_us = packets::rosflight_c_gnss_timestamp(
+                                    pps_timestamp as u64,
+                                    completion_timestamp_us,
+                                    utc_nanos,
+                                    time_and_fix_valid,
+                                );
 
                                 let header = packets::RosflightPacketHeader {
-                                    timestamp: timestamp.as_micros(),
+                                    timestamp: timestamp_us,
                                     status,
                                 };
 
@@ -592,21 +608,29 @@ impl UbloxSensor {
                                     packets::GNSSFixType::from_u8(unsafe { pvt.packet }.fix_type);
 
                                 let _pi = 3.141592654;
+                                let mut unix_seconds = unix_seconds_from_utc(
+                                    unsafe { pvt.packet }.year,
+                                    unsafe { pvt.packet }.month,
+                                    unsafe { pvt.packet }.day,
+                                    unsafe { pvt.packet }.hour,
+                                    unsafe { pvt.packet }.min,
+                                    unsafe { pvt.packet }.sec,
+                                );
+                                let mut unix_nanos = utc_nanos;
+                                if unix_nanos < 0 {
+                                    unix_seconds -= 1;
+                                    unix_nanos += 1_000_000_000;
+                                }
+
                                 let pvt_packet = packets::GNSSPacket {
                                     header: header,
-                                    unix_seconds: unix_seconds_from_utc(
-                                        unsafe { pvt.packet }.year,
-                                        unsafe { pvt.packet }.month,
-                                        unsafe { pvt.packet }.day,
-                                        unsafe { pvt.packet }.hour,
-                                        unsafe { pvt.packet }.min,
-                                        unsafe { pvt.packet }.sec,
-                                    ),
-                                    unix_nanos: unsafe { pvt.packet }.nano,
+                                    unix_seconds,
+                                    unix_nanos,
                                     // UBX NAV-PVT and ROSFLIGHT_GNSS both use decimal degrees.
                                     lat: (unsafe { pvt.packet }.lat as f64) * 1.0e-7,
                                     lon: (unsafe { pvt.packet }.lon as f64) * 1.0e-7,
-                                    height: (unsafe { pvt.packet }.height as f32) / 1000.0,
+                                    // Match ROSflight C: publish NAV-PVT hMSL, not ellipsoid height.
+                                    height_msl: (unsafe { pvt.packet }.h_msl as f32) / 1000.0,
                                     vel_n: (unsafe { pvt.packet }.vel_n as f32) / 1000.0,
                                     vel_e: (unsafe { pvt.packet }.vel_e as f32) / 1000.0,
                                     vel_d: (unsafe { pvt.packet }.vel_d as f32) / 1000.0,
@@ -626,9 +650,9 @@ impl UbloxSensor {
                                     num_sats: unsafe { pvt.packet }.num_sv,
                                     mag_dec: (unsafe { pvt.packet }.mag_dec as f32)
                                         * 1.7453292519943296e-4,
-                                    time_correction: dt,
+                                    time_correction: 0,
                                 };
-                                GNSS_SIGNAL.signal(Ok(pvt_packet));
+                                publish_gnss(Ok(pvt_packet));
                             }
                         }
                     }

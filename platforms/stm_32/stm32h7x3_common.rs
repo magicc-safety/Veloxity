@@ -91,7 +91,7 @@ pub static I2C3_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static,
 pub static I2C4_BUS: StaticCell<Mutex<CriticalSectionRawMutex, i2c::I2c<'static, Async, i2c::mode::Master>>> =
     StaticCell::new();
 
-bind_interrupts!(struct BoardIrqs {
+bind_interrupts!(pub(crate) struct BoardIrqs {
     I2C1_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C1>;
     I2C1_ER => i2c::ErrorInterruptHandler<EMBASSY_peripherals::I2C1>;
     I2C2_EV => i2c::EventInterruptHandler<EMBASSY_peripherals::I2C2>;
@@ -208,6 +208,8 @@ pub fn clock_config(mhz: u32) -> Config {
             source: PllSource::HSE,   // 50MHz
             prediv: hsi_prediv,       // 50MHz OSC / 25 = 2 MHz
             mul: PllMul::MUL400,      // 800 MHz
+            #[cfg(feature = "mcu-h743ii")]
+            fracn: None,
             divp: Some(PllDiv::DIV2), // 400 MHz for System Clock
             divq: Some(PllDiv::DIV8), // 100 MHz for SDMMC
             divr: Some(PllDiv::DIV2), // 400 MHz (not used)
@@ -217,6 +219,8 @@ pub fn clock_config(mhz: u32) -> Config {
             source: PllSource::HSE,    // 50MHz
             prediv: hsi_prediv,        // 50MHz OSC / 25 = 2 MHz
             mul: PllMul::MUL240,       // 480 MHz
+            #[cfg(feature = "mcu-h743ii")]
+            fracn: None,
             divp: Some(PllDiv::DIV30), // 16 MHz for SPI 1,2,3
             divq: Some(PllDiv::DIV30), // 16 MHz for SPI 4,5, and FDCAN
             divr: Some(PllDiv::DIV5),  // 96 MHz (not used)
@@ -226,6 +230,8 @@ pub fn clock_config(mhz: u32) -> Config {
             source: PllSource::HSE,    // 50MHz
             prediv: hsi_prediv,        // 50MHz OSC / 25 = 2 MHz
             mul: PllMul::MUL480,       // 960 MHz
+            #[cfg(feature = "mcu-h743ii")]
+            fracn: None,
             divp: Some(PllDiv::DIV48), // 20 MHz (not used)
             divq: Some(PllDiv::DIV20), // 48 MHz for USB
             divr: Some(PllDiv::DIV15), // 64 MHz for ADC

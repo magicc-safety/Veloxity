@@ -2,6 +2,7 @@
 
 pub mod reactions;
 pub mod service;
+pub mod storage;
 
 //=================================================================================
 // 1. Core Data Types
@@ -396,7 +397,7 @@ declare_params! {
     // Physical output-channel allow mask. Bit N controls channel N regardless
     // of whether the mixer labels it as a motor, servo, GPIO, or auxiliary
     // output. Zero is also a global hardware-output inhibit.
-    PARAM_CHANNEL_OUTPUT_MASK, "CHN_OUTPUT_MASK", Int(-1);
+    PARAM_CHANNEL_OUTPUT_MASK, "CHN_OUTPUT_MASK", Int(0x0f);
     PARAM_INIT_TIME, "FILT_INIT_T", Int(3000);
     PARAM_FILTER_KP_ACC, "FILT_ACC_KP", Float(0.5);
     PARAM_FILTER_KI, "FILT_KI", Float(0.01);
@@ -484,16 +485,16 @@ declare_params! {
     // eligible, and positive values request a fixed rate in hertz.
     PARAM_TELEM_HEARTBEAT_HZ, "TEL_HB_HZ", Int(1);
     PARAM_TELEM_STATUS_HZ, "TEL_STATUS_HZ", Int(10);
-    PARAM_TELEM_IMU_HZ, "TEL_IMU_HZ", Int(400);
-    PARAM_TELEM_ATTITUDE_HZ, "TEL_ATT_HZ", Int(400);
+    PARAM_TELEM_IMU_HZ, "TEL_IMU_HZ", Int(0);
+    PARAM_TELEM_ATTITUDE_HZ, "TEL_ATT_HZ", Int(0);
     PARAM_TELEM_OUTPUT_RAW_HZ, "TEL_OUT_HZ", Int(50);
-    PARAM_TELEM_DIFF_PRESSURE_HZ, "TEL_DIFF_HZ", Int(100);
-    PARAM_TELEM_BARO_HZ, "TEL_BARO_HZ", Int(100);
-    PARAM_TELEM_MAG_HZ, "TEL_MAG_HZ", Int(50);
-    PARAM_TELEM_RANGE_HZ, "TEL_RANGE_HZ", Int(50);
-    PARAM_TELEM_BATTERY_HZ, "TEL_BATT_HZ", Int(200);
-    PARAM_TELEM_GNSS_HZ, "TEL_GNSS_HZ", Int(10);
-    PARAM_TELEM_RC_HZ, "TEL_RC_HZ", Int(800);
+    PARAM_TELEM_DIFF_PRESSURE_HZ, "TEL_DIFF_HZ", Int(0);
+    PARAM_TELEM_BARO_HZ, "TEL_BARO_HZ", Int(0);
+    PARAM_TELEM_MAG_HZ, "TEL_MAG_HZ", Int(0);
+    PARAM_TELEM_RANGE_HZ, "TEL_RANGE_HZ", Int(0);
+    PARAM_TELEM_BATTERY_HZ, "TEL_BATT_HZ", Int(0);
+    PARAM_TELEM_GNSS_HZ, "TEL_GNSS_HZ", Int(0);
+    PARAM_TELEM_RC_HZ, "TEL_RC_HZ", Int(0);
 }
 
 //=================================================================================
@@ -564,7 +565,7 @@ mod tests {
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_CHANNEL_OUTPUT_MASK),
-            ParamValue::Int(-1)
+            ParamValue::Int(0x0f)
         );
         assert_eq!(
             p.get_by_id(ParamId::PARAM_RC_OUTPUT_KILL_CHANNEL),
@@ -578,6 +579,31 @@ mod tests {
             p.get_by_id(ParamId::PARAM_BATTERY_VOLTAGE_MULTIPLIER),
             ParamValue::Float(1.0)
         );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_TELEM_HEARTBEAT_HZ),
+            ParamValue::Int(1)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_TELEM_STATUS_HZ),
+            ParamValue::Int(10)
+        );
+        assert_eq!(
+            p.get_by_id(ParamId::PARAM_TELEM_OUTPUT_RAW_HZ),
+            ParamValue::Int(50)
+        );
+        for id in [
+            ParamId::PARAM_TELEM_IMU_HZ,
+            ParamId::PARAM_TELEM_ATTITUDE_HZ,
+            ParamId::PARAM_TELEM_DIFF_PRESSURE_HZ,
+            ParamId::PARAM_TELEM_BARO_HZ,
+            ParamId::PARAM_TELEM_MAG_HZ,
+            ParamId::PARAM_TELEM_RANGE_HZ,
+            ParamId::PARAM_TELEM_BATTERY_HZ,
+            ParamId::PARAM_TELEM_GNSS_HZ,
+            ParamId::PARAM_TELEM_RC_HZ,
+        ] {
+            assert_eq!(p.get_by_id(id), ParamValue::Int(0));
+        }
     }
 
     #[test]

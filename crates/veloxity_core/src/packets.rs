@@ -1,4 +1,6 @@
-pub static PARAM_PACKET_SIZE: usize = 2048;
+// ROSflight 2.0's persisted ARM `params_t` occupies 7,004 bytes. The SD driver
+// appends its four-byte CRC after this payload.
+pub static PARAM_PACKET_SIZE: usize = crate::params::storage::ROSFLIGHT_C_PARAM_STORAGE_SIZE;
 
 use crate::math::FlightFloat;
 
@@ -42,6 +44,26 @@ pub struct RosflightPacketHeader {
     // Microseconds; packets avoid board-specific timestamp types.
     pub timestamp: u64,
     pub status: u16,
+}
+
+/// Match ROSflight C's GNSS validity timestamp: use the receiver's signed UTC
+/// fractional second relative to the latest PPS edge, or estimate measurement
+/// time as 22 ms before packet completion when PPS/time validity is unavailable.
+pub fn rosflight_c_gnss_timestamp(
+    pps_timestamp_us: u64,
+    completion_timestamp_us: u64,
+    utc_nanos: i32,
+    time_and_fix_valid: bool,
+) -> u64 {
+    if pps_timestamp_us != 0 && pps_timestamp_us < completion_timestamp_us && time_and_fix_valid {
+        if utc_nanos < 0 {
+            pps_timestamp_us.saturating_sub(u64::from(utc_nanos.unsigned_abs()) / 1_000)
+        } else {
+            pps_timestamp_us.saturating_add(utc_nanos as u64 / 1_000)
+        }
+    } else {
+        completion_timestamp_us.saturating_sub(22_000)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -134,22 +156,22 @@ pub struct GNSSPacket {
     pub header: RosflightPacketHeader, // timestamp and device specific status
     pub unix_seconds: i64,             // Unix time, in seconds
     pub unix_nanos: i32,
-    pub lat: f64,    // degrees
-    pub lon: f64,    // degrees
-    pub height: f32, // m/s above ellipsoid
-    pub vel_n: f32,  // m/s north
-    pub vel_e: f32,  // m/s east
-    pub vel_d: f32,  // m/s down
-    pub h_acc: f32,  // m north/east
-    pub v_acc: f32,  // m down
-    pub s_acc: f32,  // m/s
-    pub month: u8,   // 0-11
-    pub year: u16,   // 0-65535 UTC
-    pub day: u8,     // 0-31 UTS day of month
-    pub hour: u8,    // 0-23 UTC
-    pub min: u8,     // 0-59 UTC
-    pub sec: u8,     // 0-59 UTC
-    pub nano: i32,   // adjustment +/1 to seconds
+    pub lat: f64,        // degrees
+    pub lon: f64,        // degrees
+    pub height_msl: f32, // m above mean sea level
+    pub vel_n: f32,      // m/s north
+    pub vel_e: f32,      // m/s east
+    pub vel_d: f32,      // m/s down
+    pub h_acc: f32,      // m north/east
+    pub v_acc: f32,      // m down
+    pub s_acc: f32,      // m/s
+    pub month: u8,       // 0-11
+    pub year: u16,       // 0-65535 UTC
+    pub day: u8,         // 0-31 UTS day of month
+    pub hour: u8,        // 0-23 UTC
+    pub min: u8,         // 0-59 UTC
+    pub sec: u8,         // 0-59 UTC
+    pub nano: i32,       // adjustment +/1 to seconds
     pub fix_type: GNSSFixType,
     pub num_sats: u8, // 0-255
     pub mag_dec: f32, // Magnetic Declination ??
@@ -186,6 +208,30 @@ impl Default for ParamPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn c_gnss_timestamp_adds_positive_fraction_to_pps() {
+        assert_eq!(
+            rosflight_c_gnss_timestamp(2_000_000, 2_915_000, 900_000_000, true),
+            2_900_000
+        );
+    }
+
+    #[test]
+    fn c_gnss_timestamp_subtracts_negative_fraction_from_pps() {
+        assert_eq!(
+            rosflight_c_gnss_timestamp(3_000_000, 3_015_000, -100_000_000, true),
+            2_900_000
+        );
+    }
+
+    #[test]
+    fn c_gnss_timestamp_falls_back_without_valid_pps_time() {
+        assert_eq!(
+            rosflight_c_gnss_timestamp(0, 3_015_000, 0, false),
+            2_993_000
+        );
+    }
 
     #[test]
     fn imu_packet_cast_preserves_values_across_flight_float_types() {

@@ -53,7 +53,6 @@ use veloxity_mavlink::MavlinkInterface;
 
 type PixracerReal = f64;
 const PIXRACER_CONTROL_LOOP_HZ: u16 = 400;
-const PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_PHASE: usize = 2;
 
 type PixracerWorld<'a> = World<
     board::Board,
@@ -89,6 +88,7 @@ fn main() -> ! {
     let (mut board, mut servos) = board::Board::new();
     let mut params = Params::default();
     if !board.read_params(&mut params) {
+        veloxity_core::log_warn!("Unable to load parameters; using default values");
         params.set_defaults();
         let _ = board.write_params(&params);
     }
@@ -109,9 +109,7 @@ fn main() -> ! {
             }
             RealtimeSchedulerStep::Service => {
                 let _ = world.run_prioritized_service_steps_with_policy(
-                    RealtimeServicePolicy::continuous_polling(
-                        PIXRACER_TELEMETRY_STREAMS_PER_SERVICE_PHASE,
-                    ),
+                    RealtimeServicePolicy::continuous_slack_driven(),
                 );
             }
             RealtimeSchedulerStep::Idle => {}
